@@ -34,6 +34,7 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->generate_debug_info = 0;
   generator->has_error = 0;
   generator->error_message = NULL;
+  generator->ir_program = NULL;
 
   if (!generator->output_buffer || !generator->global_variables_buffer) {
     free(generator->output_buffer);
@@ -77,6 +78,14 @@ void code_generator_destroy(CodeGenerator *generator) {
     free(generator->error_message);
     free(generator);
   }
+}
+
+void code_generator_set_ir_program(CodeGenerator *generator,
+                                   IRProgram *ir_program) {
+  if (!generator) {
+    return;
+  }
+  generator->ir_program = ir_program;
 }
 
 void code_generator_set_error(CodeGenerator *generator,

@@ -6,6 +6,7 @@
 #include "../semantic/type_checker.h"
 #include "../semantic/register_allocator.h"
 #include "../debug/debug_info.h"
+#include "../ir/ir.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,7 @@ typedef struct {
     int generate_debug_info;
     int has_error;
     char* error_message;
+    IRProgram* ir_program;
 } CodeGenerator;
 
 // Function declarations
@@ -42,6 +44,7 @@ CodeGenerator* code_generator_create(SymbolTable* symbol_table, TypeChecker* typ
 CodeGenerator* code_generator_create_with_debug(SymbolTable* symbol_table, TypeChecker* type_checker, RegisterAllocator* allocator, 
                                                DebugInfo* debug_info);
 void code_generator_destroy(CodeGenerator* generator);
+void code_generator_set_ir_program(CodeGenerator* generator, IRProgram* ir_program);
 int code_generator_generate_program(CodeGenerator* generator, ASTNode* program);
 void code_generator_generate_function(CodeGenerator* generator, ASTNode* function);
 void code_generator_generate_statement(CodeGenerator* generator, ASTNode* statement);

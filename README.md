@@ -78,7 +78,8 @@ This reduces silent failures and minimizes incorrect cascading diagnostics.
 
 - x86-64 assembly emission (Intel/NASM-style syntax)
 - Function prologue and epilogue generation
-- Statement and expression generation for supported AST nodes
+- IR-first function body emission (IR -> assembly)
+- Legacy AST-based emission still exists as controlled fallback for IR opcodes that are not fully normalized yet
 - Struct field offset-based access and assignment
 - Method call emission (mangled names, `this` as first parameter)
 - Pointer dereference and address-of code generation
@@ -87,6 +88,43 @@ This reduces silent failures and minimizes incorrect cascading diagnostics.
 - Nested control-flow label management for `break` and `continue`
 - `_start` entry emission that calls `main` when present
 - Hard failure on unresolved symbols or unsupported generation paths
+
+## Intermediate Representation (IR)
+
+MethASM now includes a real compiler IR stage between semantic analysis and assembly emission.
+
+What it is:
+
+- Function-level linear IR (`IRProgram` -> `IRFunction` -> `IRInstruction`)
+- Explicit control-flow instructions (`label`, `jump`, conditional branches)
+- Explicit data-flow operands (temps, symbols, literals, labels)
+- Lowered from AST after type checking
+- Consumed by codegen function-by-function for backend emission
+- Dumpable to `<output>.ir` in debug/optimize mode (`-d` or `-O`)
+
+Current backend coverage:
+
+- Control flow (`if`/`while`/`for`/`switch`/`break`/`continue`) is emitted from explicit IR control-flow instructions.
+- Local declarations, assignment, branches, labels, and returns emit directly from IR.
+- IR now models lvalue address and memory operations explicitly (`addr_of`, `load`, `store`) for struct fields, pointer dereference, and indexed access.
+- Heap allocation is modeled as explicit IR (`new`) instead of AST-side expression fallback.
+- Integer binary/unary operations now lower to pure IR when operators are backend-supported.
+- Type-aware lowering keeps floating-point or unsupported operator shapes on safe fallback paths.
+- Function calls are emitted directly from IR call instructions; method-call/object-call lowering still falls back where not yet normalized.
+- Some instructions still carry `ast_ref` for fallback (`eval_expr` / `ast_stmt`) when a construct is not yet representable in the current IR surface.
+
+What it is not:
+
+- Not SSA form (temps are mutable storage slots, no phi nodes)
+- Not a machine IR or register-allocated IR
+- Not target-independent optimization IR yet (no major optimization pipeline yet)
+- Not a full replacement for every AST shape internally yet; unsupported expression/statement forms can still lower to AST-referenced fallback IR nodes
+- Not currently used to represent global declarations as first-class IR operations
+
+Practical interpretation:
+
+- The main backend path for function bodies is IR-first.
+- IR gives a stable seam for future optimization and backend retargeting, but the current design intentionally favors incremental safety over maximal normalization.
 
 ## Garbage Collector Runtime
 
@@ -191,6 +229,7 @@ src/
   lexer/      Tokenization
   parser/     Parsing and AST creation
   semantic/   Type checking, symbol table, register allocation
+  ir/         AST-to-IR lowering and IR data model
   codegen/    Assembly generation
   runtime/    Garbage collector runtime
   debug/      Debug information helpers

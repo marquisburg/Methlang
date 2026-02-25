@@ -157,6 +157,21 @@ static int code_generator_eval_integer_constant(ASTNode *expression,
   }
 }
 
+static IRFunction *code_generator_find_ir_function(CodeGenerator *generator,
+                                                   const char *name) {
+  if (!generator || !generator->ir_program || !name) {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < generator->ir_program->function_count; i++) {
+    IRFunction *function = generator->ir_program->functions[i];
+    if (function && function->name && strcmp(function->name, name) == 0) {
+      return function;
+    }
+  }
+  return NULL;
+}
+
 int code_generator_generate_program(CodeGenerator *generator,
                                     ASTNode *program) {
   if (!generator || !program) {
@@ -165,6 +180,10 @@ int code_generator_generate_program(CodeGenerator *generator,
 
   if (program->type != AST_PROGRAM) {
     code_generator_set_error(generator, "Expected AST_PROGRAM root node");
+    return 0;
+  }
+  if (!generator->ir_program) {
+    code_generator_set_error(generator, "IR program not attached to code generator");
     return 0;
   }
 
@@ -227,7 +246,27 @@ int code_generator_generate_program(CodeGenerator *generator,
 
       switch (declaration->type) {
       case AST_FUNCTION_DECLARATION:
-        code_generator_generate_function(generator, declaration);
+        {
+          FunctionDeclaration *function_data =
+              declaration ? (FunctionDeclaration *)declaration->data : NULL;
+          if (!function_data || !function_data->name) {
+            code_generator_set_error(generator,
+                                     "Malformed function declaration in AST");
+            break;
+          }
+          IRFunction *ir_function =
+              code_generator_find_ir_function(generator, function_data->name);
+          if (!ir_function) {
+            code_generator_set_error(
+                generator, "No IR body found for function '%s'",
+                function_data->name);
+            break;
+          }
+          if (!code_generator_generate_function_from_ir(generator, declaration,
+                                                       ir_function)) {
+            break;
+          }
+        }
         break;
       case AST_VAR_DECLARATION:
         // Already handled in first pass

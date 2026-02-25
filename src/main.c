@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "main.h"
+#include "ir/ir.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -154,6 +155,8 @@ int compile_file(const char *input_filename, const char *output_filename,
   // Initialize debug info if debug mode is enabled
   DebugInfo *debug_info = NULL;
   CodeGenerator *code_generator = NULL;
+  IRProgram *ir_program = NULL;
+  char *ir_error_message = NULL;
 
   if (!lexer || !symbol_table || !register_allocator) {
     error_reporter_add_error(error_reporter, ERROR_INTERNAL,
@@ -260,6 +263,42 @@ int compile_file(const char *input_filename, const char *output_filename,
     goto cleanup;
   }
 
+  // Lower to the compiler IR before backend code generation.
+  ir_program =
+      ir_lower_program(program, type_checker, symbol_table, &ir_error_message);
+  if (!ir_program) {
+    fprintf(stderr, "IR lowering error: %s\n",
+            ir_error_message ? ir_error_message : "Unknown error");
+    result = 1;
+    goto cleanup;
+  }
+  code_generator_set_ir_program(code_generator, ir_program);
+
+  if (options->debug_mode || options->optimize) {
+    char *ir_output = build_sidecar_filename(output_filename, ".ir");
+    if (!ir_output) {
+      fprintf(stderr,
+              "Warning: Failed to allocate IR output filename for '%s'\n",
+              output_filename);
+    } else {
+      FILE *ir_file = fopen(ir_output, "w");
+      if (!ir_file) {
+        fprintf(stderr, "Warning: Could not create IR file '%s': %s\n",
+                ir_output, strerror(errno));
+      } else {
+        if (!ir_program_dump(ir_program, ir_file)) {
+          fprintf(stderr, "Warning: Failed to write IR dump to '%s'\n",
+                  ir_output);
+        }
+        fclose(ir_file);
+        if (options->debug_mode) {
+          printf("Generated IR dump: %s\n", ir_output);
+        }
+      }
+      free(ir_output);
+    }
+  }
+
   // Generate code
   if (!code_generator_generate_program(code_generator, program)) {
     fprintf(stderr, "Code generation error: %s\n",
@@ -353,6 +392,9 @@ cleanup:
   // Clean up resources
   if (program)
     ast_destroy_node(program);
+  if (ir_program)
+    ir_program_destroy(ir_program);
+  free(ir_error_message);
   code_generator_destroy(code_generator);
   register_allocator_destroy(register_allocator);
   type_checker_destroy(type_checker);
