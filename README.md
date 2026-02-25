@@ -78,8 +78,7 @@ This reduces silent failures and minimizes incorrect cascading diagnostics.
 
 - x86-64 assembly emission (Intel/NASM-style syntax)
 - Function prologue and epilogue generation
-- IR-first function body emission (IR -> assembly)
-- Legacy AST-based emission still exists as controlled fallback for IR opcodes that are not fully normalized yet
+- Pure IR-first function body emission (IR -> assembly)
 - Struct field offset-based access and assignment
 - Method call emission (mangled names, `this` as first parameter)
 - Pointer dereference and address-of code generation
@@ -108,23 +107,23 @@ Current backend coverage:
 - Local declarations, assignment, branches, labels, and returns emit directly from IR.
 - IR now models lvalue address and memory operations explicitly (`addr_of`, `load`, `store`) for struct fields, pointer dereference, and indexed access.
 - Heap allocation is modeled as explicit IR (`new`) instead of AST-side expression fallback.
-- Integer binary/unary operations now lower to pure IR when operators are backend-supported.
-- Type-aware lowering keeps floating-point or unsupported operator shapes on safe fallback paths.
-- Function calls are emitted directly from IR call instructions; method-call/object-call lowering still falls back where not yet normalized.
-- Some instructions still carry `ast_ref` for fallback (`eval_expr` / `ast_stmt`) when a construct is not yet representable in the current IR surface.
+- Integer binary/unary operations lower to pure IR.
+- Type-aware lowering supports specific floating-point calculations with XMM registers.
+- Function calls and method calls are emitted directly from pure IR call instructions.
 
 What it is not:
 
 - Not SSA form (temps are mutable storage slots, no phi nodes)
 - Not a machine IR or register-allocated IR
-- Not target-independent optimization IR yet (no major optimization pipeline yet)
-- Not a full replacement for every AST shape internally yet; unsupported expression/statement forms can still lower to AST-referenced fallback IR nodes
 - Not currently used to represent global declarations as first-class IR operations
+
+In-Progress Features:
+- Constant folding IR optimization pass runs if `-O` flag is enabled.
 
 Practical interpretation:
 
-- The main backend path for function bodies is IR-first.
-- IR gives a stable seam for future optimization and backend retargeting, but the current design intentionally favors incremental safety over maximal normalization.
+- The main backend path for function bodies is exclusively IR-driven.
+- IR gives a stable seam for future optimization and backend retargeting. It fully isolates semantic type checking from assembly codegen.
 
 ## Garbage Collector Runtime
 
