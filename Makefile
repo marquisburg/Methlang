@@ -8,7 +8,7 @@ BINDIR = bin
 LEXER_SOURCES = $(SRCDIR)/lexer/lexer.c
 PARSER_SOURCES = $(SRCDIR)/parser/parser.c $(SRCDIR)/parser/ast.c
 SEMANTIC_SOURCES = $(SRCDIR)/semantic/symbol_table.c $(SRCDIR)/semantic/type_checker.c $(SRCDIR)/semantic/register_allocator.c
-CODEGEN_SOURCES = $(SRCDIR)/codegen/code_generator.c
+CODEGEN_SOURCES = $(wildcard $(SRCDIR)/codegen/*.c)
 ERROR_SOURCES = $(SRCDIR)/error/error_reporter.c
 DEBUG_SOURCES = $(SRCDIR)/debug/debug_info.c
 MAIN_SOURCES = $(SRCDIR)/main.c
@@ -50,3 +50,5 @@ install: $(TARGET)
 .PHONY: debug
 debug: CFLAGS += -DDEBUG
 debug: $(TARGET)
+
+

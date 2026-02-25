@@ -1,0 +1,765 @@
+#include "code_generator_internal.h"
+#include <stdio.h>
+#include <string.h>
+
+// Function call implementation functions
+void code_generator_generate_function_call(CodeGenerator *generator,
+                                           ASTNode *call_expression) {
+  if (!generator || !call_expression ||
+      call_expression->type != AST_FUNCTION_CALL) {
+    code_generator_set_error(generator, "Invalid function call AST node");
+    return;
+  }
+
+  CallExpression *call_data = (CallExpression *)call_expression->data;
+  if (!call_data || !call_data->function_name) {
+    code_generator_set_error(generator, "Malformed function call expression");
+    return;
+  }
+
+  // Check if this is a method call (has an object)
+  if (call_data->object) {
+    // Method call with name mangling
+    // Try to determine the struct type for proper name mangling
+    char mangled_name[256];
+    const char *struct_name = NULL;
+
+    if (call_data->object->type == AST_IDENTIFIER) {
+      Identifier *id_data = (Identifier *)call_data->object->data;
+      if (id_data && id_data->name) {
+        Symbol *obj_symbol =
+            symbol_table_lookup(generator->symbol_table, id_data->name);
+        if (obj_symbol && obj_symbol->type && obj_symbol->type->name) {
+          struct_name = obj_symbol->type->name;
+        }
+      }
+    }
+
+    if (struct_name) {
+      snprintf(mangled_name, sizeof(mangled_name), "%s_%s", struct_name,
+               call_data->function_name);
+    } else {
+      snprintf(mangled_name, sizeof(mangled_name), "%s",
+               call_data->function_name);
+    }
+
+    code_generator_emit(generator, "    ; Method call: %s (mangled: %s)\n",
+                        call_data->function_name, mangled_name);
+
+    // Generate the method call using the existing helper
+    code_generator_generate_method_call(generator, call_expression,
+                                        call_data->object);
+
+    // Patch the emitted call target to use the mangled name
+    // (The method_call function already emitted the call, so we handle name
+    // mangling there)
+    return;
+  }
+
+  code_generator_emit(generator, "    ; Function call: %s\n",
+                      call_data->function_name);
+
+  // Get calling convention spec from register allocator
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator->calling_convention;
+  if (!conv_spec) {
+    code_generator_set_error(generator, "No calling convention configured");
+    return;
+  }
+
+  // Look up function symbol to get return type
+  Symbol *func_symbol =
+      symbol_table_lookup(generator->symbol_table, call_data->function_name);
+  Type *return_type = NULL;
+  if (func_symbol && func_symbol->kind == SYMBOL_FUNCTION &&
+      func_symbol->type) {
+    return_type = func_symbol->type;
+  }
+
+  // 1. Align stack for function call (x86-64 requires 16-byte alignment)
+  code_generator_align_stack_for_call(generator, call_data->argument_count);
+
+  // 2. Save caller-saved registers that are NOT used for parameters
+  // Only save registers that are actually in use and not parameter registers
+  code_generator_save_caller_saved_registers_selective(generator);
+
+  // 3. Pass parameters according to calling convention
+  code_generator_generate_parameter_passing(generator, call_data->arguments,
+                                            call_data->argument_count);
+
+  // 4. Generate the call instruction
+  code_generator_emit(generator, "    call %s\n", call_data->function_name);
+
+  // 5. Clean up stack if needed (for parameters passed on stack)
+  code_generator_cleanup_stack_after_call(generator, call_data->arguments,
+                                          call_data->argument_count);
+
+  // 6. Handle return value based on type
+  code_generator_handle_return_value(generator, return_type);
+
+  // 7. Restore caller-saved registers
+  code_generator_restore_caller_saved_registers_selective(generator);
+
+  // 8. Return value is now properly positioned
+  if (return_type && code_generator_is_floating_point_type(return_type)) {
+    code_generator_emit(generator, "    ; Return value in xmm0 (float)\n");
+  } else if (return_type && return_type->name &&
+             strcmp(return_type->name, "void") != 0) {
+    code_generator_emit(generator,
+                        "    ; Return value in rax (integer/pointer)\n");
+  } else {
+    code_generator_emit(generator, "    ; Void function - no return value\n");
+  }
+}
+
+void code_generator_generate_parameter_passing(CodeGenerator *generator,
+                                               ASTNode **arguments,
+                                               size_t argument_count) {
+  if (!generator || !arguments || argument_count == 0) {
+    return;
+  }
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator->calling_convention;
+  if (!conv_spec) {
+    return;
+  }
+
+  code_generator_emit(generator, "    ; Passing %zu parameters\n",
+                      argument_count);
+
+  // Track register usage for parameter passing
+  int int_reg_index = 0;
+  int float_reg_index = 0;
+  int stack_param_count = 0;
+
+  // Pass parameters in reverse order for stack parameters (right-to-left)
+  // But register parameters are passed in forward order
+
+  // First pass: count stack parameters and prepare
+  for (size_t i = 0; i < argument_count; i++) {
+    if (arguments[i]) {
+      // Determine parameter type (simplified type inference)
+      Type *param_type =
+          code_generator_infer_expression_type(generator, arguments[i]);
+      int is_float = code_generator_is_floating_point_type(param_type);
+
+      if (is_float) {
+        if (float_reg_index >= (int)conv_spec->float_param_count) {
+          stack_param_count++;
+        }
+        float_reg_index++;
+      } else {
+        if (int_reg_index >= (int)conv_spec->int_param_count) {
+          stack_param_count++;
+        }
+        int_reg_index++;
+      }
+    }
+  }
+
+  // Reset counters for actual parameter passing
+  int_reg_index = 0;
+  float_reg_index = 0;
+
+  // Second pass: generate parameters in correct order
+  // Stack parameters need to be pushed in reverse order (right-to-left)
+  if (stack_param_count > 0) {
+    // Process stack parameters in reverse order
+    for (int i = (int)argument_count - 1; i >= 0; i--) {
+      if (arguments[i]) {
+        Type *param_type =
+            code_generator_infer_expression_type(generator, arguments[i]);
+        int is_float = code_generator_is_floating_point_type(param_type);
+
+        // Check if this parameter goes on stack
+        int goes_on_stack = 0;
+        if (is_float && float_reg_index >= (int)conv_spec->float_param_count) {
+          goes_on_stack = 1;
+        } else if (!is_float &&
+                   int_reg_index >= (int)conv_spec->int_param_count) {
+          goes_on_stack = 1;
+        }
+
+        if (goes_on_stack) {
+          code_generator_generate_parameter(generator, arguments[i], i,
+                                            param_type);
+        }
+
+        // Update counters (counting backwards)
+        if (is_float) {
+          float_reg_index++;
+        } else {
+          int_reg_index++;
+        }
+      }
+    }
+  }
+
+  // Reset counters for register parameters
+  int_reg_index = 0;
+  float_reg_index = 0;
+
+  // Third pass: generate register parameters in forward order
+  for (size_t i = 0; i < argument_count; i++) {
+    if (arguments[i]) {
+      Type *param_type =
+          code_generator_infer_expression_type(generator, arguments[i]);
+      int is_float = code_generator_is_floating_point_type(param_type);
+
+      // Check if this parameter goes in register
+      int goes_in_register = 0;
+      if (is_float && float_reg_index < (int)conv_spec->float_param_count) {
+        goes_in_register = 1;
+      } else if (!is_float && int_reg_index < (int)conv_spec->int_param_count) {
+        goes_in_register = 1;
+      }
+
+      if (goes_in_register) {
+        code_generator_generate_parameter(generator, arguments[i], (int)i,
+                                          param_type);
+      }
+
+      // Update counters
+      if (is_float) {
+        float_reg_index++;
+      } else {
+        int_reg_index++;
+      }
+    }
+  }
+}
+
+void code_generator_generate_parameter(CodeGenerator *generator,
+                                       ASTNode *argument, int param_index,
+                                       Type *param_type) {
+  if (!generator || !argument) {
+    return;
+  }
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator->calling_convention;
+  if (!conv_spec) {
+    return;
+  }
+
+  // Generate the argument expression
+  code_generator_generate_expression(generator, argument);
+
+  // Determine parameter type if not provided
+  if (!param_type) {
+    param_type = code_generator_infer_expression_type(generator, argument);
+  }
+
+  int is_float = code_generator_is_floating_point_type(param_type);
+
+  // Track register indices separately for int and float parameters
+  static int int_reg_index = 0;
+  static int float_reg_index = 0;
+
+  // Reset counters at start of function call (this is a simplification)
+  if (param_index == 0) {
+    int_reg_index = 0;
+    float_reg_index = 0;
+  }
+
+  if (is_float) {
+    // Floating-point parameter
+    if (float_reg_index < (int)conv_spec->float_param_count) {
+      // Parameter goes in floating-point register
+      x86Register param_reg = conv_spec->float_param_registers[float_reg_index];
+      const char *reg_name = code_generator_get_register_name(param_reg);
+
+      if (reg_name) {
+        code_generator_emit(
+            generator,
+            "    movsd xmm0, %s    ; Float parameter %d in register\n",
+            reg_name, param_index + 1);
+      }
+      float_reg_index++;
+    } else {
+      // Parameter goes on stack
+      code_generator_emit(
+          generator,
+          "    sub rsp, 8        ; Allocate stack space for float\n");
+      code_generator_emit(
+          generator, "    movsd [rsp], xmm0 ; Float parameter %d on stack\n",
+          param_index + 1);
+    }
+  } else {
+    // Integer/pointer parameter
+    if (int_reg_index < (int)conv_spec->int_param_count) {
+      // Parameter goes in integer register
+      x86Register param_reg = conv_spec->int_param_registers[int_reg_index];
+      const char *reg_name = code_generator_get_register_name(param_reg);
+
+      if (reg_name) {
+        // Handle different parameter sizes
+        const char *src_reg = "rax";
+        const char *dst_reg = reg_name;
+
+        if (param_type && param_type->size == 4) {
+          // 32-bit parameter - use 32-bit register names
+          src_reg = "eax";
+          if (strcmp(reg_name, "rdi") == 0)
+            dst_reg = "edi";
+          else if (strcmp(reg_name, "rsi") == 0)
+            dst_reg = "esi";
+          else if (strcmp(reg_name, "rdx") == 0)
+            dst_reg = "edx";
+          else if (strcmp(reg_name, "rcx") == 0)
+            dst_reg = "ecx";
+          else if (strcmp(reg_name, "r8") == 0)
+            dst_reg = "r8d";
+          else if (strcmp(reg_name, "r9") == 0)
+            dst_reg = "r9d";
+        }
+
+        code_generator_emit(
+            generator, "    mov %s, %s    ; Integer parameter %d in register\n",
+            dst_reg, src_reg, param_index + 1);
+      }
+      int_reg_index++;
+    } else {
+      // Parameter goes on stack
+      if (param_type && param_type->size <= 4) {
+        // 32-bit or smaller - push as 64-bit for alignment
+        code_generator_emit(
+            generator, "    push rax          ; Integer parameter %d on stack\n",
+            param_index + 1);
+      } else {
+        // 64-bit parameter
+        code_generator_emit(
+            generator, "    push rax          ; Integer parameter %d on stack\n",
+            param_index + 1);
+      }
+    }
+  }
+}
+
+void code_generator_save_caller_saved_registers(CodeGenerator *generator) {
+  if (!generator) {
+    return;
+  }
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator->calling_convention;
+  if (!conv_spec) {
+    return;
+  }
+
+  code_generator_emit(generator,
+                      "    ; Save caller-saved registers (non-parameter)\n");
+
+  // Save only caller-saved registers that are NOT used for parameter passing
+  // In a full implementation, this would only save registers that are actually
+  // in use
+
+  // RAX is always caller-saved and not used for parameters (it's the return
+  // register)
+  code_generator_emit(generator, "    push rax\n");
+
+  // R10, R11 are caller-saved and not used for parameters in either calling
+  // convention
+  code_generator_emit(generator, "    push r10\n");
+  code_generator_emit(generator, "    push r11\n");
+}
+
+void code_generator_restore_caller_saved_registers(CodeGenerator *generator) {
+  if (!generator) {
+    return;
+  }
+
+  code_generator_emit(generator,
+                      "    ; Restore caller-saved registers (non-parameter)\n");
+
+  // Restore in reverse order
+  code_generator_emit(generator, "    pop r11\n");
+  code_generator_emit(generator, "    pop r10\n");
+  code_generator_emit(generator, "    pop rax\n");
+}
+
+// Selective register saving - only save registers that are actually in use
+void code_generator_save_caller_saved_registers_selective(
+    CodeGenerator *generator) {
+  if (!generator) {
+    return;
+  }
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator->calling_convention;
+  if (!conv_spec) {
+    return;
+  }
+
+  code_generator_emit(generator,
+                      "    ; Save caller-saved registers (selective)\n");
+
+  // Save caller-saved registers that are not used for parameter passing
+  // and are currently in use by the register allocator
+
+  // Always save RAX as it might contain a value and is not used for parameters
+  code_generator_emit(generator, "    push rax\n");
+
+  // Save R10, R11 which are caller-saved but not parameter registers
+  code_generator_emit(generator, "    push r10\n");
+  code_generator_emit(generator, "    push r11\n");
+
+  // For floating-point calls, save XMM registers that are caller-saved
+  // but not used for parameters (XMM8-XMM15 on System V, XMM4-XMM15 on Windows)
+  int float_param_regs = (int)conv_spec->float_param_count;
+  for (int i = float_param_regs; i < 8; i++) {
+    if (i >= 4 || conv_spec->convention == CALLING_CONV_SYSV) {
+      code_generator_emit(generator, "    sub rsp, 16\n");
+      code_generator_emit(generator,
+                          "    movdqu [rsp], xmm%d  ; Save XMM%d\n", i, i);
+    }
+  }
+}
+
+void code_generator_restore_caller_saved_registers_selective(
+    CodeGenerator *generator) {
+  if (!generator) {
+    return;
+  }
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator->calling_convention;
+  if (!conv_spec) {
+    return;
+  }
+
+  code_generator_emit(generator,
+                      "    ; Restore caller-saved registers (selective)\n");
+
+  // Restore XMM registers in reverse order
+  int float_param_regs = (int)conv_spec->float_param_count;
+  for (int i = 7; i >= float_param_regs; i--) {
+    if (i >= 4 || conv_spec->convention == CALLING_CONV_SYSV) {
+      code_generator_emit(generator,
+                          "    movdqu xmm%d, [rsp]  ; Restore XMM%d\n", i, i);
+      code_generator_emit(generator, "    add rsp, 16\n");
+    }
+  }
+
+  // Restore general-purpose registers in reverse order
+  code_generator_emit(generator, "    pop r11\n");
+  code_generator_emit(generator, "    pop r10\n");
+  code_generator_emit(generator, "    pop rax\n");
+}
+
+// Clean up stack after function call
+void code_generator_cleanup_stack_after_call(CodeGenerator *generator,
+                                             ASTNode **arguments,
+                                             size_t argument_count) {
+  if (!generator) {
+    return;
+  }
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator->calling_convention;
+  if (!conv_spec) {
+    return;
+  }
+
+  // Calculate how many parameters were pushed on stack
+  int stack_bytes = 0;
+  int int_reg_used = 0;
+  int float_reg_used = 0;
+
+  for (size_t i = 0; i < argument_count; i++) {
+    if (arguments[i]) {
+      Type *param_type =
+          code_generator_infer_expression_type(generator, arguments[i]);
+      int is_float = code_generator_is_floating_point_type(param_type);
+
+      if (is_float) {
+        if (float_reg_used >= (int)conv_spec->float_param_count) {
+          stack_bytes += 8; // Each stack parameter is 8 bytes
+        }
+        float_reg_used++;
+      } else {
+        if (int_reg_used >= (int)conv_spec->int_param_count) {
+          stack_bytes += 8; // Each stack parameter is 8 bytes
+        }
+        int_reg_used++;
+      }
+    }
+  }
+
+  // Clean up stack parameters
+  if (stack_bytes > 0) {
+    code_generator_emit(
+        generator,
+        "    add rsp, %d    ; Clean up %d bytes of stack parameters\n",
+        stack_bytes, stack_bytes);
+  }
+
+  // Clean up shadow space for Microsoft x64
+  if (conv_spec->convention == CALLING_CONV_MS_X64 &&
+      conv_spec->shadow_space_size > 0) {
+    code_generator_emit(generator,
+                        "    add rsp, %d      ; Clean up shadow space\n",
+                        conv_spec->shadow_space_size);
+  }
+
+  // Clean up alignment padding if it was added
+  // This is a simplified approach - in practice, we'd track the exact padding
+  code_generator_emit(generator, "    ; Stack cleanup complete\n");
+}
+
+// Handle return value based on type
+void code_generator_handle_return_value(CodeGenerator *generator,
+                                        Type *return_type) {
+  if (!generator) {
+    return;
+  }
+
+  if (!return_type || !return_type->name) {
+    code_generator_emit(generator,
+                        "    ; Unknown return type - assuming integer\n");
+    return;
+  }
+
+  if (strcmp(return_type->name, "void") == 0) {
+    code_generator_emit(generator, "    ; Void return - no value to handle\n");
+    return;
+  }
+
+  if (code_generator_is_floating_point_type(return_type)) {
+    code_generator_emit(generator, "    ; Float return value in xmm0\n");
+    // If we need to store it somewhere else, we can move it
+    // For now, leave it in XMM0 as that's where expressions expect it
+  } else {
+    code_generator_emit(generator,
+                        "    ; Integer/pointer return value in rax\n");
+    // Handle different integer sizes if needed
+    if (return_type->size == 1) {
+      code_generator_emit(
+          generator, "    movzx eax, al    ; Zero-extend 8-bit return value\n");
+    } else if (return_type->size == 2) {
+      code_generator_emit(
+          generator,
+          "    movzx eax, ax    ; Zero-extend 16-bit return value\n");
+    } else if (return_type->size == 4) {
+      code_generator_emit(generator,
+                          "    ; 32-bit return value already in eax\n");
+    }
+    // 64-bit values are already in full RAX
+  }
+}
+void code_generator_align_stack_for_call(CodeGenerator *generator,
+                                         int param_count) {
+  if (!generator) {
+    return;
+  }
+
+  // x86-64 ABI requires 16-byte stack alignment before function calls
+  // RSP must be 16-byte aligned when call instruction is executed
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator->calling_convention;
+  if (!conv_spec) {
+    return;
+  }
+
+  // Calculate how many parameters will be pushed on stack
+  int stack_params = 0;
+  if (param_count > (int)conv_spec->int_param_count) {
+    stack_params = param_count - (int)conv_spec->int_param_count;
+  }
+
+  // Account for caller-saved registers we're pushing (3 registers: rax, r10,
+  // r11)
+  int total_pushes = 3 + stack_params;
+
+  // Add shadow space for Microsoft x64 calling convention
+  if (conv_spec->convention == CALLING_CONV_MS_X64 &&
+      conv_spec->shadow_space_size > 0) {
+    code_generator_emit(generator,
+                        "    sub rsp, %d      ; Allocate shadow space\n",
+                        conv_spec->shadow_space_size);
+  }
+
+  // If total pushes results in misaligned stack, add padding
+  if ((total_pushes % 2) != 0) {
+    code_generator_emit(generator,
+                        "    sub rsp, 8       ; Align stack to 16 bytes\n");
+  }
+}
+
+// Helper function to infer expression type (simplified implementation)
+Type *code_generator_infer_expression_type(CodeGenerator *generator,
+                                           ASTNode *expression) {
+  if (!generator || !expression) {
+    return NULL;
+  }
+
+  if (generator->type_checker) {
+    Type *semantic_type =
+        type_checker_infer_type(generator->type_checker, expression);
+    if (semantic_type) {
+      return semantic_type;
+    }
+  }
+
+  // Create a basic type structure for return
+  static Type int_type = {
+      .kind = TYPE_INT32, .name = "int32", .size = 4, .alignment = 4};
+  static Type float_type = {
+      .kind = TYPE_FLOAT64, .name = "float64", .size = 8, .alignment = 8};
+  static Type string_type = {.kind = TYPE_STRING,
+                             .name = "string",
+                             .size = 8,
+                             .alignment = 8}; // pointer size
+
+  switch (expression->type) {
+  case AST_NUMBER_LITERAL: {
+    NumberLiteral *num = (NumberLiteral *)expression->data;
+    if (num && num->is_float) {
+      return &float_type;
+    } else {
+      return &int_type;
+    }
+  }
+  case AST_STRING_LITERAL:
+    return &string_type;
+
+  case AST_IDENTIFIER: {
+    // Look up variable type in symbol table
+    Identifier *id = (Identifier *)expression->data;
+    if (id && id->name) {
+      Symbol *symbol = symbol_table_lookup(generator->symbol_table, id->name);
+      if (symbol && symbol->type) {
+        return symbol->type;
+      }
+    }
+    return &int_type; // Default fallback
+  }
+
+  case AST_FUNCTION_CALL: {
+    // Look up function return type
+    CallExpression *call = (CallExpression *)expression->data;
+    if (call && call->function_name) {
+      Symbol *func_symbol =
+          symbol_table_lookup(generator->symbol_table, call->function_name);
+      if (func_symbol && func_symbol->kind == SYMBOL_FUNCTION &&
+          func_symbol->type) {
+        return func_symbol->type;
+      }
+    }
+    return &int_type; // Default fallback
+  }
+
+  case AST_BINARY_EXPRESSION: {
+    // For binary expressions, use the type of the left operand (simplified)
+    BinaryExpression *bin = (BinaryExpression *)expression->data;
+    if (bin && bin->left) {
+      return code_generator_infer_expression_type(generator, bin->left);
+    }
+    return &int_type;
+  }
+
+  case AST_INDEX_EXPRESSION: {
+    ArrayIndexExpression *index_expr = (ArrayIndexExpression *)expression->data;
+    if (index_expr && index_expr->array) {
+      Type *array_type =
+          code_generator_infer_expression_type(generator, index_expr->array);
+      if (array_type &&
+          (array_type->kind == TYPE_ARRAY || array_type->kind == TYPE_POINTER) &&
+          array_type->base_type) {
+        return array_type->base_type;
+      }
+    }
+    return &int_type;
+  }
+
+  default:
+    return &int_type; // Default fallback
+  }
+}
+
+// Helper function to check if a type is floating-point
+int code_generator_is_floating_point_type(Type *type) {
+  if (!type || !type->name) {
+    return 0;
+  }
+
+  return (strcmp(type->name, "float32") == 0 ||
+          strcmp(type->name, "float64") == 0 ||
+          strcmp(type->name, "double") == 0 ||
+          strcmp(type->name, "float") == 0);
+}
+
+const char *code_generator_get_register_name(x86Register reg) {
+  switch (reg) {
+  case REG_RAX:
+    return "rax";
+  case REG_RBX:
+    return "rbx";
+  case REG_RCX:
+    return "rcx";
+  case REG_RDX:
+    return "rdx";
+  case REG_RSI:
+    return "rsi";
+  case REG_RDI:
+    return "rdi";
+  case REG_RSP:
+    return "rsp";
+  case REG_RBP:
+    return "rbp";
+  case REG_R8:
+    return "r8";
+  case REG_R9:
+    return "r9";
+  case REG_R10:
+    return "r10";
+  case REG_R11:
+    return "r11";
+  case REG_R12:
+    return "r12";
+  case REG_R13:
+    return "r13";
+  case REG_R14:
+    return "r14";
+  case REG_R15:
+    return "r15";
+  case REG_XMM0:
+    return "xmm0";
+  case REG_XMM1:
+    return "xmm1";
+  case REG_XMM2:
+    return "xmm2";
+  case REG_XMM3:
+    return "xmm3";
+  case REG_XMM4:
+    return "xmm4";
+  case REG_XMM5:
+    return "xmm5";
+  case REG_XMM6:
+    return "xmm6";
+  case REG_XMM7:
+    return "xmm7";
+  case REG_XMM8:
+    return "xmm8";
+  case REG_XMM9:
+    return "xmm9";
+  case REG_XMM10:
+    return "xmm10";
+  case REG_XMM11:
+    return "xmm11";
+  case REG_XMM12:
+    return "xmm12";
+  case REG_XMM13:
+    return "xmm13";
+  case REG_XMM14:
+    return "xmm14";
+  case REG_XMM15:
+    return "xmm15";
+  default:
+    return NULL;
+  }
+}
+
+
