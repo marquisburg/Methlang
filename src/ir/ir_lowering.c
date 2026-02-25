@@ -54,14 +54,6 @@ static void ir_set_error(IRLoweringContext *context, const char *format, ...) {
   va_end(args);
 }
 
-static void ir_clear_error(IRLoweringContext *context) {
-  if (!context) {
-    return;
-  }
-  free(context->error_message);
-  context->error_message = NULL;
-}
-
 static char *ir_new_temp_name(IRLoweringContext *context) {
   char buffer[64];
   snprintf(buffer, sizeof(buffer), "t%d", context->next_temp_id++);
@@ -151,30 +143,6 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
                                    IRFunction *function, ASTNode *expression,
                                    IROperand *out_address, Type **out_type);
 
-static int ir_operator_supported_by_int_binary_backend(const char *op) {
-  if (!op) {
-    return 0;
-  }
-
-  return strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
-         strcmp(op, "*") == 0 || strcmp(op, "/") == 0 ||
-         strcmp(op, "%") == 0 || strcmp(op, "&") == 0 ||
-         strcmp(op, "|") == 0 || strcmp(op, "^") == 0 ||
-         strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
-         strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
-         strcmp(op, ">") == 0 || strcmp(op, ">=") == 0 ||
-         strcmp(op, "&&") == 0 || strcmp(op, "||") == 0;
-}
-
-static int ir_operator_supported_by_int_unary_backend(const char *op) {
-  if (!op) {
-    return 0;
-  }
-
-  return strcmp(op, "-") == 0 || strcmp(op, "!") == 0 ||
-         strcmp(op, "~") == 0 || strcmp(op, "+") == 0;
-}
-
 static int ir_expression_is_floating(IRLoweringContext *context,
                                      ASTNode *expression) {
   if (!context || !context->type_checker || !expression) {
@@ -189,23 +157,21 @@ static int ir_expression_is_floating(IRLoweringContext *context,
   return type->kind == TYPE_FLOAT32 || type->kind == TYPE_FLOAT64;
 }
 
-static int ir_type_is_aggregate(Type *type) {
-  return type && (type->kind == TYPE_STRUCT || type->kind == TYPE_ARRAY);
-}
-
 static int ir_type_storage_size(Type *type) {
   if (!type || type->size == 0) {
     return 8;
   }
 
-  if (type->size == 1 || type->size == 2 || type->size == 4 || type->size == 8) {
+  if (type->size == 1 || type->size == 2 || type->size == 4 ||
+      type->size == 8) {
     return (int)type->size;
   }
 
   return 8;
 }
 
-static int ir_make_temp_operand(IRLoweringContext *context, IROperand *out_temp) {
+static int ir_make_temp_operand(IRLoweringContext *context,
+                                IROperand *out_temp) {
   if (!context || !out_temp) {
     return 0;
   }
@@ -226,35 +192,18 @@ static int ir_make_temp_operand(IRLoweringContext *context, IROperand *out_temp)
   return 1;
 }
 
-static int ir_emit_eval_expression(IRLoweringContext *context,
-                                   IRFunction *function, ASTNode *expression,
-                                   IROperand *out_value) {
-  IROperand destination = ir_operand_none();
-  if (!ir_make_temp_operand(context, &destination)) {
-    return 0;
-  }
-
-  IRInstruction instruction = {0};
-  instruction.op = IR_OP_EVAL_EXPR;
-  instruction.location = expression->location;
-  instruction.dest = destination;
-  instruction.ast_ref = expression;
-
-  if (!ir_emit(context, function, &instruction)) {
-    ir_operand_destroy(&destination);
-    return 0;
-  }
-
-  *out_value = destination;
-  return 1;
-}
-
 static int ir_lower_call_expression(IRLoweringContext *context,
                                     IRFunction *function, ASTNode *expression,
                                     IROperand *out_value) {
   CallExpression *call = (CallExpression *)expression->data;
-  if (!call || !call->function_name || call->object) {
-    return ir_emit_eval_expression(context, function, expression, out_value);
+  if (!call || !call->function_name) {
+    ir_set_error(context, "Malformed call expression");
+    return 0;
+  }
+  if (call->object) {
+    ir_set_error(context, "Method calls should be mangled directly, unresolved "
+                          "method object in lower pass");
+    return 0;
   }
 
   IROperand destination = ir_operand_none();
@@ -379,8 +328,8 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
           context->symbol_table
               ? symbol_table_lookup(context->symbol_table, identifier->name)
               : NULL;
-      if (symbol &&
-          (symbol->kind == SYMBOL_VARIABLE || symbol->kind == SYMBOL_PARAMETER)) {
+      if (symbol && (symbol->kind == SYMBOL_VARIABLE ||
+                     symbol->kind == SYMBOL_PARAMETER)) {
         *out_type = symbol->type;
       } else {
         *out_type = ir_infer_expression_type(context, expression);
@@ -398,13 +347,19 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
     }
 
     IROperand object_address = ir_operand_none();
-    Type *object_type = NULL;
-    if (!ir_lower_lvalue_address(context, function, member->object,
-                                 &object_address, &object_type)) {
-      return 0;
-    }
-    if (!object_type) {
-      object_type = ir_infer_expression_type(context, member->object);
+    Type *object_type = ir_infer_expression_type(context, member->object);
+
+    if (object_type && object_type->kind == TYPE_POINTER) {
+      if (!ir_lower_expression(context, function, member->object,
+                               &object_address)) {
+        return 0;
+      }
+      object_type = object_type->base_type;
+    } else {
+      if (!ir_lower_lvalue_address(context, function, member->object,
+                                   &object_address, &object_type)) {
+        return 0;
+      }
     }
     if (!object_type || object_type->kind != TYPE_STRUCT) {
       ir_operand_destroy(&object_address);
@@ -451,7 +406,8 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
   case AST_INDEX_EXPRESSION: {
     ArrayIndexExpression *index_expression =
         (ArrayIndexExpression *)expression->data;
-    if (!index_expression || !index_expression->array || !index_expression->index) {
+    if (!index_expression || !index_expression->array ||
+        !index_expression->index) {
       ir_set_error(context, "Malformed index lvalue");
       return 0;
     }
@@ -471,8 +427,10 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
 
     IROperand base = ir_operand_none();
     IROperand index = ir_operand_none();
-    if (!ir_lower_expression(context, function, index_expression->array, &base) ||
-        !ir_lower_expression(context, function, index_expression->index, &index)) {
+    if (!ir_lower_expression(context, function, index_expression->array,
+                             &base) ||
+        !ir_lower_expression(context, function, index_expression->index,
+                             &index)) {
       ir_operand_destroy(&base);
       ir_operand_destroy(&index);
       return 0;
@@ -546,7 +504,8 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
     }
 
     IROperand pointer_value = ir_operand_none();
-    if (!ir_lower_expression(context, function, unary->operand, &pointer_value)) {
+    if (!ir_lower_expression(context, function, unary->operand,
+                             &pointer_value)) {
       return 0;
     }
 
@@ -618,7 +577,8 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
   case AST_BINARY_EXPRESSION: {
     BinaryExpression *binary = (BinaryExpression *)expression->data;
     if (!binary || !binary->left || !binary->right || !binary->operator) {
-      return ir_emit_eval_expression(context, function, expression, out_value);
+      ir_set_error(context, "Malformed binary expression");
+      return 0;
     }
 
     IROperand left = ir_operand_none();
@@ -644,10 +604,7 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     instruction.lhs = left;
     instruction.rhs = right;
     instruction.text = binary->operator;
-    if (!ir_operator_supported_by_int_binary_backend(binary->operator) ||
-        ir_expression_is_floating(context, expression)) {
-      instruction.ast_ref = expression;
-    }
+    instruction.is_float = ir_expression_is_floating(context, expression);
 
     if (!ir_emit(context, function, &instruction)) {
       ir_operand_destroy(&destination);
@@ -665,15 +622,15 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
   case AST_UNARY_EXPRESSION: {
     UnaryExpression *unary = (UnaryExpression *)expression->data;
     if (!unary || !unary->operator || !unary->operand) {
-      return ir_emit_eval_expression(context, function, expression, out_value);
+      ir_set_error(context, "Malformed unary expression");
+      return 0;
     }
 
     if (strcmp(unary->operator, "&") == 0) {
       Type *target_type = NULL;
       if (!ir_lower_lvalue_address(context, function, unary->operand, out_value,
                                    &target_type)) {
-        ir_clear_error(context);
-        return ir_emit_eval_expression(context, function, expression, out_value);
+        return 0;
       }
       return 1;
     }
@@ -683,13 +640,12 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       Type *target_type = NULL;
       if (!ir_lower_lvalue_address(context, function, expression, &address,
                                    &target_type)) {
-        ir_clear_error(context);
-        return ir_emit_eval_expression(context, function, expression, out_value);
+        return 0;
       }
-      if (!target_type || ir_type_is_aggregate(target_type)) {
+      if (!target_type) {
         ir_operand_destroy(&address);
-        ir_clear_error(context);
-        return ir_emit_eval_expression(context, function, expression, out_value);
+        ir_set_error(context, "Cannot dereference unknown type");
+        return 0;
       }
 
       IROperand destination = ir_operand_none();
@@ -732,10 +688,7 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     instruction.dest = destination;
     instruction.lhs = operand;
     instruction.text = unary->operator;
-    if (!ir_operator_supported_by_int_unary_backend(unary->operator) ||
-        ir_expression_is_floating(context, expression)) {
-      instruction.ast_ref = expression;
-    }
+    instruction.is_float = ir_expression_is_floating(context, expression);
 
     if (!ir_emit(context, function, &instruction)) {
       ir_operand_destroy(&destination);
@@ -754,13 +707,12 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     Type *value_type = NULL;
     if (!ir_lower_lvalue_address(context, function, expression, &address,
                                  &value_type)) {
-      ir_clear_error(context);
-      return ir_emit_eval_expression(context, function, expression, out_value);
+      return 0;
     }
-    if (!value_type || ir_type_is_aggregate(value_type)) {
+    if (!value_type) {
       ir_operand_destroy(&address);
-      ir_clear_error(context);
-      return ir_emit_eval_expression(context, function, expression, out_value);
+      ir_set_error(context, "Cannot determine type for load");
+      return 0;
     }
 
     IROperand destination = ir_operand_none();
@@ -789,7 +741,8 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
   case AST_NEW_EXPRESSION: {
     NewExpression *new_expression = (NewExpression *)expression->data;
     if (!new_expression || !new_expression->type_name) {
-      return ir_emit_eval_expression(context, function, expression, out_value);
+      ir_set_error(context, "Invalid new expression");
+      return 0;
     }
 
     Type *allocated_type =
@@ -823,7 +776,8 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     return ir_lower_call_expression(context, function, expression, out_value);
 
   default:
-    return ir_emit_eval_expression(context, function, expression, out_value);
+    ir_set_error(context, "Unsupported expression type in pure IR lowering");
+    return 0;
   }
 }
 
@@ -982,8 +936,9 @@ static int ir_lower_switch_statement(IRLoweringContext *context,
     ir_operand_destroy(&case_value);
   }
 
-  const char *default_label =
-      (default_index != (size_t)-1) ? case_labels[default_index] : switch_end_label;
+  const char *default_label = (default_index != (size_t)-1)
+                                  ? case_labels[default_index]
+                                  : switch_end_label;
   if (!ir_emit_jump_instruction(context, function, default_label,
                                 statement->location)) {
     for (size_t j = 0; j < case_count; j++) {
@@ -1081,7 +1036,8 @@ static int ir_lower_statement(IRLoweringContext *context, IRFunction *function,
     local.dest = ir_operand_symbol(declaration->name);
     local.text = declaration->type_name;
     if (!local.dest.name) {
-      ir_set_error(context, "Out of memory while lowering variable declaration");
+      ir_set_error(context,
+                   "Out of memory while lowering variable declaration");
       return 0;
     }
     if (!ir_emit(context, function, &local)) {
@@ -1161,26 +1117,17 @@ static int ir_lower_statement(IRLoweringContext *context, IRFunction *function,
 
     IROperand address = ir_operand_none();
     Type *target_type = NULL;
-    if (!ir_lower_lvalue_address(context, function, assignment->target, &address,
-                                 &target_type)) {
+    if (!ir_lower_lvalue_address(context, function, assignment->target,
+                                 &address, &target_type)) {
       ir_operand_destroy(&value);
-      ir_clear_error(context);
-      IRInstruction fallback = {0};
-      fallback.op = IR_OP_AST_STMT;
-      fallback.location = statement->location;
-      fallback.ast_ref = statement;
-      return ir_emit(context, function, &fallback);
+      return 0;
     }
 
-    if (!target_type || ir_type_is_aggregate(target_type)) {
+    if (!target_type) {
       ir_operand_destroy(&address);
       ir_operand_destroy(&value);
-      ir_clear_error(context);
-      IRInstruction fallback = {0};
-      fallback.op = IR_OP_AST_STMT;
-      fallback.location = statement->location;
-      fallback.ast_ref = statement;
-      return ir_emit(context, function, &fallback);
+      ir_set_error(context, "Cannot assign to unknown target type");
+      return 0;
     }
 
     IRInstruction store = {0};
@@ -1257,7 +1204,8 @@ static int ir_lower_statement(IRLoweringContext *context, IRFunction *function,
     }
 
     IROperand condition = ir_operand_none();
-    if (!ir_lower_expression(context, function, if_data->condition, &condition)) {
+    if (!ir_lower_expression(context, function, if_data->condition,
+                             &condition)) {
       free(else_label);
       free(end_label);
       return 0;
@@ -1405,7 +1353,8 @@ static int ir_lower_statement(IRLoweringContext *context, IRFunction *function,
       return 0;
     }
 
-    if (!ir_lower_statement_or_expression(context, function, for_data->initializer)) {
+    if (!ir_lower_statement_or_expression(context, function,
+                                          for_data->initializer)) {
       free(condition_label);
       free(step_label);
       free(end_label);
@@ -1468,7 +1417,8 @@ static int ir_lower_statement(IRLoweringContext *context, IRFunction *function,
       return 0;
     }
 
-    if (!ir_lower_statement_or_expression(context, function, for_data->increment)) {
+    if (!ir_lower_statement_or_expression(context, function,
+                                          for_data->increment)) {
       free(condition_label);
       free(step_label);
       free(end_label);
@@ -1500,7 +1450,8 @@ static int ir_lower_statement(IRLoweringContext *context, IRFunction *function,
       ir_set_error(context, "'break' used outside loop/switch");
       return 0;
     }
-    return ir_emit_jump_instruction(context, function, target, statement->location);
+    return ir_emit_jump_instruction(context, function, target,
+                                    statement->location);
   }
 
   case AST_CONTINUE_STATEMENT: {
@@ -1509,22 +1460,21 @@ static int ir_lower_statement(IRLoweringContext *context, IRFunction *function,
       ir_set_error(context, "'continue' used outside loop");
       return 0;
     }
-    return ir_emit_jump_instruction(context, function, target, statement->location);
+    return ir_emit_jump_instruction(context, function, target,
+                                    statement->location);
   }
 
   default: {
-    if (statement->type >= AST_IDENTIFIER && statement->type <= AST_NEW_EXPRESSION) {
+    if (statement->type >= AST_IDENTIFIER &&
+        statement->type <= AST_NEW_EXPRESSION) {
       IROperand ignored = ir_operand_none();
       int ok = ir_lower_expression(context, function, statement, &ignored);
       ir_operand_destroy(&ignored);
       return ok;
     }
 
-    IRInstruction fallback = {0};
-    fallback.op = IR_OP_AST_STMT;
-    fallback.location = statement->location;
-    fallback.ast_ref = statement;
-    return ir_emit(context, function, &fallback);
+    ir_set_error(context, "Unsupported statement type in pure IR lowering");
+    return 0;
   }
   }
 }
@@ -1549,7 +1499,8 @@ static IRFunction *ir_lower_function(IRLoweringContext *context,
 
   char *entry_label = ir_new_label_name(context, "entry");
   if (!entry_label) {
-    ir_set_error(context, "Out of memory while allocating function entry label");
+    ir_set_error(context,
+                 "Out of memory while allocating function entry label");
     ir_function_destroy(function);
     return NULL;
   }
@@ -1578,7 +1529,8 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
 
   if (!program || program->type != AST_PROGRAM) {
     if (error_message) {
-      *error_message = ir_strdup_local("Expected AST_PROGRAM root for IR lowering");
+      *error_message =
+          ir_strdup_local("Expected AST_PROGRAM root for IR lowering");
     }
     return NULL;
   }

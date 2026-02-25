@@ -12,6 +12,7 @@ ASTNode *ast_create_node(ASTNodeType type, SourceLocation location) {
   node->children = NULL;
   node->child_count = 0;
   node->data = NULL;
+  node->resolved_type = NULL;
 
   return node;
 }

@@ -3,6 +3,7 @@
 #endif
 #include "main.h"
 #include "ir/ir.h"
+#include "ir/ir_optimize.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,10 +32,11 @@ static int validate_lexical_phase(const char *source, ErrorReporter *reporter) {
     if (token.type == TOKEN_ERROR) {
       has_lexical_error = 1;
       if (reporter) {
-        SourceLocation location = source_location_create(token.line, token.column);
-        error_reporter_add_error(
-            reporter, ERROR_LEXICAL, location,
-            token.value ? token.value : "Unknown lexical error");
+        SourceLocation location =
+            source_location_create(token.line, token.column);
+        error_reporter_add_error(reporter, ERROR_LEXICAL, location,
+                                 token.value ? token.value
+                                             : "Unknown lexical error");
       }
     }
 
@@ -129,8 +131,7 @@ int compile_file(const char *input_filename, const char *output_filename,
     return 1;
   }
 
-  ErrorReporter *error_reporter =
-      error_reporter_create(input_filename, source);
+  ErrorReporter *error_reporter = error_reporter_create(input_filename, source);
   if (!error_reporter) {
     fprintf(stderr, "Error: Could not initialize error reporter\n");
     free(source);
@@ -239,7 +240,8 @@ int compile_file(const char *input_filename, const char *output_filename,
 
   // Parse the source code
   program = parser_parse_program(parser);
-  if (!program || parser->had_error || error_reporter_has_errors(error_reporter)) {
+  if (!program || parser->had_error ||
+      error_reporter_has_errors(error_reporter)) {
     if (error_reporter_has_errors(error_reporter)) {
       error_reporter_print_errors(error_reporter);
     } else {
@@ -272,6 +274,15 @@ int compile_file(const char *input_filename, const char *output_filename,
     result = 1;
     goto cleanup;
   }
+
+  if (options->optimize) {
+    if (!ir_optimize_program(ir_program)) {
+      fprintf(stderr, "IR optimization error\n");
+      result = 1;
+      goto cleanup;
+    }
+  }
+
   code_generator_set_ir_program(code_generator, ir_program);
 
   if (options->debug_mode || options->optimize) {
@@ -369,9 +380,10 @@ int compile_file(const char *input_filename, const char *output_filename,
       char *stack_trace_output =
           build_sidecar_filename(output_filename, ".stacktrace.s");
       if (!stack_trace_output) {
-        fprintf(stderr,
-                "Error: Failed to allocate stack trace output filename for '%s'\n",
-                output_filename);
+        fprintf(
+            stderr,
+            "Error: Failed to allocate stack trace output filename for '%s'\n",
+            output_filename);
         result = 1;
         goto cleanup;
       }

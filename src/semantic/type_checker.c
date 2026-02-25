@@ -346,7 +346,24 @@ int type_checker_check_program(TypeChecker *checker, ASTNode *program) {
   return 1; // Success
 }
 
+static Type *type_checker_infer_type_internal(TypeChecker *checker,
+                                              ASTNode *expression);
+
 Type *type_checker_infer_type(TypeChecker *checker, ASTNode *expression) {
+  if (!checker || !expression)
+    return NULL;
+
+  if (expression->resolved_type) {
+    return expression->resolved_type;
+  }
+
+  Type *type = type_checker_infer_type_internal(checker, expression);
+  expression->resolved_type = type;
+  return type;
+}
+
+static Type *type_checker_infer_type_internal(TypeChecker *checker,
+                                              ASTNode *expression) {
   if (!checker || !expression)
     return NULL;
 
@@ -583,9 +600,9 @@ Type *type_checker_infer_type(TypeChecker *checker, ASTNode *expression) {
       return array_type->base_type;
     }
 
-    type_checker_set_error_at_location(
-        checker, expression->location,
-        "Cannot index non-array type '%s'", array_type->name);
+    type_checker_set_error_at_location(checker, expression->location,
+                                       "Cannot index non-array type '%s'",
+                                       array_type->name);
     return NULL;
   }
 
@@ -698,7 +715,6 @@ void type_checker_init_builtin_types(TypeChecker *checker) {
     checker->builtin_void->size = 0;
     checker->builtin_void->alignment = 1;
   }
-
 }
 
 Type *type_checker_get_builtin_type(TypeChecker *checker, TypeKind kind) {
@@ -1363,8 +1379,8 @@ int type_checker_process_declaration(TypeChecker *checker,
     func_symbol->data.function.parameter_types = param_types;
     func_symbol->data.function.return_type = return_type;
 
-    Symbol *existing_before =
-        symbol_table_lookup_current_scope(checker->symbol_table, func_decl->name);
+    Symbol *existing_before = symbol_table_lookup_current_scope(
+        checker->symbol_table, func_decl->name);
     int is_resolving_forward =
         (existing_before && existing_before->kind == SYMBOL_FUNCTION &&
          existing_before->is_forward_declaration);
@@ -1410,11 +1426,9 @@ int type_checker_process_declaration(TypeChecker *checker,
         checker->current_function->data.function.parameter_types;
     if (func_decl->parameter_count > 0) {
       for (size_t i = 0; i < func_decl->parameter_count; i++) {
-        Symbol *param_symbol = symbol_create(func_decl->parameter_names[i],
-                                             SYMBOL_VARIABLE,
-                                             active_param_types
-                                                 ? active_param_types[i]
-                                                 : NULL);
+        Symbol *param_symbol =
+            symbol_create(func_decl->parameter_names[i], SYMBOL_VARIABLE,
+                          active_param_types ? active_param_types[i] : NULL);
         if (!param_symbol) {
           type_checker_set_error_at_location(
               checker, declaration->location,
@@ -1475,9 +1489,9 @@ int type_checker_process_declaration(TypeChecker *checker,
       if (assignment->target->type == AST_MEMBER_ACCESS) {
         MemberAccess *member = (MemberAccess *)assignment->target->data;
         if (!member || !member->object || !member->member) {
-          type_checker_set_error_at_location(
-              checker, assignment->target->location,
-              "Invalid field assignment target");
+          type_checker_set_error_at_location(checker,
+                                             assignment->target->location,
+                                             "Invalid field assignment target");
           return 0;
         }
 
@@ -1491,8 +1505,8 @@ int type_checker_process_declaration(TypeChecker *checker,
           snprintf(error_msg, sizeof(error_msg),
                    "Cannot assign field '%s' on non-struct type '%s'",
                    member->member, object_type->name);
-          type_checker_set_error_at_location(checker, assignment->target->location,
-                                             error_msg);
+          type_checker_set_error_at_location(
+              checker, assignment->target->location, error_msg);
           return 0;
         }
 
@@ -1500,10 +1514,10 @@ int type_checker_process_declaration(TypeChecker *checker,
         if (!field_type) {
           char error_msg[512];
           snprintf(error_msg, sizeof(error_msg),
-                   "Field '%s' not found in struct '%s'",
-                   member->member, object_type->name);
-          type_checker_set_error_at_location(checker, assignment->target->location,
-                                             error_msg);
+                   "Field '%s' not found in struct '%s'", member->member,
+                   object_type->name);
+          type_checker_set_error_at_location(
+              checker, assignment->target->location, error_msg);
           return 0;
         }
 
@@ -1520,7 +1534,8 @@ int type_checker_process_declaration(TypeChecker *checker,
         if (!(field_type->kind == TYPE_POINTER &&
               type_checker_is_null_pointer_constant(assignment->value)) &&
             !type_checker_is_assignable(checker, field_type, value_type)) {
-          type_checker_report_type_mismatch(checker, assignment->value->location,
+          type_checker_report_type_mismatch(checker,
+                                            assignment->value->location,
                                             field_type->name, value_type->name);
           return 0;
         }
@@ -1546,22 +1561,26 @@ int type_checker_process_declaration(TypeChecker *checker,
         if (!(element_type->kind == TYPE_POINTER &&
               type_checker_is_null_pointer_constant(assignment->value)) &&
             !type_checker_is_assignable(checker, element_type, value_type)) {
-          type_checker_report_type_mismatch(checker, assignment->value->location,
-                                            element_type->name, value_type->name);
+          type_checker_report_type_mismatch(
+              checker, assignment->value->location, element_type->name,
+              value_type->name);
           return 0;
         }
 
         return 1;
       } else if (assignment->target->type == AST_UNARY_EXPRESSION) {
-        UnaryExpression *target_unary = (UnaryExpression *)assignment->target->data;
+        UnaryExpression *target_unary =
+            (UnaryExpression *)assignment->target->data;
         if (!target_unary || !target_unary->operator ||
             strcmp(target_unary->operator, "*") != 0) {
-          type_checker_set_error_at_location(checker, assignment->target->location,
+          type_checker_set_error_at_location(checker,
+                                             assignment->target->location,
                                              "Invalid assignment target");
           return 0;
         }
 
-        Type *target_type = type_checker_infer_type(checker, assignment->target);
+        Type *target_type =
+            type_checker_infer_type(checker, assignment->target);
         if (!target_type) {
           return 0;
         }
@@ -1579,8 +1598,9 @@ int type_checker_process_declaration(TypeChecker *checker,
         if (!(target_type->kind == TYPE_POINTER &&
               type_checker_is_null_pointer_constant(assignment->value)) &&
             !type_checker_is_assignable(checker, target_type, value_type)) {
-          type_checker_report_type_mismatch(checker, assignment->value->location,
-                                            target_type->name, value_type->name);
+          type_checker_report_type_mismatch(
+              checker, assignment->value->location, target_type->name,
+              value_type->name);
           return 0;
         }
 
@@ -1965,7 +1985,8 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
         return 0;
       }
       if (!type_checker_is_numeric_type(cond_type)) {
-        type_checker_report_type_mismatch(checker, for_stmt->condition->location,
+        type_checker_report_type_mismatch(checker,
+                                          for_stmt->condition->location,
                                           "numeric type", cond_type->name);
         symbol_table_exit_scope(checker->symbol_table);
         return 0;
@@ -1979,7 +2000,8 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     }
 
     checker->loop_depth++;
-    if (for_stmt->body && !type_checker_check_statement(checker, for_stmt->body)) {
+    if (for_stmt->body &&
+        !type_checker_check_statement(checker, for_stmt->body)) {
       checker->loop_depth--;
       symbol_table_exit_scope(checker->symbol_table);
       return 0;
@@ -1998,12 +2020,14 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
       return 0;
     }
 
-    Type *switch_type = type_checker_infer_type(checker, switch_stmt->expression);
+    Type *switch_type =
+        type_checker_infer_type(checker, switch_stmt->expression);
     if (!switch_type) {
       return 0;
     }
     if (!type_checker_is_integer_type(switch_type)) {
-      type_checker_report_type_mismatch(checker, switch_stmt->expression->location,
+      type_checker_report_type_mismatch(checker,
+                                        switch_stmt->expression->location,
                                         "integer type", switch_type->name);
       return 0;
     }
@@ -2015,8 +2039,9 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     if (switch_stmt->case_count > 0) {
       case_values = malloc(switch_stmt->case_count * sizeof(long long));
       if (!case_values) {
-        type_checker_set_error_at_location(checker, statement->location,
-                                           "Memory allocation failed in switch validation");
+        type_checker_set_error_at_location(
+            checker, statement->location,
+            "Memory allocation failed in switch validation");
         return 0;
       }
     }
@@ -2068,14 +2093,16 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
           return 0;
         }
         if (!type_checker_is_integer_type(case_type)) {
-          type_checker_report_type_mismatch(checker, case_clause->value->location,
+          type_checker_report_type_mismatch(checker,
+                                            case_clause->value->location,
                                             "integer type", case_type->name);
           checker->switch_depth--;
           free(case_values);
           return 0;
         }
         if (!type_checker_is_assignable(checker, switch_type, case_type)) {
-          type_checker_report_type_mismatch(checker, case_clause->value->location,
+          type_checker_report_type_mismatch(checker,
+                                            case_clause->value->location,
                                             switch_type->name, case_type->name);
           checker->switch_depth--;
           free(case_values);
@@ -2083,7 +2110,8 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
         }
 
         long long case_value = 0;
-        if (!type_checker_eval_integer_constant(case_clause->value, &case_value)) {
+        if (!type_checker_eval_integer_constant(case_clause->value,
+                                                &case_value)) {
           type_checker_set_error_at_location(
               checker, case_clause->value->location,
               "Case value must be a compile-time integer constant expression");
@@ -2106,9 +2134,8 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
       }
 
       if (!case_clause->body) {
-        type_checker_set_error_at_location(
-            checker, case_node->location,
-            "Case clause must have a body");
+        type_checker_set_error_at_location(checker, case_node->location,
+                                           "Case clause must have a body");
         checker->switch_depth--;
         free(case_values);
         return 0;
@@ -2250,11 +2277,10 @@ Type *type_checker_check_binary_expression(TypeChecker *checker,
 
       int left_is_null = type_checker_is_null_pointer_constant(binop->left);
       int right_is_null = type_checker_is_null_pointer_constant(binop->right);
-      int comparable =
-          (left_is_pointer && right_is_pointer &&
-           type_checker_types_equal(left_type, right_type)) ||
-          (left_is_pointer && right_is_null) ||
-          (right_is_pointer && left_is_null);
+      int comparable = (left_is_pointer && right_is_pointer &&
+                        type_checker_types_equal(left_type, right_type)) ||
+                       (left_is_pointer && right_is_null) ||
+                       (right_is_pointer && left_is_null);
 
       if (!comparable) {
         char error_msg[512];

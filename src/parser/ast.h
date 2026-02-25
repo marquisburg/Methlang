@@ -41,7 +41,8 @@ typedef struct ASTNode {
   SourceLocation location;
   struct ASTNode **children;
   size_t child_count;
-  void *data; // Node-specific data
+  void *data;                 // Node-specific data
+  struct Type *resolved_type; // Cached type from semantic analysis
 } ASTNode;
 
 typedef struct {
