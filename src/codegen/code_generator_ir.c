@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define STACK_FRAME_WARN_THRESHOLD (256 * 1024)
+
 typedef struct {
   char *name;
   int offset;
@@ -682,6 +684,44 @@ static int code_generator_ir_operand_is_float(const IROperand *operand) {
   return operand && operand->kind == IR_OPERAND_FLOAT;
 }
 
+static int code_generator_ir_operand_has_float_type(CodeGenerator *generator,
+                                                    const IROperand *operand) {
+  if (!generator || !operand) {
+    return 0;
+  }
+
+  if (operand->kind == IR_OPERAND_SYMBOL && operand->name) {
+    Symbol *symbol = symbol_table_lookup(generator->symbol_table, operand->name);
+    if (symbol && symbol->type &&
+        code_generator_is_floating_point_type(symbol->type)) {
+      return 1;
+    }
+  }
+
+  return code_generator_ir_operand_is_float(operand);
+}
+
+static int code_generator_ir_call_argument_is_float(
+    CodeGenerator *generator, Symbol *function_symbol,
+    const IRInstruction *instruction, size_t argument_index) {
+  if (!generator || !instruction || argument_index >= instruction->argument_count) {
+    return 0;
+  }
+
+  if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
+      function_symbol->data.function.parameter_types &&
+      argument_index < function_symbol->data.function.parameter_count) {
+    Type *parameter_type =
+        function_symbol->data.function.parameter_types[argument_index];
+    if (parameter_type) {
+      return code_generator_is_floating_point_type(parameter_type);
+    }
+  }
+
+  return code_generator_ir_operand_has_float_type(
+      generator, &instruction->arguments[argument_index]);
+}
+
 static int code_generator_emit_ir_call_argument_stack(CodeGenerator *generator,
                                                       const IROperand *operand,
                                                       IRTempTable *temp_table,
@@ -759,11 +799,23 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
 
   int int_reg_cursor = 0;
   int float_reg_cursor = 0;
+  size_t ms_param_slot_count = 0;
+  if (conv_spec->convention == CALLING_CONV_MS_X64) {
+    ms_param_slot_count = conv_spec->int_param_count;
+    if (conv_spec->float_param_count < ms_param_slot_count) {
+      ms_param_slot_count = conv_spec->float_param_count;
+    }
+  }
   int stack_argument_count = 0;
   for (size_t i = 0; i < argument_count; i++) {
-    is_float[i] =
-        code_generator_ir_operand_is_float(&instruction->arguments[i]);
-    if (is_float[i]) {
+    is_float[i] = code_generator_ir_call_argument_is_float(
+        generator, function_symbol, instruction, i);
+    if (conv_spec->convention == CALLING_CONV_MS_X64) {
+      if (i >= ms_param_slot_count) {
+        goes_on_stack[i] = 1;
+        stack_argument_count++;
+      }
+    } else if (is_float[i]) {
       if (float_reg_cursor < (int)conv_spec->float_param_count) {
         float_reg_cursor++;
       } else {
@@ -820,55 +872,79 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
       continue;
     }
 
-    if (is_float && is_float[i]) {
-      if (float_reg_cursor >= (int)conv_spec->float_param_count) {
+    if (conv_spec->convention == CALLING_CONV_MS_X64) {
+      if (i >= ms_param_slot_count) {
         code_generator_set_error(
-            generator, "IR call argument classification mismatch (float)");
+            generator, "IR call argument classification mismatch (Win64)");
         free(is_float);
         free(goes_on_stack);
         return 0;
       }
       x86Register target_register =
-          conv_spec->float_param_registers[float_reg_cursor++];
+          (is_float && is_float[i]) ? conv_spec->float_param_registers[i]
+                                    : conv_spec->int_param_registers[i];
       if (!code_generator_emit_ir_call_argument_register(
               generator, &instruction->arguments[i], temp_table,
-              target_register, 1)) {
+              target_register, (is_float && is_float[i]) ? 1 : 0)) {
         free(is_float);
         free(goes_on_stack);
         return 0;
       }
     } else {
-      if (int_reg_cursor >= (int)conv_spec->int_param_count) {
-        code_generator_set_error(
-            generator, "IR call argument classification mismatch (integer)");
-        free(is_float);
-        free(goes_on_stack);
-        return 0;
-      }
-      x86Register target_register =
-          conv_spec->int_param_registers[int_reg_cursor++];
-      if (!code_generator_emit_ir_call_argument_register(
-              generator, &instruction->arguments[i], temp_table,
-              target_register, 0)) {
-        free(is_float);
-        free(goes_on_stack);
-        return 0;
+      if (is_float && is_float[i]) {
+        if (float_reg_cursor >= (int)conv_spec->float_param_count) {
+          code_generator_set_error(
+              generator, "IR call argument classification mismatch (float)");
+          free(is_float);
+          free(goes_on_stack);
+          return 0;
+        }
+        x86Register target_register =
+            conv_spec->float_param_registers[float_reg_cursor++];
+        if (!code_generator_emit_ir_call_argument_register(
+                generator, &instruction->arguments[i], temp_table,
+                target_register, 1)) {
+          free(is_float);
+          free(goes_on_stack);
+          return 0;
+        }
+      } else {
+        if (int_reg_cursor >= (int)conv_spec->int_param_count) {
+          code_generator_set_error(
+              generator, "IR call argument classification mismatch (integer)");
+          free(is_float);
+          free(goes_on_stack);
+          return 0;
+        }
+        x86Register target_register =
+            conv_spec->int_param_registers[int_reg_cursor++];
+        if (!code_generator_emit_ir_call_argument_register(
+                generator, &instruction->arguments[i], temp_table,
+                target_register, 0)) {
+          free(is_float);
+          free(goes_on_stack);
+          return 0;
+        }
       }
     }
   }
 
   code_generator_emit(generator, "    call %s\n", call_target);
-  code_generator_emit(generator, "    mov rcx, rax\n");
 
   if (call_stack_total > 0) {
     code_generator_emit(generator, "    add rsp, %d\n", call_stack_total);
   }
-  code_generator_emit(generator, "    mov rax, rcx\n");
 
   Type *return_type = NULL;
   if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
       function_symbol->type) {
     return_type = function_symbol->type;
+    if (function_symbol->data.function.return_type) {
+      return_type = function_symbol->data.function.return_type;
+    }
+  }
+  if (return_type && code_generator_is_floating_point_type(return_type)) {
+    code_generator_emit(generator, "    movq rax, xmm0\n");
   }
   code_generator_handle_return_value(generator, return_type);
 
@@ -1006,6 +1082,23 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
   }
 }
 
+static int code_generator_add_stack_size(CodeGenerator *generator,
+                                         int *stack_size, int amount,
+                                         const char *function_name) {
+  if (!generator || !stack_size || amount < 0) {
+    return 0;
+  }
+  if (*stack_size > INT_MAX - amount) {
+    code_generator_set_error(
+        generator,
+        "Stack frame too large in function '%s' (integer overflow while sizing)",
+        function_name ? function_name : "<unknown>");
+    return 0;
+  }
+  *stack_size += amount;
+  return 1;
+}
+
 int code_generator_generate_function_from_ir(CodeGenerator *generator,
                                              ASTNode *function_declaration,
                                              IRFunction *ir_function) {
@@ -1116,7 +1209,14 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
         symbol_table_exit_scope(generator->symbol_table);
         return 0;
       }
-      stack_size += local_size + 15;
+      if (!code_generator_add_stack_size(generator, &stack_size,
+                                         local_size + 15,
+                                         function_data->name)) {
+        ir_temp_table_destroy(&temp_table);
+        ir_local_table_destroy(&local_table);
+        symbol_table_exit_scope(generator->symbol_table);
+        return 0;
+      }
     }
 
     if (instruction->dest.kind == IR_OPERAND_TEMP && instruction->dest.name) {
@@ -1131,7 +1231,35 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       }
     }
   }
-  stack_size += (int)(temp_table.count * (8 + 15));
+  if (temp_table.count > (size_t)(INT_MAX / (8 + 15))) {
+    code_generator_set_error(
+        generator, "Stack frame too large in function '%s' (too many temps)",
+        function_data->name);
+    ir_temp_table_destroy(&temp_table);
+    ir_local_table_destroy(&local_table);
+    symbol_table_exit_scope(generator->symbol_table);
+    return 0;
+  }
+  if (!code_generator_add_stack_size(generator, &stack_size,
+                                     (int)(temp_table.count * (8 + 15)),
+                                     function_data->name)) {
+    ir_temp_table_destroy(&temp_table);
+    ir_local_table_destroy(&local_table);
+    symbol_table_exit_scope(generator->symbol_table);
+    return 0;
+  }
+
+  if (generator->type_checker && generator->type_checker->error_reporter &&
+      stack_size >= STACK_FRAME_WARN_THRESHOLD) {
+    char warning[256];
+    snprintf(
+        warning, sizeof(warning),
+        "Large stack frame in function '%s' (%d bytes); this increases stack overflow risk",
+        function_data->name, stack_size);
+    error_reporter_add_warning(generator->type_checker->error_reporter,
+                               ERROR_SEMANTIC, function_declaration->location,
+                               warning);
+  }
 
   code_generator_function_prologue(generator, function_data->name, stack_size);
   generator->current_stack_offset = parameter_home_size;

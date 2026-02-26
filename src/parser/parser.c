@@ -112,6 +112,8 @@ static const char *token_type_to_string(TokenType type) {
     return "string";
   case TOKEN_IMPORT:
     return "'import'";
+  case TOKEN_IMPORT_STR:
+    return "'import_str'";
   case TOKEN_EXTERN:
     return "'extern'";
   case TOKEN_EXPORT:
@@ -180,6 +182,10 @@ static const char *token_type_to_string(TokenType type) {
     return "'*'";
   case TOKEN_AMPERSAND:
     return "'&'";
+  case TOKEN_AND_AND:
+    return "'&&'";
+  case TOKEN_OR_OR:
+    return "'||'";
   case TOKEN_DIVIDE:
     return "'/'";
   case TOKEN_DOT:
@@ -357,6 +363,10 @@ int parser_get_operator_precedence(TokenType type) {
   case TOKEN_EQUALS_EQUALS:
   case TOKEN_NOT_EQUALS:
     return 4; // Equality
+  case TOKEN_AND_AND:
+    return 3; // Logical AND
+  case TOKEN_OR_OR:
+    return 2; // Logical OR
   default:
     return 0; // Not a binary operator
   }
@@ -374,6 +384,8 @@ int parser_is_binary_operator(TokenType type) {
   case TOKEN_LESS_EQUALS:
   case TOKEN_GREATER_THAN:
   case TOKEN_GREATER_EQUALS:
+  case TOKEN_AND_AND:
+  case TOKEN_OR_OR:
   case TOKEN_DOT:
     return 1;
   default:
@@ -445,6 +457,8 @@ ASTNode *parser_parse_declaration(Parser *parser) {
   switch (parser->current_token.type) {
   case TOKEN_IMPORT:
     return parser_parse_import_declaration(parser);
+  case TOKEN_ENUM:
+    return parser_parse_enum_declaration(parser);
   case TOKEN_EXTERN: {
     parser_advance(parser); // consume 'extern'
     if (parser->current_token.type == TOKEN_FUNCTION) {
@@ -479,9 +493,44 @@ ASTNode *parser_parse_declaration(Parser *parser) {
       if (decl && decl->data) {
         ((StructDeclaration *)decl->data)->is_exported = 1;
       }
+    } else if (parser->current_token.type == TOKEN_ENUM) {
+      decl = parser_parse_enum_declaration(parser);
+      if (decl && decl->data) {
+        ((EnumDeclaration *)decl->data)->is_exported = 1;
+      }
+    } else if (parser->current_token.type == TOKEN_VAR) {
+      decl = parser_parse_var_declaration(parser);
+      if (decl && decl->data) {
+        ((VarDeclaration *)decl->data)->is_exported = 1;
+      }
+    } else if (parser->current_token.type == TOKEN_EXTERN) {
+      parser_advance(parser); // consume 'extern'
+      if (parser->current_token.type == TOKEN_FUNCTION) {
+        decl = parser_parse_function_declaration(parser);
+        if (decl && decl->data) {
+          FunctionDeclaration *func_data = (FunctionDeclaration *)decl->data;
+          if (func_data->body != NULL) {
+            parser_set_error(parser, "Extern functions must not have a body");
+            ast_destroy_node(decl);
+            return NULL;
+          }
+          func_data->is_extern = 1;
+          func_data->is_exported = 1;
+        }
+      } else if (parser->current_token.type == TOKEN_VAR) {
+        decl = parser_parse_extern_var_declaration(parser);
+        if (decl && decl->data) {
+          ((VarDeclaration *)decl->data)->is_exported = 1;
+        }
+      } else {
+        parser_set_error(parser,
+                         "Expected 'function' or 'var' after 'export extern'");
+        return NULL;
+      }
     } else {
-      parser_set_error(parser,
-                       "Expected 'function' or 'struct' after 'export'");
+      parser_set_error(
+          parser,
+          "Expected 'function', 'var', 'struct', 'enum', or 'extern' after 'export'");
       return NULL;
     }
     return decl;
@@ -743,6 +792,18 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
     char *value = strdup(parser->current_token.value);
     parser_advance(parser);
     return ast_create_string_literal(value, location);
+  }
+  case TOKEN_IMPORT_STR: {
+    parser_advance(parser); // consume 'import_str'
+    if (parser->current_token.type != TOKEN_STRING) {
+      parser_set_error(parser, "Expected string literal after 'import_str'");
+      return NULL;
+    }
+    char *file_path = strdup(parser->current_token.value);
+    parser_advance(parser); // consume the string
+    ASTNode *node = ast_create_import_str(file_path, location);
+    free(file_path);
+    return node;
   }
   case TOKEN_LPAREN: {
     parser_advance(parser); // consume '('
@@ -1407,6 +1468,100 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
   return func_decl;
 }
 
+ASTNode *parser_parse_enum_declaration(Parser *parser) {
+  if (!parser)
+    return NULL;
+
+  SourceLocation location = {parser->current_token.line,
+                             parser->current_token.column};
+  if (!parser_expect(parser, TOKEN_ENUM))
+    return NULL;
+
+  if (!parser_is_identifier_like(parser->current_token.type)) {
+    parser_set_error(parser, "Expected enum name after 'enum'");
+    return NULL;
+  }
+  char *enum_name = strdup(parser->current_token.value);
+  parser_advance(parser);
+
+  if (!parser_expect(parser, TOKEN_LBRACE)) {
+    free(enum_name);
+    return NULL;
+  }
+
+  EnumVariant *variants = NULL;
+  size_t variant_count = 0;
+
+  while (parser->current_token.type != TOKEN_RBRACE &&
+         parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+    if (parser->current_token.type == TOKEN_NEWLINE ||
+        parser->current_token.type == TOKEN_COMMA) {
+      parser_advance(parser);
+      continue;
+    }
+
+    if (!parser_is_identifier_like(parser->current_token.type)) {
+      parser_set_error(parser, "Expected enum variant name");
+      break;
+    }
+    char *variant_name = strdup(parser->current_token.value);
+    parser_advance(parser);
+
+    ASTNode *value = NULL;
+    if (parser->current_token.type == TOKEN_EQUALS) {
+      parser_advance(parser);
+      value = parser_parse_expression(parser);
+      if (!value) {
+        if (!parser->has_error)
+          parser_set_error(parser, "Expected expression after '='");
+        free(variant_name);
+        break;
+      }
+    }
+
+    variants = realloc(variants, (variant_count + 1) * sizeof(EnumVariant));
+    variants[variant_count].name = variant_name;
+    variants[variant_count].value = value;
+    variant_count++;
+
+    if (parser->current_token.type == TOKEN_COMMA ||
+        parser->current_token.type == TOKEN_NEWLINE) {
+      parser_advance(parser);
+    }
+  }
+
+  if (parser->has_error) {
+    for (size_t i = 0; i < variant_count; i++) {
+      free(variants[i].name);
+      ast_destroy_node(variants[i].value);
+    }
+    free(variants);
+    free(enum_name);
+    return NULL;
+  }
+
+  if (!parser_expect(parser, TOKEN_RBRACE)) {
+    for (size_t i = 0; i < variant_count; i++) {
+      free(variants[i].name);
+      ast_destroy_node(variants[i].value);
+    }
+    free(variants);
+    free(enum_name);
+    return NULL;
+  }
+
+  ASTNode *node =
+      ast_create_enum_declaration(enum_name, variants, variant_count, location);
+
+  free(enum_name);
+  for (size_t i = 0; i < variant_count; i++) {
+    free(variants[i].name);
+  }
+  free(variants);
+
+  return node;
+}
+
 ASTNode *parser_parse_struct_declaration(Parser *parser) {
   if (!parser)
     return NULL;
@@ -1753,49 +1908,92 @@ ASTNode *parser_parse_if_statement(Parser *parser) {
     return NULL;
   }
 
+  ElseIfClause *else_ifs = NULL;
+  size_t else_if_count = 0;
   ASTNode *else_branch = NULL;
-  if (parser->current_token.type == TOKEN_ELSE) {
-    parser_advance(parser);
-    else_branch = (parser->current_token.type == TOKEN_LBRACE)
-                      ? parser_parse_block(parser)
-                      : parser_parse_statement(parser);
-    if (!else_branch) {
-      ast_destroy_node(condition);
-      ast_destroy_node(then_branch);
-      return NULL;
+
+  while (parser->current_token.type == TOKEN_ELSE) {
+    if (parser->peek_token.type == TOKEN_IF) {
+      parser_advance(parser); // consume 'else'
+      parser_advance(parser); // consume 'if'
+
+      if (!parser_expect(parser, TOKEN_LPAREN)) {
+        parser_set_error(parser, "Expected '(' after 'else if'");
+        goto cleanup;
+      }
+
+      ASTNode *elif_cond = parser_parse_expression(parser);
+      if (!elif_cond)
+        goto cleanup;
+
+      if (!parser_expect(parser, TOKEN_RPAREN)) {
+        parser_set_error(parser, "Expected ')' after else if condition");
+        ast_destroy_node(elif_cond);
+        goto cleanup;
+      }
+
+      ASTNode *elif_body = (parser->current_token.type == TOKEN_LBRACE)
+                               ? parser_parse_block(parser)
+                               : parser_parse_statement(parser);
+      if (!elif_body) {
+        ast_destroy_node(elif_cond);
+        goto cleanup;
+      }
+
+      else_ifs = realloc(else_ifs, (else_if_count + 1) * sizeof(ElseIfClause));
+      else_ifs[else_if_count].condition = elif_cond;
+      else_ifs[else_if_count].body = elif_body;
+      else_if_count++;
+    } else {
+      parser_advance(parser); // consume 'else'
+      else_branch = (parser->current_token.type == TOKEN_LBRACE)
+                        ? parser_parse_block(parser)
+                        : parser_parse_statement(parser);
+      if (!else_branch)
+        goto cleanup;
+      break;
     }
   }
 
   ASTNode *if_node = ast_create_node(AST_IF_STATEMENT, location);
-  if (!if_node) {
-    ast_destroy_node(condition);
-    ast_destroy_node(then_branch);
-    if (else_branch)
-      ast_destroy_node(else_branch);
-    return NULL;
-  }
+  if (!if_node)
+    goto cleanup;
 
   IfStatement *if_data = malloc(sizeof(IfStatement));
   if (!if_data) {
     ast_destroy_node(if_node);
-    ast_destroy_node(condition);
-    ast_destroy_node(then_branch);
-    if (else_branch)
-      ast_destroy_node(else_branch);
-    return NULL;
+    goto cleanup;
   }
 
   if_data->condition = condition;
   if_data->then_branch = then_branch;
+  if_data->else_ifs = else_ifs;
+  if_data->else_if_count = else_if_count;
   if_data->else_branch = else_branch;
   if_node->data = if_data;
 
   ast_add_child(if_node, condition);
   ast_add_child(if_node, then_branch);
+  for (size_t i = 0; i < else_if_count; i++) {
+    ast_add_child(if_node, else_ifs[i].condition);
+    ast_add_child(if_node, else_ifs[i].body);
+  }
   if (else_branch)
     ast_add_child(if_node, else_branch);
 
   return if_node;
+
+cleanup:
+  ast_destroy_node(condition);
+  ast_destroy_node(then_branch);
+  for (size_t i = 0; i < else_if_count; i++) {
+    ast_destroy_node(else_ifs[i].condition);
+    ast_destroy_node(else_ifs[i].body);
+  }
+  free(else_ifs);
+  if (else_branch)
+    ast_destroy_node(else_branch);
+  return NULL;
 }
 
 ASTNode *parser_parse_while_statement(Parser *parser) {

@@ -1,0 +1,11 @@
+function main() -> int32 {
+  var slash: int32 = '/';
+  var space: uint8 = ' ';
+  var newline: int32 = '\n';
+
+  if (slash != 47) return 1;
+  if (space != 32) return 2;
+  if (newline != 10) return 3;
+
+  return 0;
+}

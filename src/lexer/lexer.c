@@ -153,8 +153,31 @@ Token lexer_next_token(Lexer *lexer) {
     token.type = TOKEN_MULTIPLY;
     break;
   case '&':
+    if (lexer->position + 1 < lexer->length &&
+        lexer->source[lexer->position + 1] == '&') {
+      token.type = TOKEN_AND_AND;
+      token.value = strdup("&&");
+      lexer->position += 2;
+      lexer->column += 2;
+      return token;
+    }
     token.type = TOKEN_AMPERSAND;
     break;
+  case '|':
+    if (lexer->position + 1 < lexer->length &&
+        lexer->source[lexer->position + 1] == '|') {
+      token.type = TOKEN_OR_OR;
+      token.value = strdup("||");
+      lexer->position += 2;
+      lexer->column += 2;
+      return token;
+    }
+    token.type = TOKEN_ERROR;
+    token.value = strdup("Unknown character: |");
+    lexer_set_error(lexer, token.value);
+    lexer->position++;
+    lexer->column++;
+    return token;
   case '/':
     // Note: comments (//) are already handled above before this switch
     token.type = TOKEN_DIVIDE;
@@ -193,6 +216,89 @@ Token lexer_next_token(Lexer *lexer) {
     token.value[1] = '\0';
     lexer->position++;
     lexer->column++;
+    return token;
+  }
+
+  // Character literals
+  if (current == '\'') {
+    lexer->position++; // skip opening quote
+    lexer->column++;
+    if (lexer->position >= lexer->length) {
+      token.type = TOKEN_ERROR;
+      token.value = strdup("Unterminated character literal");
+      lexer_set_error(lexer, token.value);
+      return token;
+    }
+
+    int value = 0;
+    char ch = lexer->source[lexer->position];
+    if (ch == '\\') {
+      lexer->position++;
+      lexer->column++;
+      if (lexer->position >= lexer->length) {
+        token.type = TOKEN_ERROR;
+        token.value = strdup("Unterminated character literal");
+        lexer_set_error(lexer, token.value);
+        return token;
+      }
+
+      char esc = lexer->source[lexer->position];
+      switch (esc) {
+      case 'n':
+        value = '\n';
+        break;
+      case 't':
+        value = '\t';
+        break;
+      case 'r':
+        value = '\r';
+        break;
+      case '\\':
+        value = '\\';
+        break;
+      case '\'':
+        value = '\'';
+        break;
+      case '0':
+        value = '\0';
+        break;
+      default:
+        token.type = TOKEN_ERROR;
+        token.value = strdup("Invalid character escape sequence");
+        lexer_set_error(lexer, token.value);
+        return token;
+      }
+    } else {
+      if (ch == '\n' || ch == '\r') {
+        token.type = TOKEN_ERROR;
+        token.value = strdup("Unterminated character literal");
+        lexer_set_error(lexer, token.value);
+        return token;
+      }
+      value = (unsigned char)ch;
+    }
+
+    lexer->position++;
+    lexer->column++;
+    if (lexer->position >= lexer->length || lexer->source[lexer->position] != '\'') {
+      token.type = TOKEN_ERROR;
+      token.value = strdup("Character literal must contain exactly one character");
+      lexer_set_error(lexer, token.value);
+      return token;
+    }
+
+    lexer->position++; // skip closing quote
+    lexer->column++;
+
+    token.type = TOKEN_NUMBER;
+    token.value = malloc(16);
+    if (!token.value) {
+      token.type = TOKEN_ERROR;
+      token.value = strdup("Memory allocation failed");
+      lexer_set_error(lexer, token.value);
+      return token;
+    }
+    snprintf(token.value, 16, "%d", value);
     return token;
   }
 
@@ -280,6 +386,8 @@ Token lexer_next_token(Lexer *lexer) {
     // Check for keywords
     if (strcmp(token.value, "import") == 0)
       token.type = TOKEN_IMPORT;
+    else if (strcmp(token.value, "import_str") == 0)
+      token.type = TOKEN_IMPORT_STR;
     else if (strcmp(token.value, "extern") == 0)
       token.type = TOKEN_EXTERN;
     else if (strcmp(token.value, "export") == 0)
@@ -290,6 +398,8 @@ Token lexer_next_token(Lexer *lexer) {
       token.type = TOKEN_FUNCTION;
     else if (strcmp(token.value, "struct") == 0)
       token.type = TOKEN_STRUCT;
+    else if (strcmp(token.value, "enum") == 0)
+      token.type = TOKEN_ENUM;
     else if (strcmp(token.value, "method") == 0)
       token.type = TOKEN_METHOD;
     else if (strcmp(token.value, "return") == 0)

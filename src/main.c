@@ -72,6 +72,24 @@ static char *build_sidecar_filename(const char *base_filename,
   return path;
 }
 
+static int add_import_directory(CompilerOptions *options, const char *path) {
+  if (!options || !path || path[0] == '\0') {
+    return 0;
+  }
+
+  size_t next_count = options->import_directory_count + 1;
+  const char **grown = realloc((void *)options->import_directories,
+                               next_count * sizeof(const char *));
+  if (!grown) {
+    return 0;
+  }
+
+  grown[options->import_directory_count] = path;
+  options->import_directories = grown;
+  options->import_directory_count = next_count;
+  return 1;
+}
+
 int main(int argc, char *argv[]) {
   CompilerOptions options = {0};
   options.output_filename = "output.s"; // Default output filename
@@ -83,6 +101,22 @@ int main(int argc, char *argv[]) {
       options.input_filename = argv[++i];
     } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
       options.output_filename = argv[++i];
+    } else if (strcmp(argv[i], "-I") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "Error: Missing import directory after '-I'\n");
+        return 1;
+      }
+      if (!add_import_directory(&options, argv[++i])) {
+        fprintf(stderr, "Error: Failed to add import directory\n");
+        return 1;
+      }
+    } else if (strncmp(argv[i], "-I", 2) == 0 && argv[i][2] != '\0') {
+      if (!add_import_directory(&options, argv[i] + 2)) {
+        fprintf(stderr, "Error: Failed to add import directory\n");
+        return 1;
+      }
+    } else if (strcmp(argv[i], "--stdlib") == 0 && i + 1 < argc) {
+      options.stdlib_directory = argv[++i];
     } else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--debug") == 0) {
       options.debug_mode = 1;
       options.generate_debug_symbols = 1;
@@ -101,6 +135,8 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(argv[i], "-O") == 0 ||
                strcmp(argv[i], "--optimize") == 0) {
       options.optimize = 1;
+    } else if (strcmp(argv[i], "--prelude") == 0) {
+      options.prelude = 1;
     } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
       print_usage(argv[0]);
       return 0;
@@ -116,11 +152,14 @@ int main(int argc, char *argv[]) {
   if (!options.input_filename) {
     fprintf(stderr, "Error: No input file specified.\n");
     print_usage(argv[0]);
+    free((void *)options.import_directories);
     return 1;
   }
 
-  return compile_file(options.input_filename, options.output_filename,
-                      &options);
+  int result =
+      compile_file(options.input_filename, options.output_filename, &options);
+  free((void *)options.import_directories);
+  return result;
 }
 
 int compile_file(const char *input_filename, const char *output_filename,
@@ -254,7 +293,44 @@ int compile_file(const char *input_filename, const char *output_filename,
   }
 
   // Resolve imports (flatten imported module ASTs into the main program)
-  if (!resolve_imports(program, input_filename, error_reporter)) {
+  ImportResolverOptions import_options = {0};
+  if (options) {
+    import_options.import_directories = options->import_directories;
+    import_options.import_directory_count = options->import_directory_count;
+    import_options.stdlib_directory =
+        (options->stdlib_directory && options->stdlib_directory[0] != '\0')
+            ? options->stdlib_directory
+            : "stdlib";
+  } else {
+    import_options.stdlib_directory = "stdlib";
+  }
+
+  // Auto-inject the standard prelude only when --prelude was specified.
+  if (options->prelude) {
+    Program *prog_data = (Program *)program->data;
+    SourceLocation prelude_loc = {0, 0};
+    ASTNode *prelude_import =
+        ast_create_import_declaration("std/prelude", prelude_loc);
+    if (prelude_import) {
+      // Prepend the prelude import before all user declarations.
+      ASTNode **grown =
+          realloc(prog_data->declarations,
+                  (prog_data->declaration_count + 1) * sizeof(ASTNode *));
+      if (grown) {
+        memmove(grown + 1, grown,
+                prog_data->declaration_count * sizeof(ASTNode *));
+        grown[0] = prelude_import;
+        prog_data->declarations = grown;
+        prog_data->declaration_count++;
+        ast_add_child(program, prelude_import);
+      } else {
+        ast_destroy_node(prelude_import);
+      }
+    }
+  }
+
+  if (!resolve_imports_with_options(program, input_filename, error_reporter,
+                                    &import_options)) {
     if (error_reporter_has_errors(error_reporter)) {
       error_reporter_print_errors(error_reporter);
     } else {
@@ -408,8 +484,15 @@ int compile_file(const char *input_filename, const char *output_filename,
   }
 
   if (options->debug_mode) {
+    if (error_reporter->count > 0) {
+      error_reporter_print_errors(error_reporter);
+    }
     printf("Successfully compiled '%s' to '%s'\n", input_filename,
            output_filename);
+  } else if (error_reporter->count > 0) {
+    // Surface non-fatal diagnostics (e.g. circular/duplicate import warnings)
+    // even on successful compilation.
+    error_reporter_print_errors(error_reporter);
   }
 
 cleanup:
@@ -438,6 +521,8 @@ void print_usage(const char *program_name) {
   printf("Options:\n");
   printf("  -i <file>           Input file\n");
   printf("  -o <file>           Output file (default: output.s)\n");
+  printf("  -I <dir>            Add import search directory (repeatable)\n");
+  printf("  --stdlib <dir>      Set stdlib root directory (default: stdlib)\n");
   printf("  -d, --debug         Enable debug output and symbols\n");
   printf("  -g, --debug-symbols Generate debug symbols\n");
   printf("  -l, --line-mapping  Generate source line mapping\n");
@@ -445,6 +530,8 @@ void print_usage(const char *program_name) {
   printf("  --debug-format <fmt> Debug format: dwarf, stabs, or map (default: "
          "dwarf)\n");
   printf("  -O, --optimize      Enable optimizations\n");
+  printf("  --prelude           Auto-import the standard prelude (std/io, "
+         "std/net, etc.)\n");
   printf("  -h, --help          Show this help message\n");
 }
 

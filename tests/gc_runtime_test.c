@@ -2,12 +2,12 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define TEST_ASSERT(cond, msg)                                                  \
-  do {                                                                          \
-    if (!(cond)) {                                                              \
-      fprintf(stderr, "FAIL: %s\n", (msg));                                     \
-      return 0;                                                                 \
-    }                                                                           \
+#define TEST_ASSERT(cond, msg)                                                 \
+  do {                                                                         \
+    if (!(cond)) {                                                             \
+      fprintf(stderr, "FAIL: %s\n", (msg));                                    \
+      return 0;                                                                \
+    }                                                                          \
   } while (0)
 
 static void collect_from_here(void) {
@@ -16,6 +16,14 @@ static void collect_from_here(void) {
 }
 
 static void *g_explicit_root_slot = NULL;
+
+// Perform an allocation and store the result in the global root slot from a
+// separate call frame.  This prevents the gc_alloc return value from lingering
+// as a stale spill in the *caller's* stack frame, which would cause a
+// false-positive hit during conservative stack scanning.
+static void allocate_into_global_root(size_t size) {
+  g_explicit_root_slot = gc_alloc(size);
+}
 
 static void scrub_stack_words(void) {
   volatile uintptr_t scrub[256];
@@ -193,9 +201,10 @@ static int test_auto_collection_projected_threshold(void) {
   scrub_stack_words();
   volatile void *live = gc_alloc(200);
   TEST_ASSERT(live != NULL, "second allocation failed");
-  TEST_ASSERT(gc_get_allocation_count() == 1,
-              "projected-threshold collection should reclaim unreachable blocks "
-              "before allocating");
+  TEST_ASSERT(
+      gc_get_allocation_count() == 1,
+      "projected-threshold collection should reclaim unreachable blocks "
+      "before allocating");
 
   live = NULL;
   scrub_stack_words();
@@ -203,6 +212,31 @@ static int test_auto_collection_projected_threshold(void) {
   TEST_ASSERT(gc_get_allocation_count() <= 1,
               "live allocation should become collectable after root is "
               "cleared");
+  return 1;
+}
+
+// Phase-1 helper: allocate into the global root, verify it survives a first
+// collection, then return.  Keeping this in a separate call frame means the
+// gc_alloc return value and the pointer loaded by TEST_ASSERT are both gone
+// from the stack once this function returns.
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+static int
+test_explicit_root_phase1(void) {
+  allocate_into_global_root(40);
+  if (g_explicit_root_slot == NULL) {
+    fprintf(stderr, "FAIL: %s\n", "explicit root allocation failed");
+    return 0;
+  }
+
+  scrub_stack_words();
+  collect_from_here();
+  if (gc_get_allocation_count() != 1) {
+    fprintf(stderr, "FAIL: %s\n",
+            "explicitly registered root should retain allocation");
+    return 0;
+  }
   return 1;
 }
 
@@ -217,18 +251,30 @@ static int test_explicit_registered_root(void) {
 #endif
 
   gc_register_root(&g_explicit_root_slot);
-  g_explicit_root_slot = gc_alloc(40);
-  TEST_ASSERT(g_explicit_root_slot != NULL, "explicit root allocation failed");
 
-  scrub_stack_words();
-  gc_collect_now();
-  TEST_ASSERT(gc_get_allocation_count() == 1,
-              "explicitly registered root should retain allocation");
+  // Phase 1 – allocate and prove the root keeps it alive.
+  if (!test_explicit_root_phase1()) {
+    return 0;
+  }
 
+  // Phase 2 – unregister the root, clear the global, collect.
+  // Because phase-1 ran in a callee frame, no stale pointer remains here.
   gc_unregister_root(&g_explicit_root_slot);
   g_explicit_root_slot = NULL;
-  scrub_stack_words();
-  gc_collect_now();
+
+  // Aggressively scrub the stack to kill any stale pointer copies that may
+  // have been left by callee-save register spills or ABI shadow space.
+  {
+    volatile uintptr_t scrub[512];
+    for (size_t i = 0; i < (sizeof(scrub) / sizeof(scrub[0])); i++) {
+      scrub[i] = 0;
+    }
+  }
+
+  {
+    volatile uintptr_t sp_marker = 0;
+    gc_collect((void *)&sp_marker);
+  }
   TEST_ASSERT(gc_get_allocation_count() == 0,
               "allocation should collect after unregistering explicit root");
   return 1;

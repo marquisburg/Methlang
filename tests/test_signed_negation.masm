@@ -1,0 +1,14 @@
+// Signed negation: negative literals, unary minus, int8/int16/int32 boundaries
+function main() -> int32 {
+  var a: int8 = -128;
+  var b: int8 = 127;
+  var c: int16 = -32768;
+  var d: int32 = -2147483648;
+  var e: int32 = -1;
+  var f: int32 = 0 - 17;
+  var g: int32 = 0 - e;
+  if (a < 0 && b > 0 && c < 0 && d < 0) {
+    return g;
+  }
+  return 0;
+}

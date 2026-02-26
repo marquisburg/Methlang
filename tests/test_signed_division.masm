@@ -1,0 +1,13 @@
+// Signed division: truncates toward zero per spec
+// -7/2 = -3, 7/-2 = -3, -9/3 = -3
+function main() -> int32 {
+  var a: int32 = -7;
+  var b: int32 = 2;
+  var q1: int32 = a / b;
+  var q2: int32 = 7 / (0 - 2);
+  var q3: int32 = (0 - 9) / 3;
+  if (q1 == (0 - 3) && q2 == (0 - 3) && q3 == (0 - 3)) {
+    return 1;
+  }
+  return 0;
+}

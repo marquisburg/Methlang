@@ -1,0 +1,14 @@
+// ABI: void function — no return value, no RAX expectation
+var side_effect: int32 = 0;
+
+function set_effect() {
+  side_effect = 1;
+}
+
+function main() -> int32 {
+  set_effect();
+  if (side_effect == 1) {
+    return 1;
+  }
+  return 0;
+}

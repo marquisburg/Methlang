@@ -1,0 +1,20 @@
+// Re-verify narrowing + widening: sign-extend for signed, zero-extend for unsigned
+// Same patterns as test_narrowing_conversions but with explicit boundary values
+function widen_signed(x: int8) -> int32 {
+  return x;
+}
+
+function widen_unsigned(x: uint8) -> int32 {
+  return x;
+}
+
+function main() -> int32 {
+  var i8: int8 = -1;
+  var u8: uint8 = 255;
+  var s: int32 = widen_signed(i8);
+  var u: int32 = widen_unsigned(u8);
+  if (s == -1 && u == 255) {
+    return 1;
+  }
+  return 0;
+}

@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define WINDOWS_STACK_PROBE_PAGE_SIZE 4096
+
 // Stack frame management functions
 void code_generator_function_prologue(CodeGenerator *generator,
                                       const char *function_name,
@@ -38,10 +40,32 @@ void code_generator_function_prologue(CodeGenerator *generator,
   if (aligned_stack_size > 0) {
     // Round up to nearest 16-byte boundary
     aligned_stack_size = (aligned_stack_size + 15) & ~15;
+
+#ifdef _WIN32
+    if (aligned_stack_size > WINDOWS_STACK_PROBE_PAGE_SIZE) {
+      // Probe guard pages before large stack subtraction on Win64.
+      // Mirrors compiler-lowered pattern (___chkstk_ms + sub rsp, rax).
+      code_generator_emit(generator, "    mov rax, %d\n", aligned_stack_size);
+      code_generator_emit(generator, "    extern ___chkstk_ms\n");
+      code_generator_emit(generator, "    sub rsp, 32\n");
+      code_generator_emit(generator, "    call ___chkstk_ms\n");
+      code_generator_emit(generator, "    add rsp, 32\n");
+      code_generator_emit(
+          generator,
+          "    sub rsp, rax    ; Allocate %d bytes on stack (probed)\n",
+          aligned_stack_size);
+    } else {
+      code_generator_emit(
+          generator,
+          "    sub rsp, %d    ; Allocate %d bytes on stack (aligned)\n",
+          aligned_stack_size, aligned_stack_size);
+    }
+#else
     code_generator_emit(
         generator,
         "    sub rsp, %d    ; Allocate %d bytes on stack (aligned)\n",
         aligned_stack_size, aligned_stack_size);
+#endif
     generator->function_stack_size = aligned_stack_size;
   }
 

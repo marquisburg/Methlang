@@ -1,0 +1,13 @@
+[TRACE] About to parse program
+[TRACE] Parse complete
+[TRACE] About to resolve imports
+[import_str] Starting process_imports_recursive
+[import_str] About to call process_import_strs_in_node on imported module 'std/io'
+[import_str] Done processing import_strs in imported module
+[import_str] Done process_imports_recursive, had_error=0
+[import_str] Starting process_import_strs_in_node (child_count=21)
+[import_str] Done process_import_strs_in_node
+[TRACE] Import resolution complete
+[TRACE] Starting type check
+[TRACE] Type check complete
+[TRACE] Starting IR lowering

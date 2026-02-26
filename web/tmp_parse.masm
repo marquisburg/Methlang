@@ -1,0 +1,43 @@
+import "std/io";
+
+var REQ: string = "POST /forum HTTP/1.1\r\nHost: x\r\n\r\ntitle=hello";
+var key_title: string = "title";
+
+function extract_form_value(buf: cstring, body_start: int32, body_len: int32, key: cstring, key_len: int32, out: cstring, out_max: int32) -> int32 {
+  var i: int32 = body_start;
+  var end: int32 = body_start + body_len;
+  while (i + key_len + 1 <= end) {
+    var match: int32 = 1;
+    var k: int32 = 0;
+    while (k < key_len) {
+      if (buf[i + k] != key[k]) { match = 0; break; }
+      k = k + 1;
+    }
+    if (match == 1 && buf[i + key_len] == 61) {
+      i = i + key_len + 1;
+      var out_len: int32 = 0;
+      while (i < end && out_len < out_max - 1) {
+        if (buf[i] == 38) { break; }
+        if (buf[i] == 43) {
+          out[out_len] = 32;
+        } else {
+          out[out_len] = buf[i];
+        }
+        out_len = out_len + 1;
+        i = i + 1;
+      }
+      out[out_len] = 0;
+      return out_len;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+function main() -> int32 {
+  var out: uint8[64];
+  var got: int32 = extract_form_value(REQ.chars, 33, REQ.length - 33, cstr(key_title), 5, &out[0], 64);
+  print_int(got); putchar(10);
+  print(&out[0]); putchar(10);
+  return 0;
+}

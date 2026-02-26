@@ -1,0 +1,10 @@
+// extern function returning signed integer — caller must handle correctly
+extern function returns_int32() -> int32 = "returns_int32";
+
+function main() -> int32 {
+  var x: int32 = returns_int32();
+  if (x < 0) {
+    return 1;
+  }
+  return 0;
+}

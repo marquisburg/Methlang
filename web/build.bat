@@ -27,7 +27,7 @@ if %ERRORLEVEL% EQU 0 (
     )
     gcc -c src\runtime\gc.c -o web\gc.o -Isrc
     if %ERRORLEVEL% NEQ 0 exit /b 1
-    gcc -nostartfiles web\server.o web\gc.o -o web\server.exe -lws2_32 -lkernel32
+    gcc -nostartfiles web\server.o web\gc.o -o web\server.exe -L"%MINGW_PREFIX%\lib" -lws2_32 -lkernel32
 ) else (
     echo NASM required. Install from https://www.nasm.us/
     exit /b 1

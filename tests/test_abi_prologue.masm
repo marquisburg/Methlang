@@ -1,0 +1,8 @@
+// ABI: function prologue — push rbp, mov rbp, rsp, sub rsp
+function do_nothing() -> int32 {
+  return 0;
+}
+
+function main() -> int32 {
+  return do_nothing();
+}

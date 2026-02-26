@@ -1,0 +1,11 @@
+// int64 assigned to int32 local — truncate correctly, no adjacent corruption
+function main() -> int32 {
+  var before: int32 = 111;
+  var wide: int64 = 0x100000001;
+  var narrow: int32 = wide;
+  var after: int32 = 222;
+  if (before == 111 && narrow == 1 && after == 222) {
+    return 1;
+  }
+  return 0;
+}

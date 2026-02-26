@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>MethASM — Typed Assembly-Inspired Language</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'JetBrains Mono','Fira Code',monospace;background:#0d1117;color:#c9d1d9;line-height:1.6;padding:2rem;max-width:900px;margin:0 auto}
+h1{font-size:2.2rem;color:#58a6ff;margin-bottom:.5rem;font-weight:600}
+h2{font-size:1.3rem;color:#79c0ff;margin:2rem 0 1rem;border-bottom:1px solid #30363d;padding-bottom:.3rem}
+.subtitle{color:#8b949e;margin-bottom:2rem;font-size:.95rem}
+.badge{display:inline-block;background:#21262d;color:#8b949e;padding:.2rem .5rem;border-radius:4px;font-size:.8rem;margin-right:.5rem;margin-bottom:.5rem}
+section{margin-bottom:2rem}
+p{margin-bottom:1rem;color:#b1bac4}
+code{background:#161b22;padding:.15rem .4rem;border-radius:4px;font-size:.9em;color:#79c0ff}
+pre{background:#161b22;padding:1rem;border-radius:6px;overflow-x:auto;margin:1rem 0;border:1px solid #30363d}
+pre code{background:none;padding:0;color:#c9d1d9}
+ul{margin-left:1.5rem;margin-bottom:1rem}
+li{margin-bottom:.4rem;color:#b1bac4}
+.footnote{font-size:.85rem;color:#6e7681;margin-top:3rem;padding-top:1rem;border-top:1px solid #30363d}
+a{color:#58a6ff;text-decoration:none}
+a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<h1>MethASM</h1>
+<p class='subtitle'>A typed, assembly-inspired language that compiles to x86-64 NASM assembly.</p>
+<p><span class='badge'>Statically typed</span><span class='badge'>C interop</span><span class='badge'>Garbage collection</span><span class='badge'>Module system</span><span class='badge'>Windows & Linux</span></p>
+
+<section>
+<h2>Overview</h2>
+<p>MethASM provides explicit typing, structured control flow (<code>if</code>, <code>while</code>, <code>for</code>, <code>switch</code>), structs and enums, pointers and arrays, C interop via <code>extern</code>, a module system, and conservative GC for heap allocation via <code>new</code>. The compiler emits NASM-compatible assembly; link with the platform C runtime and any required libs (e.g. <code>ws2_32</code> for networking).</p>
+</section>
+
+<section>
+<h2>Key Features</h2>
+<ul>
+<li><strong>Explicit typing</strong> — All variables and parameters have declared types; no inference.</li>
+<li><strong>Control flow</strong> — <code>if</code>/<code>else</code>, <code>while</code>, <code>for</code>, <code>switch</code> with <code>break</code>/<code>continue</code>.</li>
+<li><strong>Structs & enums</strong> — Named types with methods; enums for tagged values.</li>
+<li><strong>Pointers & arrays</strong> — Bounds-aware indexing; <code>ptr[i]</code> for element access.</li>
+<li><strong>C interop</strong> — <code>extern function</code> and <code>extern var</code> for FFI; <code>cstring</code> for char*.</li>
+<li><strong>Garbage collection</strong> — <code>new T</code> for GC-managed heap; use <code>malloc</code> when GC not linked.</li>
+<li><strong>Modules</strong> — <code>import &quot;std/io&quot;</code>; stdlib under <code>stdlib/</code>.</li>
+</ul>
+</section>
+
+<section>
+<h2>Code Example</h2>
+<pre><code>import &quot;std/io&quot;;
+import &quot;std/net&quot;;
+
+function main() -> int32 {
+  println(&quot;Hello, MethASM!&quot;);
+  var sock: int64 = socket_tcp();
+  // ... bind, listen, accept ...
+  return 0;
+}</code></pre>
+</section>
+
+<section>
+<h2>Standard Library</h2>
+<h3>Cross-platform</h3>
+<ul>
+<li><code>std/io</code> — <code>println</code>, <code>puts</code>, <code>print_int</code>, file I/O</li>
+<li><code>std/mem</code> — <code>malloc</code>, <code>free</code>, <code>memcpy</code>, <code>memset</code></li>
+<li><code>std/math</code> — <code>abs</code>, <code>min</code>, <code>max</code>, <code>clamp</code></li>
+<li><code>std/conv</code> — <code>atoi</code>, <code>strlen</code>, <code>strncmp</code>, char classification</li>
+<li><code>std/process</code> — <code>exit</code>, <code>rand</code>, <code>srand</code></li>
+</ul>
+<h3>Windows (Winsock2)</h3>
+<ul>
+<li><code>std/net</code> — <code>socket</code>, <code>bind</code>, <code>listen</code>, <code>accept</code>, <code>send</code>, <code>recv</code></li>
+<li><code>std/thread</code> — Win32 threads, mutexes, atomics, spin locks</li>
+</ul>
+</section>
+
+<section>
+<h2>This Server</h2>
+<p>This page is served by an HTTP server written entirely in MethASM. Single-threaded, no GC, uses <code>std/net</code> for Winsock2. The server handles <code>GET /</code>, <code>GET /health</code>, <code>GET /forum</code>, and returns 404 for other requests. Built with: <code>methasm web/server.masm -o server.s</code> → NASM → GCC + ws2_32.</p>
+<p><a href='/forum'>Forum</a></p>
+</section>
+
+<p class='footnote'>MethASM — Compiles to x86-64. Use <code>--prelude</code> for automatic stdlib imports. See docs for full reference.</p>
+</body>
+</html>

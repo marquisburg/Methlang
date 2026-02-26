@@ -1,0 +1,30 @@
+import "std/conv";
+
+function main() -> int32 {
+  var buf: uint8[16];
+
+  buf[0] = 'G';
+  buf[1] = 'E';
+  buf[2] = 'T';
+  buf[3] = ' ';
+  buf[4] = '/';
+  buf[5] = 'h';
+  buf[6] = 'e';
+  buf[7] = 'a';
+  buf[8] = 'l';
+  buf[9] = 't';
+  buf[10] = 'h';
+
+  var len: int32 = 11;
+  if (strncmp(&buf[0], 5, "health", len) == 0) {
+    if (strncmp(&buf[0], 5, "heal", len) == 0) {
+      return 2;
+    }
+    if (strncmp(&buf[0], 5, "healthz", len) == 0) {
+      return 3;
+    }
+    return 0;
+  }
+
+  return 1;
+}

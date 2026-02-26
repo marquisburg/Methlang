@@ -317,6 +317,7 @@ Type *type_create(TypeKind kind, const char *name) {
   case TYPE_UINT64:
   case TYPE_FLOAT64:
   case TYPE_POINTER:
+  case TYPE_ENUM:
     type->size = 8;
     type->alignment = 8;
     break;
@@ -395,7 +396,11 @@ Symbol *symbol_create(const char *name, SymbolKind kind, Type *type) {
     symbol->data.function.return_type = NULL;
     break;
   case SYMBOL_STRUCT:
-    // No specific data for struct symbols
+  case SYMBOL_ENUM:
+    // No specific data for struct/enum symbols
+    break;
+  case SYMBOL_CONSTANT:
+    symbol->data.constant.value = 0;
     break;
   }
 

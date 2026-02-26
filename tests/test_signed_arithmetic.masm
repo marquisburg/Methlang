@@ -1,0 +1,12 @@
+// Signed arithmetic: add/sub/mul with negatives
+function main() -> int32 {
+  var a: int32 = 10;
+  var b: int32 = -3;
+  var sum: int32 = a + b;
+  var diff: int32 = a - b;
+  var prod: int32 = a * b;
+  if (sum == 7 && diff == 13 && prod == -30) {
+    return 1;
+  }
+  return 0;
+}

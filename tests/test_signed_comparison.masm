@@ -1,0 +1,14 @@
+// Signed comparison: -1 < 0, -1 > -2, -32768 < 32767
+function main() -> int32 {
+  var a: int32 = -1;
+  var b: int32 = 0;
+  var c: int32 = -2;
+  var d: int16 = -32768;
+  var e: int16 = 32767;
+  if (a < b && a > c && d < e) {
+    if (a != b && a != c) {
+      return 1;
+    }
+  }
+  return 0;
+}

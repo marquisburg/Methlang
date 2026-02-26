@@ -1,0 +1,20 @@
+// Stack layout: mixed types in sequence — no overlap or misalignment
+// int8, int16, int32, int64, array, scalar — each must retain its value
+function main() -> int32 {
+  var a: int8 = 127;
+  var b: int16 = -32768;
+  var c: int32 = 2147483647;
+  var d: int64 = -1;
+  var arr: int32[4];
+  arr[0] = 1;
+  arr[1] = 2;
+  arr[2] = 3;
+  arr[3] = 4;
+  var sentinel: int32 = 99;
+  if (a == 127 && b == -32768 && c == 2147483647 && d == -1) {
+    if (arr[0] == 1 && arr[3] == 4 && sentinel == 99) {
+      return 1;
+    }
+  }
+  return 0;
+}

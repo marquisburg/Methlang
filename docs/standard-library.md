@@ -1,0 +1,66 @@
+# Standard Library
+
+The standard library lives under `stdlib/`. Modules are imported by path. The `std/` prefix is resolved under the stdlib root (default `stdlib`).
+
+## Platform Support
+
+The compiler and most stdlib modules work on Linux and Windows. The compiler emits `elf64` assembly on Linux and `win64` on Windows. Use `make` to build the compiler on Linux and macOS; use `build.bat` on Windows.
+
+**Cross-platform modules:** `std/io`, `std/mem`, `std/math`, `std/conv`, and `std/process` use the C runtime and work on both Linux and Windows.
+
+**Windows-only:** `std/net` provides Winsock2 bindings and `std/thread` provides Win32 threading bindings. They do not work on Linux. Programs that import `std/net`/`std/thread` or use `--prelude` (which includes `std/net`) will fail to link on Linux with undefined references to Win32 symbols. For networking/threading on Linux, use `extern` declarations to call POSIX APIs directly and link with the system C library.
+
+## std/io
+
+Console and file I/O. `puts` writes a null-terminated string and appends a newline; `putchar` writes a single character; `getchar` reads one. `print` and `println` write a cstring (println adds a newline). `print_int` and `println_int` write an integer in decimal. `cstr(s: string) -> cstring` converts a MethASM string to a C string for passing to C functions. File operations: `fopen`, `fclose`, `fread`, `fwrite`, `fputs`, `fgets`, `fflush`. File handles are `cstring` (opaque `FILE*`). Stream accessors: `get_stdin`, `get_stdout`, `get_stderr`.
+
+## std/mem
+
+Memory management. C runtime functions: `malloc`, `calloc`, `realloc`, `free`, `memset`, `memcpy`, `memmove`, `memcmp`. Helpers: `alloc_zeroed` (allocate and zero-initialize), `buf_dup` (allocate and copy a buffer). Use `malloc` for buffers, C interop, or when the GC is not linked. Use `new` for MethASM struct instances that should be garbage-collected. See [Garbage Collector](garbage-collector.md).
+
+## std/math
+
+Math utilities. `abs` (C runtime). `min`, `max`, `clamp` (integer operations on int64).
+
+## std/conv
+
+Conversions and character classification. C runtime: `atoi`, `atol`. Digit helpers: `digit_to_char`, `char_to_digit`. Classification: `is_digit`, `is_upper`, `is_lower`, `is_alpha`, `is_alnum`, `is_space`. Case conversion: `to_lower`, `to_upper`. String utilities: `strlen`, `streq`, `strncmp(buf, offset, needle, buf_len)`.
+
+## std/process
+
+Process control. `exit` terminates the program with an exit code. `rand`, `srand` for pseudo-random numbers.
+
+## std/net
+
+Winsock2 bindings for Windows only. Does not work on Linux. Requires linking with `-lws2_32`. Constants include address/socket/protocol values (`AF_INET`, `SOCK_STREAM`, `IPPROTO_TCP`) and common socket options (`SOL_SOCKET`, `SO_REUSEADDR`) plus shutdown values (`SD_RECEIVE`, `SD_SEND`, `SD_BOTH`).
+
+Core functions: `socket`, `bind`, `listen`, `accept`, `connect`, `send`, `recv`, `shutdown`, `closesocket`, `setsockopt`. Lifecycle: `net_init`, `net_cleanup`, `net_last_error`.
+
+`net_init`/`net_cleanup` are thread-safe and reference-counted. Multiple threads can call `net_init` safely; Winsock startup happens once and cleanup happens when the last caller releases via `net_cleanup`. Extra cleanup calls are treated as no-op for robustness.
+
+Convenience helpers:
+- `socket_tcp`, `socket_udp`
+- `sockaddr_in(ip, port)`, `sockaddr_in_any(port)`
+- `set_reuseaddr(sock, enabled)`
+- `send_all(sock, buf, len)` (looping send until full write or error)
+- `net_is_initialized()`
+
+For HTTP responses, prefer sending header and body in separate `send_all` calls. If you omit `Content-Length`, include `Connection: close` and close the socket after sending.
+
+## std/thread
+
+Windows Win32 thread primitives. Includes:
+- Thread APIs: `CreateThread`, `WaitForSingleObject`, `CloseHandle`, `GetCurrentThreadId`, `Sleep`
+- Mutex APIs: `CreateMutexA`, `ReleaseMutex` with wrappers (`mutex_create`, `mutex_lock`, `mutex_unlock`, `mutex_close`)
+- Atomics: `InterlockedCompareExchange`, `InterlockedExchange`, `InterlockedIncrement`, `InterlockedDecrement` with wrapper helpers
+- Spin lock helpers: `spin_try_lock`, `spin_lock`, `spin_unlock` for short critical sections
+
+Due to the language's current lack of function pointer support, practical callback-based thread entry is usually provided via a tiny C bridge function, then called from MethASM.
+
+## std/prelude
+
+The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process`, and `std/net`. Use with `--prelude` to automatically import these modules without explicit `import` statements. The prelude is opt-in; it is not loaded by default. On Linux, `--prelude` will fail at link time because it pulls in `std/net` (Windows-only). Use explicit imports instead.
+
+```bash
+methasm --prelude main.masm -o main.s
+```

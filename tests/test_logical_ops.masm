@@ -1,0 +1,22 @@
+function mark() -> int32 {
+  return 1;
+}
+
+function main() -> int32 {
+  var len: int32 = 11;
+  var is_health: int32 = 0;
+
+  if (len >= 11 && 'h' == 'h' && 'e' == 'e' && 'a' == 'a' && 'l' == 'l' && 't' == 't' && 'h' == 'h') {
+    is_health = 1;
+  }
+
+  if (0 != 0 && mark() == 1) {
+    return 2;
+  }
+
+  if (is_health == 1 || mark() == 0) {
+    return 0;
+  }
+
+  return 3;
+}

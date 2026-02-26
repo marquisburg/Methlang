@@ -1,0 +1,13 @@
+import "std/io";
+
+var fn: string = "threads.txt";
+var mode_a: string = "a";
+var line: string = "x\n";
+
+function main() -> int32 {
+  var fp: cstring = fopen(cstr(fn), cstr(mode_a));
+  if (fp == 0) { return 2; }
+  fputs(cstr(line), fp);
+  fclose(fp);
+  return 0;
+}

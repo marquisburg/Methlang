@@ -1,0 +1,12 @@
+// cstring passed to extern function — pointer value preserved
+extern function strlen_c(s: cstring) -> int64 = "strlen";
+
+var MSG: string = "hello";
+
+function main() -> int32 {
+  var len: int64 = strlen_c(MSG.chars);
+  if (len == 5) {
+    return 1;
+  }
+  return 0;
+}

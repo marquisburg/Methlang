@@ -45,6 +45,14 @@ void ast_destroy_node(ASTNode *node) {
     }
     break;
   }
+  case AST_IMPORT_STR: {
+    ImportStrExpression *import_str = (ImportStrExpression *)node->data;
+    if (import_str) {
+      free(import_str->file_path);
+      free(import_str);
+    }
+    break;
+  }
   case AST_VAR_DECLARATION: {
     VarDeclaration *var_decl = (VarDeclaration *)node->data;
     if (var_decl) {
@@ -83,6 +91,22 @@ void ast_destroy_node(ASTNode *node) {
       free(struct_decl->field_types);
       free(struct_decl->methods);
       free(struct_decl);
+    }
+    break;
+  }
+  case AST_ENUM_DECLARATION: {
+    EnumDeclaration *enum_decl = (EnumDeclaration *)node->data;
+    if (enum_decl) {
+      free(enum_decl->name);
+      if (enum_decl->variants) {
+        for (size_t i = 0; i < enum_decl->variant_count; i++) {
+          free(enum_decl->variants[i].name);
+          // the 'value' node is a child of the enum decl node, so it's freed
+          // automatically
+        }
+        free(enum_decl->variants);
+      }
+      free(enum_decl);
     }
     break;
   }
@@ -188,6 +212,16 @@ void ast_destroy_node(ASTNode *node) {
     }
     break;
   }
+  case AST_IF_STATEMENT: {
+    IfStatement *if_stmt = (IfStatement *)node->data;
+    if (if_stmt) {
+      if (if_stmt->else_ifs) {
+        free(if_stmt->else_ifs);
+      }
+      free(if_stmt);
+    }
+    break;
+  }
   default:
     free(node->data);
     break;
@@ -247,6 +281,23 @@ ASTNode *ast_create_import_declaration(const char *module_name,
   return node;
 }
 
+ASTNode *ast_create_import_str(const char *file_path, SourceLocation location) {
+  ASTNode *node = ast_create_node(AST_IMPORT_STR, location);
+  if (!node)
+    return NULL;
+
+  ImportStrExpression *import_str = malloc(sizeof(ImportStrExpression));
+  if (!import_str) {
+    free(node);
+    return NULL;
+  }
+
+  import_str->file_path = file_path ? strdup(file_path) : NULL;
+  node->data = import_str;
+
+  return node;
+}
+
 ASTNode *ast_create_var_declaration(const char *name, const char *type_name,
                                     ASTNode *initializer,
                                     SourceLocation location) {
@@ -264,6 +315,7 @@ ASTNode *ast_create_var_declaration(const char *name, const char *type_name,
   var_decl->type_name = type_name ? strdup(type_name) : NULL;
   var_decl->initializer = initializer;
   var_decl->is_extern = 0;
+  var_decl->is_exported = 0;
   var_decl->link_name = NULL;
   node->data = var_decl;
 
@@ -368,6 +420,48 @@ ASTNode *ast_create_struct_declaration(const char *name, char **field_names,
 
   node->data = struct_decl;
 
+  return node;
+}
+
+ASTNode *ast_create_enum_declaration(const char *name, EnumVariant *variants,
+                                     size_t variant_count,
+                                     SourceLocation location) {
+  ASTNode *node = ast_create_node(AST_ENUM_DECLARATION, location);
+  if (!node)
+    return NULL;
+
+  EnumDeclaration *enum_decl = malloc(sizeof(EnumDeclaration));
+  if (!enum_decl) {
+    free(node);
+    return NULL;
+  }
+
+  enum_decl->name = name ? strdup(name) : NULL;
+  enum_decl->is_exported = 0;
+  enum_decl->variant_count = variant_count;
+
+  if (variant_count > 0 && variants) {
+    enum_decl->variants = malloc(variant_count * sizeof(EnumVariant));
+    if (!enum_decl->variants) {
+      if (enum_decl->name)
+        free(enum_decl->name);
+      free(enum_decl);
+      free(node);
+      return NULL;
+    }
+    for (size_t i = 0; i < variant_count; i++) {
+      enum_decl->variants[i].name =
+          variants[i].name ? strdup(variants[i].name) : NULL;
+      enum_decl->variants[i].value = variants[i].value;
+      if (variants[i].value) {
+        ast_add_child(node, variants[i].value);
+      }
+    }
+  } else {
+    enum_decl->variants = NULL;
+  }
+
+  node->data = enum_decl;
   return node;
 }
 

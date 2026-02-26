@@ -1,0 +1,19 @@
+// Test that the prelude works when --prelude is passed. Uses std/io, std/math, std/conv.
+// print, println, cstr, min, max, clamp, exit, etc. should all be usable.
+
+function main() -> int32 {
+  // std/io: print and println are available natively
+  var greeting: string = "Hello from the prelude!";
+  println(cstr(greeting));
+
+  // std/math: min, max, clamp
+  var a: int64 = min(10, 20);
+  var b: int64 = max(10, 20);
+  var c: int64 = clamp(50, 0, 100);
+
+  // std/conv: is_digit, to_lower
+  var d: int32 = is_digit(57);
+  var e: int32 = to_lower(65);
+
+  return 0;
+}

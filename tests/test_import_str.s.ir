@@ -1,0 +1,8 @@
+function main {
+     0: label ir_entry_0
+     1: local @content : string
+     2: assign @content <- "Hello from embedded file!
+"
+     3: return 0
+}
+

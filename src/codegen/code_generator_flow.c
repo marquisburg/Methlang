@@ -171,6 +171,38 @@ static IRFunction *code_generator_find_ir_function(CodeGenerator *generator,
   return NULL;
 }
 
+static int code_generator_validate_entrypoint_sections(CodeGenerator *generator) {
+  if (!generator || !generator->output_buffer) {
+    return 1;
+  }
+
+  const char *entry = strstr(generator->output_buffer, "\nmainCRTStartup:\n");
+  if (!entry) {
+    entry = strstr(generator->output_buffer, "\n_start:\n");
+  }
+  if (!entry) {
+    return 1;
+  }
+
+  const char *entry_end = strstr(entry, "    call ExitProcess\n");
+  if (!entry_end) {
+    entry_end = strstr(entry, "    syscall\n");
+  }
+  if (!entry_end) {
+    return 1;
+  }
+
+  const char *section_switch = strstr(entry, "\nsection .");
+  if (section_switch && section_switch < entry_end) {
+    code_generator_set_error(
+        generator,
+        "Internal codegen error: section switch emitted inside entrypoint body");
+    return 0;
+  }
+
+  return 1;
+}
+
 int code_generator_generate_program(CodeGenerator *generator,
                                     ASTNode *program) {
   if (!generator || !program) {
@@ -241,15 +273,9 @@ int code_generator_generate_program(CodeGenerator *generator,
     code_generator_emit(generator, "; No program data found\n");
   }
 
-  // Emit the collected global variables in data section
-  if (generator->global_variables_size > 0) {
-    code_generator_emit(generator, "\n; Data section for global variables\n");
-    code_generator_emit(generator, "section .data\n");
-    code_generator_emit(generator, "%s", generator->global_variables_buffer);
-  }
-
-  // Ensure all emitted functions and entrypoint stubs are placed in executable
-  // code section even when globals switched the active section to .data/.bss.
+  // Ensure function and entrypoint emission starts in executable code section.
+  // Global data (including function-local string literals) is emitted later
+  // after all codegen passes have populated the global buffer.
   code_generator_emit(generator, "\nsection .text\n");
 
   // Second pass: process functions and other declarations
@@ -423,8 +449,8 @@ int code_generator_generate_program(CodeGenerator *generator,
         emitted_gc_root_extern = 1;
       }
 
-      code_generator_emit(generator, "    lea %s, [rel %s]\n",
-                          first_param_reg, var_data->name);
+      code_generator_emit(generator, "    lea %s, [rel %s]\n", first_param_reg,
+                          var_data->name);
       code_generator_emit(generator, "    call gc_register_root\n");
     }
   }
@@ -467,6 +493,19 @@ int code_generator_generate_program(CodeGenerator *generator,
     code_generator_emit(generator, "    syscall\n");
   }
 
+  // Emit all collected global data after all executable code so labels created
+  // during function emission (e.g. local string literals) are always defined
+  // and cannot interrupt entrypoint instruction flow.
+  if (generator->global_variables_size > 0) {
+    code_generator_emit(generator, "\n; Data section for global variables\n");
+    code_generator_emit(generator, "section .data\n");
+    code_generator_emit(generator, "%s", generator->global_variables_buffer);
+  }
+
+  if (!code_generator_validate_entrypoint_sections(generator)) {
+    return 0;
+  }
+
   return generator->has_error ? 0 : 1;
 }
 
@@ -488,7 +527,19 @@ void code_generator_register_function_parameters(CodeGenerator *generator,
       generator->register_allocator->calling_convention;
   size_t int_param_reg_index = 0;
   size_t float_param_reg_index = 0;
+  size_t ms_param_slot_index = 0;
+  size_t ms_param_slot_count = 0;
+  if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
+    ms_param_slot_count = conv_spec->int_param_count;
+    if (conv_spec->float_param_count < ms_param_slot_count) {
+      ms_param_slot_count = conv_spec->float_param_count;
+    }
+  }
   int stack_offset = 16; // Start after return address and saved RBP
+  if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
+    // Win64 keeps 32-byte caller shadow space above the return address.
+    stack_offset += conv_spec->shadow_space_size;
+  }
 
   for (size_t i = 0; i < func_data->parameter_count; i++) {
     const char *param_name = func_data->parameter_names[i];
@@ -528,10 +579,24 @@ void code_generator_register_function_parameters(CodeGenerator *generator,
     Type *param_type = param_symbol->type;
     int is_float = code_generator_is_floating_point_type(param_type);
 
-    if (is_float && float_param_reg_index < conv_spec->float_param_count) {
+    if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
+      // Win64 parameter registers are assigned by argument slot, not by
+      // independent integer/float cursors.
+      size_t slot = ms_param_slot_index++;
+      if (slot < ms_param_slot_count) {
+        is_in_register = 1;
+        register_id = is_float ? conv_spec->float_param_registers[slot]
+                               : conv_spec->int_param_registers[slot];
+      } else {
+        incoming_stack_offset = stack_offset;
+        stack_offset += 8; // Assuming 8-byte stack slots
+      }
+    } else if (is_float &&
+               float_param_reg_index < conv_spec->float_param_count) {
       is_in_register = 1;
       register_id = conv_spec->float_param_registers[float_param_reg_index++];
-    } else if (!is_float && int_param_reg_index < conv_spec->int_param_count) {
+    } else if (!is_float &&
+               int_param_reg_index < conv_spec->int_param_count) {
       is_in_register = 1;
       register_id = conv_spec->int_param_registers[int_param_reg_index++];
     } else {
@@ -785,28 +850,44 @@ void code_generator_generate_statement(CodeGenerator *generator,
   case AST_IF_STATEMENT: {
     IfStatement *if_data = (IfStatement *)statement->data;
     if (if_data && if_data->condition && if_data->then_branch) {
-      char *else_label = code_generator_generate_label(generator, "if_else");
       char *end_label = code_generator_generate_label(generator, "if_end");
-      if (!else_label || !end_label)
+      if (!end_label)
         break;
 
-      code_generator_generate_expression(generator, if_data->condition);
-      code_generator_emit(generator,
-                          "    test rax, rax      ; Test condition\n");
-      code_generator_emit(generator, "    jz %s              ; Jump if false\n",
-                          else_label);
+      ASTNode *current_cond = if_data->condition;
+      ASTNode *current_body = if_data->then_branch;
 
-      code_generator_generate_statement(generator, if_data->then_branch);
-      code_generator_emit(generator, "    jmp %s              ; Skip else\n",
-                          end_label);
+      for (size_t i = 0; i <= if_data->else_if_count; i++) {
+        char *next_label = code_generator_generate_label(generator, "if_next");
+        if (!next_label) {
+          free(end_label);
+          break;
+        }
 
-      code_generator_emit(generator, "%s:\n", else_label);
+        code_generator_generate_expression(generator, current_cond);
+        code_generator_emit(generator,
+                            "    test rax, rax      ; Test condition\n");
+        code_generator_emit(
+            generator, "    jz %s              ; Jump to next\n", next_label);
+
+        code_generator_generate_statement(generator, current_body);
+        code_generator_emit(
+            generator, "    jmp %s             ; Skip remaining\n", end_label);
+
+        code_generator_emit(generator, "%s:\n", next_label);
+        free(next_label);
+
+        if (i < if_data->else_if_count) {
+          current_cond = if_data->else_ifs[i].condition;
+          current_body = if_data->else_ifs[i].body;
+        }
+      }
+
       if (if_data->else_branch) {
         code_generator_generate_statement(generator, if_data->else_branch);
       }
 
       code_generator_emit(generator, "%s:\n", end_label);
-      free(else_label);
       free(end_label);
     } else {
       code_generator_set_error(generator, "Malformed if statement");

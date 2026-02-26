@@ -39,6 +39,7 @@ ASTNode *parser_parse_import_declaration(Parser *parser);
 ASTNode *parser_parse_var_declaration(Parser *parser);
 ASTNode *parser_parse_function_declaration(Parser *parser);
 ASTNode *parser_parse_struct_declaration(Parser *parser);
+ASTNode *parser_parse_enum_declaration(Parser *parser);
 ASTNode *parser_parse_method_declaration(Parser *parser);
 ASTNode *parser_parse_inline_asm(Parser *parser);
 ASTNode *parser_parse_assignment(Parser *parser);

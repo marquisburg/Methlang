@@ -19,6 +19,7 @@ typedef enum {
   TYPE_POINTER,
   TYPE_ARRAY,
   TYPE_STRUCT,
+  TYPE_ENUM,
   TYPE_VOID
 } TypeKind;
 
@@ -51,6 +52,8 @@ typedef enum {
   SYMBOL_VARIABLE,
   SYMBOL_FUNCTION,
   SYMBOL_STRUCT,
+  SYMBOL_ENUM,
+  SYMBOL_CONSTANT,
   SYMBOL_PARAMETER
 } SymbolKind;
 
@@ -75,6 +78,9 @@ typedef struct Symbol {
       size_t parameter_count;
       Type *return_type;
     } function;
+    struct {
+      long long value;
+    } constant;
   } data;
 } Symbol;
 

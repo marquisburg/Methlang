@@ -5,95 +5,76 @@ section .text
 ; Code section
 
 ; First pass: processing 1 declarations
-; Declaration 0 type: 2 (AST_INLINE_ASM = 15)
+; Declaration 0 type: 4 (AST_INLINE_ASM = 18)
 
-global main
+section .text
 
-main:
+global test
+
+test:
     push rbp        ; Save old base pointer
     mov rbp, rsp  ; Set new base pointer
-    ; Save callee-saved registers
-    push rbx         ; Save callee-saved register
-    push r12         ; Save callee-saved register
-    push r13         ; Save callee-saved register
-    push r14         ; Save callee-saved register
-    push r15         ; Save callee-saved register
-    sub rsp, 224    ; Allocate 224 bytes on stack (aligned)
-    ; Zero-initialize local variable space
-    mov rdi, rsp  ; Destination for memset
-    mov rax, 0     ; Value to set (zero)
-    mov rcx, 224    ; Number of bytes
-    rep stosb         ; Zero-fill the stack space
+    sub rsp, 80    ; Allocate 80 bytes on stack (aligned)
     ; Registering 0 function parameters
-    ; Added 8 bytes padding for 16-byte alignment
-    ; Added 8 bytes padding for 16-byte alignment
-    ; Added 8 bytes padding for 16-byte alignment
-    ; Added 8 bytes padding for 16-byte alignment
-    ; Added 8 bytes padding for 16-byte alignment
-    ; Added 8 bytes padding for 16-byte alignment
-    ; Added 8 bytes padding for 16-byte alignment
-    ; Added 8 bytes padding for 16-byte alignment
 ir_entry_0:
-    ; String literal: "Hello from string type!"
-    lea rax, [Lstr_struct1 + rip]  ; Load string struct address
-    ; Store to variable: msg
-    mov [rbp - 16], rax  ; To stack [rbp - 16]
-    lea rax, [rbp - 16]
-    mov [rbp - 56], rax
-    mov rax, [rbp - 56]
+    mov rax, 5
+    ; Store to variable: x
+    mov dword [rbp - 4], eax  ; To stack [rbp - 4]
+    ; Load variable: x
+    mov eax, dword [rbp - 4]  ; From stack [rbp - 4]
     push rax
-    mov rax, 8
-    mov rbx, rax
+    mov rax, 1
+    mov r10, rax
     pop rax
-    add rax, rbx
-    mov [rbp - 72], rax
-    mov rax, [rbp - 72]
-    mov rax, qword [rax]
-    mov [rbp - 88], rax
-    mov rax, [rbp - 88]
-    ; Store to variable: len
-    mov [rbp - 24], rax  ; To stack [rbp - 24]
-    lea rax, [rbp - 16]
-    mov [rbp - 104], rax
-    mov rax, [rbp - 104]
+    cmp rax, r10
+    sete al
+    movzx rax, al
+    mov [rbp - 16], rax
+    mov rax, [rbp - 16]
+    test rax, rax
+    jz ir_if_next_2
+    mov rax, 2
+    ; Store to variable: x
+    mov dword [rbp - 4], eax  ; To stack [rbp - 4]
+    jmp ir_if_end_1
+ir_if_next_2:
+    ; Load variable: x
+    mov eax, dword [rbp - 4]  ; From stack [rbp - 4]
     push rax
-    mov rax, 0
-    mov rbx, rax
+    mov rax, 2
+    mov r10, rax
     pop rax
-    add rax, rbx
-    mov [rbp - 120], rax
-    mov rax, [rbp - 120]
-    mov rax, qword [rax]
-    mov [rbp - 136], rax
-    mov rax, [rbp - 136]
-    ; Store to variable: chrs
-    mov [rbp - 40], rax  ; To stack [rbp - 40]
+    cmp rax, r10
+    sete al
+    movzx rax, al
+    mov [rbp - 24], rax
+    mov rax, [rbp - 24]
+    test rax, rax
+    jz ir_if_next_3
+    mov rax, 3
+    ; Store to variable: x
+    mov dword [rbp - 4], eax  ; To stack [rbp - 4]
+    jmp ir_if_end_1
+ir_if_next_3:
+ir_if_end_1:
     mov rax, 0
-    jmp Lmain_exit
-Lmain_exit:
+    jmp Ltest_exit
+Ltest_exit:
     ; Function epilogue
     mov rsp, rbp  ; Restore stack pointer
-    ; Restore callee-saved registers
-    pop r15          ; Restore callee-saved register
-    pop r14          ; Restore callee-saved register
-    pop r13          ; Restore callee-saved register
-    pop r12          ; Restore callee-saved register
-    pop rbx          ; Restore callee-saved register
     pop rbp         ; Restore old base pointer
     ret               ; Return to caller
 
 ; Default program entry point
-global _start
-_start:
+global mainCRTStartup
+mainCRTStartup:
+    sub rsp, 40      ; Shadow space + alignment
     ; Initialize garbage collector runtime
-    mov rdi, rsp
+    lea rcx, [rsp + 40]
     extern gc_init
     call gc_init
-    ; Call user main function
-    call main
-    push rax         ; Preserve main return code
     extern gc_shutdown
     call gc_shutdown
-    pop rdi          ; Use main return as exit code
-    mov rax, 60    ; sys_exit
-    syscall
+    mov rcx, 0       ; Default exit status
+    extern ExitProcess
+    call ExitProcess

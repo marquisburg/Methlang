@@ -1072,6 +1072,24 @@ x86Register register_allocator_get_parameter_register(RegisterAllocator* allocat
     }
     
     CallingConventionSpec* spec = allocator->calling_convention;
+    if (param_index < 0) {
+        return REG_NONE;
+    }
+    
+    if (spec->convention == CALLING_CONV_MS_X64) {
+        // Win64 uses shared argument slots across integer and floating classes.
+        size_t slot_count = spec->int_param_count;
+        if (spec->float_param_count < slot_count) {
+            slot_count = spec->float_param_count;
+        }
+        if ((size_t)param_index >= slot_count) {
+            return REG_NONE;
+        }
+        if (register_allocator_is_floating_point_type(param_type)) {
+            return spec->float_param_registers[param_index];
+        }
+        return spec->int_param_registers[param_index];
+    }
     
     if (register_allocator_is_floating_point_type(param_type)) {
         // Floating point parameter
@@ -1190,4 +1208,3 @@ LiveInterval* register_allocator_split_interval(LiveInterval* interval, int posi
     (void)position; // Suppress unused parameter warning
     return NULL;
 }
-

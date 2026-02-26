@@ -328,6 +328,12 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
           context->symbol_table
               ? symbol_table_lookup(context->symbol_table, identifier->name)
               : NULL;
+
+      if (symbol && symbol->kind == SYMBOL_CONSTANT) {
+        ir_set_error(context, "Cannot take address of constant");
+        return 0;
+      }
+
       if (symbol && (symbol->kind == SYMBOL_VARIABLE ||
                      symbol->kind == SYMBOL_PARAMETER)) {
         *out_type = symbol->type;
@@ -568,6 +574,15 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       ir_set_error(context, "Malformed identifier expression");
       return 0;
     }
+    Symbol *symbol =
+        context->symbol_table
+            ? symbol_table_lookup(context->symbol_table, identifier->name)
+            : NULL;
+    if (symbol && symbol->kind == SYMBOL_CONSTANT) {
+      *out_value = ir_operand_int(symbol->data.constant.value);
+      return 1;
+    }
+
     *out_value = ir_operand_symbol(identifier->name);
     if (!out_value->name) {
       ir_set_error(context, "Out of memory while lowering identifier");
@@ -581,6 +596,235 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     if (!binary || !binary->left || !binary->right || !binary->operator) {
       ir_set_error(context, "Malformed binary expression");
       return 0;
+    }
+
+    if (strcmp(binary->operator, "&&") == 0 || strcmp(binary->operator, "||") == 0) {
+      int is_and = strcmp(binary->operator, "&&") == 0;
+      IROperand destination = ir_operand_none();
+      IROperand left = ir_operand_none();
+      IROperand right = ir_operand_none();
+      char *rhs_label = NULL;
+      char *true_label = NULL;
+      char *false_label = NULL;
+      char *end_label = NULL;
+
+      if (!ir_make_temp_operand(context, &destination)) {
+        return 0;
+      }
+      if (!ir_lower_expression(context, function, binary->left, &left)) {
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+
+      rhs_label = ir_new_label_name(context, "sc_rhs");
+      true_label = ir_new_label_name(context, "sc_true");
+      false_label = ir_new_label_name(context, "sc_false");
+      end_label = ir_new_label_name(context, "sc_end");
+      if (!rhs_label || !true_label || !false_label || !end_label) {
+        ir_set_error(context, "Out of memory while creating short-circuit labels");
+        free(rhs_label);
+        free(true_label);
+        free(false_label);
+        free(end_label);
+        ir_operand_destroy(&left);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+
+      IRInstruction instruction = {0};
+      instruction.location = expression->location;
+
+      instruction.op = IR_OP_BRANCH_ZERO;
+      instruction.lhs = left;
+      instruction.text = is_and ? false_label : rhs_label;
+      if (!ir_emit(context, function, &instruction)) {
+        free(rhs_label);
+        free(true_label);
+        free(false_label);
+        free(end_label);
+        ir_operand_destroy(&left);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+
+      if (is_and) {
+        instruction = (IRInstruction){0};
+        instruction.op = IR_OP_LABEL;
+        instruction.location = expression->location;
+        instruction.text = rhs_label;
+        if (!ir_emit(context, function, &instruction) ||
+            !ir_lower_expression(context, function, binary->right, &right)) {
+          free(rhs_label);
+          free(true_label);
+          free(false_label);
+          free(end_label);
+          ir_operand_destroy(&left);
+          ir_operand_destroy(&destination);
+          return 0;
+        }
+
+        instruction = (IRInstruction){0};
+        instruction.op = IR_OP_BRANCH_ZERO;
+        instruction.location = expression->location;
+        instruction.lhs = right;
+        instruction.text = false_label;
+        if (!ir_emit(context, function, &instruction)) {
+          free(rhs_label);
+          free(true_label);
+          free(false_label);
+          free(end_label);
+          ir_operand_destroy(&right);
+          ir_operand_destroy(&left);
+          ir_operand_destroy(&destination);
+          return 0;
+        }
+      } else {
+        instruction = (IRInstruction){0};
+        instruction.op = IR_OP_JUMP;
+        instruction.location = expression->location;
+        instruction.text = true_label;
+        if (!ir_emit(context, function, &instruction)) {
+          free(rhs_label);
+          free(true_label);
+          free(false_label);
+          free(end_label);
+          ir_operand_destroy(&left);
+          ir_operand_destroy(&destination);
+          return 0;
+        }
+
+        instruction = (IRInstruction){0};
+        instruction.op = IR_OP_LABEL;
+        instruction.location = expression->location;
+        instruction.text = rhs_label;
+        if (!ir_emit(context, function, &instruction) ||
+            !ir_lower_expression(context, function, binary->right, &right)) {
+          free(rhs_label);
+          free(true_label);
+          free(false_label);
+          free(end_label);
+          ir_operand_destroy(&left);
+          ir_operand_destroy(&destination);
+          return 0;
+        }
+
+        instruction = (IRInstruction){0};
+        instruction.op = IR_OP_BRANCH_ZERO;
+        instruction.location = expression->location;
+        instruction.lhs = right;
+        instruction.text = false_label;
+        if (!ir_emit(context, function, &instruction)) {
+          free(rhs_label);
+          free(true_label);
+          free(false_label);
+          free(end_label);
+          ir_operand_destroy(&right);
+          ir_operand_destroy(&left);
+          ir_operand_destroy(&destination);
+          return 0;
+        }
+      }
+
+      instruction = (IRInstruction){0};
+      instruction.op = IR_OP_LABEL;
+      instruction.location = expression->location;
+      instruction.text = true_label;
+      if (!ir_emit(context, function, &instruction)) {
+        free(rhs_label);
+        free(true_label);
+        free(false_label);
+        free(end_label);
+        ir_operand_destroy(&right);
+        ir_operand_destroy(&left);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+
+      instruction = (IRInstruction){0};
+      instruction.op = IR_OP_ASSIGN;
+      instruction.location = expression->location;
+      instruction.dest = destination;
+      instruction.lhs = ir_operand_int(1);
+      if (!ir_emit(context, function, &instruction)) {
+        free(rhs_label);
+        free(true_label);
+        free(false_label);
+        free(end_label);
+        ir_operand_destroy(&right);
+        ir_operand_destroy(&left);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+
+      instruction = (IRInstruction){0};
+      instruction.op = IR_OP_JUMP;
+      instruction.location = expression->location;
+      instruction.text = end_label;
+      if (!ir_emit(context, function, &instruction)) {
+        free(rhs_label);
+        free(true_label);
+        free(false_label);
+        free(end_label);
+        ir_operand_destroy(&right);
+        ir_operand_destroy(&left);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+
+      instruction = (IRInstruction){0};
+      instruction.op = IR_OP_LABEL;
+      instruction.location = expression->location;
+      instruction.text = false_label;
+      if (!ir_emit(context, function, &instruction)) {
+        free(rhs_label);
+        free(true_label);
+        free(false_label);
+        free(end_label);
+        ir_operand_destroy(&right);
+        ir_operand_destroy(&left);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+
+      instruction = (IRInstruction){0};
+      instruction.op = IR_OP_ASSIGN;
+      instruction.location = expression->location;
+      instruction.dest = destination;
+      instruction.lhs = ir_operand_int(0);
+      if (!ir_emit(context, function, &instruction)) {
+        free(rhs_label);
+        free(true_label);
+        free(false_label);
+        free(end_label);
+        ir_operand_destroy(&right);
+        ir_operand_destroy(&left);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+
+      instruction = (IRInstruction){0};
+      instruction.op = IR_OP_LABEL;
+      instruction.location = expression->location;
+      instruction.text = end_label;
+      if (!ir_emit(context, function, &instruction)) {
+        free(rhs_label);
+        free(true_label);
+        free(false_label);
+        free(end_label);
+        ir_operand_destroy(&right);
+        ir_operand_destroy(&left);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+
+      free(rhs_label);
+      free(true_label);
+      free(false_label);
+      free(end_label);
+      ir_operand_destroy(&right);
+      ir_operand_destroy(&left);
+      *out_value = destination;
+      return 1;
     }
 
     IROperand left = ir_operand_none();
@@ -1196,71 +1440,81 @@ static int ir_lower_statement(IRLoweringContext *context, IRFunction *function,
       return 0;
     }
 
-    char *else_label = ir_new_label_name(context, "if_else");
     char *end_label = ir_new_label_name(context, "if_end");
-    if (!else_label || !end_label) {
-      free(else_label);
-      free(end_label);
+    if (!end_label) {
       ir_set_error(context, "Out of memory while allocating if labels");
       return 0;
     }
 
-    IROperand condition = ir_operand_none();
-    if (!ir_lower_expression(context, function, if_data->condition,
-                             &condition)) {
-      free(else_label);
-      free(end_label);
-      return 0;
-    }
+    ASTNode *current_cond = if_data->condition;
+    ASTNode *current_body = if_data->then_branch;
 
-    IRInstruction branch = {0};
-    branch.op = IR_OP_BRANCH_ZERO;
-    branch.location = statement->location;
-    branch.lhs = condition;
-    branch.text = else_label;
-    if (!ir_emit(context, function, &branch)) {
+    for (size_t i = 0; i <= if_data->else_if_count; i++) {
+      char *next_label = ir_new_label_name(context, "if_next");
+      if (!next_label) {
+        free(end_label);
+        return 0;
+      }
+
+      IROperand condition = ir_operand_none();
+      if (!ir_lower_expression(context, function, current_cond, &condition)) {
+        free(next_label);
+        free(end_label);
+        return 0;
+      }
+
+      IRInstruction branch = {0};
+      branch.op = IR_OP_BRANCH_ZERO;
+      branch.location = current_cond->location;
+      branch.lhs = condition;
+      branch.text = next_label;
+      if (!ir_emit(context, function, &branch)) {
+        ir_operand_destroy(&condition);
+        free(next_label);
+        free(end_label);
+        return 0;
+      }
       ir_operand_destroy(&condition);
-      free(else_label);
-      free(end_label);
-      return 0;
-    }
-    ir_operand_destroy(&condition);
 
-    if (!ir_lower_statement(context, function, if_data->then_branch)) {
-      free(else_label);
-      free(end_label);
-      return 0;
-    }
+      if (!ir_lower_statement(context, function, current_body)) {
+        free(next_label);
+        free(end_label);
+        return 0;
+      }
 
-    if (!ir_emit_jump_instruction(context, function, end_label,
-                                  statement->location)) {
-      free(else_label);
-      free(end_label);
-      return 0;
-    }
+      if (!ir_emit_jump_instruction(context, function, end_label,
+                                    current_cond->location)) {
+        free(next_label);
+        free(end_label);
+        return 0;
+      }
 
-    if (!ir_emit_label_instruction(context, function, else_label,
-                                   statement->location)) {
-      free(else_label);
-      free(end_label);
-      return 0;
+      if (!ir_emit_label_instruction(context, function, next_label,
+                                     current_cond->location)) {
+        free(next_label);
+        free(end_label);
+        return 0;
+      }
+      free(next_label);
+
+      if (i < if_data->else_if_count) {
+        current_cond = if_data->else_ifs[i].condition;
+        current_body = if_data->else_ifs[i].body;
+      }
     }
 
     if (if_data->else_branch &&
         !ir_lower_statement(context, function, if_data->else_branch)) {
-      free(else_label);
       free(end_label);
       return 0;
     }
 
     if (!ir_emit_label_instruction(context, function, end_label,
                                    statement->location)) {
-      free(else_label);
       free(end_label);
       return 0;
     }
 
-    free(else_label);
     free(end_label);
     return 1;
   }
@@ -1559,7 +1813,8 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
     if (!declaration || declaration->type != AST_FUNCTION_DECLARATION) {
       continue;
     }
-    FunctionDeclaration *function_data = (FunctionDeclaration *)declaration->data;
+    FunctionDeclaration *function_data =
+        (FunctionDeclaration *)declaration->data;
     if (!function_data) {
       ir_set_error(&context, "Malformed function declaration");
       ir_program_destroy(ir_program);

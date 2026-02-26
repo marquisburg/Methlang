@@ -1,0 +1,29 @@
+import "std/mem";
+import "std/conv";
+
+var A: string = "<li><a href='/forum?thread=";
+
+function int_to_dec(buf: cstring, n: int64) -> int32 {
+  var digits: int32[20];
+  var count: int32 = 0;
+  if (n == 0) { buf[0] = 48; return 1; }
+  while (n > 0) {
+    var d: int64 = n - (n / 10) * 10;
+    digits[count] = d;
+    count = count + 1;
+    n = n / 10;
+  }
+  var i: int32 = count - 1;
+  while (i >= 0) {
+    buf[count - 1 - i] = digit_to_char(digits[i]);
+    i = i - 1;
+  }
+  return count;
+}
+
+function main() -> int32 {
+  var item_buf: uint8[600];
+  memcpy(&item_buf[0], A.chars, A.length);
+  var dc: int32 = int_to_dec(&item_buf[A.length], 1);
+  return dc;
+}

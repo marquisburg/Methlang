@@ -1,6 +1,39 @@
 # MethASM Syntax Highlighting
 
-Syntax highlighting for MethASM (`.masm`) files in VS Code and Cursor.
+Syntax highlighting and basic linting for MethASM (`.masm`) files in VS Code and Cursor.
+
+## Linter
+
+Two diagnostic layers:
+
+### 1. Regex-based (instant)
+Pattern checks for common issues based on the MethASM language reference:
+
+**Unsupported operators:**
+- **Modulo `%`** — Use a helper or inline logic
+- **Bitwise `~`, `<<`, `>>`, `|`, `^`** — Use inline assembly or C externs (`&` is valid for address-of, `||` for logical OR)
+- **Unary logical NOT `!`** — Use `== 0` or `!= 0` for comparisons
+- **Compound assignment `+=`, `-=`, `*=`, `/=`** — Use `x = x + 1` instead of `x += 1`
+
+**Invalid literals:**
+- **`0x` / `0X`** without hex digits
+- **`0b` / `0B`** without 0/1 digits
+- **Underscores in numbers** (`1_000_000`) — Not supported
+
+**Other:**
+- **Block comments `/* */`** — Only `//` line comments are supported
+- **Labeled `break` / `continue`** — Use flags or restructure nested loops
+- **Unterminated strings** — Missing closing double quote
+
+### 2. Compiler-backed (on save)
+Runs the MethASM compiler (`bin/methasm.exe`) for **semantic diagnostics**: type errors, scope errors, use-before-init, undefined symbols, etc. Requires the compiler to be built and available at `bin/methasm.exe` (or configured path).
+
+**Settings** (MethASM in Settings):
+- `masm.linter.compilerEnabled` — Enable compiler diagnostics (default: true)
+- `masm.linter.compilerPath` — Path to methasm (default: auto-detect `bin/methasm.exe`)
+- `masm.linter.stdlibPath` — Path to stdlib (default: `stdlib`)
+
+Diagnostics run on open, edit (debounced), and save. See `test-lint.masm` for regex examples.
 
 ## Installation (local)
 

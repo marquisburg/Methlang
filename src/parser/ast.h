@@ -7,9 +7,11 @@
 typedef enum {
   AST_PROGRAM,
   AST_IMPORT,
+  AST_IMPORT_STR,
   AST_VAR_DECLARATION,
   AST_FUNCTION_DECLARATION,
   AST_STRUCT_DECLARATION,
+  AST_ENUM_DECLARATION,
   AST_METHOD_DECLARATION,
   AST_ASSIGNMENT,
   AST_FUNCTION_CALL,
@@ -51,10 +53,15 @@ typedef struct {
 } ImportDeclaration;
 
 typedef struct {
+  char *file_path;
+} ImportStrExpression;
+
+typedef struct {
   char *name;
   char *type_name;
   ASTNode *initializer;
   int is_extern;
+  int is_exported;
   char *link_name;
 } VarDeclaration;
 
@@ -79,6 +86,18 @@ typedef struct {
   size_t method_count;
   int is_exported;
 } StructDeclaration;
+
+typedef struct {
+  char *name;
+  ASTNode *value; // Initializer expression, evaluating to constant
+} EnumVariant;
+
+typedef struct {
+  char *name;
+  EnumVariant *variants;
+  size_t variant_count;
+  int is_exported;
+} EnumDeclaration;
 
 typedef struct {
   char *assembly_code;
@@ -145,7 +164,14 @@ typedef struct {
 
 typedef struct {
   ASTNode *condition;
+  ASTNode *body;
+} ElseIfClause;
+
+typedef struct {
+  ASTNode *condition;
   ASTNode *then_branch;
+  ElseIfClause *else_ifs;
+  size_t else_if_count;
   ASTNode *else_branch;
 } IfStatement;
 
@@ -186,6 +212,7 @@ void ast_add_child(ASTNode *parent, ASTNode *child);
 ASTNode *ast_create_program();
 ASTNode *ast_create_import_declaration(const char *module_name,
                                        SourceLocation location);
+ASTNode *ast_create_import_str(const char *file_path, SourceLocation location);
 ASTNode *ast_create_var_declaration(const char *name, const char *type_name,
                                     ASTNode *initializer,
                                     SourceLocation location);
@@ -197,6 +224,9 @@ ASTNode *ast_create_struct_declaration(const char *name, char **field_names,
                                        char **field_types, size_t field_count,
                                        ASTNode **methods, size_t method_count,
                                        SourceLocation location);
+ASTNode *ast_create_enum_declaration(const char *name, EnumVariant *variants,
+                                     size_t variant_count,
+                                     SourceLocation location);
 ASTNode *ast_create_call_expression(const char *function_name,
                                     ASTNode **arguments, size_t argument_count,
                                     SourceLocation location);
@@ -209,9 +239,9 @@ ASTNode *ast_create_number_literal(long long int_value,
                                    SourceLocation location);
 ASTNode *ast_create_float_literal(double float_value, SourceLocation location);
 ASTNode *ast_create_string_literal(const char *value, SourceLocation location);
-ASTNode *ast_create_binary_expression(ASTNode *left, const char *operator,
-                                      ASTNode * right, SourceLocation location);
-ASTNode *ast_create_unary_expression(const char *operator, ASTNode * operand,
+ASTNode *ast_create_binary_expression(ASTNode *left, const char *op,
+                                      ASTNode *right, SourceLocation location);
+ASTNode *ast_create_unary_expression(const char *op, ASTNode *operand,
                                      SourceLocation location);
 ASTNode *ast_create_member_access(ASTNode *object, const char *member,
                                   SourceLocation location);

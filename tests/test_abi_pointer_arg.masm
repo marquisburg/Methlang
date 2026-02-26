@@ -1,0 +1,13 @@
+// ABI: pointer in first integer param register (RCX on MS x64)
+function deref(p: int32*) -> int32 {
+  return *p;
+}
+
+function main() -> int32 {
+  var x: int32 = 99;
+  var r: int32 = deref(&x);
+  if (r == 99) {
+    return 1;
+  }
+  return 0;
+}

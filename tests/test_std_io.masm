@@ -1,0 +1,14 @@
+import "std/io";
+
+function main() -> int32 {
+  var msg1: string = "Hello from println!";
+  println(cstr(msg1));
+
+  var msg2: string = "Hello from ";
+  print(cstr(msg2));
+
+  var msg3: string = "print!\n";
+  print(cstr(msg3));
+
+  return 0;
+}

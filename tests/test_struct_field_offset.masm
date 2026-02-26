@@ -1,0 +1,25 @@
+// Pointer to struct field — address correct for non-first fields
+struct Point3 {
+  x: int32;
+  y: int32;
+  z: int32;
+}
+
+function get_y(p: Point3*) -> int32 {
+  return p->y;
+}
+
+function get_z(p: Point3*) -> int32 {
+  return p->z;
+}
+
+function main() -> int32 {
+  var p: Point3;
+  p.x = 10;
+  p.y = 20;
+  p.z = 30;
+  if (get_y(&p) == 20 && get_z(&p) == 30) {
+    return 1;
+  }
+  return 0;
+}
