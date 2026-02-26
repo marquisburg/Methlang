@@ -28,30 +28,9 @@ void code_generator_function_prologue(CodeGenerator *generator,
                       "    push rbp        ; Save old base pointer\n");
   code_generator_emit(generator, "    mov rbp, rsp  ; Set new base pointer\n");
 
-  // Get calling convention for callee-saved register handling
-  CallingConventionSpec *conv_spec =
-      generator->register_allocator->calling_convention;
-
-  // Save callee-saved registers that will be used by this function
-  // This is a simplified approach - in practice, we'd only save registers we
-  // actually use
-  if (conv_spec && conv_spec->callee_saved_registers) {
-    code_generator_emit(generator, "    ; Save callee-saved registers\n");
-    for (size_t i = 0; i < conv_spec->callee_saved_count; i++) {
-      x86Register reg = conv_spec->callee_saved_registers[i];
-      const char *reg_name = code_generator_get_register_name(reg);
-      if (reg_name && reg != REG_RBP && reg != REG_RSP) {
-        // Only save if we might use this register (simplified check)
-        if (reg == REG_RBX || reg == REG_R12 || reg == REG_R13 ||
-            reg == REG_R14 || reg == REG_R15) {
-          code_generator_emit(
-              generator, "    push %s         ; Save callee-saved register\n",
-              reg_name);
-          generator->function_stack_size += 8; // Track additional stack usage
-        }
-      }
-    }
-  }
+  // Callee-saved register preservation is intentionally disabled for now.
+  // The current frame-slot logic assumes local slots begin at [rbp - 8].
+  // Emitting pushes here shifts that layout and can corrupt frame access.
 
   // Allocate stack space for local variables
   // Ensure 16-byte alignment for the stack frame
@@ -66,19 +45,10 @@ void code_generator_function_prologue(CodeGenerator *generator,
     generator->function_stack_size = aligned_stack_size;
   }
 
-  // Initialize local variables to zero if needed
-  if (aligned_stack_size > 0) {
-    code_generator_emit(generator,
-                        "    ; Zero-initialize local variable space\n");
-    code_generator_emit(generator,
-                        "    mov rdi, rsp  ; Destination for memset\n");
-    code_generator_emit(generator,
-                        "    mov rax, 0     ; Value to set (zero)\n");
-    code_generator_emit(generator, "    mov rcx, %d    ; Number of bytes\n",
-                        aligned_stack_size);
-    code_generator_emit(generator,
-                        "    rep stosb         ; Zero-fill the stack space\n");
-  }
+  // NOTE: Do not zero-fill the full frame in prologue.
+  // Incoming argument registers are consumed immediately after prologue to
+  // materialize parameter home slots. A blanket memset here clobbers those
+  // registers before homing.
 }
 
 void code_generator_function_epilogue(CodeGenerator *generator) {
@@ -88,32 +58,8 @@ void code_generator_function_epilogue(CodeGenerator *generator) {
 
   code_generator_emit(generator, "    ; Function epilogue\n");
 
-  // Get calling convention for callee-saved register handling
-  CallingConventionSpec *conv_spec =
-      generator->register_allocator->calling_convention;
-
   // Restore stack pointer to base pointer (cleans up local variables)
   code_generator_emit(generator, "    mov rsp, rbp  ; Restore stack pointer\n");
-
-  // Restore callee-saved registers in reverse order
-  if (conv_spec && conv_spec->callee_saved_registers) {
-    code_generator_emit(generator, "    ; Restore callee-saved registers\n");
-    // Restore in reverse order of saving
-    for (int i = (int)conv_spec->callee_saved_count - 1; i >= 0; i--) {
-      x86Register reg = conv_spec->callee_saved_registers[i];
-      const char *reg_name = code_generator_get_register_name(reg);
-      if (reg_name && reg != REG_RBP && reg != REG_RSP) {
-        // Only restore if we saved this register
-        if (reg == REG_RBX || reg == REG_R12 || reg == REG_R13 ||
-            reg == REG_R14 || reg == REG_R15) {
-          code_generator_emit(
-              generator,
-              "    pop %s          ; Restore callee-saved register\n",
-              reg_name);
-        }
-      }
-    }
-  }
 
   // Restore old base pointer
   code_generator_emit(generator,

@@ -55,17 +55,16 @@ static void code_generator_pop_control_labels(CodeGenerator *generator) {
   generator->control_flow_stack_size--;
 }
 
-static const char *code_generator_current_break_label(
-    CodeGenerator *generator) {
+static const char *
+code_generator_current_break_label(CodeGenerator *generator) {
   if (!generator || generator->control_flow_stack_size == 0) {
     return NULL;
   }
-  return generator
-      ->break_label_stack[generator->control_flow_stack_size - 1];
+  return generator->break_label_stack[generator->control_flow_stack_size - 1];
 }
 
-static const char *code_generator_current_continue_label(
-    CodeGenerator *generator) {
+static const char *
+code_generator_current_continue_label(CodeGenerator *generator) {
   if (!generator || generator->control_flow_stack_size == 0) {
     return NULL;
   }
@@ -183,7 +182,8 @@ int code_generator_generate_program(CodeGenerator *generator,
     return 0;
   }
   if (!generator->ir_program) {
-    code_generator_set_error(generator, "IR program not attached to code generator");
+    code_generator_set_error(generator,
+                             "IR program not attached to code generator");
     return 0;
   }
 
@@ -207,7 +207,16 @@ int code_generator_generate_program(CodeGenerator *generator,
                           i, declaration->type, AST_INLINE_ASM);
 
       if (declaration->type == AST_VAR_DECLARATION) {
-        code_generator_generate_global_variable(generator, declaration);
+        VarDeclaration *var_data = (VarDeclaration *)declaration->data;
+        if (var_data && var_data->is_extern) {
+          const char *extern_name =
+              code_generator_get_link_symbol_name(generator, var_data->name);
+          if (!code_generator_emit_extern_symbol(generator, extern_name)) {
+            return 0;
+          }
+        } else {
+          code_generator_generate_global_variable(generator, declaration);
+        }
       } else if (declaration->type == AST_INLINE_ASM) {
         // Top-level inline assembly - emit directly without register
         // preservation
@@ -239,35 +248,48 @@ int code_generator_generate_program(CodeGenerator *generator,
     code_generator_emit(generator, "%s", generator->global_variables_buffer);
   }
 
+  // Ensure all emitted functions and entrypoint stubs are placed in executable
+  // code section even when globals switched the active section to .data/.bss.
+  code_generator_emit(generator, "\nsection .text\n");
+
   // Second pass: process functions and other declarations
   if (program_data) {
     for (size_t i = 0; i < program_data->declaration_count; i++) {
       ASTNode *declaration = program_data->declarations[i];
 
       switch (declaration->type) {
-      case AST_FUNCTION_DECLARATION:
-        {
-          FunctionDeclaration *function_data =
-              declaration ? (FunctionDeclaration *)declaration->data : NULL;
-          if (!function_data || !function_data->name) {
-            code_generator_set_error(generator,
-                                     "Malformed function declaration in AST");
-            break;
-          }
-          IRFunction *ir_function =
-              code_generator_find_ir_function(generator, function_data->name);
-          if (!ir_function) {
-            code_generator_set_error(
-                generator, "No IR body found for function '%s'",
-                function_data->name);
-            break;
-          }
-          if (!code_generator_generate_function_from_ir(generator, declaration,
-                                                       ir_function)) {
-            break;
-          }
+      case AST_FUNCTION_DECLARATION: {
+        FunctionDeclaration *function_data =
+            declaration ? (FunctionDeclaration *)declaration->data : NULL;
+        if (!function_data || !function_data->name) {
+          code_generator_set_error(generator,
+                                   "Malformed function declaration in AST");
+          break;
         }
-        break;
+        if (function_data->is_extern) {
+          const char *extern_name = code_generator_get_link_symbol_name(
+              generator, function_data->name);
+          if (!code_generator_emit_extern_symbol(generator, extern_name)) {
+            break;
+          }
+          break;
+        }
+        if (!function_data->body) {
+          break;
+        }
+        IRFunction *ir_function =
+            code_generator_find_ir_function(generator, function_data->name);
+        if (!ir_function) {
+          code_generator_set_error(generator,
+                                   "No IR body found for function '%s'",
+                                   function_data->name);
+          break;
+        }
+        if (!code_generator_generate_function_from_ir(generator, declaration,
+                                                      ir_function)) {
+          break;
+        }
+      } break;
       case AST_VAR_DECLARATION:
         // Already handled in first pass
         break;
@@ -298,7 +320,8 @@ int code_generator_generate_program(CodeGenerator *generator,
       }
 
       FunctionDeclaration *func_data = (FunctionDeclaration *)declaration->data;
-      if (func_data && func_data->name && strcmp(func_data->name, "main") == 0) {
+      if (func_data && func_data->name &&
+          strcmp(func_data->name, "main") == 0) {
         has_main = 1;
         break;
       }
@@ -306,11 +329,47 @@ int code_generator_generate_program(CodeGenerator *generator,
   }
 
   // Generate process entry point.
+  CallingConventionSpec *entry_conv_spec =
+      generator->register_allocator->calling_convention;
+  if (!entry_conv_spec) {
+    code_generator_set_error(
+        generator, "No calling convention configured for entry point");
+    return 0;
+  }
+
+  // Determine the first integer parameter register for runtime calls
+  const char *first_param_reg = "rdi"; // SysV default
+  if (entry_conv_spec->int_param_count > 0) {
+    const char *candidate = code_generator_get_register_name(
+        entry_conv_spec->int_param_registers[0]);
+    if (candidate) {
+      first_param_reg = candidate;
+    }
+  }
+
+  int is_ms_x64 = (entry_conv_spec->convention == CALLING_CONV_MS_X64);
+
   code_generator_emit(generator, "\n; Default program entry point\n");
-  code_generator_emit(generator, "global _start\n");
-  code_generator_emit(generator, "_start:\n");
-  code_generator_emit(generator, "    ; Initialize garbage collector runtime\n");
-  code_generator_emit(generator, "    mov rdi, rsp\n");
+  if (is_ms_x64) {
+    // Microsoft x64: use mainCRTStartup as entry symbol
+    code_generator_emit(generator, "global mainCRTStartup\n");
+    code_generator_emit(generator, "mainCRTStartup:\n");
+    code_generator_emit(generator,
+                        "    sub rsp, 40      ; Shadow space + alignment\n");
+  } else {
+    // System V: use _start as entry symbol
+    code_generator_emit(generator, "global _start\n");
+    code_generator_emit(generator, "_start:\n");
+  }
+
+  code_generator_emit(generator,
+                      "    ; Initialize garbage collector runtime\n");
+  if (is_ms_x64) {
+    // Anchor GC to the caller-visible stack top (before our 40-byte reserve).
+    code_generator_emit(generator, "    lea %s, [rsp + 40]\n", first_param_reg);
+  } else {
+    code_generator_emit(generator, "    mov %s, rsp\n", first_param_reg);
+  }
   code_generator_emit(generator, "    extern gc_init\n");
   code_generator_emit(generator, "    call gc_init\n");
 
@@ -327,9 +386,13 @@ int code_generator_generate_program(CodeGenerator *generator,
       if (!var_data || !var_data->name) {
         continue;
       }
+      if (var_data->is_extern) {
+        continue;
+      }
 
       int should_register = 0;
-      Symbol *symbol = symbol_table_lookup(generator->symbol_table, var_data->name);
+      Symbol *symbol =
+          symbol_table_lookup(generator->symbol_table, var_data->name);
       if (symbol && symbol->type) {
         switch (symbol->type->kind) {
         case TYPE_POINTER:
@@ -360,7 +423,8 @@ int code_generator_generate_program(CodeGenerator *generator,
         emitted_gc_root_extern = 1;
       }
 
-      code_generator_emit(generator, "    lea rdi, [%s + rip]\n", var_data->name);
+      code_generator_emit(generator, "    lea %s, [rel %s]\n",
+                          first_param_reg, var_data->name);
       code_generator_emit(generator, "    call gc_register_root\n");
     }
   }
@@ -368,17 +432,40 @@ int code_generator_generate_program(CodeGenerator *generator,
   if (has_main) {
     code_generator_emit(generator, "    ; Call user main function\n");
     code_generator_emit(generator, "    call main\n");
-    code_generator_emit(generator, "    push rax         ; Preserve main return code\n");
+    if (is_ms_x64) {
+      code_generator_emit(
+          generator, "    mov [rsp + 32], rax ; Preserve main return code\n");
+    } else {
+      code_generator_emit(generator,
+                          "    push rax         ; Preserve main return code\n");
+    }
     code_generator_emit(generator, "    extern gc_shutdown\n");
     code_generator_emit(generator, "    call gc_shutdown\n");
-    code_generator_emit(generator, "    pop rdi          ; Use main return as exit code\n");
+    if (is_ms_x64) {
+      code_generator_emit(
+          generator, "    mov %s, [rsp + 32] ; Use main return as exit code\n",
+          first_param_reg);
+    } else {
+      code_generator_emit(
+          generator, "    pop rdi          ; Use main return as exit code\n");
+    }
   } else {
     code_generator_emit(generator, "    extern gc_shutdown\n");
     code_generator_emit(generator, "    call gc_shutdown\n");
-    code_generator_emit(generator, "    mov rdi, 0       ; Default exit status\n");
+    code_generator_emit(generator,
+                        "    mov %s, 0       ; Default exit status\n",
+                        first_param_reg);
   }
-  code_generator_emit(generator, "    mov rax, 60    ; sys_exit\n");
-  code_generator_emit(generator, "    syscall\n");
+
+  if (is_ms_x64) {
+    // Windows: call ExitProcess from kernel32
+    code_generator_emit(generator, "    extern ExitProcess\n");
+    code_generator_emit(generator, "    call ExitProcess\n");
+  } else {
+    // Linux: use syscall to exit
+    code_generator_emit(generator, "    mov rax, 60    ; sys_exit\n");
+    code_generator_emit(generator, "    syscall\n");
+  }
 
   return generator->has_error ? 0 : 1;
 }
@@ -387,9 +474,9 @@ int code_generator_generate_program(CodeGenerator *generator,
 void code_generator_generate_statement(CodeGenerator *generator,
                                        ASTNode *statement);
 
-void code_generator_register_function_parameters(
-    CodeGenerator *generator, FunctionDeclaration *func_data,
-    int parameter_home_size) {
+void code_generator_register_function_parameters(CodeGenerator *generator,
+                                                 FunctionDeclaration *func_data,
+                                                 int parameter_home_size) {
   if (!generator || !func_data) {
     return;
   }
@@ -420,12 +507,12 @@ void code_generator_register_function_parameters(
     Symbol *param_symbol =
         symbol_table_lookup_current_scope(generator->symbol_table, param_name);
     if (!param_symbol) {
-      param_symbol = symbol_create(param_name, SYMBOL_PARAMETER, resolved_param_type);
-      if (!param_symbol || !symbol_table_declare(generator->symbol_table,
-                                                 param_symbol)) {
+      param_symbol =
+          symbol_create(param_name, SYMBOL_PARAMETER, resolved_param_type);
+      if (!param_symbol ||
+          !symbol_table_declare(generator->symbol_table, param_symbol)) {
         symbol_destroy(param_symbol);
-        code_generator_set_error(generator,
-                                 "Failed to register parameter '%s'",
+        code_generator_set_error(generator, "Failed to register parameter '%s'",
                                  param_name ? param_name : "<unnamed>");
         return;
       }
@@ -453,7 +540,8 @@ void code_generator_register_function_parameters(
       stack_offset += 8; // Assuming 8-byte parameters
     }
 
-    // Materialize all parameters into stable stack homes so '&param' is valid.
+    // Materialize all parameters into stable stack homes so '&param' is
+    // valid.
     int home_offset = (int)((i + 1) * 8);
     if (home_offset > parameter_home_size) {
       code_generator_set_error(generator,
@@ -466,7 +554,8 @@ void code_generator_register_function_parameters(
     param_symbol->data.variable.memory_offset = home_offset;
 
     if (is_in_register) {
-      const char *reg_name = code_generator_get_register_name((x86Register)register_id);
+      const char *reg_name =
+          code_generator_get_register_name((x86Register)register_id);
       if (!reg_name) {
         code_generator_set_error(generator,
                                  "Invalid register for parameter '%s'",
@@ -541,9 +630,8 @@ void code_generator_generate_function(CodeGenerator *generator,
   int parameter_home_size = 0;
   if (func_data->parameter_count > 0) {
     if (func_data->parameter_count > (size_t)(INT_MAX / 8)) {
-      code_generator_set_error(generator,
-                               "Too many parameters in function '%s'",
-                               func_data->name);
+      code_generator_set_error(
+          generator, "Too many parameters in function '%s'", func_data->name);
       symbol_table_exit_scope(generator->symbol_table);
       return;
     }
@@ -568,8 +656,8 @@ void code_generator_generate_function(CodeGenerator *generator,
                                                  var_decl->initializer);
             }
             if (!var_type) {
-              var_type =
-                  type_checker_get_type_by_name(generator->type_checker, "int64");
+              var_type = type_checker_get_type_by_name(generator->type_checker,
+                                                       "int64");
             }
 
             int var_size = 0;
@@ -733,7 +821,8 @@ void code_generator_generate_statement(CodeGenerator *generator,
       if (!loop_start || !loop_end)
         break;
 
-      if (!code_generator_push_control_labels(generator, loop_end, loop_start)) {
+      if (!code_generator_push_control_labels(generator, loop_end,
+                                              loop_start)) {
         free(loop_start);
         free(loop_end);
         break;
@@ -799,8 +888,8 @@ void code_generator_generate_statement(CodeGenerator *generator,
       code_generator_generate_expression(generator, for_data->condition);
       code_generator_emit(generator,
                           "    test rax, rax      ; Test for-loop condition\n");
-      code_generator_emit(generator,
-                          "    jz %s              ; Exit for-loop\n", loop_end);
+      code_generator_emit(generator, "    jz %s              ; Exit for-loop\n",
+                          loop_end);
     }
 
     code_generator_generate_statement(generator, for_data->body);
@@ -840,7 +929,8 @@ void code_generator_generate_statement(CodeGenerator *generator,
     }
 
     code_generator_generate_expression(generator, switch_data->expression);
-    code_generator_emit(generator, "    mov rbx, rax       ; Save switch value\n");
+    code_generator_emit(generator,
+                        "    mov r10, rax       ; Save switch value\n");
 
     char **case_labels = NULL;
     size_t case_count = switch_data->case_count;
@@ -861,7 +951,8 @@ void code_generator_generate_statement(CodeGenerator *generator,
 
     for (size_t i = 0; i < case_count; i++) {
       ASTNode *case_node = switch_data->cases ? switch_data->cases[i] : NULL;
-      CaseClause *case_clause = case_node ? (CaseClause *)case_node->data : NULL;
+      CaseClause *case_clause =
+          case_node ? (CaseClause *)case_node->data : NULL;
       case_labels[i] = code_generator_generate_label(generator, "case");
       if (!case_labels[i]) {
         code_generator_set_error(generator,
@@ -876,12 +967,11 @@ void code_generator_generate_statement(CodeGenerator *generator,
         long long value = 0;
         if (!code_generator_eval_integer_constant(case_clause->value, &value)) {
           code_generator_set_error(
-              generator,
-              "Case value must be a compile-time integer constant");
+              generator, "Case value must be a compile-time integer constant");
           break;
         }
 
-        code_generator_emit(generator, "    cmp rbx, %lld\n", value);
+        code_generator_emit(generator, "    cmp r10, %lld\n", value);
         code_generator_emit(generator, "    je %s\n", case_labels[i]);
       } else {
         code_generator_set_error(generator, "Malformed switch case");
@@ -901,7 +991,8 @@ void code_generator_generate_statement(CodeGenerator *generator,
       break;
     }
 
-    if (default_index != (size_t)-1 && case_labels && case_labels[default_index]) {
+    if (default_index != (size_t)-1 && case_labels &&
+        case_labels[default_index]) {
       code_generator_emit(generator, "    jmp %s\n",
                           case_labels[default_index]);
     } else {
@@ -910,8 +1001,10 @@ void code_generator_generate_statement(CodeGenerator *generator,
 
     for (size_t i = 0; i < case_count; i++) {
       ASTNode *case_node = switch_data->cases ? switch_data->cases[i] : NULL;
-      CaseClause *case_clause = case_node ? (CaseClause *)case_node->data : NULL;
-      if (!case_labels || !case_labels[i] || !case_clause || !case_clause->body) {
+      CaseClause *case_clause =
+          case_node ? (CaseClause *)case_node->data : NULL;
+      if (!case_labels || !case_labels[i] || !case_clause ||
+          !case_clause->body) {
         continue;
       }
       code_generator_emit(generator, "%s:\n", case_labels[i]);
@@ -940,7 +1033,8 @@ void code_generator_generate_statement(CodeGenerator *generator,
   } break;
 
   case AST_CONTINUE_STATEMENT: {
-    const char *continue_label = code_generator_current_continue_label(generator);
+    const char *continue_label =
+        code_generator_current_continue_label(generator);
     if (!continue_label) {
       code_generator_set_error(generator,
                                "'continue' used outside loop in codegen");
@@ -972,16 +1066,16 @@ void code_generator_generate_expression(CodeGenerator *generator,
         // Load float value into XMM0 register
         char *float_label = code_generator_generate_label(generator, "float");
         if (float_label) {
-          code_generator_emit(
-              generator,
-              "    movsd xmm0, [%s + rip]  ; Load float from memory\n",
-              float_label);
+          code_generator_emit(generator,
+                              "    movsd xmm0, [rel %s]  ; Load float from "
+                              "memory\n",
+                              float_label);
 
           // Add the float literal to the global data section
           code_generator_emit_to_global_buffer(generator, "%s:\n", float_label);
-          code_generator_emit_to_global_buffer(generator, "    dq 0x%016llx  ; float64: %f\n",
-                                *(long long *)&num_data->float_value,
-                                num_data->float_value);
+          code_generator_emit_to_global_buffer(
+              generator, "    dq 0x%016llx  ; float64: %f\n",
+              *(long long *)&num_data->float_value, num_data->float_value);
 
           free(float_label);
         }
@@ -1063,8 +1157,7 @@ void code_generator_generate_expression(CodeGenerator *generator,
       }
 
       // Call gc_alloc(alloc_size)
-      code_generator_emit(generator,
-                          "    mov rdi, %d      ; size in bytes\n",
+      code_generator_emit(generator, "    mov rdi, %d      ; size in bytes\n",
                           alloc_size);
       code_generator_emit(generator, "    extern gc_alloc\n");
       code_generator_emit(generator, "    call gc_alloc\n");
@@ -1081,4 +1174,3 @@ void code_generator_generate_expression(CodeGenerator *generator,
     break;
   }
 }
-

@@ -278,7 +278,13 @@ Token lexer_next_token(Lexer *lexer) {
     token.value[length] = '\0';
 
     // Check for keywords
-    if (strcmp(token.value, "var") == 0)
+    if (strcmp(token.value, "import") == 0)
+      token.type = TOKEN_IMPORT;
+    else if (strcmp(token.value, "extern") == 0)
+      token.type = TOKEN_EXTERN;
+    else if (strcmp(token.value, "export") == 0)
+      token.type = TOKEN_EXPORT;
+    else if (strcmp(token.value, "var") == 0)
       token.type = TOKEN_VAR;
     else if (strcmp(token.value, "function") == 0)
       token.type = TOKEN_FUNCTION;

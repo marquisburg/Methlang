@@ -1,0 +1,10 @@
+function main() -> int32 {
+  var x: int32 = 2;
+  switch (x) {
+    default:
+      x = x + 1;
+    default:
+      x = x + 2;
+  }
+  return x;
+}

@@ -1,0 +1,120 @@
+// MethASM Web Server - Full implementation in MethASM
+// Serves HTML on port 5000 using Winsock (Windows) via extern C calls.
+
+// Winsock externs
+extern function WSAStartup(wVersionRequested: int32, lpWSAData: uint8*) -> int32 = "WSAStartup";
+extern function WSACleanup() -> int32 = "WSACleanup";
+extern function socket(af: int32, type: int32, protocol: int32) -> int64 = "socket";
+extern function bind(s: int64, addr: SockAddrIn*, namelen: int32) -> int32 = "bind";
+extern function listen(s: int64, backlog: int32) -> int32 = "listen";
+extern function accept(s: int64, addr: uint8*, addrlen: uint8*) -> int64 = "accept";
+extern function recv(s: int64, buf: uint8*, len: int32, flags: int32) -> int32 = "recv";
+extern function send(s: int64, buf: uint8*, len: int32, flags: int32) -> int32 = "send";
+extern function closesocket(s: int64) -> int32 = "closesocket";
+extern function htons(hostshort: uint16) -> uint16 = "htons";
+extern function GetStdHandle(nStdHandle: int32) -> int64 = "GetStdHandle";
+extern function WriteFile(hFile: int64, lpBuffer: uint8*, nNumberOfBytesToWrite: uint32, lpNumberOfBytesWritten: uint8*, lpOverlapped: uint8*) -> int32 = "WriteFile";
+// sockaddr_in layout for Windows
+struct SockAddrIn {
+  sin_family: int16;
+  sin_port: uint16;
+  sin_addr: uint32;
+  sin_zero: uint8[8];
+}
+
+// Constants: AF_INET=2, SOCK_STREAM=1, INADDR_ANY=0
+// Port 5000
+
+var http_header: string = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n";
+var html_body: string = "<!DOCTYPE html><html><head><title>MethASM</title></head><body><h1>MethASM Web Server</h1><p>Running on port 5000</p></body></html>";
+var nl: string = "\r\n";
+var msg_wsa_fail: string = "Startup error: WSAStartup failed";
+var msg_socket_fail: string = "Startup error: socket() failed";
+var msg_bind_fail: string = "Startup error: bind() failed (port in use?)";
+var msg_listen_fail: string = "Startup error: listen() failed";
+var msg_started: string = "Server listening on http://localhost:5000";
+
+function log_line_parts(chars: cstring, len: int32) {
+  var out: int64 = GetStdHandle(-11);
+  if (out < 0) {
+    return;
+  }
+
+  WriteFile(out, chars, len, 0, 0);
+  WriteFile(out, nl.chars, nl.length, 0, 0);
+}
+
+function main() -> int32 {
+  var wsa: uint8[416];
+  var addr: SockAddrIn;
+  var listen_sock: int64 = 0;
+  var client: int64 = 0;
+  var result: int32 = 0;
+
+  // WSAStartup(MAKEWORD(2,2)=514, &wsa)
+  result = WSAStartup(514, &wsa[0]);
+  if (result != 0) {
+    log_line_parts(msg_wsa_fail.chars, msg_wsa_fail.length);
+    return 1;
+  }
+
+  // listen_sock = socket(AF_INET, SOCK_STREAM, 0)
+  listen_sock = socket(2, 1, 0);
+  if (listen_sock < 0) {
+    log_line_parts(msg_socket_fail.chars, msg_socket_fail.length);
+    WSACleanup();
+    return 1;
+  }
+
+  // addr.sin_family = AF_INET, addr.sin_port = htons(5000), addr.sin_addr = INADDR_ANY
+  addr.sin_family = 2;
+  addr.sin_port = htons(5000);
+  addr.sin_addr = 0;
+
+  // bind(listen_sock, &addr, 16)
+  result = bind(listen_sock, &addr, 16);
+  if (result != 0) {
+    log_line_parts(msg_bind_fail.chars, msg_bind_fail.length);
+    closesocket(listen_sock);
+    WSACleanup();
+    return 1;
+  }
+
+  // listen(listen_sock, 5)
+  result = listen(listen_sock, 5);
+  if (result != 0) {
+    log_line_parts(msg_listen_fail.chars, msg_listen_fail.length);
+    closesocket(listen_sock);
+    WSACleanup();
+    return 1;
+  }
+
+  log_line_parts(msg_started.chars, msg_started.length);
+
+  // Main accept loop
+  while (1) {
+    // client = accept(listen_sock, 0, 0)
+    client = accept(listen_sock, 0, 0);
+    if (client < 0) {
+      continue;
+    }
+
+    // Discard request (minimal - we don't parse HTTP)
+    var discard: uint8[1024];
+    var bytes_read: int32 = recv(client, &discard[0], 1024, 0);
+    if (bytes_read <= 0) {
+      closesocket(client);
+      continue;
+    }
+
+    // Send HTTP response (string.chars = pointer, string.length = size)
+    send(client, http_header.chars, http_header.length, 0);
+    send(client, html_body.chars, html_body.length, 0);
+
+    closesocket(client);
+  }
+
+  closesocket(listen_sock);
+  WSACleanup();
+  return 0;
+}

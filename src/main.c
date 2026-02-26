@@ -4,6 +4,7 @@
 #include "main.h"
 #include "ir/ir.h"
 #include "ir/ir_optimize.h"
+#include "semantic/import_resolver.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -247,6 +248,17 @@ int compile_file(const char *input_filename, const char *output_filename,
     } else {
       fprintf(stderr, "Parse error: %s\n",
               parser->error_message ? parser->error_message : "Unknown error");
+    }
+    result = 1;
+    goto cleanup;
+  }
+
+  // Resolve imports (flatten imported module ASTs into the main program)
+  if (!resolve_imports(program, input_filename, error_reporter)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Import resolution error\n");
     }
     result = 1;
     goto cleanup;

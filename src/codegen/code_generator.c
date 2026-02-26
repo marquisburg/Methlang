@@ -35,6 +35,9 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->has_error = 0;
   generator->error_message = NULL;
   generator->ir_program = NULL;
+  generator->extern_symbols = NULL;
+  generator->extern_symbol_count = 0;
+  generator->extern_symbol_capacity = 0;
 
   if (!generator->output_buffer || !generator->global_variables_buffer) {
     free(generator->output_buffer);
@@ -76,6 +79,12 @@ void code_generator_destroy(CodeGenerator *generator) {
     free(generator->current_function_name);
     free(generator->global_variables_buffer);
     free(generator->error_message);
+    if (generator->extern_symbols) {
+      for (size_t i = 0; i < generator->extern_symbol_count; i++) {
+        free(generator->extern_symbols[i]);
+      }
+    }
+    free(generator->extern_symbols);
     free(generator);
   }
 }
@@ -178,6 +187,126 @@ void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
 
 char *code_generator_get_output(CodeGenerator *generator) {
   return generator->output_buffer;
+}
+
+const char *code_generator_get_link_symbol_name(CodeGenerator *generator,
+                                                const char *symbol_name) {
+  if (!symbol_name || symbol_name[0] == '\0') {
+    return NULL;
+  }
+  if (!generator || !generator->symbol_table) {
+    return symbol_name;
+  }
+
+  Symbol *symbol = symbol_table_lookup(generator->symbol_table, symbol_name);
+  if (symbol && symbol->is_extern && symbol->link_name &&
+      symbol->link_name[0] != '\0') {
+    return symbol->link_name;
+  }
+  return symbol_name;
+}
+
+int code_generator_emit_extern_symbol(CodeGenerator *generator,
+                                      const char *symbol_name) {
+  if (!generator || !symbol_name || symbol_name[0] == '\0') {
+    return 0;
+  }
+
+  for (size_t i = 0; i < generator->extern_symbol_count; i++) {
+    if (generator->extern_symbols[i] &&
+        strcmp(generator->extern_symbols[i], symbol_name) == 0) {
+      return 1;
+    }
+  }
+
+  if (generator->extern_symbol_count >= generator->extern_symbol_capacity) {
+    size_t new_capacity = generator->extern_symbol_capacity == 0
+                              ? 8
+                              : generator->extern_symbol_capacity * 2;
+    char **new_items = realloc(generator->extern_symbols,
+                               new_capacity * sizeof(char *));
+    if (!new_items) {
+      code_generator_set_error(generator,
+                               "Out of memory while tracking extern symbols");
+      return 0;
+    }
+    generator->extern_symbols = new_items;
+    generator->extern_symbol_capacity = new_capacity;
+  }
+
+  generator->extern_symbols[generator->extern_symbol_count] =
+      strdup(symbol_name);
+  if (!generator->extern_symbols[generator->extern_symbol_count]) {
+    code_generator_set_error(generator,
+                             "Out of memory while storing extern symbol name");
+    return 0;
+  }
+  generator->extern_symbol_count++;
+  code_generator_emit(generator, "    extern %s\n", symbol_name);
+  return !generator->has_error;
+}
+
+int code_generator_emit_escaped_string_bytes(CodeGenerator *generator,
+                                             const char *value,
+                                             int include_null_terminator) {
+  if (!generator || !value) {
+    return 0;
+  }
+
+  code_generator_emit_to_global_buffer(generator, "    db ");
+
+  int emitted_component = 0;
+  int in_quoted_segment = 0;
+
+  const unsigned char *bytes = (const unsigned char *)value;
+  while (*bytes) {
+    unsigned char c = *bytes++;
+    int is_printable_safe = (c >= 32 && c <= 126 && c != '"' && c != '\\');
+
+    if (is_printable_safe) {
+      if (!in_quoted_segment) {
+        if (emitted_component) {
+          code_generator_emit_to_global_buffer(generator, ", ");
+        }
+        code_generator_emit_to_global_buffer(generator, "\"");
+        in_quoted_segment = 1;
+      }
+      code_generator_emit_to_global_buffer(generator, "%c", c);
+      emitted_component = 1;
+      continue;
+    }
+
+    if (in_quoted_segment) {
+      code_generator_emit_to_global_buffer(generator, "\"");
+      in_quoted_segment = 0;
+    }
+
+    if (emitted_component) {
+      code_generator_emit_to_global_buffer(generator, ", ");
+    }
+    code_generator_emit_to_global_buffer(generator, "%u", (unsigned int)c);
+    emitted_component = 1;
+  }
+
+  if (in_quoted_segment) {
+    code_generator_emit_to_global_buffer(generator, "\"");
+  }
+
+  if (include_null_terminator) {
+    if (emitted_component) {
+      code_generator_emit_to_global_buffer(generator, ", ");
+    }
+    code_generator_emit_to_global_buffer(generator, "0");
+    emitted_component = 1;
+  }
+
+  if (!emitted_component) {
+    // Empty non-terminated strings are still emitted as a zero byte.
+    code_generator_emit_to_global_buffer(generator, "0");
+  }
+
+  code_generator_emit_to_global_buffer(generator, "\n");
+  return !generator->has_error;
 }
 
 

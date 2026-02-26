@@ -44,10 +44,13 @@ This reduces silent failures and minimizes incorrect cascading diagnostics.
 - Functions and function calls
 - Function forward declarations (e.g. `function add(a: int32, b: int32) -> int32;`)
 - Function return type syntax with both `->` and `:`
+- External C function declarations with optional link names
+- External C global declarations with optional link names
 - Struct declarations
 - Struct member access and assignment
 - Struct methods and method calls (`obj.method(args)`)
 - Array and pointer indexing (`arr[i]`, `ptr[i]`) and indexed assignment
+- `cstring` alias type (`uint8*`)
 - `if` and `else`
 - `while`
 - `for`
@@ -73,6 +76,7 @@ This reduces silent failures and minimizes incorrect cascading diagnostics.
 - Duplicate `case` detection and default-clause uniqueness checks
 - Undefined symbol detection with source locations
 - Forward declaration signature compatibility checks in symbol resolution
+- Extern/non-extern redeclaration and link-name consistency checks
 
 ## Code Generation
 
@@ -86,7 +90,31 @@ This reduces silent failures and minimizes incorrect cascading diagnostics.
 - Code generation for `if`, `while`, `for`, and `switch` control flow
 - Nested control-flow label management for `break` and `continue`
 - `_start` entry emission that calls `main` when present
+- `extern <symbol>` emission for foreign function/global references
 - Hard failure on unresolved symbols or unsupported generation paths
+
+## C Interop (v1)
+
+MethASM supports call-into-C declarations for external functions and globals.
+
+Syntax:
+
+```masm
+extern function puts(msg: cstring) -> int32 = "puts";
+extern var errno_value: int32 = "errno";
+```
+
+Notes:
+
+- `= "symbol"` is optional; when omitted, the MethASM declaration name is used.
+- `cstring` is a built-in alias for `uint8*`.
+- `extern` declarations are top-level only.
+- Link-name suffixes (`= "..."`) are valid only on `extern` declarations.
+- `extern var` requires an explicit type and cannot have an initializer.
+- `import`/`export` behavior is unchanged in this milestone.
+- ABI follows the active target platform convention:
+  - Windows: Microsoft x64 ABI
+  - Linux/macOS: System V AMD64 ABI
 
 ## Intermediate Representation (IR)
 

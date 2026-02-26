@@ -1,0 +1,6 @@
+function main() -> int32 {
+    var msg: string = "Hello from string type!";
+    var len: uint64 = msg.length;
+    var chrs: uint8* = msg.chars;
+    return 0;
+}

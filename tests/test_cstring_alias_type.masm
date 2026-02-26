@@ -1,0 +1,17 @@
+function identity_ptr(p: uint8*) -> uint8* {
+  return p;
+}
+
+function identity_cstr(p: cstring) -> cstring {
+  return p;
+}
+
+function main() -> int32 {
+  var a: cstring = 0;
+  var b: uint8* = identity_ptr(a);
+  var c: cstring = identity_cstr(b);
+  if (c == 0) {
+    return 0;
+  }
+  return 1;
+}

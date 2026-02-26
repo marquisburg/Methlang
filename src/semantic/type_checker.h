@@ -29,6 +29,7 @@ typedef struct {
     Type* builtin_float32;
     Type* builtin_float64;
     Type* builtin_string;
+    Type* builtin_cstring;
     Type* builtin_void;
     Symbol* current_function;
     int loop_depth;

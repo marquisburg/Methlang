@@ -4,11 +4,8 @@
 section .text
 ; Code section
 
-; First pass: processing 2 declarations
-; Declaration 0 type: 3 (AST_INLINE_ASM = 10)
-; Declaration 1 type: 2 (AST_INLINE_ASM = 10)
-    ; Struct declaration: Vector3
-    ; Struct Vector3: size=12, alignment=4
+; First pass: processing 1 declarations
+; Declaration 0 type: 2 (AST_INLINE_ASM = 15)
 
 global main
 
@@ -21,89 +18,57 @@ main:
     push r13         ; Save callee-saved register
     push r14         ; Save callee-saved register
     push r15         ; Save callee-saved register
-    sub $16, %rsp    ; Allocate 16 bytes on stack (aligned)
+    sub rsp, 224    ; Allocate 224 bytes on stack (aligned)
     ; Zero-initialize local variable space
-    mov %rsp, %rdi  ; Destination for memset
-    mov $0, %rax     ; Value to set (zero)
-    mov $16, %rcx    ; Number of bytes
+    mov rdi, rsp  ; Destination for memset
+    mov rax, 0     ; Value to set (zero)
+    mov rcx, 224    ; Number of bytes
     rep stosb         ; Zero-fill the stack space
-    ; Initialize Garbage Collector
-    mov rdi, rbp
-    extern gc_init
-    call gc_init
-
     ; Registering 0 function parameters
     ; Added 8 bytes padding for 16-byte alignment
-    ; Local variable: v1 (unknown, 8 bytes) at offset -8
-    ; Field assignment: .x = ...
-    ; Integer literal: 10
-    mov rax, 10
-    push rax           ; Save value
-    ; Load variable: v1
-    ; Warning: Variable v1 not found in symbol table
-    mov rax, 0        ; Default to 0
-    ; Warning: Could not determine field offset for x
-    pop rcx            ; Restore value
-    mov [rax], rcx     ; Store value to field
-    ; Field assignment: .y = ...
-    ; Integer literal: 20
-    mov rax, 20
-    push rax           ; Save value
-    ; Load variable: v1
-    ; Warning: Variable v1 not found in symbol table
-    mov rax, 0        ; Default to 0
-    ; Warning: Could not determine field offset for y
-    add rax, 8       ; Add field offset
-    pop rcx            ; Restore value
-    mov [rax], rcx     ; Store value to field
     ; Added 8 bytes padding for 16-byte alignment
-    ; Local variable: v2 (unknown, 8 bytes) at offset -24
-    ; Field assignment: .z = ...
-    ; Integer literal: 30
-    mov rax, 30
-    push rax           ; Save value
-    ; Load variable: v2
-    ; Warning: Variable v2 not found in symbol table
-    mov rax, 0        ; Default to 0
-    ; Warning: Could not determine field offset for z
-    add rax, 16       ; Add field offset
-    pop rcx            ; Restore value
-    mov [rax], rcx     ; Store value to field
-    ; Return statement
-    ; Binary operation: +
-    ; Binary operation: +
-    ; Member access: .x
-    ; Load variable: v1
-    ; Warning: Variable v1 not found in symbol table
-    mov rax, 0        ; Default to 0
-    ; Warning: Could not determine field offset for x
-    ; Field offset for x: 0
-    mov rax, [rax]    ; Load field value
-    push rax           ; Save left operand
-    ; Member access: .y
-    ; Load variable: v1
-    ; Warning: Variable v1 not found in symbol table
-    mov rax, 0        ; Default to 0
-    ; Warning: Could not determine field offset for y
-    ; Field offset for y: 8
-    add rax, 8       ; Add field offset
-    mov rax, [rax]    ; Load field value
-    mov rbx, rax     ; Move right operand to RBX
-    pop rax            ; Restore left operand
-    add rax, rbx      ; + operation
-    push rax           ; Save left operand
-    ; Member access: .z
-    ; Load variable: v2
-    ; Warning: Variable v2 not found in symbol table
-    mov rax, 0        ; Default to 0
-    ; Warning: Could not determine field offset for z
-    ; Field offset for z: 16
-    add rax, 16       ; Add field offset
-    mov rax, [rax]    ; Load field value
-    mov rbx, rax     ; Move right operand to RBX
-    pop rax            ; Restore left operand
-    add rax, rbx      ; + operation
-    ; Return value in %rax
+    ; Added 8 bytes padding for 16-byte alignment
+    ; Added 8 bytes padding for 16-byte alignment
+    ; Added 8 bytes padding for 16-byte alignment
+    ; Added 8 bytes padding for 16-byte alignment
+    ; Added 8 bytes padding for 16-byte alignment
+    ; Added 8 bytes padding for 16-byte alignment
+ir_entry_0:
+    ; String literal: "Hello from string type!"
+    lea rax, [Lstr_struct1 + rip]  ; Load string struct address
+    ; Store to variable: msg
+    mov [rbp - 16], rax  ; To stack [rbp - 16]
+    lea rax, [rbp - 16]
+    mov [rbp - 56], rax
+    mov rax, [rbp - 56]
+    push rax
+    mov rax, 8
+    mov rbx, rax
+    pop rax
+    add rax, rbx
+    mov [rbp - 72], rax
+    mov rax, [rbp - 72]
+    mov rax, qword [rax]
+    mov [rbp - 88], rax
+    mov rax, [rbp - 88]
+    ; Store to variable: len
+    mov [rbp - 24], rax  ; To stack [rbp - 24]
+    lea rax, [rbp - 16]
+    mov [rbp - 104], rax
+    mov rax, [rbp - 104]
+    push rax
+    mov rax, 0
+    mov rbx, rax
+    pop rax
+    add rax, rbx
+    mov [rbp - 120], rax
+    mov rax, [rbp - 120]
+    mov rax, qword [rax]
+    mov [rbp - 136], rax
+    mov rax, [rbp - 136]
+    ; Store to variable: chrs
+    mov [rbp - 40], rax  ; To stack [rbp - 40]
+    mov rax, 0
     jmp Lmain_exit
 Lmain_exit:
     ; Function epilogue
@@ -120,7 +85,15 @@ Lmain_exit:
 ; Default program entry point
 global _start
 _start:
-    ; Exit gracefully
+    ; Initialize garbage collector runtime
+    mov rdi, rsp
+    extern gc_init
+    call gc_init
+    ; Call user main function
+    call main
+    push rax         ; Preserve main return code
+    extern gc_shutdown
+    call gc_shutdown
+    pop rdi          ; Use main return as exit code
     mov rax, 60    ; sys_exit
-    mov rdi, 0     ; exit status
     syscall

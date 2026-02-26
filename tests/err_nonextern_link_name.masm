@@ -1,0 +1,5 @@
+function local_alias() -> int32 = "puts";
+
+function main() -> int32 {
+  return 0;
+}

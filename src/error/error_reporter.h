@@ -9,6 +9,7 @@ typedef enum {
   ERROR_SEMANTIC,
   ERROR_TYPE,
   ERROR_SCOPE,
+  ERROR_IO,
   ERROR_INTERNAL
 } ErrorType;
 

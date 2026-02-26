@@ -1,0 +1,12 @@
+function takes_i8(x: int8) -> int16 {
+  var y: int16 = x;
+  return y;
+}
+
+function main() -> int32 {
+  var a: uint16 = 511;
+  var b: int8 = a;
+  var c: int16 = b;
+  var d: int16 = takes_i8(a);
+  return c + d;
+}

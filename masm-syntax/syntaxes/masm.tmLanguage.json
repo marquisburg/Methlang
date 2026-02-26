@@ -1,0 +1,146 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "MethASM",
+  "scopeName": "source.masm",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.masm",
+          "match": "//.*$",
+          "captures": {
+            "0": { "name": "comment.line.double-slash.masm" }
+          }
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.masm",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.masm",
+              "match": "\\\\[\\\\\"nrt0]"
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.masm",
+          "match": "\\b(if|else|while|for|switch|case|default|break|continue|return)\\b"
+        },
+        {
+          "name": "keyword.declaration.masm",
+          "match": "\\b(extern|function|import|export|var|struct|method)\\b"
+        },
+        {
+          "name": "keyword.other.masm",
+          "match": "\\b(asm|this|new)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.primitive.masm",
+          "match": "\\b(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|string|cstring|void)\\b"
+        },
+        {
+          "name": "entity.name.type.masm",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*(?=\\s*[\\*\\{])"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.masm",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.masm",
+          "match": "\\b0[bB][01]+\\b"
+        },
+        {
+          "name": "constant.numeric.masm",
+          "match": "\\b[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.masm",
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.masm",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.comparison.masm",
+          "match": "==|!=|<=|>="
+        },
+        {
+          "name": "keyword.operator.comparison.masm",
+          "match": "<|>"
+        },
+        {
+          "name": "keyword.operator.assignment.masm",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.arithmetic.masm",
+          "match": "[+\\-*/%]"
+        },
+        {
+          "name": "keyword.operator.logical.masm",
+          "match": "&&|\\|\\|"
+        },
+        {
+          "name": "keyword.operator.bitwise.masm",
+          "match": "<<|>>|&|\\||\\^"
+        },
+        {
+          "name": "punctuation.separator.masm",
+          "match": "[:;,\\.]"
+        },
+        {
+          "name": "punctuation.definition.masm",
+          "match": "[{}\\[\\]()]"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.parameter.masm",
+          "match": "(?<=function\\s+\\w+\\s*\\()([a-zA-Z_][a-zA-Z0-9_]*)"
+        },
+        {
+          "name": "variable.other.member.masm",
+          "match": "(?<=\\.)[a-zA-Z_][a-zA-Z0-9_]*"
+        },
+        {
+          "name": "entity.name.function.masm",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,20 @@
+extern function GetStdHandle(nStdHandle: int32) -> int64 = "GetStdHandle";
+extern function WriteFile(hFile: int64, lpBuffer: uint8*, nNumberOfBytesToWrite: uint32, lpNumberOfBytesWritten: uint8*, lpOverlapped: uint8*) -> int32 = "WriteFile";
+
+var msg: string = "hello";
+var nl: string = "\r\n";
+
+function log_line_parts(chars: cstring, len: int32) {
+  var out: int64 = GetStdHandle(-11);
+  if (out < 0) {
+    return;
+  }
+
+  WriteFile(out, chars, len, 0, 0);
+  WriteFile(out, nl.chars, nl.length, 0, 0);
+}
+
+function main() -> int32 {
+  log_line_parts(msg.chars, msg.length);
+  return 0;
+}

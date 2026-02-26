@@ -12,11 +12,6 @@ typedef struct GCAllocation {
   // Payload follows immediately after this struct
 } GCAllocation;
 
-typedef struct GCRoot {
-  void **slot;
-  struct GCRoot *next;
-} GCRoot;
-
 typedef struct GCMarkStack {
   GCAllocation **items;
   size_t count;
@@ -25,7 +20,8 @@ typedef struct GCMarkStack {
 
 static void *g_stack_base = NULL;
 static GCAllocation *g_allocations = NULL;
-static GCRoot *g_roots = NULL;
+static void **g_root_slots[4096];
+static size_t g_root_count = 0;
 static size_t g_allocation_count = 0;
 static size_t g_allocated_bytes = 0;
 static uintptr_t g_heap_min = UINTPTR_MAX;
@@ -33,6 +29,31 @@ static uintptr_t g_heap_max = 0;
 static size_t g_collection_threshold = 1024 * 1024; // 1 MiB default
 static const size_t GC_MIN_COLLECTION_THRESHOLD = 4096;
 static int g_is_collecting = 0;
+
+static int gc_try_add_size(size_t a, size_t b, size_t *out) {
+  if (!out) {
+    return 0;
+  }
+  if (SIZE_MAX - a < b) {
+    return 0;
+  }
+  *out = a + b;
+  return 1;
+}
+
+static size_t gc_saturating_mul2_size(size_t value) {
+  if (value > (SIZE_MAX / 2)) {
+    return SIZE_MAX;
+  }
+  return value * 2;
+}
+
+static uintptr_t gc_saturating_add_uintptr(uintptr_t base, size_t delta) {
+  if (UINTPTR_MAX - base < delta) {
+    return UINTPTR_MAX;
+  }
+  return base + (uintptr_t)delta;
+}
 
 static void gc_mark_stack_destroy(GCMarkStack *stack) {
   if (!stack) {
@@ -50,6 +71,10 @@ static int gc_mark_stack_push(GCMarkStack *stack, GCAllocation *allocation) {
   }
   if (stack->count == stack->capacity) {
     size_t new_capacity = (stack->capacity == 0) ? 64 : stack->capacity * 2;
+    if (new_capacity < stack->capacity ||
+        new_capacity > (SIZE_MAX / sizeof(GCAllocation *))) {
+      return 0;
+    }
     GCAllocation **new_items = (GCAllocation **)realloc(
         stack->items, new_capacity * sizeof(GCAllocation *));
     if (!new_items) {
@@ -74,7 +99,7 @@ static GCAllocation *gc_find_allocation_containing(uintptr_t value) {
   GCAllocation *current = g_allocations;
   while (current) {
     uintptr_t payload_start = (uintptr_t)(current + 1);
-    uintptr_t payload_end = payload_start + current->size;
+    uintptr_t payload_end = gc_saturating_add_uintptr(payload_start, current->size);
     if (value >= payload_start && value < payload_end) {
       return current;
     }
@@ -90,7 +115,7 @@ static void gc_recompute_heap_bounds(void) {
 
   while (current) {
     uintptr_t start = (uintptr_t)(current + 1);
-    uintptr_t end = start + current->size;
+    uintptr_t end = gc_saturating_add_uintptr(start, current->size);
     if (start < min_addr) {
       min_addr = start;
     }
@@ -104,14 +129,20 @@ static void gc_recompute_heap_bounds(void) {
   g_heap_max = max_addr;
 }
 
-static void gc_maybe_collect_before_alloc(void) {
+static void gc_maybe_collect_before_alloc(size_t requested_size) {
   if (!g_stack_base) {
     return;
   }
   if (g_is_collecting) {
     return;
   }
-  if (g_allocated_bytes < g_collection_threshold) {
+
+  size_t projected_bytes = g_allocated_bytes;
+  if (!gc_try_add_size(projected_bytes, requested_size, &projected_bytes)) {
+    projected_bytes = SIZE_MAX;
+  }
+
+  if (projected_bytes < g_collection_threshold) {
     return;
   }
 
@@ -119,7 +150,16 @@ static void gc_maybe_collect_before_alloc(void) {
   gc_collect((void *)&sp_marker);
 
   // Adapt threshold to reduce repeated collections when heap is still large.
-  size_t next_threshold = g_allocated_bytes * 2;
+  // Also account for pending requested bytes to avoid collecting again
+  // immediately in the same allocation hot path.
+  size_t next_threshold = g_allocated_bytes;
+  if (!gc_try_add_size(next_threshold, requested_size, &next_threshold)) {
+    next_threshold = SIZE_MAX;
+  }
+  size_t doubled_live_bytes = gc_saturating_mul2_size(g_allocated_bytes);
+  if (doubled_live_bytes > next_threshold) {
+    next_threshold = doubled_live_bytes;
+  }
   if (next_threshold < GC_MIN_COLLECTION_THRESHOLD) {
     next_threshold = GC_MIN_COLLECTION_THRESHOLD;
   }
@@ -131,23 +171,17 @@ void gc_register_root(void **root_slot) {
     return;
   }
 
-  GCRoot *current = g_roots;
-  while (current) {
-    if (current->slot == root_slot) {
+  for (size_t i = 0; i < g_root_count; i++) {
+    if (g_root_slots[i] == root_slot) {
       return; // Already registered
     }
-    current = current->next;
   }
 
-  GCRoot *root = (GCRoot *)malloc(sizeof(GCRoot));
-  if (!root) {
-    fprintf(stderr, "Fatal error: Out of memory during gc_register_root\n");
+  if (g_root_count >= (sizeof(g_root_slots) / sizeof(g_root_slots[0]))) {
+    fprintf(stderr, "Fatal error: Exceeded maximum GC root slots\n");
     exit(1);
   }
-
-  root->slot = root_slot;
-  root->next = g_roots;
-  g_roots = root;
+  g_root_slots[g_root_count++] = root_slot;
 }
 
 void gc_unregister_root(void **root_slot) {
@@ -155,16 +189,13 @@ void gc_unregister_root(void **root_slot) {
     return;
   }
 
-  GCRoot **prev = &g_roots;
-  GCRoot *current = g_roots;
-  while (current) {
-    if (current->slot == root_slot) {
-      *prev = current->next;
-      free(current);
+  for (size_t i = 0; i < g_root_count; i++) {
+    if (g_root_slots[i] == root_slot) {
+      g_root_count--;
+      g_root_slots[i] = g_root_slots[g_root_count];
+      g_root_slots[g_root_count] = NULL;
       return;
     }
-    prev = &current->next;
-    current = current->next;
   }
 }
 
@@ -179,10 +210,21 @@ void *gc_alloc(size_t size) {
   if (size == 0)
     return NULL;
 
-  gc_maybe_collect_before_alloc();
+  gc_maybe_collect_before_alloc(size);
 
-  size_t total_size = sizeof(GCAllocation) + size;
+  size_t total_size = 0;
+  if (!gc_try_add_size(sizeof(GCAllocation), size, &total_size)) {
+    fprintf(stderr, "Fatal error: Allocation size overflow during gc_alloc\n");
+    exit(1);
+  }
+
   GCAllocation *alloc = (GCAllocation *)malloc(total_size);
+  if (!alloc && g_stack_base && !g_is_collecting) {
+    // Under memory pressure, attempt one collection and retry.
+    uintptr_t sp_marker = 0;
+    gc_collect((void *)&sp_marker);
+    alloc = (GCAllocation *)malloc(total_size);
+  }
   if (!alloc) {
     fprintf(stderr, "Fatal error: Out of memory during gc_alloc\n");
     exit(1);
@@ -191,15 +233,22 @@ void *gc_alloc(size_t size) {
   alloc->size = size;
   alloc->marked = 0;
 
+  size_t next_allocated_bytes = 0;
+  if (!gc_try_add_size(g_allocated_bytes, size, &next_allocated_bytes)) {
+    fprintf(stderr,
+            "Fatal error: allocated-byte accounting overflow during gc_alloc\n");
+    exit(1);
+  }
+
   // Prepend to tracking list
   alloc->next = g_allocations;
   g_allocations = alloc;
 
   g_allocation_count++;
-  g_allocated_bytes += size;
+  g_allocated_bytes = next_allocated_bytes;
 
   uintptr_t payload_start = (uintptr_t)(alloc + 1);
-  uintptr_t payload_end = payload_start + size;
+  uintptr_t payload_end = gc_saturating_add_uintptr(payload_start, size);
   if (payload_start < g_heap_min) {
     g_heap_min = payload_start;
   }
@@ -237,10 +286,34 @@ static void mark_pointer(void *ptr, GCMarkStack *stack) {
   }
 }
 
+static void gc_scan_words(uintptr_t start, uintptr_t end_exclusive,
+                          GCMarkStack *stack) {
+  if (start >= end_exclusive) {
+    return;
+  }
+
+  uintptr_t aligned_start =
+      (start + (sizeof(void *) - 1)) & ~(uintptr_t)(sizeof(void *) - 1);
+  if (aligned_start >= end_exclusive) {
+    return;
+  }
+  if ((end_exclusive - aligned_start) < sizeof(void *)) {
+    return;
+  }
+
+  void **scan_ptr = (void **)aligned_start;
+  while ((uintptr_t)scan_ptr <= (end_exclusive - sizeof(void *))) {
+    mark_pointer(*scan_ptr, stack);
+    scan_ptr++;
+  }
+}
+
 void gc_collect(void *current_rsp) {
   if (!g_stack_base || !current_rsp)
     return;
   if (g_is_collecting)
+    return;
+  if (!g_allocations)
     return;
 
   g_is_collecting = 1;
@@ -266,32 +339,23 @@ void gc_collect(void *current_rsp) {
 
   // 2. MARK PHASE (Conservative stack scanning)
   // Mark registered explicit roots first (globals, external runtime roots).
-  GCRoot *root = g_roots;
-  while (root) {
-    if (root->slot) {
-      mark_pointer(*root->slot, &mark_stack);
+  for (size_t i = 0; i < g_root_count; i++) {
+    void **slot = g_root_slots[i];
+    if (slot) {
+      mark_pointer(*slot, &mark_stack);
     }
-    root = root->next;
   }
 
   // Conservative stack scanning.
-  // Scan every aligned pointer-sized word on the stack
-  uintptr_t aligned_start =
-      (stack_start + (sizeof(void *) - 1)) & ~(uintptr_t)(sizeof(void *) - 1);
-  void **scan_ptr = (void **)aligned_start;
-  while ((uintptr_t)scan_ptr < stack_end) {
-    mark_pointer(*scan_ptr, &mark_stack);
-    scan_ptr++;
-  }
+  gc_scan_words(stack_start, stack_end, &mark_stack);
 
   // Traverse object graph from marked roots.
   GCAllocation *marked_allocation = NULL;
   while ((marked_allocation = gc_mark_stack_pop(&mark_stack)) != NULL) {
-    void **payload_ptrs = (void **)((void *)(marked_allocation + 1));
-    size_t pointer_slots = marked_allocation->size / sizeof(void *);
-    for (size_t i = 0; i < pointer_slots; i++) {
-      mark_pointer(payload_ptrs[i], &mark_stack);
-    }
+    uintptr_t payload_start = (uintptr_t)(marked_allocation + 1);
+    uintptr_t payload_end =
+        gc_saturating_add_uintptr(payload_start, marked_allocation->size);
+    gc_scan_words(payload_start, payload_end, &mark_stack);
   }
 
   gc_mark_stack_destroy(&mark_stack);
@@ -350,13 +414,10 @@ void gc_shutdown(void) {
 
   g_allocations = NULL;
 
-  GCRoot *root = g_roots;
-  while (root) {
-    GCRoot *next = root->next;
-    free(root);
-    root = next;
+  for (size_t i = 0; i < g_root_count; i++) {
+    g_root_slots[i] = NULL;
   }
-  g_roots = NULL;
+  g_root_count = 0;
 
   g_allocation_count = 0;
   g_allocated_bytes = 0;

@@ -11,6 +11,9 @@ typedef enum {
   TOKEN_STRING,
 
   // Enhanced syntax keywords
+  TOKEN_IMPORT,
+  TOKEN_EXTERN,
+  TOKEN_EXPORT,
   TOKEN_VAR,
   TOKEN_FUNCTION,
   TOKEN_STRUCT,

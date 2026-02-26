@@ -1,0 +1,9 @@
+// Module that exports only selected functions
+export function add(a: int64, b: int64) -> int64 {
+  return a + b
+}
+
+// This function is NOT exported — should be invisible to importers
+function internal_helper() -> int64 {
+  return 99
+}

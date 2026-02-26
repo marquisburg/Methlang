@@ -75,32 +75,35 @@ void code_generator_generate_function_call(CodeGenerator *generator,
       func_symbol->type) {
     return_type = func_symbol->type;
   }
+  const char *call_target =
+      code_generator_get_link_symbol_name(generator, call_data->function_name);
+  if (!call_target) {
+    code_generator_set_error(generator, "Invalid call target name");
+    return;
+  }
+  if (func_symbol && func_symbol->is_extern) {
+    if (!code_generator_emit_extern_symbol(generator, call_target)) {
+      return;
+    }
+  }
 
   // 1. Align stack for function call (x86-64 requires 16-byte alignment)
   code_generator_align_stack_for_call(generator, call_data->argument_count);
 
-  // 2. Save caller-saved registers that are NOT used for parameters
-  // Only save registers that are actually in use and not parameter registers
-  code_generator_save_caller_saved_registers_selective(generator);
-
-  // 3. Pass parameters according to calling convention
+  // 2. Pass parameters according to calling convention
   code_generator_generate_parameter_passing(generator, call_data->arguments,
                                             call_data->argument_count);
 
-  // 4. Generate the call instruction
-  code_generator_emit(generator, "    call %s\n", call_data->function_name);
+  // 3. Generate the call instruction
+  code_generator_emit(generator, "    call %s\n", call_target);
 
-  // 5. Clean up stack if needed (for parameters passed on stack)
+  // 4. Clean up stack if needed (for parameters passed on stack)
   code_generator_cleanup_stack_after_call(generator, call_data->arguments,
                                           call_data->argument_count);
 
-  // 6. Handle return value based on type
+  // 5. Handle return value based on type
   code_generator_handle_return_value(generator, return_type);
-
-  // 7. Restore caller-saved registers
-  code_generator_restore_caller_saved_registers_selective(generator);
-
-  // 8. Return value is now properly positioned
+  // 6. Return value is now properly positioned
   if (return_type && code_generator_is_floating_point_type(return_type)) {
     code_generator_emit(generator, "    ; Return value in xmm0 (float)\n");
   } else if (return_type && return_type->name &&
@@ -338,114 +341,22 @@ void code_generator_generate_parameter(CodeGenerator *generator,
 }
 
 void code_generator_save_caller_saved_registers(CodeGenerator *generator) {
-  if (!generator) {
-    return;
-  }
-
-  CallingConventionSpec *conv_spec =
-      generator->register_allocator->calling_convention;
-  if (!conv_spec) {
-    return;
-  }
-
-  code_generator_emit(generator,
-                      "    ; Save caller-saved registers (non-parameter)\n");
-
-  // Save only caller-saved registers that are NOT used for parameter passing
-  // In a full implementation, this would only save registers that are actually
-  // in use
-
-  // RAX is always caller-saved and not used for parameters (it's the return
-  // register)
-  code_generator_emit(generator, "    push rax\n");
-
-  // R10, R11 are caller-saved and not used for parameters in either calling
-  // convention
-  code_generator_emit(generator, "    push r10\n");
-  code_generator_emit(generator, "    push r11\n");
+  (void)generator;
 }
 
 void code_generator_restore_caller_saved_registers(CodeGenerator *generator) {
-  if (!generator) {
-    return;
-  }
-
-  code_generator_emit(generator,
-                      "    ; Restore caller-saved registers (non-parameter)\n");
-
-  // Restore in reverse order
-  code_generator_emit(generator, "    pop r11\n");
-  code_generator_emit(generator, "    pop r10\n");
-  code_generator_emit(generator, "    pop rax\n");
+  (void)generator;
 }
 
 // Selective register saving - only save registers that are actually in use
 void code_generator_save_caller_saved_registers_selective(
     CodeGenerator *generator) {
-  if (!generator) {
-    return;
-  }
-
-  CallingConventionSpec *conv_spec =
-      generator->register_allocator->calling_convention;
-  if (!conv_spec) {
-    return;
-  }
-
-  code_generator_emit(generator,
-                      "    ; Save caller-saved registers (selective)\n");
-
-  // Save caller-saved registers that are not used for parameter passing
-  // and are currently in use by the register allocator
-
-  // Always save RAX as it might contain a value and is not used for parameters
-  code_generator_emit(generator, "    push rax\n");
-
-  // Save R10, R11 which are caller-saved but not parameter registers
-  code_generator_emit(generator, "    push r10\n");
-  code_generator_emit(generator, "    push r11\n");
-
-  // For floating-point calls, save XMM registers that are caller-saved
-  // but not used for parameters (XMM8-XMM15 on System V, XMM4-XMM15 on Windows)
-  int float_param_regs = (int)conv_spec->float_param_count;
-  for (int i = float_param_regs; i < 8; i++) {
-    if (i >= 4 || conv_spec->convention == CALLING_CONV_SYSV) {
-      code_generator_emit(generator, "    sub rsp, 16\n");
-      code_generator_emit(generator,
-                          "    movdqu [rsp], xmm%d  ; Save XMM%d\n", i, i);
-    }
-  }
+  (void)generator;
 }
 
 void code_generator_restore_caller_saved_registers_selective(
     CodeGenerator *generator) {
-  if (!generator) {
-    return;
-  }
-
-  CallingConventionSpec *conv_spec =
-      generator->register_allocator->calling_convention;
-  if (!conv_spec) {
-    return;
-  }
-
-  code_generator_emit(generator,
-                      "    ; Restore caller-saved registers (selective)\n");
-
-  // Restore XMM registers in reverse order
-  int float_param_regs = (int)conv_spec->float_param_count;
-  for (int i = 7; i >= float_param_regs; i--) {
-    if (i >= 4 || conv_spec->convention == CALLING_CONV_SYSV) {
-      code_generator_emit(generator,
-                          "    movdqu xmm%d, [rsp]  ; Restore XMM%d\n", i, i);
-      code_generator_emit(generator, "    add rsp, 16\n");
-    }
-  }
-
-  // Restore general-purpose registers in reverse order
-  code_generator_emit(generator, "    pop r11\n");
-  code_generator_emit(generator, "    pop r10\n");
-  code_generator_emit(generator, "    pop rax\n");
+  (void)generator;
 }
 
 // Clean up stack after function call
@@ -554,24 +465,13 @@ void code_generator_align_stack_for_call(CodeGenerator *generator,
     return;
   }
 
-  // x86-64 ABI requires 16-byte stack alignment before function calls
-  // RSP must be 16-byte aligned when call instruction is executed
-
   CallingConventionSpec *conv_spec =
       generator->register_allocator->calling_convention;
   if (!conv_spec) {
     return;
   }
 
-  // Calculate how many parameters will be pushed on stack
-  int stack_params = 0;
-  if (param_count > (int)conv_spec->int_param_count) {
-    stack_params = param_count - (int)conv_spec->int_param_count;
-  }
-
-  // Account for caller-saved registers we're pushing (3 registers: rax, r10,
-  // r11)
-  int total_pushes = 3 + stack_params;
+  (void)param_count;
 
   // Add shadow space for Microsoft x64 calling convention
   if (conv_spec->convention == CALLING_CONV_MS_X64 &&
@@ -581,11 +481,6 @@ void code_generator_align_stack_for_call(CodeGenerator *generator,
                         conv_spec->shadow_space_size);
   }
 
-  // If total pushes results in misaligned stack, add padding
-  if ((total_pushes % 2) != 0) {
-    code_generator_emit(generator,
-                        "    sub rsp, 8       ; Align stack to 16 bytes\n");
-  }
 }
 
 // Helper function to infer expression type (simplified implementation)

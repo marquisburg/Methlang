@@ -1,0 +1,20 @@
+function main() -> int32 {
+  var acc: int32 = 0;
+  for (var i: int32 = 0; i < 6; i = i + 1) {
+    switch (i) {
+      case 0:
+        acc = acc + 10;
+        break;
+      case 1:
+        acc = acc + 10;
+        break;
+      case 2:
+        acc = acc + 3;
+        continue;
+      default:
+        acc = acc + i;
+    }
+  }
+
+  return acc;
+}

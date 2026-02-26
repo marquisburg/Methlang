@@ -1,0 +1,40 @@
+struct Node {
+  value: int32;
+}
+
+function add3(a: int32, b: int32, c: int32) -> int32 {
+  return a + b + c;
+}
+
+function main() -> int32 {
+  var arr: int32[5];
+  for (var i: int32 = 0; i < 5; i = i + 1) {
+    arr[i] = i * 2;
+  }
+
+  var n1: Node* = new Node;
+  var n2: Node* = new Node;
+  n1->value = arr[1] + arr[2];
+  n2->value = add3(arr[0], arr[3], arr[4]);
+
+  var p: int32* = &n1->value;
+  *p = *p + 1;
+
+  var score: int32 = 0;
+  var first: Node* = n1;
+  var second: Node* = n2;
+  while (first != 0) {
+    switch (first->value) {
+      case 7:
+        score = score + 70;
+        break;
+      default:
+        score = score + first->value;
+        break;
+    }
+    first = second;
+    second = 0;
+  }
+
+  return score;
+}

@@ -61,6 +61,8 @@ typedef struct Symbol {
   Scope *scope;
   int is_initialized;
   int is_forward_declaration; // For functions that are declared but not defined
+  int is_extern;              // For extern declarations (C interop)
+  char *link_name;            // Link-time symbol name for extern declarations
   union {
     struct {
       int register_id;

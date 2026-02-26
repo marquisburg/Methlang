@@ -176,6 +176,36 @@ static int test_auto_collection_threshold(void) {
   return 1;
 }
 
+static int test_auto_collection_projected_threshold(void) {
+  gc_shutdown();
+  gc_set_collection_threshold(4096);
+#if defined(__GNUC__) || defined(__clang__)
+  gc_init(__builtin_frame_address(0));
+#else
+  volatile uintptr_t stack_base = 0;
+  gc_init((void *)&stack_base);
+#endif
+
+  allocate_temporary_unreachable(4000);
+  TEST_ASSERT(gc_get_allocation_count() == 1,
+              "expected one pre-threshold temporary allocation");
+
+  scrub_stack_words();
+  volatile void *live = gc_alloc(200);
+  TEST_ASSERT(live != NULL, "second allocation failed");
+  TEST_ASSERT(gc_get_allocation_count() == 1,
+              "projected-threshold collection should reclaim unreachable blocks "
+              "before allocating");
+
+  live = NULL;
+  scrub_stack_words();
+  collect_from_here();
+  TEST_ASSERT(gc_get_allocation_count() <= 1,
+              "live allocation should become collectable after root is "
+              "cleared");
+  return 1;
+}
+
 static int test_explicit_registered_root(void) {
   gc_shutdown();
   gc_set_collection_threshold(1 << 20);
@@ -212,6 +242,7 @@ int main(void) {
   passed &= test_transitive_marking();
   passed &= test_interior_pointer_root();
   passed &= test_auto_collection_threshold();
+  passed &= test_auto_collection_projected_threshold();
   passed &= test_explicit_registered_root();
 
   gc_shutdown();

@@ -37,6 +37,9 @@ typedef struct {
     int has_error;
     char* error_message;
     IRProgram* ir_program;
+    char** extern_symbols;
+    size_t extern_symbol_count;
+    size_t extern_symbol_capacity;
 } CodeGenerator;
 
 // Function declarations

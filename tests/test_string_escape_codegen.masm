@@ -1,0 +1,5 @@
+var s: string = "line1\r\nline2\t\"q\"\\";
+
+function main() -> int32 {
+  return 0;
+}

@@ -1,0 +1,4 @@
+var msg: string = "hello";
+function main() -> int32 {
+  return 0;
+}

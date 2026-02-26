@@ -1,0 +1,28 @@
+{
+  "name": "masm-syntax",
+  "displayName": "MethASM Syntax Highlighting",
+  "description": "Syntax highlighting for MethASM (.masm) files",
+  "version": "0.1.0",
+  "publisher": "methasm",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "masm",
+        "aliases": ["MethASM", "masm"],
+        "extensions": [".masm"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "masm",
+        "scopeName": "source.masm",
+        "path": "./syntaxes/masm.tmLanguage.json"
+      }
+    ]
+  }
+}

@@ -6,6 +6,7 @@
 
 typedef enum {
   AST_PROGRAM,
+  AST_IMPORT,
   AST_VAR_DECLARATION,
   AST_FUNCTION_DECLARATION,
   AST_STRUCT_DECLARATION,
@@ -46,9 +47,15 @@ typedef struct ASTNode {
 } ASTNode;
 
 typedef struct {
+  char *module_name;
+} ImportDeclaration;
+
+typedef struct {
   char *name;
   char *type_name;
   ASTNode *initializer;
+  int is_extern;
+  char *link_name;
 } VarDeclaration;
 
 typedef struct {
@@ -58,6 +65,9 @@ typedef struct {
   size_t parameter_count;
   char *return_type;
   ASTNode *body;
+  int is_exported;
+  int is_extern;
+  char *link_name;
 } FunctionDeclaration;
 
 typedef struct {
@@ -67,6 +77,7 @@ typedef struct {
   size_t field_count;
   ASTNode **methods;
   size_t method_count;
+  int is_exported;
 } StructDeclaration;
 
 typedef struct {
@@ -173,6 +184,8 @@ void ast_add_child(ASTNode *parent, ASTNode *child);
 
 // Specific node creation functions
 ASTNode *ast_create_program();
+ASTNode *ast_create_import_declaration(const char *module_name,
+                                       SourceLocation location);
 ASTNode *ast_create_var_declaration(const char *name, const char *type_name,
                                     ASTNode *initializer,
                                     SourceLocation location);

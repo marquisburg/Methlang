@@ -5,14 +5,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void parser_report_lexer_token_error(Parser *parser, const Token *token) {
+static void parser_report_lexer_token_error(Parser *parser,
+                                            const Token *token) {
   if (!parser || !token || token->type != TOKEN_ERROR) {
     return;
   }
 
-  const char *message =
-      (token->value && token->value[0] != '\0') ? token->value
-                                                : "Invalid token";
+  const char *message = (token->value && token->value[0] != '\0')
+                            ? token->value
+                            : "Invalid token";
   char error_msg[512];
   snprintf(error_msg, sizeof(error_msg), "Lexical error: %s", message);
 
@@ -109,6 +110,12 @@ static const char *token_type_to_string(TokenType type) {
     return "number";
   case TOKEN_STRING:
     return "string";
+  case TOKEN_IMPORT:
+    return "'import'";
+  case TOKEN_EXTERN:
+    return "'extern'";
+  case TOKEN_EXPORT:
+    return "'export'";
   case TOKEN_VAR:
     return "'var'";
   case TOKEN_FUNCTION:
@@ -429,11 +436,56 @@ ASTNode *parser_parse_program(Parser *parser) {
   return program;
 }
 
+static ASTNode *parser_parse_extern_var_declaration(Parser *parser);
+
 ASTNode *parser_parse_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
   switch (parser->current_token.type) {
+  case TOKEN_IMPORT:
+    return parser_parse_import_declaration(parser);
+  case TOKEN_EXTERN: {
+    parser_advance(parser); // consume 'extern'
+    if (parser->current_token.type == TOKEN_FUNCTION) {
+      ASTNode *decl = parser_parse_function_declaration(parser);
+      if (decl && decl->data) {
+        FunctionDeclaration *func_data = (FunctionDeclaration *)decl->data;
+        if (func_data->body != NULL) {
+          parser_set_error(parser, "Extern functions must not have a body");
+          ast_destroy_node(decl);
+          return NULL;
+        }
+        func_data->is_extern = 1;
+      }
+      return decl;
+    }
+    if (parser->current_token.type == TOKEN_VAR) {
+      return parser_parse_extern_var_declaration(parser);
+    }
+    parser_set_error(parser, "Expected 'function' or 'var' after 'extern'");
+    return NULL;
+  }
+  case TOKEN_EXPORT: {
+    parser_advance(parser); // consume 'export'
+    ASTNode *decl = NULL;
+    if (parser->current_token.type == TOKEN_FUNCTION) {
+      decl = parser_parse_function_declaration(parser);
+      if (decl && decl->data) {
+        ((FunctionDeclaration *)decl->data)->is_exported = 1;
+      }
+    } else if (parser->current_token.type == TOKEN_STRUCT) {
+      decl = parser_parse_struct_declaration(parser);
+      if (decl && decl->data) {
+        ((StructDeclaration *)decl->data)->is_exported = 1;
+      }
+    } else {
+      parser_set_error(parser,
+                       "Expected 'function' or 'struct' after 'export'");
+      return NULL;
+    }
+    return decl;
+  }
   case TOKEN_VAR:
     return parser_parse_var_declaration(parser);
   case TOKEN_FUNCTION:
@@ -505,6 +557,8 @@ ASTNode *parser_parse_statement(Parser *parser) {
     return NULL;
 
   switch (parser->current_token.type) {
+  case TOKEN_EXTERN:
+    return parser_parse_declaration(parser);
   case TOKEN_VAR:
     return parser_parse_var_declaration(parser);
   case TOKEN_RETURN:
@@ -925,6 +979,125 @@ ASTNode *parser_parse_binary_expression(Parser *parser, int min_precedence) {
 // Placeholder implementations for specific parsing functions
 // These will be implemented in subsequent tasks
 
+ASTNode *parser_parse_import_declaration(Parser *parser) {
+  if (!parser)
+    return NULL;
+
+  SourceLocation location = {parser->current_token.line,
+                             parser->current_token.column};
+  parser_advance(parser); // consume 'import'
+
+  if (parser->current_token.type != TOKEN_STRING) {
+    parser_set_error(parser, "Expected string literal after 'import'");
+    return NULL;
+  }
+
+  char *module_name = strdup(parser->current_token.value);
+  parser_advance(parser); // consume string
+
+  if (!parser_expect_statement_end(parser)) {
+    free(module_name);
+    return NULL;
+  }
+
+  ASTNode *node = ast_create_import_declaration(module_name, location);
+  free(module_name);
+
+  return node;
+}
+
+static ASTNode *parser_parse_extern_var_declaration(Parser *parser) {
+  if (!parser) {
+    return NULL;
+  }
+
+  SourceLocation location = {parser->current_token.line,
+                             parser->current_token.column};
+  if (!parser_expect(parser, TOKEN_VAR)) {
+    return NULL;
+  }
+
+  if (!parser_is_identifier_like(parser->current_token.type)) {
+    parser_set_error(parser, "Expected variable name after 'extern var'");
+    return NULL;
+  }
+
+  char *var_name = strdup(parser->current_token.value);
+  parser_advance(parser);
+  if (!var_name) {
+    parser_set_error(parser, "Memory allocation failed");
+    return NULL;
+  }
+
+  if (parser->current_token.type != TOKEN_COLON) {
+    parser_set_error(parser,
+                     "Extern variable declarations require an explicit type");
+    free(var_name);
+    return NULL;
+  }
+  parser_advance(parser); // consume ':'
+
+  char *type_name = parser_parse_type_annotation(parser);
+  if (!type_name) {
+    free(var_name);
+    parser_set_error(parser, "Extern variable declarations require a type");
+    return NULL;
+  }
+
+  char *link_name = NULL;
+  if (parser->current_token.type == TOKEN_EQUALS) {
+    parser_advance(parser); // consume '='
+    if (parser->current_token.type != TOKEN_STRING) {
+      parser_set_error(
+          parser,
+          "Extern variable declarations cannot have an initializer; expected "
+          "string literal link name after '='");
+      free(var_name);
+      free(type_name);
+      return NULL;
+    }
+    link_name = strdup(parser->current_token.value);
+    parser_advance(parser);
+    if (!link_name) {
+      parser_set_error(parser, "Memory allocation failed for link name");
+      free(var_name);
+      free(type_name);
+      return NULL;
+    }
+  }
+
+  if (!parser_expect_statement_end(parser)) {
+    free(var_name);
+    free(type_name);
+    free(link_name);
+    return NULL;
+  }
+
+  ASTNode *var_decl =
+      ast_create_var_declaration(var_name, type_name, NULL, location);
+  free(var_name);
+  free(type_name);
+  if (!var_decl || !var_decl->data) {
+    free(link_name);
+    return var_decl;
+  }
+
+  VarDeclaration *var_data = (VarDeclaration *)var_decl->data;
+  var_data->is_extern = 1;
+  if (link_name) {
+    var_data->link_name = strdup(link_name);
+    if (!var_data->link_name) {
+      free(link_name);
+      ast_destroy_node(var_decl);
+      parser_set_error(parser, "Memory allocation failed for link name");
+      return NULL;
+    }
+  }
+  free(link_name);
+
+  return var_decl;
+}
+
 ASTNode *parser_parse_var_declaration(Parser *parser) {
   if (!parser)
     return NULL;
@@ -1118,6 +1291,7 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
 
   // Optional return type: '-> type' (or ': type' for compatibility)
   char *return_type = NULL;
+  char *link_name = NULL;
   if (parser->current_token.type == TOKEN_ARROW ||
       parser->current_token.type == TOKEN_COLON) {
     parser_advance(parser); // consume return separator
@@ -1135,6 +1309,37 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
       free(param_names);
       free(param_types);
       free(func_name);
+      free(link_name);
+      return NULL;
+    }
+  }
+
+  if (parser->current_token.type == TOKEN_EQUALS) {
+    parser_advance(parser); // consume '='
+    if (parser->current_token.type != TOKEN_STRING) {
+      parser_set_error(parser, "Expected string literal link name after '='");
+      for (size_t i = 0; i < param_count; i++) {
+        free(param_names[i]);
+        free(param_types[i]);
+      }
+      free(param_names);
+      free(param_types);
+      free(func_name);
+      free(return_type);
+      return NULL;
+    }
+    link_name = strdup(parser->current_token.value);
+    parser_advance(parser);
+    if (!link_name) {
+      parser_set_error(parser, "Memory allocation failed for link name");
+      for (size_t i = 0; i < param_count; i++) {
+        free(param_names[i]);
+        free(param_types[i]);
+      }
+      free(param_names);
+      free(param_types);
+      free(func_name);
+      free(return_type);
       return NULL;
     }
   }
@@ -1153,13 +1358,15 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
       free(param_types);
       free(func_name);
       free(return_type);
+      free(link_name);
       return NULL;
     }
   } else if (parser->current_token.type == TOKEN_SEMICOLON ||
              parser->current_token.type == TOKEN_NEWLINE) {
     parser_expect_statement_end(parser);
   } else {
-    parser_set_error(parser, "Expected function body ('{') or declaration terminator");
+    parser_set_error(parser,
+                     "Expected function body ('{') or declaration terminator");
     // Clean up
     for (size_t i = 0; i < param_count; i++) {
       free(param_names[i]);
@@ -1169,16 +1376,27 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
     free(param_types);
     free(func_name);
     free(return_type);
+    free(link_name);
     return NULL;
   }
 
   ASTNode *func_decl =
       ast_create_function_declaration(func_name, param_names, param_types,
                                       param_count, return_type, body, location);
+  if (func_decl && func_decl->data && link_name) {
+    FunctionDeclaration *func_data = (FunctionDeclaration *)func_decl->data;
+    func_data->link_name = strdup(link_name);
+    if (!func_data->link_name) {
+      ast_destroy_node(func_decl);
+      func_decl = NULL;
+      parser_set_error(parser, "Memory allocation failed for link name");
+    }
+  }
 
   // Clean up temporary strings
   free(func_name);
   free(return_type);
+  free(link_name);
   for (size_t i = 0; i < param_count; i++) {
     free(param_names[i]);
     free(param_types[i]);
@@ -1823,8 +2041,7 @@ ASTNode *parser_parse_switch_statement(Parser *parser) {
       parser_advance(parser);
       case_value = parser_parse_expression(parser);
       if (!case_value) {
-        parser_set_error(parser,
-                         "Expected constant expression after 'case'");
+        parser_set_error(parser, "Expected constant expression after 'case'");
         break;
       }
     } else if (parser->current_token.type == TOKEN_DEFAULT) {
@@ -2217,5 +2434,3 @@ ASTNode *parser_parse_method_declaration(Parser *parser) {
 
   return method_decl;
 }
-
-

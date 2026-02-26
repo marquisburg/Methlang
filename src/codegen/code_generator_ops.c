@@ -5,8 +5,9 @@
 static int code_generator_get_type_storage_size(Type *type);
 static void code_generator_emit_store_value_at_address(CodeGenerator *generator,
                                                        int element_size);
-static void code_generator_emit_load_value_from_address(CodeGenerator *generator,
-                                                        int element_size);
+static void
+code_generator_emit_load_value_from_address(CodeGenerator *generator,
+                                            int element_size);
 static int code_generator_generate_array_element_address(
     CodeGenerator *generator, ASTNode *array_expr, ASTNode *index_expr);
 static int code_generator_generate_lvalue_address(CodeGenerator *generator,
@@ -79,9 +80,8 @@ void code_generator_generate_binary_operation(CodeGenerator *generator,
         code_generator_emit(generator,
                             "    movzx rax, al     ; Zero-extend AL to RAX\n");
       } else {
-        code_generator_set_error(generator,
-                                 "Unsupported floating-point operator '%s'",
-                                 op);
+        code_generator_set_error(
+            generator, "Unsupported floating-point operator '%s'", op);
       }
     }
   } else {
@@ -92,7 +92,7 @@ void code_generator_generate_binary_operation(CodeGenerator *generator,
 
     code_generator_generate_expression(generator, right);
     code_generator_emit(generator,
-                        "    mov rbx, rax     ; Move right operand to RBX\n");
+                        "    mov r10, rax     ; Move right operand to R10\n");
 
     code_generator_emit(generator,
                         "    pop rax            ; Restore left operand\n");
@@ -104,22 +104,22 @@ void code_generator_generate_binary_operation(CodeGenerator *generator,
             generator,
             "    cqo                  ; Sign-extend RAX to RDX:RAX\n");
         code_generator_emit(generator,
-                            "    idiv rbx           ; Divide RDX:RAX by RBX\n");
+                            "    idiv r10           ; Divide RDX:RAX by R10\n");
       } else if (strcmp(op, "%") == 0) {
         code_generator_emit(
             generator,
             "    cqo                  ; Sign-extend RAX to RDX:RAX\n");
         code_generator_emit(generator,
-                            "    idiv rbx           ; Divide RDX:RAX by RBX\n");
+                            "    idiv r10           ; Divide RDX:RAX by R10\n");
         code_generator_emit(generator,
                             "    mov rax, rdx     ; Move remainder to RAX\n");
       } else {
-        code_generator_emit(generator, "    %s rax, rbx      ; %s operation\n",
+        code_generator_emit(generator, "    %s rax, r10      ; %s operation\n",
                             instruction, op);
       }
     } else {
       // Handle comparison and logical operators
-      code_generator_emit(generator, "    cmp rax, rbx     ; Compare\n");
+      code_generator_emit(generator, "    cmp rax, r10     ; Compare\n");
       const char *set_instruction = "nop";
       if (strcmp(op, "==") == 0)
         set_instruction = "sete";
@@ -141,14 +141,14 @@ void code_generator_generate_binary_operation(CodeGenerator *generator,
         code_generator_emit(generator,
                             "    movzx rax, al    ; Zero-extend AL to RAX\n");
       } else if (strcmp(op, "&&") == 0) {
-        code_generator_emit(generator, "    and rax, rbx     ; Logical AND\n");
+        code_generator_emit(generator, "    and rax, r10     ; Logical AND\n");
         code_generator_emit(
             generator,
             "    setne al           ; Set AL if result is not zero\n");
         code_generator_emit(generator,
                             "    movzx rax, al    ; Zero-extend AL to RAX\n");
       } else if (strcmp(op, "||") == 0) {
-        code_generator_emit(generator, "    or rax, rbx      ; Logical OR\n");
+        code_generator_emit(generator, "    or rax, r10      ; Logical OR\n");
         code_generator_emit(
             generator,
             "    setne al           ; Set AL if result is not zero\n");
@@ -176,7 +176,8 @@ void code_generator_generate_unary_operation(CodeGenerator *generator,
       return;
     }
   } else if (strcmp(op, "*") == 0) {
-    Type *operand_type = code_generator_infer_expression_type(generator, operand);
+    Type *operand_type =
+        code_generator_infer_expression_type(generator, operand);
     code_generator_generate_expression(generator, operand);
     if (generator->has_error) {
       return;
@@ -197,7 +198,8 @@ void code_generator_generate_unary_operation(CodeGenerator *generator,
       return;
     }
 
-    int element_size = code_generator_get_type_storage_size(operand_type->base_type);
+    int element_size =
+        code_generator_get_type_storage_size(operand_type->base_type);
     code_generator_emit_load_value_from_address(generator, element_size);
   } else {
     // Generate operand (result in RAX)
@@ -253,14 +255,16 @@ void code_generator_generate_assignment_statement(CodeGenerator *generator,
       return;
     }
 
-    code_generator_emit(generator, "    push rax           ; Save assigned value\n");
+    code_generator_emit(generator,
+                        "    push rax           ; Save assigned value\n");
     if (!code_generator_generate_lvalue_address(generator, assign_data->target,
                                                 &target_type)) {
       return;
     }
 
     if (!target_type) {
-      code_generator_set_error(generator, "Unable to resolve assignment target type");
+      code_generator_set_error(generator,
+                               "Unable to resolve assignment target type");
       return;
     }
     if (target_type->kind == TYPE_STRUCT || target_type->kind == TYPE_ARRAY) {
@@ -286,19 +290,39 @@ void code_generator_load_variable(CodeGenerator *generator,
   code_generator_emit(generator, "    ; Load variable: %s\n", variable_name);
 
   Symbol *symbol = symbol_table_lookup(generator->symbol_table, variable_name);
-  if (symbol && (symbol->kind == SYMBOL_VARIABLE || symbol->kind == SYMBOL_PARAMETER)) {
+  if (symbol &&
+      (symbol->kind == SYMBOL_VARIABLE || symbol->kind == SYMBOL_PARAMETER)) {
+    const char *resolved_name = variable_name;
+    if (symbol->is_extern) {
+      resolved_name =
+          code_generator_get_link_symbol_name(generator, variable_name);
+      if (!resolved_name) {
+        code_generator_set_error(generator,
+                                 "Invalid extern symbol name '%s'",
+                                 variable_name);
+        return;
+      }
+      if (!code_generator_emit_extern_symbol(generator, resolved_name)) {
+        return;
+      }
+    }
+
     if (symbol->type && symbol->type->kind == TYPE_ARRAY) {
       if (symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
         code_generator_emit(generator,
-                            "    lea rax, [%s + rip]  ; Array base address\n",
-                            variable_name);
+                            "    lea rax, [rel %s]  ; Array base address\n",
+                            resolved_name);
       } else {
         int offset = symbol->data.variable.memory_offset;
-        code_generator_emit(generator,
-                            "    lea rax, [rbp - %d]  ; Local array base\n",
-                            offset);
+        code_generator_emit(
+            generator, "    lea rax, [rbp - %d]  ; Local array base\n", offset);
       }
       return;
+    }
+
+    int value_size = 8;
+    if (symbol->type && symbol->type->size > 0 && symbol->type->size <= 8) {
+      value_size = (int)symbol->type->size;
     }
 
     if (symbol->data.variable.is_in_register) {
@@ -310,15 +334,47 @@ void code_generator_load_variable(CodeGenerator *generator,
       }
     } else {
       if (symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
-        code_generator_emit(generator,
-                            "    mov rax, [%s + rip]  ; From global memory\n",
-                            variable_name);
+        if (value_size == 1) {
+          code_generator_emit(
+              generator, "    movzx rax, byte [rel %s]  ; From global memory\n",
+              resolved_name);
+        } else if (value_size == 2) {
+          code_generator_emit(
+              generator, "    movzx rax, word [rel %s]  ; From global memory\n",
+              resolved_name);
+        } else if (value_size == 4) {
+          code_generator_emit(
+              generator, "    mov eax, dword [rel %s]  ; From global memory\n",
+              resolved_name);
+        } else {
+          code_generator_emit(
+              generator, "    mov rax, qword [rel %s]  ; From global memory\n",
+              resolved_name);
+        }
       } else {
         // Local variable or parameter on stack
         int offset = symbol->data.variable.memory_offset;
-        code_generator_emit(
-            generator, "    mov rax, [rbp - %d]  ; From stack [rbp - %d]\n",
-            offset, offset);
+        if (value_size == 1) {
+          code_generator_emit(generator,
+                              "    movzx rax, byte [rbp - %d]  ; From stack "
+                              "[rbp - %d]\n",
+                              offset, offset);
+        } else if (value_size == 2) {
+          code_generator_emit(generator,
+                              "    movzx rax, word [rbp - %d]  ; From stack "
+                              "[rbp - %d]\n",
+                              offset, offset);
+        } else if (value_size == 4) {
+          code_generator_emit(generator,
+                              "    mov eax, dword [rbp - %d]  ; From stack "
+                              "[rbp - %d]\n",
+                              offset, offset);
+        } else {
+          code_generator_emit(generator,
+                              "    mov rax, qword [rbp - %d]  ; From stack "
+                              "[rbp - %d]\n",
+                              offset, offset);
+        }
       }
     }
   } else {
@@ -339,12 +395,38 @@ void code_generator_store_variable(CodeGenerator *generator,
                       variable_name);
 
   Symbol *symbol = symbol_table_lookup(generator->symbol_table, variable_name);
-  if (symbol && (symbol->kind == SYMBOL_VARIABLE || symbol->kind == SYMBOL_PARAMETER)) {
+  if (symbol &&
+      (symbol->kind == SYMBOL_VARIABLE || symbol->kind == SYMBOL_PARAMETER)) {
+    const char *resolved_name = variable_name;
+    if (symbol->is_extern) {
+      resolved_name =
+          code_generator_get_link_symbol_name(generator, variable_name);
+      if (!resolved_name) {
+        code_generator_set_error(generator,
+                                 "Invalid extern symbol name '%s'",
+                                 variable_name);
+        return;
+      }
+      if (!code_generator_emit_extern_symbol(generator, resolved_name)) {
+        return;
+      }
+    }
+
     if (symbol->type && symbol->type->kind == TYPE_ARRAY) {
       code_generator_set_error(generator,
                                "Cannot assign directly to array variable '%s'",
                                variable_name);
       return;
+    }
+
+    int value_size = 8;
+    if (symbol->type && symbol->type->size > 0 && symbol->type->size <= 8) {
+      value_size = (int)symbol->type->size;
+    }
+
+    if (strcmp(source_reg, "rax") != 0) {
+      code_generator_emit(generator, "    mov rax, %s\n", source_reg);
+      source_reg = "rax";
     }
 
     if (symbol->data.variable.is_in_register) {
@@ -356,21 +438,50 @@ void code_generator_store_variable(CodeGenerator *generator,
       }
     } else {
       if (symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
-        code_generator_emit(generator,
-                            "    mov [%s + rip], %s  ; To global memory\n",
-                            variable_name, source_reg);
+        if (value_size == 1) {
+          code_generator_emit(
+              generator, "    mov byte [rel %s], al  ; To global memory\n",
+              resolved_name);
+        } else if (value_size == 2) {
+          code_generator_emit(
+              generator, "    mov word [rel %s], ax  ; To global memory\n",
+              resolved_name);
+        } else if (value_size == 4) {
+          code_generator_emit(
+              generator, "    mov dword [rel %s], eax  ; To global memory\n",
+              resolved_name);
+        } else {
+          code_generator_emit(
+              generator, "    mov qword [rel %s], rax  ; To global memory\n",
+              resolved_name);
+        }
       } else {
         // Local variable or parameter on stack
         int offset = symbol->data.variable.memory_offset;
-        code_generator_emit(generator,
-                            "    mov [rbp - %d], %s  ; To stack [rbp - %d]\n",
-                            offset, source_reg, offset);
+        if (value_size == 1) {
+          code_generator_emit(
+              generator, "    mov byte [rbp - %d], al  ; To stack [rbp - %d]\n",
+              offset, offset);
+        } else if (value_size == 2) {
+          code_generator_emit(
+              generator, "    mov word [rbp - %d], ax  ; To stack [rbp - %d]\n",
+              offset, offset);
+        } else if (value_size == 4) {
+          code_generator_emit(generator,
+                              "    mov dword [rbp - %d], eax  ; To stack [rbp - "
+                              "%d]\n",
+                              offset, offset);
+        } else {
+          code_generator_emit(generator,
+                              "    mov qword [rbp - %d], rax  ; To stack [rbp - "
+                              "%d]\n",
+                              offset, offset);
+        }
       }
     }
   } else {
-    code_generator_set_error(generator,
-                             "Cannot store to undefined variable '%s'",
-                             variable_name);
+    code_generator_set_error(
+        generator, "Cannot store to undefined variable '%s'", variable_name);
   }
 }
 void code_generator_load_string_literal(CodeGenerator *generator,
@@ -379,22 +490,40 @@ void code_generator_load_string_literal(CodeGenerator *generator,
     return;
   }
 
-  code_generator_emit(generator, "    ; String literal: \"%s\"\n",
-                      string_value);
+  code_generator_emit(generator, "    ; String literal (%zu bytes)\n",
+                      strlen(string_value));
 
   // Generate a unique label for this string
-  char *label = code_generator_generate_label(generator, "str");
-  if (label) {
+  char *label = code_generator_generate_label(generator, "str_chars");
+  char *label_struct = code_generator_generate_label(generator, "str_struct");
+  if (label && label_struct) {
     // Load string address into RAX
     code_generator_emit(
-        generator, "    lea rax, [%s + rip]  ; Load string address\n", label);
+        generator, "    lea rax, [rel %s]  ; Load string struct address\n",
+        label_struct);
 
     // Add string to global variables buffer for data section
     code_generator_emit_to_global_buffer(generator, "%s:\n", label);
-    code_generator_emit_to_global_buffer(generator, "    db \"%s\", 0\n", string_value);
+    if (!code_generator_emit_escaped_string_bytes(generator, string_value, 1)) {
+      free(label);
+      free(label_struct);
+      return;
+    }
+
+    code_generator_emit_to_global_buffer(generator, "    align 8\n");
+    code_generator_emit_to_global_buffer(generator, "%s:\n", label_struct);
+    code_generator_emit_to_global_buffer(generator, "    dq %s\n", label);
+    code_generator_emit_to_global_buffer(generator, "    dq %zu\n",
+                                         strlen(string_value));
     code_generator_emit_to_global_buffer(generator, "\n");
 
     free(label);
+    free(label_struct);
+  } else {
+    if (label)
+      free(label);
+    if (label_struct)
+      free(label_struct);
   }
 }
 
@@ -635,7 +764,8 @@ static int code_generator_get_type_storage_size(Type *type) {
   if (!type || type->size == 0) {
     return 8;
   }
-  if (type->size == 1 || type->size == 2 || type->size == 4 || type->size == 8) {
+  if (type->size == 1 || type->size == 2 || type->size == 4 ||
+      type->size == 8) {
     return (int)type->size;
   }
   return 8;
@@ -663,8 +793,9 @@ static void code_generator_emit_store_value_at_address(CodeGenerator *generator,
   }
 }
 
-static void code_generator_emit_load_value_from_address(CodeGenerator *generator,
-                                                        int element_size) {
+static void
+code_generator_emit_load_value_from_address(CodeGenerator *generator,
+                                            int element_size) {
   if (!generator) {
     return;
   }
@@ -691,20 +822,24 @@ static int code_generator_generate_array_element_address(
     return 0;
   }
 
-  Type *array_type = code_generator_infer_expression_type(generator, array_expr);
+  Type *array_type =
+      code_generator_infer_expression_type(generator, array_expr);
   if (!array_type ||
       (array_type->kind != TYPE_ARRAY && array_type->kind != TYPE_POINTER) ||
       !array_type->base_type) {
-    code_generator_set_error(generator, "Indexing requires an array or pointer");
+    code_generator_set_error(generator,
+                             "Indexing requires an array or pointer");
     return 0;
   }
 
-  int element_size = code_generator_get_type_storage_size(array_type->base_type);
+  int element_size =
+      code_generator_get_type_storage_size(array_type->base_type);
 
   code_generator_generate_expression(generator, array_expr);
   code_generator_emit(generator, "    push rax           ; Save array base\n");
   code_generator_generate_expression(generator, index_expr);
-  code_generator_emit(generator, "    pop rcx            ; Restore array base\n");
+  code_generator_emit(generator,
+                      "    pop rcx            ; Restore array base\n");
   if (element_size > 1) {
     code_generator_emit(generator, "    imul rax, rax, %d\n", element_size);
   }
@@ -735,8 +870,8 @@ static int code_generator_generate_lvalue_address(CodeGenerator *generator,
     Symbol *symbol = symbol_table_lookup(generator->symbol_table, id->name);
     if (!symbol ||
         (symbol->kind != SYMBOL_VARIABLE && symbol->kind != SYMBOL_PARAMETER)) {
-      code_generator_set_error(generator,
-                               "Undefined lvalue identifier '%s'", id->name);
+      code_generator_set_error(generator, "Undefined lvalue identifier '%s'",
+                               id->name);
       return 0;
     }
 
@@ -746,20 +881,30 @@ static int code_generator_generate_lvalue_address(CodeGenerator *generator,
 
     if (symbol->data.variable.is_in_register) {
       code_generator_set_error(
-          generator,
-          "Cannot take address of register-allocated variable '%s'", id->name);
+          generator, "Cannot take address of register-allocated variable '%s'",
+          id->name);
       return 0;
     }
 
     if (symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
+      const char *resolved_name =
+          code_generator_get_link_symbol_name(generator, id->name);
+      if (!resolved_name) {
+        code_generator_set_error(generator, "Invalid extern symbol name '%s'",
+                                 id->name);
+        return 0;
+      }
+      if (symbol->is_extern &&
+          !code_generator_emit_extern_symbol(generator, resolved_name)) {
+        return 0;
+      }
       code_generator_emit(generator,
-                          "    lea rax, [%s + rip]  ; Address of global\n",
-                          id->name);
+                          "    lea rax, [rel %s]  ; Address of global\n",
+                          resolved_name);
     } else {
       int offset = symbol->data.variable.memory_offset;
-      code_generator_emit(generator,
-                          "    lea rax, [rbp - %d]  ; Address of local\n",
-                          offset);
+      code_generator_emit(
+          generator, "    lea rax, [rbp - %d]  ; Address of local\n", offset);
     }
     return 1;
   }
@@ -776,18 +921,18 @@ static int code_generator_generate_lvalue_address(CodeGenerator *generator,
                                                 &object_type)) {
       return 0;
     }
-    if (!object_type || object_type->kind != TYPE_STRUCT) {
-      code_generator_set_error(generator,
-                               "Member access requires struct object");
+    if (!object_type || (object_type->kind != TYPE_STRUCT &&
+                         object_type->kind != TYPE_STRING)) {
+      code_generator_set_error(
+          generator, "Member access requires struct or string object");
       return 0;
     }
 
     int field_offset =
         code_generator_get_field_offset(generator, object_type, access->member);
     if (field_offset < 0) {
-      code_generator_set_error(generator,
-                               "Cannot determine field offset for '%s'",
-                               access->member);
+      code_generator_set_error(
+          generator, "Cannot determine field offset for '%s'", access->member);
       return 0;
     }
     if (field_offset > 0) {
@@ -808,7 +953,8 @@ static int code_generator_generate_lvalue_address(CodeGenerator *generator,
       return 0;
     }
 
-    Type *array_type = code_generator_infer_expression_type(generator, idx->array);
+    Type *array_type =
+        code_generator_infer_expression_type(generator, idx->array);
     if (!array_type ||
         (array_type->kind != TYPE_ARRAY && array_type->kind != TYPE_POINTER) ||
         !array_type->base_type) {
@@ -817,7 +963,8 @@ static int code_generator_generate_lvalue_address(CodeGenerator *generator,
       return 0;
     }
 
-    code_generator_generate_array_element_address(generator, idx->array, idx->index);
+    code_generator_generate_array_element_address(generator, idx->array,
+                                                  idx->index);
     if (generator->has_error) {
       return 0;
     }
@@ -836,7 +983,8 @@ static int code_generator_generate_lvalue_address(CodeGenerator *generator,
       return 0;
     }
 
-    Type *operand_type = code_generator_infer_expression_type(generator, unary->operand);
+    Type *operand_type =
+        code_generator_infer_expression_type(generator, unary->operand);
     if (!operand_type || operand_type->kind != TYPE_POINTER ||
         !operand_type->base_type) {
       code_generator_set_error(generator,
@@ -999,4 +1147,3 @@ int code_generator_calculate_struct_alignment(int field_size) {
     return 1;
   }
 }
-

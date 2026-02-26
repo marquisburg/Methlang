@@ -361,9 +361,11 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
         return 0;
       }
     }
-    if (!object_type || object_type->kind != TYPE_STRUCT) {
+    if (!object_type || (object_type->kind != TYPE_STRUCT &&
+                         object_type->kind != TYPE_STRING)) {
       ir_operand_destroy(&object_address);
-      ir_set_error(context, "Member access requires struct lvalue object");
+      ir_set_error(context,
+                   "Member access requires struct or string lvalue object");
       return 0;
     }
 
@@ -1555,6 +1557,27 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
   for (size_t i = 0; i < program_data->declaration_count; i++) {
     ASTNode *declaration = program_data->declarations[i];
     if (!declaration || declaration->type != AST_FUNCTION_DECLARATION) {
+      continue;
+    }
+    FunctionDeclaration *function_data = (FunctionDeclaration *)declaration->data;
+    if (!function_data) {
+      ir_set_error(&context, "Malformed function declaration");
+      ir_program_destroy(ir_program);
+      for (size_t j = 0; j < context.control_count; j++) {
+        free(context.control_stack[j].break_label);
+        free(context.control_stack[j].continue_label);
+      }
+      free(context.control_stack);
+      if (error_message) {
+        *error_message = context.error_message
+                             ? context.error_message
+                             : ir_strdup_local("Unknown IR lowering error");
+      } else {
+        free(context.error_message);
+      }
+      return NULL;
+    }
+    if (!function_data->body) {
       continue;
     }
 

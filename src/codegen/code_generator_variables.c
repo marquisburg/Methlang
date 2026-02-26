@@ -15,6 +15,12 @@ void code_generator_generate_global_variable(CodeGenerator *generator,
   if (!var_data || !var_data->name) {
     return;
   }
+  if (var_data->is_extern) {
+    const char *extern_name =
+        code_generator_get_link_symbol_name(generator, var_data->name);
+    code_generator_emit_extern_symbol(generator, extern_name);
+    return;
+  }
 
   // Add debug symbol for global variable
   if (generator->generate_debug_info) {
@@ -103,13 +109,23 @@ void code_generator_generate_global_variable(CodeGenerator *generator,
           if (str_label) {
             code_generator_emit_to_global_buffer(
                 generator, "    dq %s  ; Pointer to string data\n", str_label);
+            code_generator_emit_to_global_buffer(
+                generator, "    dq %zu  ; String length\n",
+                strlen(str->value));
             code_generator_emit_to_global_buffer(generator, "%s:\n", str_label);
-            code_generator_emit_to_global_buffer(generator, "    db \"%s\", 0\n", str->value);
+            if (!code_generator_emit_escaped_string_bytes(generator, str->value,
+                                                          1)) {
+              free(str_label);
+              return;
+            }
             free(str_label);
           }
         } else {
           // Direct string storage
-          code_generator_emit_to_global_buffer(generator, "    db \"%s\", 0\n", str->value);
+          if (!code_generator_emit_escaped_string_bytes(generator, str->value,
+                                                        1)) {
+            return;
+          }
         }
       }
     } else if (var_data->initializer->type == AST_IDENTIFIER) {
@@ -342,11 +358,31 @@ void code_generator_generate_variable_zero_initialization(
 
     if (symbol->type) {
       if (symbol->type->kind == TYPE_ARRAY && symbol->type->size > 0) {
-        code_generator_emit(generator, "    lea rdi, [rbp - %d]  ; Array start\n",
+        char *zero_loop = code_generator_generate_label(generator, "zero_loop");
+        char *zero_done = code_generator_generate_label(generator, "zero_done");
+        if (!zero_loop || !zero_done) {
+          free(zero_loop);
+          free(zero_done);
+          code_generator_set_error(generator,
+                                   "Failed to allocate labels for zero init");
+          return;
+        }
+
+        // Avoid clobbering non-volatile registers (e.g. rdi) during local
+        // array zero-initialization.
+        code_generator_emit(generator, "    lea rax, [rbp - %d]  ; Array start\n",
                             offset);
-        code_generator_emit(generator, "    xor eax, eax\n");
         code_generator_emit(generator, "    mov rcx, %zu\n", symbol->type->size);
-        code_generator_emit(generator, "    rep stosb\n");
+        code_generator_emit(generator, "    test rcx, rcx\n");
+        code_generator_emit(generator, "    jz %s\n", zero_done);
+        code_generator_emit(generator, "%s:\n", zero_loop);
+        code_generator_emit(generator, "    mov byte [rax], 0\n");
+        code_generator_emit(generator, "    inc rax\n");
+        code_generator_emit(generator, "    dec rcx\n");
+        code_generator_emit(generator, "    jnz %s\n", zero_loop);
+        code_generator_emit(generator, "%s:\n", zero_done);
+        free(zero_loop);
+        free(zero_done);
         return;
       }
 
@@ -476,17 +512,6 @@ int code_generator_allocate_stack_space(CodeGenerator *generator, int size,
 
   // Update the current stack offset
   generator->current_stack_offset = aligned_offset;
-
-  // Ensure stack remains 16-byte aligned for function calls
-  // This is important for x86-64 ABI compliance
-  int total_stack_used = aligned_offset;
-  if ((total_stack_used % 16) != 0) {
-    int padding = 16 - (total_stack_used % 16);
-    generator->current_stack_offset += padding;
-    code_generator_emit(generator,
-                        "    ; Added %d bytes padding for 16-byte alignment\n",
-                        padding);
-  }
 
   return aligned_offset;
 }

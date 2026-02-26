@@ -1,0 +1,11 @@
+function add {
+     0: label ir_entry_0
+     1: binary %t0 = @a + @b
+     2: return %t0
+}
+
+function circular_test {
+     0: label ir_entry_1
+     1: return 1
+}
+
