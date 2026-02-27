@@ -107,6 +107,28 @@ var b: Direction = East;
 
 Enums can be compared with integers and used in `switch` cases. They can be exported for use in other modules (see [Declarations](declarations.md)).
 
+## Generic Type Parameters
+
+Functions and structs can be generic. Type parameters are declared in angle brackets: `function f<T>(...)` or `struct S<T> { ... }`. Instantiation uses the same syntax: `f<int32>(args)` or `var x: Pair<int32, float64>`.
+
+```masm
+struct Pair<A, B> {
+  first: A;
+  second: B;
+}
+
+function identity<T>(x: T) -> T {
+  return x;
+}
+
+var p: Pair<int32, int32>;           // struct instantiation
+var n: int32 = identity<int32>(42);  // function call with type args
+```
+
+The compiler performs **monomorphization** before type checking: each unique instantiation becomes a concrete type or function. There is no runtime generics; all type parameters are resolved at compile time.
+
+**Constraints:** Type parameters are unconstrained. Operations inside generic bodies must be valid for all possible type arguments. For example, `a + b` in `function add<T>(a: T, b: T) -> T` requires that `T` supports `+`; the type checker validates this when the generic is instantiated.
+
 ## Type Conversions
 
 Widening conversions (e.g. `int32` to `int64`, `float32` to `float64`) are implicit. Narrowing conversions (e.g. `int32` to `int16`, `int64` to `int8`) are allowed implicitly for integer-to-integer and float-to-float. There is no implicit conversion between integers and floats, or between pointers and integers, except that `0` is valid as a null pointer initializer and in pointer comparisons.

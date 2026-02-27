@@ -12,8 +12,13 @@ Expressions produce values. They appear in initializers, assignments, function a
 | 4 | Additive `+`, `-` | `a + b`, `a - b` |
 | 5 | Relational `<`, `<=`, `>`, `>=` | `a < b` |
 | 6 | Equality `==`, `!=` | `a == b` |
+| 7 | Bitwise AND `&` | `a & b` |
+| 8 | Bitwise XOR `^` | `a ^ b` |
+| 9 | Bitwise OR `\|` | `a \| b` |
+| 10 | Logical AND `&&` | `a && b` |
+| 11 | Logical OR `\|\|` | `a \|\| b` |
 
-Use parentheses to clarify or override. Bitwise and logical operators are not supported; see [Lexical Structure](lexical-structure.md).
+Bitwise shifts (`<<`, `>>`) and complement (`~`) follow multiplicative/additive precedence. Use parentheses to clarify or override.
 
 ## Literals
 
@@ -54,7 +59,7 @@ a >= b
 
 **Modulo:** The modulo operator `%` is not supported. Use a helper or inline logic for remainder operations. See [Lexical Structure](lexical-structure.md).
 
-**Bitwise operators:** Bitwise AND (`&`), OR (`|`), XOR (`^`), complement (`~`), and shifts (`<<`, `>>`) are not supported. The `&` token is used only for address-of (unary). For bit manipulation, use inline assembly or C externs. This is a known limitation for systems programmers; see [Known Limitations](known-limitations.md).
+**Bitwise operators:** Bitwise AND (`&`), OR (`|`), XOR (`^`), complement (`~`), and shifts (`<<`, `>>`) are supported for integer types. Unary `&` is address-of; binary `&` is bitwise AND. Context disambiguates.
 
 **Logical operators:** Short-circuit logical AND (`&&`) and OR (`||`) are supported.
 

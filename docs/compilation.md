@@ -14,6 +14,19 @@ The input file is the main source file. Imports are resolved relative to it. The
 
 `-o <file>` output assembly file (default `output.s`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default `stdlib`). `--prelude` auto-import `std/prelude`. `-d`/`--debug` debug mode. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-O`/`--optimize` enable optimizations. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
 
+## Compilation Pipeline
+
+The compiler runs these phases in order:
+
+1. **Lexing** — tokenize source
+2. **Parsing** — build AST
+3. **Import resolution** — resolve and inline `import` directives
+4. **Monomorphization** — expand generic functions and structs into concrete instantiations
+5. **Type checking** — semantic analysis and symbol resolution
+6. **IR lowering** — convert AST to intermediate representation
+7. **Optimization** (optional, `-O`) — constant folding and other passes
+8. **Code generation** — emit x86-64 assembly
+
 ## Build Pipeline
 
 1. Compile: `methasm main.masm -o main.s`

@@ -4,7 +4,7 @@
 section .text
 ; Code section
 
-; First pass: processing 225 declarations
+; First pass: processing 229 declarations
 ; Declaration 0 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 1 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 2 type: 4 (AST_INLINE_ASM = 20)
@@ -68,12 +68,12 @@ section .text
 ; Declaration 60 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 61 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 62 type: 4 (AST_INLINE_ASM = 20)
-; Declaration 63 type: 3 (AST_INLINE_ASM = 20)
-; Declaration 64 type: 3 (AST_INLINE_ASM = 20)
+; Declaration 63 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 64 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 65 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 66 type: 4 (AST_INLINE_ASM = 20)
-; Declaration 67 type: 4 (AST_INLINE_ASM = 20)
-; Declaration 68 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 67 type: 3 (AST_INLINE_ASM = 20)
+; Declaration 68 type: 3 (AST_INLINE_ASM = 20)
 ; Declaration 69 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 70 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 71 type: 4 (AST_INLINE_ASM = 20)
@@ -141,10 +141,10 @@ section .text
 ; Declaration 133 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 134 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 135 type: 4 (AST_INLINE_ASM = 20)
-; Declaration 136 type: 3 (AST_INLINE_ASM = 20)
-; Declaration 137 type: 3 (AST_INLINE_ASM = 20)
-; Declaration 138 type: 3 (AST_INLINE_ASM = 20)
-; Declaration 139 type: 3 (AST_INLINE_ASM = 20)
+; Declaration 136 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 137 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 138 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 139 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 140 type: 3 (AST_INLINE_ASM = 20)
 ; Declaration 141 type: 3 (AST_INLINE_ASM = 20)
 ; Declaration 142 type: 3 (AST_INLINE_ASM = 20)
@@ -206,21 +206,21 @@ section .text
 ; Declaration 198 type: 3 (AST_INLINE_ASM = 20)
 ; Declaration 199 type: 3 (AST_INLINE_ASM = 20)
 ; Declaration 200 type: 3 (AST_INLINE_ASM = 20)
-; Declaration 201 type: 4 (AST_INLINE_ASM = 20)
-; Declaration 202 type: 4 (AST_INLINE_ASM = 20)
-; Declaration 203 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 201 type: 3 (AST_INLINE_ASM = 20)
+; Declaration 202 type: 3 (AST_INLINE_ASM = 20)
+; Declaration 203 type: 3 (AST_INLINE_ASM = 20)
 ; Declaration 204 type: 3 (AST_INLINE_ASM = 20)
-; Declaration 205 type: 3 (AST_INLINE_ASM = 20)
-; Declaration 206 type: 3 (AST_INLINE_ASM = 20)
-; Declaration 207 type: 3 (AST_INLINE_ASM = 20)
+; Declaration 205 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 206 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 207 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 208 type: 3 (AST_INLINE_ASM = 20)
 ; Declaration 209 type: 3 (AST_INLINE_ASM = 20)
 ; Declaration 210 type: 3 (AST_INLINE_ASM = 20)
 ; Declaration 211 type: 3 (AST_INLINE_ASM = 20)
-; Declaration 212 type: 4 (AST_INLINE_ASM = 20)
-; Declaration 213 type: 4 (AST_INLINE_ASM = 20)
-; Declaration 214 type: 4 (AST_INLINE_ASM = 20)
-; Declaration 215 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 212 type: 3 (AST_INLINE_ASM = 20)
+; Declaration 213 type: 3 (AST_INLINE_ASM = 20)
+; Declaration 214 type: 3 (AST_INLINE_ASM = 20)
+; Declaration 215 type: 3 (AST_INLINE_ASM = 20)
 ; Declaration 216 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 217 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 218 type: 4 (AST_INLINE_ASM = 20)
@@ -230,6 +230,10 @@ section .text
 ; Declaration 222 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 223 type: 4 (AST_INLINE_ASM = 20)
 ; Declaration 224 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 225 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 226 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 227 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 228 type: 4 (AST_INLINE_ASM = 20)
 
 section .text
     extern puts
@@ -1185,6 +1189,8 @@ LWAIT_FAILED_exit:
     extern Sleep
     extern CreateMutexA
     extern ReleaseMutex
+    extern gc_thread_attach
+    extern gc_thread_detach
     extern _InterlockedCompareExchange
     extern _InterlockedExchange
     extern _InterlockedIncrement
@@ -1382,6 +1388,66 @@ Lthread_sleep_ms_exit:
     pop rbp         ; Restore old base pointer
     ret               ; Return to caller
 
+global thread_gc_attach
+
+thread_gc_attach:
+    push rbp        ; Save old base pointer
+    mov rbp, rsp  ; Set new base pointer
+    sub rsp, 48    ; Allocate 48 bytes on stack (aligned)
+    ; Registering 0 function parameters
+ir_entry_84:
+    ; IR call: gc_thread_attach (0 args)
+    sub rsp, 32
+    call gc_thread_attach
+    add rsp, 32
+    ; Integer/pointer return value in rax
+    ; 32-bit return value already in eax
+    mov [rbp - 8], rax
+    mov rax, 0
+    mov [rbp - 16], rax
+    mov rax, [rbp - 16]
+    test rax, rax
+    jz ir_errdefer_ok_85
+    jmp ir_errdefer_end_86
+ir_errdefer_ok_85:
+ir_errdefer_end_86:
+    jmp Lthread_gc_attach_exit
+Lthread_gc_attach_exit:
+    ; Function epilogue
+    mov rsp, rbp  ; Restore stack pointer
+    pop rbp         ; Restore old base pointer
+    ret               ; Return to caller
+
+global thread_gc_detach
+
+thread_gc_detach:
+    push rbp        ; Save old base pointer
+    mov rbp, rsp  ; Set new base pointer
+    sub rsp, 48    ; Allocate 48 bytes on stack (aligned)
+    ; Registering 0 function parameters
+ir_entry_87:
+    ; IR call: gc_thread_detach (0 args)
+    sub rsp, 32
+    call gc_thread_detach
+    add rsp, 32
+    ; Integer/pointer return value in rax
+    ; 32-bit return value already in eax
+    mov [rbp - 8], rax
+    mov rax, 0
+    mov [rbp - 16], rax
+    mov rax, [rbp - 16]
+    test rax, rax
+    jz ir_errdefer_ok_88
+    jmp ir_errdefer_end_89
+ir_errdefer_ok_88:
+ir_errdefer_end_89:
+    jmp Lthread_gc_detach_exit
+Lthread_gc_detach_exit:
+    ; Function epilogue
+    mov rsp, rbp  ; Restore stack pointer
+    pop rbp         ; Restore old base pointer
+    ret               ; Return to caller
+
 global mutex_create
 
 mutex_create:
@@ -1389,7 +1455,7 @@ mutex_create:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 48    ; Allocate 48 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_84:
+ir_entry_90:
     ; IR call: CreateMutexA (3 args)
     sub rsp, 32
     mov rax, 0
@@ -1406,10 +1472,10 @@ ir_entry_84:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_errdefer_ok_85
-    jmp ir_errdefer_end_86
-ir_errdefer_ok_85:
-ir_errdefer_end_86:
+    jz ir_errdefer_ok_91
+    jmp ir_errdefer_end_92
+ir_errdefer_ok_91:
+ir_errdefer_end_92:
     mov rax, [rbp - 8]
     jmp Lmutex_create_exit
 Lmutex_create_exit:
@@ -1425,7 +1491,7 @@ mutex_create_owned:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 48    ; Allocate 48 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_87:
+ir_entry_93:
     ; IR call: CreateMutexA (3 args)
     sub rsp, 32
     mov rax, 0
@@ -1442,10 +1508,10 @@ ir_entry_87:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_errdefer_ok_88
-    jmp ir_errdefer_end_89
-ir_errdefer_ok_88:
-ir_errdefer_end_89:
+    jz ir_errdefer_ok_94
+    jmp ir_errdefer_end_95
+ir_errdefer_ok_94:
+ir_errdefer_end_95:
     mov rax, [rbp - 8]
     jmp Lmutex_create_owned_exit
 Lmutex_create_owned_exit:
@@ -1465,7 +1531,7 @@ mutex_lock:
     ; Parameter 'mutex' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'timeout_ms'
     ; Parameter 'timeout_ms' arrived in register rdx
-ir_entry_90:
+ir_entry_96:
     ; IR call: WaitForSingleObject (2 args)
     sub rsp, 32
     ; Load variable: mutex
@@ -1501,28 +1567,28 @@ ir_entry_90:
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_if_next_92
+    jz ir_if_next_98
     mov rax, 1
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_errdefer_ok_93
-    jmp ir_errdefer_end_94
-ir_errdefer_ok_93:
-ir_errdefer_end_94:
+    jz ir_errdefer_ok_99
+    jmp ir_errdefer_end_100
+ir_errdefer_ok_99:
+ir_errdefer_end_100:
     mov rax, 1
     jmp Lmutex_lock_exit
-    jmp ir_if_end_91
-ir_if_next_92:
-ir_if_end_91:
+    jmp ir_if_end_97
+ir_if_next_98:
+ir_if_end_97:
     mov rax, 0
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_errdefer_ok_95
-    jmp ir_errdefer_end_96
-ir_errdefer_ok_95:
-ir_errdefer_end_96:
+    jz ir_errdefer_ok_101
+    jmp ir_errdefer_end_102
+ir_errdefer_ok_101:
+ir_errdefer_end_102:
     mov rax, 0
     jmp Lmutex_lock_exit
 Lmutex_lock_exit:
@@ -1540,7 +1606,7 @@ mutex_lock_infinite:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'mutex'
     ; Parameter 'mutex' arrived in register rcx
-ir_entry_97:
+ir_entry_103:
     ; IR call: INFINITE (0 args)
     sub rsp, 32
     call INFINITE
@@ -1564,10 +1630,10 @@ ir_entry_97:
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_98
-    jmp ir_errdefer_end_99
-ir_errdefer_ok_98:
-ir_errdefer_end_99:
+    jz ir_errdefer_ok_104
+    jmp ir_errdefer_end_105
+ir_errdefer_ok_104:
+ir_errdefer_end_105:
     mov rax, [rbp - 24]
     jmp Lmutex_lock_infinite_exit
 Lmutex_lock_infinite_exit:
@@ -1585,7 +1651,7 @@ mutex_unlock:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'mutex'
     ; Parameter 'mutex' arrived in register rcx
-ir_entry_100:
+ir_entry_106:
     ; IR call: ReleaseMutex (1 args)
     sub rsp, 32
     ; Load variable: mutex
@@ -1600,10 +1666,10 @@ ir_entry_100:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_errdefer_ok_101
-    jmp ir_errdefer_end_102
-ir_errdefer_ok_101:
-ir_errdefer_end_102:
+    jz ir_errdefer_ok_107
+    jmp ir_errdefer_end_108
+ir_errdefer_ok_107:
+ir_errdefer_end_108:
     mov rax, [rbp - 16]
     jmp Lmutex_unlock_exit
 Lmutex_unlock_exit:
@@ -1621,7 +1687,7 @@ mutex_close:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'mutex'
     ; Parameter 'mutex' arrived in register rcx
-ir_entry_103:
+ir_entry_109:
     ; IR call: CloseHandle (1 args)
     sub rsp, 32
     ; Load variable: mutex
@@ -1636,10 +1702,10 @@ ir_entry_103:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_errdefer_ok_104
-    jmp ir_errdefer_end_105
-ir_errdefer_ok_104:
-ir_errdefer_end_105:
+    jz ir_errdefer_ok_110
+    jmp ir_errdefer_end_111
+ir_errdefer_ok_110:
+ir_errdefer_end_111:
     mov rax, [rbp - 16]
     jmp Lmutex_close_exit
 Lmutex_close_exit:
@@ -1661,7 +1727,7 @@ atomic_compare_exchange_i32:
     ; Parameter 'exchange' arrived in register rdx
     mov [rbp - 24], r8  ; Home param 'comparand'
     ; Parameter 'comparand' arrived in register r8
-ir_entry_106:
+ir_entry_112:
     ; IR call: InterlockedCompareExchange (3 args)
     sub rsp, 32
     ; Load variable: target
@@ -1682,10 +1748,10 @@ ir_entry_106:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_107
-    jmp ir_errdefer_end_108
-ir_errdefer_ok_107:
-ir_errdefer_end_108:
+    jz ir_errdefer_ok_113
+    jmp ir_errdefer_end_114
+ir_errdefer_ok_113:
+ir_errdefer_end_114:
     mov rax, [rbp - 32]
     jmp Latomic_compare_exchange_i32_exit
 Latomic_compare_exchange_i32_exit:
@@ -1705,7 +1771,7 @@ atomic_exchange_i32:
     ; Parameter 'target' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'value'
     ; Parameter 'value' arrived in register rdx
-ir_entry_109:
+ir_entry_115:
     ; IR call: InterlockedExchange (2 args)
     sub rsp, 32
     ; Load variable: target
@@ -1723,10 +1789,10 @@ ir_entry_109:
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_110
-    jmp ir_errdefer_end_111
-ir_errdefer_ok_110:
-ir_errdefer_end_111:
+    jz ir_errdefer_ok_116
+    jmp ir_errdefer_end_117
+ir_errdefer_ok_116:
+ir_errdefer_end_117:
     mov rax, [rbp - 24]
     jmp Latomic_exchange_i32_exit
 Latomic_exchange_i32_exit:
@@ -1744,7 +1810,7 @@ atomic_inc_i32:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'target'
     ; Parameter 'target' arrived in register rcx
-ir_entry_112:
+ir_entry_118:
     ; IR call: InterlockedIncrement (1 args)
     sub rsp, 32
     ; Load variable: target
@@ -1759,10 +1825,10 @@ ir_entry_112:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_errdefer_ok_113
-    jmp ir_errdefer_end_114
-ir_errdefer_ok_113:
-ir_errdefer_end_114:
+    jz ir_errdefer_ok_119
+    jmp ir_errdefer_end_120
+ir_errdefer_ok_119:
+ir_errdefer_end_120:
     mov rax, [rbp - 16]
     jmp Latomic_inc_i32_exit
 Latomic_inc_i32_exit:
@@ -1780,7 +1846,7 @@ atomic_dec_i32:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'target'
     ; Parameter 'target' arrived in register rcx
-ir_entry_115:
+ir_entry_121:
     ; IR call: InterlockedDecrement (1 args)
     sub rsp, 32
     ; Load variable: target
@@ -1795,10 +1861,10 @@ ir_entry_115:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_errdefer_ok_116
-    jmp ir_errdefer_end_117
-ir_errdefer_ok_116:
-ir_errdefer_end_117:
+    jz ir_errdefer_ok_122
+    jmp ir_errdefer_end_123
+ir_errdefer_ok_122:
+ir_errdefer_end_123:
     mov rax, [rbp - 16]
     jmp Latomic_dec_i32_exit
 Latomic_dec_i32_exit:
@@ -1816,7 +1882,7 @@ spin_try_lock:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'lock_var'
     ; Parameter 'lock_var' arrived in register rcx
-ir_entry_118:
+ir_entry_124:
     ; IR call: InterlockedCompareExchange (3 args)
     sub rsp, 32
     ; Load variable: lock_var
@@ -1842,28 +1908,28 @@ ir_entry_118:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_120
+    jz ir_if_next_126
     mov rax, 1
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_121
-    jmp ir_errdefer_end_122
-ir_errdefer_ok_121:
-ir_errdefer_end_122:
+    jz ir_errdefer_ok_127
+    jmp ir_errdefer_end_128
+ir_errdefer_ok_127:
+ir_errdefer_end_128:
     mov rax, 1
     jmp Lspin_try_lock_exit
-    jmp ir_if_end_119
-ir_if_next_120:
-ir_if_end_119:
+    jmp ir_if_end_125
+ir_if_next_126:
+ir_if_end_125:
     mov rax, 0
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_123
-    jmp ir_errdefer_end_124
-ir_errdefer_ok_123:
-ir_errdefer_end_124:
+    jz ir_errdefer_ok_129
+    jmp ir_errdefer_end_130
+ir_errdefer_ok_129:
+ir_errdefer_end_130:
     mov rax, 0
     jmp Lspin_try_lock_exit
 Lspin_try_lock_exit:
@@ -1881,8 +1947,8 @@ spin_lock:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'lock_var'
     ; Parameter 'lock_var' arrived in register rcx
-ir_entry_125:
-ir_while_126:
+ir_entry_131:
+ir_while_132:
     ; IR call: spin_try_lock (1 args)
     sub rsp, 32
     ; Load variable: lock_var
@@ -1904,7 +1970,7 @@ ir_while_126:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_while_end_127
+    jz ir_while_end_133
     ; IR call: Sleep (1 args)
     sub rsp, 32
     mov rax, 0
@@ -1913,16 +1979,16 @@ ir_while_126:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 32], rax
-    jmp ir_while_126
-ir_while_end_127:
+    jmp ir_while_132
+ir_while_end_133:
     mov rax, 0
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_128
-    jmp ir_errdefer_end_129
-ir_errdefer_ok_128:
-ir_errdefer_end_129:
+    jz ir_errdefer_ok_134
+    jmp ir_errdefer_end_135
+ir_errdefer_ok_134:
+ir_errdefer_end_135:
     jmp Lspin_lock_exit
 Lspin_lock_exit:
     ; Function epilogue
@@ -1939,7 +2005,7 @@ spin_unlock:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'lock_var'
     ; Parameter 'lock_var' arrived in register rcx
-ir_entry_130:
+ir_entry_136:
     ; IR call: InterlockedExchange (2 args)
     sub rsp, 32
     ; Load variable: lock_var
@@ -1956,10 +2022,10 @@ ir_entry_130:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_errdefer_ok_131
-    jmp ir_errdefer_end_132
-ir_errdefer_ok_131:
-ir_errdefer_end_132:
+    jz ir_errdefer_ok_137
+    jmp ir_errdefer_end_138
+ir_errdefer_ok_137:
+ir_errdefer_end_138:
     jmp Lspin_unlock_exit
 Lspin_unlock_exit:
     ; Function epilogue
@@ -1974,15 +2040,15 @@ AF_INET:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_133:
+ir_entry_139:
     mov rax, 2
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_134
-    jmp ir_errdefer_end_135
-ir_errdefer_ok_134:
-ir_errdefer_end_135:
+    jz ir_errdefer_ok_140
+    jmp ir_errdefer_end_141
+ir_errdefer_ok_140:
+ir_errdefer_end_141:
     mov rax, 2
     jmp LAF_INET_exit
 LAF_INET_exit:
@@ -1998,15 +2064,15 @@ SOCK_STREAM:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_136:
+ir_entry_142:
     mov rax, 1
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_137
-    jmp ir_errdefer_end_138
-ir_errdefer_ok_137:
-ir_errdefer_end_138:
+    jz ir_errdefer_ok_143
+    jmp ir_errdefer_end_144
+ir_errdefer_ok_143:
+ir_errdefer_end_144:
     mov rax, 1
     jmp LSOCK_STREAM_exit
 LSOCK_STREAM_exit:
@@ -2022,15 +2088,15 @@ SOCK_DGRAM:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_139:
+ir_entry_145:
     mov rax, 2
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_140
-    jmp ir_errdefer_end_141
-ir_errdefer_ok_140:
-ir_errdefer_end_141:
+    jz ir_errdefer_ok_146
+    jmp ir_errdefer_end_147
+ir_errdefer_ok_146:
+ir_errdefer_end_147:
     mov rax, 2
     jmp LSOCK_DGRAM_exit
 LSOCK_DGRAM_exit:
@@ -2046,15 +2112,15 @@ IPPROTO_TCP:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_142:
+ir_entry_148:
     mov rax, 6
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_143
-    jmp ir_errdefer_end_144
-ir_errdefer_ok_143:
-ir_errdefer_end_144:
+    jz ir_errdefer_ok_149
+    jmp ir_errdefer_end_150
+ir_errdefer_ok_149:
+ir_errdefer_end_150:
     mov rax, 6
     jmp LIPPROTO_TCP_exit
 LIPPROTO_TCP_exit:
@@ -2070,15 +2136,15 @@ IPPROTO_UDP:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_145:
+ir_entry_151:
     mov rax, 17
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_146
-    jmp ir_errdefer_end_147
-ir_errdefer_ok_146:
-ir_errdefer_end_147:
+    jz ir_errdefer_ok_152
+    jmp ir_errdefer_end_153
+ir_errdefer_ok_152:
+ir_errdefer_end_153:
     mov rax, 17
     jmp LIPPROTO_UDP_exit
 LIPPROTO_UDP_exit:
@@ -2094,15 +2160,15 @@ SOL_SOCKET:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_148:
+ir_entry_154:
     mov rax, 0
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_149
-    jmp ir_errdefer_end_150
-ir_errdefer_ok_149:
-ir_errdefer_end_150:
+    jz ir_errdefer_ok_155
+    jmp ir_errdefer_end_156
+ir_errdefer_ok_155:
+ir_errdefer_end_156:
     mov rax, 0
     jmp LSOL_SOCKET_exit
 LSOL_SOCKET_exit:
@@ -2118,15 +2184,15 @@ SO_REUSEADDR:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_151:
+ir_entry_157:
     mov rax, 4
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_152
-    jmp ir_errdefer_end_153
-ir_errdefer_ok_152:
-ir_errdefer_end_153:
+    jz ir_errdefer_ok_158
+    jmp ir_errdefer_end_159
+ir_errdefer_ok_158:
+ir_errdefer_end_159:
     mov rax, 4
     jmp LSO_REUSEADDR_exit
 LSO_REUSEADDR_exit:
@@ -2142,15 +2208,15 @@ SD_RECEIVE:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_154:
+ir_entry_160:
     mov rax, 0
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_155
-    jmp ir_errdefer_end_156
-ir_errdefer_ok_155:
-ir_errdefer_end_156:
+    jz ir_errdefer_ok_161
+    jmp ir_errdefer_end_162
+ir_errdefer_ok_161:
+ir_errdefer_end_162:
     mov rax, 0
     jmp LSD_RECEIVE_exit
 LSD_RECEIVE_exit:
@@ -2166,15 +2232,15 @@ SD_SEND:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_157:
+ir_entry_163:
     mov rax, 1
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_158
-    jmp ir_errdefer_end_159
-ir_errdefer_ok_158:
-ir_errdefer_end_159:
+    jz ir_errdefer_ok_164
+    jmp ir_errdefer_end_165
+ir_errdefer_ok_164:
+ir_errdefer_end_165:
     mov rax, 1
     jmp LSD_SEND_exit
 LSD_SEND_exit:
@@ -2190,15 +2256,15 @@ SD_BOTH:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_160:
+ir_entry_166:
     mov rax, 2
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_161
-    jmp ir_errdefer_end_162
-ir_errdefer_ok_161:
-ir_errdefer_end_162:
+    jz ir_errdefer_ok_167
+    jmp ir_errdefer_end_168
+ir_errdefer_ok_167:
+ir_errdefer_end_168:
     mov rax, 2
     jmp LSD_BOTH_exit
 LSD_BOTH_exit:
@@ -2214,15 +2280,15 @@ INADDR_ANY:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_163:
+ir_entry_169:
     mov rax, 0
     mov [rbp - 8], rax
     mov rax, [rbp - 8]
     test rax, rax
-    jz ir_errdefer_ok_164
-    jmp ir_errdefer_end_165
-ir_errdefer_ok_164:
-ir_errdefer_end_165:
+    jz ir_errdefer_ok_170
+    jmp ir_errdefer_end_171
+ir_errdefer_ok_170:
+ir_errdefer_end_171:
     mov rax, 0
     jmp LINADDR_ANY_exit
 LINADDR_ANY_exit:
@@ -2238,7 +2304,7 @@ INVALID_SOCKET:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 48    ; Allocate 48 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_166:
+ir_entry_172:
     mov rax, 1
     neg rax
     mov [rbp - 8], rax
@@ -2246,10 +2312,10 @@ ir_entry_166:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_errdefer_ok_167
-    jmp ir_errdefer_end_168
-ir_errdefer_ok_167:
-ir_errdefer_end_168:
+    jz ir_errdefer_ok_173
+    jmp ir_errdefer_end_174
+ir_errdefer_ok_173:
+ir_errdefer_end_174:
     mov rax, [rbp - 8]
     jmp LINVALID_SOCKET_exit
 LINVALID_SOCKET_exit:
@@ -2265,7 +2331,7 @@ SOCKET_ERROR:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 48    ; Allocate 48 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_169:
+ir_entry_175:
     mov rax, 1
     neg rax
     mov [rbp - 8], rax
@@ -2273,10 +2339,10 @@ ir_entry_169:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_errdefer_ok_170
-    jmp ir_errdefer_end_171
-ir_errdefer_ok_170:
-ir_errdefer_end_171:
+    jz ir_errdefer_ok_176
+    jmp ir_errdefer_end_177
+ir_errdefer_ok_176:
+ir_errdefer_end_177:
     mov rax, [rbp - 8]
     jmp LSOCKET_ERROR_exit
 LSOCKET_ERROR_exit:
@@ -2310,7 +2376,7 @@ net_init:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 480    ; Allocate 480 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_172:
+ir_entry_178:
     lea rax, [rel net_ref_lock]
     mov [rbp - 24], rax
     ; IR call: spin_lock (1 args)
@@ -2333,7 +2399,7 @@ ir_entry_172:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_if_next_174
+    jz ir_if_next_180
     ; Load variable: net_ref_count
     movsxd rax, dword [rel net_ref_count]  ; From global memory
     push rax
@@ -2359,15 +2425,15 @@ ir_entry_172:
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_errdefer_ok_175
-    jmp ir_errdefer_end_176
-ir_errdefer_ok_175:
-ir_errdefer_end_176:
+    jz ir_errdefer_ok_181
+    jmp ir_errdefer_end_182
+ir_errdefer_ok_181:
+ir_errdefer_end_182:
     mov rax, 0
     jmp Lnet_init_exit
-    jmp ir_if_end_173
-ir_if_next_174:
-ir_if_end_173:
+    jmp ir_if_end_179
+ir_if_next_180:
+ir_if_end_179:
     ; IR call: malloc (1 args)
     sub rsp, 32
     mov rax, 408
@@ -2391,7 +2457,7 @@ ir_if_end_173:
     mov [rbp - 88], rax
     mov rax, [rbp - 88]
     test rax, rax
-    jz ir_if_next_178
+    jz ir_if_next_184
     lea rax, [rel net_ref_lock]
     mov [rbp - 96], rax
     ; IR call: spin_unlock (1 args)
@@ -2409,15 +2475,15 @@ ir_if_end_173:
     mov [rbp - 120], rax
     mov rax, [rbp - 120]
     test rax, rax
-    jz ir_errdefer_ok_179
-    jmp ir_errdefer_end_180
-ir_errdefer_ok_179:
-ir_errdefer_end_180:
+    jz ir_errdefer_ok_185
+    jmp ir_errdefer_end_186
+ir_errdefer_ok_185:
+ir_errdefer_end_186:
     mov rax, [rbp - 112]
     jmp Lnet_init_exit
-    jmp ir_if_end_177
-ir_if_next_178:
-ir_if_end_177:
+    jmp ir_if_end_183
+ir_if_next_184:
+ir_if_end_183:
     ; IR call: WSAStartup (2 args)
     sub rsp, 32
     mov rax, 514
@@ -2454,13 +2520,13 @@ ir_if_end_177:
     mov [rbp - 144], rax
     mov rax, [rbp - 144]
     test rax, rax
-    jz ir_if_next_182
+    jz ir_if_next_188
     mov rax, 1
     ; Store to variable: net_ref_count
     mov dword [rel net_ref_count], eax  ; To global memory
-    jmp ir_if_end_181
-ir_if_next_182:
-ir_if_end_181:
+    jmp ir_if_end_187
+ir_if_next_188:
+ir_if_end_187:
     lea rax, [rel net_ref_lock]
     mov [rbp - 152], rax
     ; IR call: spin_unlock (1 args)
@@ -2476,10 +2542,10 @@ ir_if_end_181:
     mov [rbp - 168], rax
     mov rax, [rbp - 168]
     test rax, rax
-    jz ir_errdefer_ok_183
-    jmp ir_errdefer_end_184
-ir_errdefer_ok_183:
-ir_errdefer_end_184:
+    jz ir_errdefer_ok_189
+    jmp ir_errdefer_end_190
+ir_errdefer_ok_189:
+ir_errdefer_end_190:
     ; Load variable: result
     movsxd rax, dword [rbp - 12]  ; From stack [rbp - 12]
     jmp Lnet_init_exit
@@ -2496,7 +2562,7 @@ net_cleanup:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 368    ; Allocate 368 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_185:
+ir_entry_191:
     lea rax, [rel net_ref_lock]
     mov [rbp - 16], rax
     ; IR call: spin_lock (1 args)
@@ -2519,7 +2585,7 @@ ir_entry_185:
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_if_next_187
+    jz ir_if_next_193
     lea rax, [rel net_ref_lock]
     mov [rbp - 40], rax
     ; IR call: spin_unlock (1 args)
@@ -2534,15 +2600,15 @@ ir_entry_185:
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_errdefer_ok_188
-    jmp ir_errdefer_end_189
-ir_errdefer_ok_188:
-ir_errdefer_end_189:
+    jz ir_errdefer_ok_194
+    jmp ir_errdefer_end_195
+ir_errdefer_ok_194:
+ir_errdefer_end_195:
     mov rax, 0
     jmp Lnet_cleanup_exit
-    jmp ir_if_end_186
-ir_if_next_187:
-ir_if_end_186:
+    jmp ir_if_end_192
+ir_if_next_193:
+ir_if_end_192:
     ; Load variable: net_ref_count
     movsxd rax, dword [rel net_ref_count]  ; From global memory
     push rax
@@ -2566,7 +2632,7 @@ ir_if_end_186:
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_if_next_191
+    jz ir_if_next_197
     lea rax, [rel net_ref_lock]
     mov [rbp - 80], rax
     ; IR call: spin_unlock (1 args)
@@ -2581,15 +2647,15 @@ ir_if_end_186:
     mov [rbp - 96], rax
     mov rax, [rbp - 96]
     test rax, rax
-    jz ir_errdefer_ok_192
-    jmp ir_errdefer_end_193
-ir_errdefer_ok_192:
-ir_errdefer_end_193:
+    jz ir_errdefer_ok_198
+    jmp ir_errdefer_end_199
+ir_errdefer_ok_198:
+ir_errdefer_end_199:
     mov rax, 0
     jmp Lnet_cleanup_exit
-    jmp ir_if_end_190
-ir_if_next_191:
-ir_if_end_190:
+    jmp ir_if_end_196
+ir_if_next_197:
+ir_if_end_196:
     ; IR call: WSACleanup (0 args)
     sub rsp, 32
     call WSACleanup
@@ -2615,10 +2681,10 @@ ir_if_end_190:
     mov [rbp - 128], rax
     mov rax, [rbp - 128]
     test rax, rax
-    jz ir_errdefer_ok_194
-    jmp ir_errdefer_end_195
-ir_errdefer_ok_194:
-ir_errdefer_end_195:
+    jz ir_errdefer_ok_200
+    jmp ir_errdefer_end_201
+ir_errdefer_ok_200:
+ir_errdefer_end_201:
     ; Load variable: result
     movsxd rax, dword [rbp - 4]  ; From stack [rbp - 4]
     jmp Lnet_cleanup_exit
@@ -2635,7 +2701,7 @@ net_last_error:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 48    ; Allocate 48 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_196:
+ir_entry_202:
     ; IR call: WSAGetLastError (0 args)
     sub rsp, 32
     call WSAGetLastError
@@ -2647,10 +2713,10 @@ ir_entry_196:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_errdefer_ok_197
-    jmp ir_errdefer_end_198
-ir_errdefer_ok_197:
-ir_errdefer_end_198:
+    jz ir_errdefer_ok_203
+    jmp ir_errdefer_end_204
+ir_errdefer_ok_203:
+ir_errdefer_end_204:
     mov rax, [rbp - 8]
     jmp Lnet_last_error_exit
 Lnet_last_error_exit:
@@ -2666,7 +2732,7 @@ socket_tcp:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 128    ; Allocate 128 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_199:
+ir_entry_205:
     ; IR call: AF_INET (0 args)
     sub rsp, 32
     call AF_INET
@@ -2704,10 +2770,10 @@ ir_entry_199:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_200
-    jmp ir_errdefer_end_201
-ir_errdefer_ok_200:
-ir_errdefer_end_201:
+    jz ir_errdefer_ok_206
+    jmp ir_errdefer_end_207
+ir_errdefer_ok_206:
+ir_errdefer_end_207:
     mov rax, [rbp - 32]
     jmp Lsocket_tcp_exit
 Lsocket_tcp_exit:
@@ -2723,7 +2789,7 @@ socket_udp:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 128    ; Allocate 128 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_202:
+ir_entry_208:
     ; IR call: AF_INET (0 args)
     sub rsp, 32
     call AF_INET
@@ -2761,10 +2827,10 @@ ir_entry_202:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_203
-    jmp ir_errdefer_end_204
-ir_errdefer_ok_203:
-ir_errdefer_end_204:
+    jz ir_errdefer_ok_209
+    jmp ir_errdefer_end_210
+ir_errdefer_ok_209:
+ir_errdefer_end_210:
     mov rax, [rbp - 32]
     jmp Lsocket_udp_exit
 Lsocket_udp_exit:
@@ -2780,7 +2846,7 @@ net_is_initialized:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 160    ; Allocate 160 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_205:
+ir_entry_211:
     mov rax, 0
     ; Store to variable: ready
     mov dword [rbp - 4], eax  ; To stack [rbp - 4]
@@ -2806,13 +2872,13 @@ ir_entry_205:
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_if_next_207
+    jz ir_if_next_213
     mov rax, 1
     ; Store to variable: ready
     mov dword [rbp - 4], eax  ; To stack [rbp - 4]
-    jmp ir_if_end_206
-ir_if_next_207:
-ir_if_end_206:
+    jmp ir_if_end_212
+ir_if_next_213:
+ir_if_end_212:
     lea rax, [rel net_ref_lock]
     mov [rbp - 40], rax
     ; IR call: spin_unlock (1 args)
@@ -2828,10 +2894,10 @@ ir_if_end_206:
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_errdefer_ok_208
-    jmp ir_errdefer_end_209
-ir_errdefer_ok_208:
-ir_errdefer_end_209:
+    jz ir_errdefer_ok_214
+    jmp ir_errdefer_end_215
+ir_errdefer_ok_214:
+ir_errdefer_end_215:
     ; Load variable: ready
     movsxd rax, dword [rbp - 4]  ; From stack [rbp - 4]
     jmp Lnet_is_initialized_exit
@@ -2852,7 +2918,7 @@ sockaddr_in:
     ; Parameter 'ip' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'port'
     ; Parameter 'port' arrived in register rdx
-ir_entry_210:
+ir_entry_216:
     ; IR call: malloc (1 args)
     sub rsp, 32
     mov rax, 16
@@ -2876,20 +2942,20 @@ ir_entry_210:
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_if_next_212
+    jz ir_if_next_218
     mov rax, 0
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_errdefer_ok_213
-    jmp ir_errdefer_end_214
-ir_errdefer_ok_213:
-ir_errdefer_end_214:
+    jz ir_errdefer_ok_219
+    jmp ir_errdefer_end_220
+ir_errdefer_ok_219:
+ir_errdefer_end_220:
     mov rax, 0
     jmp Lsockaddr_in_exit
-    jmp ir_if_end_211
-ir_if_next_212:
-ir_if_end_211:
+    jmp ir_if_end_217
+ir_if_next_218:
+ir_if_end_217:
     ; IR call: memset (3 args)
     sub rsp, 32
     ; Load variable: buf
@@ -2906,9 +2972,9 @@ ir_if_end_211:
     ; Load variable: buf
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     test rax, rax
-    jz ir_trap_null_215
-    jmp ir_nonnull_216
-ir_trap_null_215:
+    jz ir_trap_null_221
+    jmp ir_nonnull_222
+ir_trap_null_221:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -2925,7 +2991,7 @@ ir_trap_null_215:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_216:
+ir_nonnull_222:
     mov rax, 0
     push rax
     mov rax, 1
@@ -2950,9 +3016,9 @@ ir_nonnull_216:
     ; Load variable: buf
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     test rax, rax
-    jz ir_trap_null_217
-    jmp ir_nonnull_218
-ir_trap_null_217:
+    jz ir_trap_null_223
+    jmp ir_nonnull_224
+ir_trap_null_223:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -2969,7 +3035,7 @@ ir_trap_null_217:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_218:
+ir_nonnull_224:
     mov rax, 1
     push rax
     mov rax, 1
@@ -3007,9 +3073,9 @@ ir_nonnull_218:
     ; Load variable: buf
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     test rax, rax
-    jz ir_trap_null_219
-    jmp ir_nonnull_220
-ir_trap_null_219:
+    jz ir_trap_null_225
+    jmp ir_nonnull_226
+ir_trap_null_225:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -3026,7 +3092,7 @@ ir_trap_null_219:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_220:
+ir_nonnull_226:
     mov rax, 2
     push rax
     mov rax, 1
@@ -3061,9 +3127,9 @@ ir_nonnull_220:
     ; Load variable: buf
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     test rax, rax
-    jz ir_trap_null_221
-    jmp ir_nonnull_222
-ir_trap_null_221:
+    jz ir_trap_null_227
+    jmp ir_nonnull_228
+ir_trap_null_227:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -3080,7 +3146,7 @@ ir_trap_null_221:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_222:
+ir_nonnull_228:
     mov rax, 3
     push rax
     mov rax, 1
@@ -3118,9 +3184,9 @@ ir_nonnull_222:
     ; Load variable: buf
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     test rax, rax
-    jz ir_trap_null_223
-    jmp ir_nonnull_224
-ir_trap_null_223:
+    jz ir_trap_null_229
+    jmp ir_nonnull_230
+ir_trap_null_229:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -3137,7 +3203,7 @@ ir_trap_null_223:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_224:
+ir_nonnull_230:
     mov rax, 4
     push rax
     mov rax, 1
@@ -3172,9 +3238,9 @@ ir_nonnull_224:
     ; Load variable: buf
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     test rax, rax
-    jz ir_trap_null_225
-    jmp ir_nonnull_226
-ir_trap_null_225:
+    jz ir_trap_null_231
+    jmp ir_nonnull_232
+ir_trap_null_231:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -3191,7 +3257,7 @@ ir_trap_null_225:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_226:
+ir_nonnull_232:
     mov rax, 5
     push rax
     mov rax, 1
@@ -3225,9 +3291,9 @@ ir_nonnull_226:
     ; Load variable: buf
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     test rax, rax
-    jz ir_trap_null_227
-    jmp ir_nonnull_228
-ir_trap_null_227:
+    jz ir_trap_null_233
+    jmp ir_nonnull_234
+ir_trap_null_233:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -3244,7 +3310,7 @@ ir_trap_null_227:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_228:
+ir_nonnull_234:
     mov rax, 6
     push rax
     mov rax, 1
@@ -3278,9 +3344,9 @@ ir_nonnull_228:
     ; Load variable: buf
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     test rax, rax
-    jz ir_trap_null_229
-    jmp ir_nonnull_230
-ir_trap_null_229:
+    jz ir_trap_null_235
+    jmp ir_nonnull_236
+ir_trap_null_235:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -3297,7 +3363,7 @@ ir_trap_null_229:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_230:
+ir_nonnull_236:
     mov rax, 7
     push rax
     mov rax, 1
@@ -3324,10 +3390,10 @@ ir_nonnull_230:
     mov [rbp - 312], rax
     mov rax, [rbp - 312]
     test rax, rax
-    jz ir_errdefer_ok_231
-    jmp ir_errdefer_end_232
-ir_errdefer_ok_231:
-ir_errdefer_end_232:
+    jz ir_errdefer_ok_237
+    jmp ir_errdefer_end_238
+ir_errdefer_ok_237:
+ir_errdefer_end_238:
     ; Load variable: buf
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     jmp Lsockaddr_in_exit
@@ -3346,7 +3412,7 @@ sockaddr_in_any:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'port'
     ; Parameter 'port' arrived in register rcx
-ir_entry_233:
+ir_entry_239:
     ; IR call: malloc (1 args)
     sub rsp, 32
     mov rax, 16
@@ -3370,20 +3436,20 @@ ir_entry_233:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_if_next_235
+    jz ir_if_next_241
     mov rax, 0
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_errdefer_ok_236
-    jmp ir_errdefer_end_237
-ir_errdefer_ok_236:
-ir_errdefer_end_237:
+    jz ir_errdefer_ok_242
+    jmp ir_errdefer_end_243
+ir_errdefer_ok_242:
+ir_errdefer_end_243:
     mov rax, 0
     jmp Lsockaddr_in_any_exit
-    jmp ir_if_end_234
-ir_if_next_235:
-ir_if_end_234:
+    jmp ir_if_end_240
+ir_if_next_241:
+ir_if_end_240:
     ; IR call: memset (3 args)
     sub rsp, 32
     ; Load variable: buf
@@ -3400,9 +3466,9 @@ ir_if_end_234:
     ; Load variable: buf
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     test rax, rax
-    jz ir_trap_null_238
-    jmp ir_nonnull_239
-ir_trap_null_238:
+    jz ir_trap_null_244
+    jmp ir_nonnull_245
+ir_trap_null_244:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -3419,7 +3485,7 @@ ir_trap_null_238:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_239:
+ir_nonnull_245:
     mov rax, 0
     push rax
     mov rax, 1
@@ -3444,9 +3510,9 @@ ir_nonnull_239:
     ; Load variable: buf
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     test rax, rax
-    jz ir_trap_null_240
-    jmp ir_nonnull_241
-ir_trap_null_240:
+    jz ir_trap_null_246
+    jmp ir_nonnull_247
+ir_trap_null_246:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -3463,7 +3529,7 @@ ir_trap_null_240:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_241:
+ir_nonnull_247:
     mov rax, 1
     push rax
     mov rax, 1
@@ -3501,9 +3567,9 @@ ir_nonnull_241:
     ; Load variable: buf
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     test rax, rax
-    jz ir_trap_null_242
-    jmp ir_nonnull_243
-ir_trap_null_242:
+    jz ir_trap_null_248
+    jmp ir_nonnull_249
+ir_trap_null_248:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -3520,7 +3586,7 @@ ir_trap_null_242:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_243:
+ir_nonnull_249:
     mov rax, 2
     push rax
     mov rax, 1
@@ -3555,9 +3621,9 @@ ir_nonnull_243:
     ; Load variable: buf
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     test rax, rax
-    jz ir_trap_null_244
-    jmp ir_nonnull_245
-ir_trap_null_244:
+    jz ir_trap_null_250
+    jmp ir_nonnull_251
+ir_trap_null_250:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -3574,7 +3640,7 @@ ir_trap_null_244:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_245:
+ir_nonnull_251:
     mov rax, 3
     push rax
     mov rax, 1
@@ -3601,10 +3667,10 @@ ir_nonnull_245:
     mov [rbp - 176], rax
     mov rax, [rbp - 176]
     test rax, rax
-    jz ir_errdefer_ok_246
-    jmp ir_errdefer_end_247
-ir_errdefer_ok_246:
-ir_errdefer_end_247:
+    jz ir_errdefer_ok_252
+    jmp ir_errdefer_end_253
+ir_errdefer_ok_252:
+ir_errdefer_end_253:
     ; Load variable: buf
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     jmp Lsockaddr_in_any_exit
@@ -3625,7 +3691,7 @@ set_reuseaddr:
     ; Parameter 'sock' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'enabled'
     ; Parameter 'enabled' arrived in register rdx
-ir_entry_248:
+ir_entry_254:
     ; Load variable: enabled
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -3638,7 +3704,7 @@ ir_entry_248:
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_if_next_250
+    jz ir_if_next_256
     mov rax, 0
     push rax
     mov rax, 4
@@ -3650,9 +3716,9 @@ ir_entry_248:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_trap_bounds_251
-    jmp ir_in_bounds_252
-ir_trap_bounds_251:
+    jz ir_trap_bounds_257
+    jmp ir_in_bounds_258
+ir_trap_bounds_257:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -3669,7 +3735,7 @@ ir_trap_bounds_251:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_252:
+ir_in_bounds_258:
     mov rax, 0
     push rax
     mov rax, 1
@@ -3691,8 +3757,8 @@ ir_in_bounds_252:
     mov rcx, rax
     pop rax
     mov byte [rax], cl
-    jmp ir_if_end_249
-ir_if_next_250:
+    jmp ir_if_end_255
+ir_if_next_256:
     mov rax, 0
     push rax
     mov rax, 4
@@ -3704,9 +3770,9 @@ ir_if_next_250:
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_trap_bounds_253
-    jmp ir_in_bounds_254
-ir_trap_bounds_253:
+    jz ir_trap_bounds_259
+    jmp ir_in_bounds_260
+ir_trap_bounds_259:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -3723,7 +3789,7 @@ ir_trap_bounds_253:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_254:
+ir_in_bounds_260:
     mov rax, 0
     push rax
     mov rax, 1
@@ -3745,7 +3811,7 @@ ir_in_bounds_254:
     mov rcx, rax
     pop rax
     mov byte [rax], cl
-ir_if_end_249:
+ir_if_end_255:
     mov rax, 1
     push rax
     mov rax, 4
@@ -3757,9 +3823,9 @@ ir_if_end_249:
     mov [rbp - 104], rax
     mov rax, [rbp - 104]
     test rax, rax
-    jz ir_trap_bounds_255
-    jmp ir_in_bounds_256
-ir_trap_bounds_255:
+    jz ir_trap_bounds_261
+    jmp ir_in_bounds_262
+ir_trap_bounds_261:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -3776,7 +3842,7 @@ ir_trap_bounds_255:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_256:
+ir_in_bounds_262:
     mov rax, 1
     push rax
     mov rax, 1
@@ -3809,9 +3875,9 @@ ir_in_bounds_256:
     mov [rbp - 136], rax
     mov rax, [rbp - 136]
     test rax, rax
-    jz ir_trap_bounds_257
-    jmp ir_in_bounds_258
-ir_trap_bounds_257:
+    jz ir_trap_bounds_263
+    jmp ir_in_bounds_264
+ir_trap_bounds_263:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -3828,7 +3894,7 @@ ir_trap_bounds_257:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_258:
+ir_in_bounds_264:
     mov rax, 2
     push rax
     mov rax, 1
@@ -3861,9 +3927,9 @@ ir_in_bounds_258:
     mov [rbp - 168], rax
     mov rax, [rbp - 168]
     test rax, rax
-    jz ir_trap_bounds_259
-    jmp ir_in_bounds_260
-ir_trap_bounds_259:
+    jz ir_trap_bounds_265
+    jmp ir_in_bounds_266
+ir_trap_bounds_265:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -3880,7 +3946,7 @@ ir_trap_bounds_259:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_260:
+ir_in_bounds_266:
     mov rax, 3
     push rax
     mov rax, 1
@@ -3927,9 +3993,9 @@ ir_in_bounds_260:
     mov [rbp - 216], rax
     mov rax, [rbp - 216]
     test rax, rax
-    jz ir_trap_bounds_261
-    jmp ir_in_bounds_262
-ir_trap_bounds_261:
+    jz ir_trap_bounds_267
+    jmp ir_in_bounds_268
+ir_trap_bounds_267:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -3946,7 +4012,7 @@ ir_trap_bounds_261:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_262:
+ir_in_bounds_268:
     mov rax, 0
     push rax
     mov rax, 1
@@ -3984,10 +4050,10 @@ ir_in_bounds_262:
     mov [rbp - 248], rax
     mov rax, [rbp - 248]
     test rax, rax
-    jz ir_errdefer_ok_263
-    jmp ir_errdefer_end_264
-ir_errdefer_ok_263:
-ir_errdefer_end_264:
+    jz ir_errdefer_ok_269
+    jmp ir_errdefer_end_270
+ir_errdefer_ok_269:
+ir_errdefer_end_270:
     mov rax, [rbp - 240]
     jmp Lset_reuseaddr_exit
 Lset_reuseaddr_exit:
@@ -4009,11 +4075,11 @@ send_all:
     ; Parameter 'buf' arrived in register rdx
     mov [rbp - 24], r8  ; Home param 'len'
     ; Parameter 'len' arrived in register r8
-ir_entry_265:
+ir_entry_271:
     mov rax, 0
     ; Store to variable: total
     mov dword [rbp - 28], eax  ; To stack [rbp - 28]
-ir_while_266:
+ir_while_272:
     ; Load variable: total
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -4027,13 +4093,13 @@ ir_while_266:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_while_end_267
+    jz ir_while_end_273
     ; Load variable: buf
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     test rax, rax
-    jz ir_trap_null_268
-    jmp ir_nonnull_269
-ir_trap_null_268:
+    jz ir_trap_null_274
+    jmp ir_nonnull_275
+ir_trap_null_274:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -4050,7 +4116,7 @@ ir_trap_null_268:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_269:
+ir_nonnull_275:
     ; Load variable: total
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -4107,7 +4173,7 @@ ir_nonnull_269:
     mov [rbp - 80], rax
     mov rax, [rbp - 80]
     test rax, rax
-    jz ir_if_next_271
+    jz ir_if_next_277
     mov rax, 1
     neg rax
     mov [rbp - 88], rax
@@ -4115,15 +4181,15 @@ ir_nonnull_269:
     mov [rbp - 96], rax
     mov rax, [rbp - 96]
     test rax, rax
-    jz ir_errdefer_ok_272
-    jmp ir_errdefer_end_273
-ir_errdefer_ok_272:
-ir_errdefer_end_273:
+    jz ir_errdefer_ok_278
+    jmp ir_errdefer_end_279
+ir_errdefer_ok_278:
+ir_errdefer_end_279:
     mov rax, [rbp - 88]
     jmp Lsend_all_exit
-    jmp ir_if_end_270
-ir_if_next_271:
-ir_if_end_270:
+    jmp ir_if_end_276
+ir_if_next_277:
+ir_if_end_276:
     ; Load variable: total
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -4136,17 +4202,17 @@ ir_if_end_270:
     mov rax, [rbp - 104]
     ; Store to variable: total
     mov dword [rbp - 28], eax  ; To stack [rbp - 28]
-    jmp ir_while_266
-ir_while_end_267:
+    jmp ir_while_272
+ir_while_end_273:
     ; Load variable: total
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_274
-    jmp ir_errdefer_end_275
-ir_errdefer_ok_274:
-ir_errdefer_end_275:
+    jz ir_errdefer_ok_280
+    jmp ir_errdefer_end_281
+ir_errdefer_ok_280:
+ir_errdefer_end_281:
     ; Load variable: total
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     jmp Lsend_all_exit
@@ -4167,7 +4233,7 @@ digit_to_char:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'd'
     ; Parameter 'd' arrived in register rcx
-ir_entry_276:
+ir_entry_282:
     ; Load variable: d
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4180,10 +4246,10 @@ ir_entry_276:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_errdefer_ok_277
-    jmp ir_errdefer_end_278
-ir_errdefer_ok_277:
-ir_errdefer_end_278:
+    jz ir_errdefer_ok_283
+    jmp ir_errdefer_end_284
+ir_errdefer_ok_283:
+ir_errdefer_end_284:
     mov rax, [rbp - 16]
     jmp Ldigit_to_char_exit
 Ldigit_to_char_exit:
@@ -4201,7 +4267,7 @@ char_to_digit:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'c'
     ; Parameter 'c' arrived in register rcx
-ir_entry_279:
+ir_entry_285:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4214,10 +4280,10 @@ ir_entry_279:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_errdefer_ok_280
-    jmp ir_errdefer_end_281
-ir_errdefer_ok_280:
-ir_errdefer_end_281:
+    jz ir_errdefer_ok_286
+    jmp ir_errdefer_end_287
+ir_errdefer_ok_286:
+ir_errdefer_end_287:
     mov rax, [rbp - 16]
     jmp Lchar_to_digit_exit
 Lchar_to_digit_exit:
@@ -4235,7 +4301,7 @@ is_digit:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'c'
     ; Parameter 'c' arrived in register rcx
-ir_entry_282:
+ir_entry_288:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4248,7 +4314,7 @@ ir_entry_282:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_if_next_284
+    jz ir_if_next_290
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4261,31 +4327,31 @@ ir_entry_282:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_286
+    jz ir_if_next_292
     mov rax, 1
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_287
-    jmp ir_errdefer_end_288
-ir_errdefer_ok_287:
-ir_errdefer_end_288:
+    jz ir_errdefer_ok_293
+    jmp ir_errdefer_end_294
+ir_errdefer_ok_293:
+ir_errdefer_end_294:
     mov rax, 1
     jmp Lis_digit_exit
-    jmp ir_if_end_285
-ir_if_next_286:
-ir_if_end_285:
-    jmp ir_if_end_283
-ir_if_next_284:
-ir_if_end_283:
+    jmp ir_if_end_291
+ir_if_next_292:
+ir_if_end_291:
+    jmp ir_if_end_289
+ir_if_next_290:
+ir_if_end_289:
     mov rax, 0
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_289
-    jmp ir_errdefer_end_290
-ir_errdefer_ok_289:
-ir_errdefer_end_290:
+    jz ir_errdefer_ok_295
+    jmp ir_errdefer_end_296
+ir_errdefer_ok_295:
+ir_errdefer_end_296:
     mov rax, 0
     jmp Lis_digit_exit
 Lis_digit_exit:
@@ -4303,7 +4369,7 @@ is_upper:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'c'
     ; Parameter 'c' arrived in register rcx
-ir_entry_291:
+ir_entry_297:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4316,7 +4382,7 @@ ir_entry_291:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_if_next_293
+    jz ir_if_next_299
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4329,31 +4395,31 @@ ir_entry_291:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_295
+    jz ir_if_next_301
     mov rax, 1
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_296
-    jmp ir_errdefer_end_297
-ir_errdefer_ok_296:
-ir_errdefer_end_297:
+    jz ir_errdefer_ok_302
+    jmp ir_errdefer_end_303
+ir_errdefer_ok_302:
+ir_errdefer_end_303:
     mov rax, 1
     jmp Lis_upper_exit
-    jmp ir_if_end_294
-ir_if_next_295:
-ir_if_end_294:
-    jmp ir_if_end_292
-ir_if_next_293:
-ir_if_end_292:
+    jmp ir_if_end_300
+ir_if_next_301:
+ir_if_end_300:
+    jmp ir_if_end_298
+ir_if_next_299:
+ir_if_end_298:
     mov rax, 0
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_298
-    jmp ir_errdefer_end_299
-ir_errdefer_ok_298:
-ir_errdefer_end_299:
+    jz ir_errdefer_ok_304
+    jmp ir_errdefer_end_305
+ir_errdefer_ok_304:
+ir_errdefer_end_305:
     mov rax, 0
     jmp Lis_upper_exit
 Lis_upper_exit:
@@ -4371,7 +4437,7 @@ is_lower:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'c'
     ; Parameter 'c' arrived in register rcx
-ir_entry_300:
+ir_entry_306:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4384,7 +4450,7 @@ ir_entry_300:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_if_next_302
+    jz ir_if_next_308
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4397,31 +4463,31 @@ ir_entry_300:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_304
+    jz ir_if_next_310
     mov rax, 1
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_305
-    jmp ir_errdefer_end_306
-ir_errdefer_ok_305:
-ir_errdefer_end_306:
+    jz ir_errdefer_ok_311
+    jmp ir_errdefer_end_312
+ir_errdefer_ok_311:
+ir_errdefer_end_312:
     mov rax, 1
     jmp Lis_lower_exit
-    jmp ir_if_end_303
-ir_if_next_304:
-ir_if_end_303:
-    jmp ir_if_end_301
-ir_if_next_302:
-ir_if_end_301:
+    jmp ir_if_end_309
+ir_if_next_310:
+ir_if_end_309:
+    jmp ir_if_end_307
+ir_if_next_308:
+ir_if_end_307:
     mov rax, 0
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_307
-    jmp ir_errdefer_end_308
-ir_errdefer_ok_307:
-ir_errdefer_end_308:
+    jz ir_errdefer_ok_313
+    jmp ir_errdefer_end_314
+ir_errdefer_ok_313:
+ir_errdefer_end_314:
     mov rax, 0
     jmp Lis_lower_exit
 Lis_lower_exit:
@@ -4439,7 +4505,7 @@ is_alpha:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'c'
     ; Parameter 'c' arrived in register rcx
-ir_entry_309:
+ir_entry_315:
     ; IR call: is_upper (1 args)
     sub rsp, 32
     ; Load variable: c
@@ -4461,20 +4527,20 @@ ir_entry_309:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_311
+    jz ir_if_next_317
     mov rax, 1
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_312
-    jmp ir_errdefer_end_313
-ir_errdefer_ok_312:
-ir_errdefer_end_313:
+    jz ir_errdefer_ok_318
+    jmp ir_errdefer_end_319
+ir_errdefer_ok_318:
+ir_errdefer_end_319:
     mov rax, 1
     jmp Lis_alpha_exit
-    jmp ir_if_end_310
-ir_if_next_311:
-ir_if_end_310:
+    jmp ir_if_end_316
+ir_if_next_317:
+ir_if_end_316:
     ; IR call: is_lower (1 args)
     sub rsp, 32
     ; Load variable: c
@@ -4496,28 +4562,28 @@ ir_if_end_310:
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_if_next_315
+    jz ir_if_next_321
     mov rax, 1
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_errdefer_ok_316
-    jmp ir_errdefer_end_317
-ir_errdefer_ok_316:
-ir_errdefer_end_317:
+    jz ir_errdefer_ok_322
+    jmp ir_errdefer_end_323
+ir_errdefer_ok_322:
+ir_errdefer_end_323:
     mov rax, 1
     jmp Lis_alpha_exit
-    jmp ir_if_end_314
-ir_if_next_315:
-ir_if_end_314:
+    jmp ir_if_end_320
+ir_if_next_321:
+ir_if_end_320:
     mov rax, 0
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_errdefer_ok_318
-    jmp ir_errdefer_end_319
-ir_errdefer_ok_318:
-ir_errdefer_end_319:
+    jz ir_errdefer_ok_324
+    jmp ir_errdefer_end_325
+ir_errdefer_ok_324:
+ir_errdefer_end_325:
     mov rax, 0
     jmp Lis_alpha_exit
 Lis_alpha_exit:
@@ -4535,7 +4601,7 @@ is_alnum:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'c'
     ; Parameter 'c' arrived in register rcx
-ir_entry_320:
+ir_entry_326:
     ; IR call: is_alpha (1 args)
     sub rsp, 32
     ; Load variable: c
@@ -4557,20 +4623,20 @@ ir_entry_320:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_322
+    jz ir_if_next_328
     mov rax, 1
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_323
-    jmp ir_errdefer_end_324
-ir_errdefer_ok_323:
-ir_errdefer_end_324:
+    jz ir_errdefer_ok_329
+    jmp ir_errdefer_end_330
+ir_errdefer_ok_329:
+ir_errdefer_end_330:
     mov rax, 1
     jmp Lis_alnum_exit
-    jmp ir_if_end_321
-ir_if_next_322:
-ir_if_end_321:
+    jmp ir_if_end_327
+ir_if_next_328:
+ir_if_end_327:
     ; IR call: is_digit (1 args)
     sub rsp, 32
     ; Load variable: c
@@ -4592,28 +4658,28 @@ ir_if_end_321:
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_if_next_326
+    jz ir_if_next_332
     mov rax, 1
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_errdefer_ok_327
-    jmp ir_errdefer_end_328
-ir_errdefer_ok_327:
-ir_errdefer_end_328:
+    jz ir_errdefer_ok_333
+    jmp ir_errdefer_end_334
+ir_errdefer_ok_333:
+ir_errdefer_end_334:
     mov rax, 1
     jmp Lis_alnum_exit
-    jmp ir_if_end_325
-ir_if_next_326:
-ir_if_end_325:
+    jmp ir_if_end_331
+ir_if_next_332:
+ir_if_end_331:
     mov rax, 0
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_errdefer_ok_329
-    jmp ir_errdefer_end_330
-ir_errdefer_ok_329:
-ir_errdefer_end_330:
+    jz ir_errdefer_ok_335
+    jmp ir_errdefer_end_336
+ir_errdefer_ok_335:
+ir_errdefer_end_336:
     mov rax, 0
     jmp Lis_alnum_exit
 Lis_alnum_exit:
@@ -4631,7 +4697,7 @@ is_space:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'c'
     ; Parameter 'c' arrived in register rcx
-ir_entry_331:
+ir_entry_337:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4644,20 +4710,20 @@ ir_entry_331:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_if_next_333
+    jz ir_if_next_339
     mov rax, 1
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_errdefer_ok_334
-    jmp ir_errdefer_end_335
-ir_errdefer_ok_334:
-ir_errdefer_end_335:
+    jz ir_errdefer_ok_340
+    jmp ir_errdefer_end_341
+ir_errdefer_ok_340:
+ir_errdefer_end_341:
     mov rax, 1
     jmp Lis_space_exit
-    jmp ir_if_end_332
-ir_if_next_333:
-ir_if_end_332:
+    jmp ir_if_end_338
+ir_if_next_339:
+ir_if_end_338:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4670,20 +4736,20 @@ ir_if_end_332:
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_if_next_337
+    jz ir_if_next_343
     mov rax, 1
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_338
-    jmp ir_errdefer_end_339
-ir_errdefer_ok_338:
-ir_errdefer_end_339:
+    jz ir_errdefer_ok_344
+    jmp ir_errdefer_end_345
+ir_errdefer_ok_344:
+ir_errdefer_end_345:
     mov rax, 1
     jmp Lis_space_exit
-    jmp ir_if_end_336
-ir_if_next_337:
-ir_if_end_336:
+    jmp ir_if_end_342
+ir_if_next_343:
+ir_if_end_342:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4696,20 +4762,20 @@ ir_if_end_336:
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_if_next_341
+    jz ir_if_next_347
     mov rax, 1
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_errdefer_ok_342
-    jmp ir_errdefer_end_343
-ir_errdefer_ok_342:
-ir_errdefer_end_343:
+    jz ir_errdefer_ok_348
+    jmp ir_errdefer_end_349
+ir_errdefer_ok_348:
+ir_errdefer_end_349:
     mov rax, 1
     jmp Lis_space_exit
-    jmp ir_if_end_340
-ir_if_next_341:
-ir_if_end_340:
+    jmp ir_if_end_346
+ir_if_next_347:
+ir_if_end_346:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4722,20 +4788,20 @@ ir_if_end_340:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_if_next_345
+    jz ir_if_next_351
     mov rax, 1
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_errdefer_ok_346
-    jmp ir_errdefer_end_347
-ir_errdefer_ok_346:
-ir_errdefer_end_347:
+    jz ir_errdefer_ok_352
+    jmp ir_errdefer_end_353
+ir_errdefer_ok_352:
+ir_errdefer_end_353:
     mov rax, 1
     jmp Lis_space_exit
-    jmp ir_if_end_344
-ir_if_next_345:
-ir_if_end_344:
+    jmp ir_if_end_350
+ir_if_next_351:
+ir_if_end_350:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4748,20 +4814,20 @@ ir_if_end_344:
     mov [rbp - 80], rax
     mov rax, [rbp - 80]
     test rax, rax
-    jz ir_if_next_349
+    jz ir_if_next_355
     mov rax, 1
     mov [rbp - 88], rax
     mov rax, [rbp - 88]
     test rax, rax
-    jz ir_errdefer_ok_350
-    jmp ir_errdefer_end_351
-ir_errdefer_ok_350:
-ir_errdefer_end_351:
+    jz ir_errdefer_ok_356
+    jmp ir_errdefer_end_357
+ir_errdefer_ok_356:
+ir_errdefer_end_357:
     mov rax, 1
     jmp Lis_space_exit
-    jmp ir_if_end_348
-ir_if_next_349:
-ir_if_end_348:
+    jmp ir_if_end_354
+ir_if_next_355:
+ir_if_end_354:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4774,28 +4840,28 @@ ir_if_end_348:
     mov [rbp - 96], rax
     mov rax, [rbp - 96]
     test rax, rax
-    jz ir_if_next_353
+    jz ir_if_next_359
     mov rax, 1
     mov [rbp - 104], rax
     mov rax, [rbp - 104]
     test rax, rax
-    jz ir_errdefer_ok_354
-    jmp ir_errdefer_end_355
-ir_errdefer_ok_354:
-ir_errdefer_end_355:
+    jz ir_errdefer_ok_360
+    jmp ir_errdefer_end_361
+ir_errdefer_ok_360:
+ir_errdefer_end_361:
     mov rax, 1
     jmp Lis_space_exit
-    jmp ir_if_end_352
-ir_if_next_353:
-ir_if_end_352:
+    jmp ir_if_end_358
+ir_if_next_359:
+ir_if_end_358:
     mov rax, 0
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_356
-    jmp ir_errdefer_end_357
-ir_errdefer_ok_356:
-ir_errdefer_end_357:
+    jz ir_errdefer_ok_362
+    jmp ir_errdefer_end_363
+ir_errdefer_ok_362:
+ir_errdefer_end_363:
     mov rax, 0
     jmp Lis_space_exit
 Lis_space_exit:
@@ -4813,7 +4879,7 @@ to_lower:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'c'
     ; Parameter 'c' arrived in register rcx
-ir_entry_358:
+ir_entry_364:
     ; IR call: is_upper (1 args)
     sub rsp, 32
     ; Load variable: c
@@ -4835,7 +4901,7 @@ ir_entry_358:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_360
+    jz ir_if_next_366
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4848,24 +4914,24 @@ ir_entry_358:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_361
-    jmp ir_errdefer_end_362
-ir_errdefer_ok_361:
-ir_errdefer_end_362:
+    jz ir_errdefer_ok_367
+    jmp ir_errdefer_end_368
+ir_errdefer_ok_367:
+ir_errdefer_end_368:
     mov rax, [rbp - 32]
     jmp Lto_lower_exit
-    jmp ir_if_end_359
-ir_if_next_360:
-ir_if_end_359:
+    jmp ir_if_end_365
+ir_if_next_366:
+ir_if_end_365:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_errdefer_ok_363
-    jmp ir_errdefer_end_364
-ir_errdefer_ok_363:
-ir_errdefer_end_364:
+    jz ir_errdefer_ok_369
+    jmp ir_errdefer_end_370
+ir_errdefer_ok_369:
+ir_errdefer_end_370:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     jmp Lto_lower_exit
@@ -4884,7 +4950,7 @@ to_upper:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'c'
     ; Parameter 'c' arrived in register rcx
-ir_entry_365:
+ir_entry_371:
     ; IR call: is_lower (1 args)
     sub rsp, 32
     ; Load variable: c
@@ -4906,7 +4972,7 @@ ir_entry_365:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_367
+    jz ir_if_next_373
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -4919,24 +4985,24 @@ ir_entry_365:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_errdefer_ok_368
-    jmp ir_errdefer_end_369
-ir_errdefer_ok_368:
-ir_errdefer_end_369:
+    jz ir_errdefer_ok_374
+    jmp ir_errdefer_end_375
+ir_errdefer_ok_374:
+ir_errdefer_end_375:
     mov rax, [rbp - 32]
     jmp Lto_upper_exit
-    jmp ir_if_end_366
-ir_if_next_367:
-ir_if_end_366:
+    jmp ir_if_end_372
+ir_if_next_373:
+ir_if_end_372:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_errdefer_ok_370
-    jmp ir_errdefer_end_371
-ir_errdefer_ok_370:
-ir_errdefer_end_371:
+    jz ir_errdefer_ok_376
+    jmp ir_errdefer_end_377
+ir_errdefer_ok_376:
+ir_errdefer_end_377:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     jmp Lto_upper_exit
@@ -4955,17 +5021,17 @@ strlen:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 's'
     ; Parameter 's' arrived in register rcx
-ir_entry_372:
+ir_entry_378:
     mov rax, 0
     ; Store to variable: i
     mov qword [rbp - 16], rax  ; To stack [rbp - 16]
-ir_while_373:
+ir_while_379:
     ; Load variable: s
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_375
-    jmp ir_nonnull_376
-ir_trap_null_375:
+    jz ir_trap_null_381
+    jmp ir_nonnull_382
+ir_trap_null_381:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -4982,7 +5048,7 @@ ir_trap_null_375:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_376:
+ir_nonnull_382:
     ; Load variable: i
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -5013,7 +5079,7 @@ ir_nonnull_376:
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_while_end_374
+    jz ir_while_end_380
     ; Load variable: i
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -5025,17 +5091,17 @@ ir_nonnull_376:
     mov rax, [rbp - 56]
     ; Store to variable: i
     mov qword [rbp - 16], rax  ; To stack [rbp - 16]
-    jmp ir_while_373
-ir_while_end_374:
+    jmp ir_while_379
+ir_while_end_380:
     ; Load variable: i
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_errdefer_ok_377
-    jmp ir_errdefer_end_378
-ir_errdefer_ok_377:
-ir_errdefer_end_378:
+    jz ir_errdefer_ok_383
+    jmp ir_errdefer_end_384
+ir_errdefer_ok_383:
+ir_errdefer_end_384:
     ; Load variable: i
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     jmp Lstrlen_exit
@@ -5056,17 +5122,17 @@ streq:
     ; Parameter 'a' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'b'
     ; Parameter 'b' arrived in register rdx
-ir_entry_379:
+ir_entry_385:
     mov rax, 0
     ; Store to variable: i
     mov qword [rbp - 24], rax  ; To stack [rbp - 24]
-ir_while_380:
+ir_while_386:
     ; Load variable: a
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_382
-    jmp ir_nonnull_383
-ir_trap_null_382:
+    jz ir_trap_null_388
+    jmp ir_nonnull_389
+ir_trap_null_388:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5083,7 +5149,7 @@ ir_trap_null_382:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_383:
+ir_nonnull_389:
     ; Load variable: i
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -5114,13 +5180,13 @@ ir_nonnull_383:
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_while_end_381
+    jz ir_while_end_387
     ; Load variable: a
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_386
-    jmp ir_nonnull_387
-ir_trap_null_386:
+    jz ir_trap_null_392
+    jmp ir_nonnull_393
+ir_trap_null_392:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5137,7 +5203,7 @@ ir_trap_null_386:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_387:
+ir_nonnull_393:
     ; Load variable: i
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -5160,9 +5226,9 @@ ir_nonnull_387:
     ; Load variable: b
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     test rax, rax
-    jz ir_trap_null_388
-    jmp ir_nonnull_389
-ir_trap_null_388:
+    jz ir_trap_null_394
+    jmp ir_nonnull_395
+ir_trap_null_394:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5179,7 +5245,7 @@ ir_trap_null_388:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_389:
+ir_nonnull_395:
     ; Load variable: i
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -5210,20 +5276,20 @@ ir_nonnull_389:
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_if_next_385
+    jz ir_if_next_391
     mov rax, 0
     mov [rbp - 120], rax
     mov rax, [rbp - 120]
     test rax, rax
-    jz ir_errdefer_ok_390
-    jmp ir_errdefer_end_391
-ir_errdefer_ok_390:
-ir_errdefer_end_391:
+    jz ir_errdefer_ok_396
+    jmp ir_errdefer_end_397
+ir_errdefer_ok_396:
+ir_errdefer_end_397:
     mov rax, 0
     jmp Lstreq_exit
-    jmp ir_if_end_384
-ir_if_next_385:
-ir_if_end_384:
+    jmp ir_if_end_390
+ir_if_next_391:
+ir_if_end_390:
     ; Load variable: i
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -5235,14 +5301,14 @@ ir_if_end_384:
     mov rax, [rbp - 128]
     ; Store to variable: i
     mov qword [rbp - 24], rax  ; To stack [rbp - 24]
-    jmp ir_while_380
-ir_while_end_381:
+    jmp ir_while_386
+ir_while_end_387:
     ; Load variable: b
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     test rax, rax
-    jz ir_trap_null_394
-    jmp ir_nonnull_395
-ir_trap_null_394:
+    jz ir_trap_null_400
+    jmp ir_nonnull_401
+ir_trap_null_400:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5259,7 +5325,7 @@ ir_trap_null_394:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_395:
+ir_nonnull_401:
     ; Load variable: i
     mov rax, qword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -5290,28 +5356,28 @@ ir_nonnull_395:
     mov [rbp - 160], rax
     mov rax, [rbp - 160]
     test rax, rax
-    jz ir_if_next_393
+    jz ir_if_next_399
     mov rax, 0
     mov [rbp - 168], rax
     mov rax, [rbp - 168]
     test rax, rax
-    jz ir_errdefer_ok_396
-    jmp ir_errdefer_end_397
-ir_errdefer_ok_396:
-ir_errdefer_end_397:
+    jz ir_errdefer_ok_402
+    jmp ir_errdefer_end_403
+ir_errdefer_ok_402:
+ir_errdefer_end_403:
     mov rax, 0
     jmp Lstreq_exit
-    jmp ir_if_end_392
-ir_if_next_393:
-ir_if_end_392:
+    jmp ir_if_end_398
+ir_if_next_399:
+ir_if_end_398:
     mov rax, 1
     mov [rbp - 176], rax
     mov rax, [rbp - 176]
     test rax, rax
-    jz ir_errdefer_ok_398
-    jmp ir_errdefer_end_399
-ir_errdefer_ok_398:
-ir_errdefer_end_399:
+    jz ir_errdefer_ok_404
+    jmp ir_errdefer_end_405
+ir_errdefer_ok_404:
+ir_errdefer_end_405:
     mov rax, 1
     jmp Lstreq_exit
 Lstreq_exit:
@@ -5335,7 +5401,7 @@ strncmp:
     ; Parameter 'needle' arrived in register r8
     mov [rbp - 32], r9  ; Home param 'buf_len'
     ; Parameter 'buf_len' arrived in register r9
-ir_entry_400:
+ir_entry_406:
     ; Load variable: offset
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -5348,7 +5414,7 @@ ir_entry_400:
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_if_next_402
+    jz ir_if_next_408
     mov rax, 1
     neg rax
     mov [rbp - 56], rax
@@ -5356,15 +5422,15 @@ ir_entry_400:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_errdefer_ok_403
-    jmp ir_errdefer_end_404
-ir_errdefer_ok_403:
-ir_errdefer_end_404:
+    jz ir_errdefer_ok_409
+    jmp ir_errdefer_end_410
+ir_errdefer_ok_409:
+ir_errdefer_end_410:
     mov rax, [rbp - 56]
     jmp Lstrncmp_exit
-    jmp ir_if_end_401
-ir_if_next_402:
-ir_if_end_401:
+    jmp ir_if_end_407
+ir_if_next_408:
+ir_if_end_407:
     ; Load variable: buf_len
     movsxd rax, dword [rbp - 32]  ; From stack [rbp - 32]
     push rax
@@ -5377,7 +5443,7 @@ ir_if_end_401:
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_if_next_406
+    jz ir_if_next_412
     mov rax, 1
     neg rax
     mov [rbp - 80], rax
@@ -5385,15 +5451,15 @@ ir_if_end_401:
     mov [rbp - 88], rax
     mov rax, [rbp - 88]
     test rax, rax
-    jz ir_errdefer_ok_407
-    jmp ir_errdefer_end_408
-ir_errdefer_ok_407:
-ir_errdefer_end_408:
+    jz ir_errdefer_ok_413
+    jmp ir_errdefer_end_414
+ir_errdefer_ok_413:
+ir_errdefer_end_414:
     mov rax, [rbp - 80]
     jmp Lstrncmp_exit
-    jmp ir_if_end_405
-ir_if_next_406:
-ir_if_end_405:
+    jmp ir_if_end_411
+ir_if_next_412:
+ir_if_end_411:
     ; Load variable: offset
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -5407,7 +5473,7 @@ ir_if_end_405:
     mov [rbp - 96], rax
     mov rax, [rbp - 96]
     test rax, rax
-    jz ir_if_next_410
+    jz ir_if_next_416
     mov rax, 1
     neg rax
     mov [rbp - 104], rax
@@ -5415,19 +5481,19 @@ ir_if_end_405:
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_411
-    jmp ir_errdefer_end_412
-ir_errdefer_ok_411:
-ir_errdefer_end_412:
+    jz ir_errdefer_ok_417
+    jmp ir_errdefer_end_418
+ir_errdefer_ok_417:
+ir_errdefer_end_418:
     mov rax, [rbp - 104]
     jmp Lstrncmp_exit
-    jmp ir_if_end_409
-ir_if_next_410:
-ir_if_end_409:
+    jmp ir_if_end_415
+ir_if_next_416:
+ir_if_end_415:
     mov rax, 0
     ; Store to variable: i
     mov dword [rbp - 36], eax  ; To stack [rbp - 36]
-ir_while_413:
+ir_while_419:
     ; Load variable: needle
     mov rax, qword [rbp - 24]  ; String param ptr
     push rax
@@ -5451,7 +5517,7 @@ ir_while_413:
     mov [rbp - 136], rax
     mov rax, [rbp - 136]
     test rax, rax
-    jz ir_while_end_414
+    jz ir_while_end_420
     ; Load variable: offset
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -5473,7 +5539,7 @@ ir_while_413:
     mov [rbp - 152], rax
     mov rax, [rbp - 152]
     test rax, rax
-    jz ir_if_next_416
+    jz ir_if_next_422
     mov rax, 1
     neg rax
     mov [rbp - 160], rax
@@ -5481,15 +5547,15 @@ ir_while_413:
     mov [rbp - 168], rax
     mov rax, [rbp - 168]
     test rax, rax
-    jz ir_errdefer_ok_417
-    jmp ir_errdefer_end_418
-ir_errdefer_ok_417:
-ir_errdefer_end_418:
+    jz ir_errdefer_ok_423
+    jmp ir_errdefer_end_424
+ir_errdefer_ok_423:
+ir_errdefer_end_424:
     mov rax, [rbp - 160]
     jmp Lstrncmp_exit
-    jmp ir_if_end_415
-ir_if_next_416:
-ir_if_end_415:
+    jmp ir_if_end_421
+ir_if_next_422:
+ir_if_end_421:
     ; Load variable: offset
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -5502,9 +5568,9 @@ ir_if_end_415:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_421
-    jmp ir_nonnull_422
-ir_trap_null_421:
+    jz ir_trap_null_427
+    jmp ir_nonnull_428
+ir_trap_null_427:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5521,7 +5587,7 @@ ir_trap_null_421:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_422:
+ir_nonnull_428:
     mov rax, [rbp - 176]
     push rax
     mov rax, 1
@@ -5553,9 +5619,9 @@ ir_nonnull_422:
     mov [rbp - 216], rax
     mov rax, [rbp - 216]
     test rax, rax
-    jz ir_trap_null_423
-    jmp ir_nonnull_424
-ir_trap_null_423:
+    jz ir_trap_null_429
+    jmp ir_nonnull_430
+ir_trap_null_429:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5572,7 +5638,7 @@ ir_trap_null_423:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_424:
+ir_nonnull_430:
     ; Load variable: i
     movsxd rax, dword [rbp - 36]  ; From stack [rbp - 36]
     push rax
@@ -5602,7 +5668,7 @@ ir_nonnull_424:
     mov [rbp - 248], rax
     mov rax, [rbp - 248]
     test rax, rax
-    jz ir_if_next_420
+    jz ir_if_next_426
     ; Load variable: offset
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -5615,9 +5681,9 @@ ir_nonnull_424:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_425
-    jmp ir_nonnull_426
-ir_trap_null_425:
+    jz ir_trap_null_431
+    jmp ir_nonnull_432
+ir_trap_null_431:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5634,7 +5700,7 @@ ir_trap_null_425:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_426:
+ir_nonnull_432:
     mov rax, [rbp - 256]
     push rax
     mov rax, 1
@@ -5666,9 +5732,9 @@ ir_nonnull_426:
     mov [rbp - 296], rax
     mov rax, [rbp - 296]
     test rax, rax
-    jz ir_trap_null_427
-    jmp ir_nonnull_428
-ir_trap_null_427:
+    jz ir_trap_null_433
+    jmp ir_nonnull_434
+ir_trap_null_433:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5685,7 +5751,7 @@ ir_trap_null_427:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_428:
+ir_nonnull_434:
     ; Load variable: i
     movsxd rax, dword [rbp - 36]  ; From stack [rbp - 36]
     push rax
@@ -5715,15 +5781,15 @@ ir_nonnull_428:
     mov [rbp - 336], rax
     mov rax, [rbp - 336]
     test rax, rax
-    jz ir_errdefer_ok_429
-    jmp ir_errdefer_end_430
-ir_errdefer_ok_429:
-ir_errdefer_end_430:
+    jz ir_errdefer_ok_435
+    jmp ir_errdefer_end_436
+ir_errdefer_ok_435:
+ir_errdefer_end_436:
     mov rax, [rbp - 328]
     jmp Lstrncmp_exit
-    jmp ir_if_end_419
-ir_if_next_420:
-ir_if_end_419:
+    jmp ir_if_end_425
+ir_if_next_426:
+ir_if_end_425:
     ; Load variable: i
     movsxd rax, dword [rbp - 36]  ; From stack [rbp - 36]
     push rax
@@ -5735,16 +5801,16 @@ ir_if_end_419:
     mov rax, [rbp - 344]
     ; Store to variable: i
     mov dword [rbp - 36], eax  ; To stack [rbp - 36]
-    jmp ir_while_413
-ir_while_end_414:
+    jmp ir_while_419
+ir_while_end_420:
     mov rax, 0
     mov [rbp - 352], rax
     mov rax, [rbp - 352]
     test rax, rax
-    jz ir_errdefer_ok_431
-    jmp ir_errdefer_end_432
-ir_errdefer_ok_431:
-ir_errdefer_end_432:
+    jz ir_errdefer_ok_437
+    jmp ir_errdefer_end_438
+ir_errdefer_ok_437:
+ir_errdefer_end_438:
     mov rax, 0
     jmp Lstrncmp_exit
 Lstrncmp_exit:
@@ -5768,7 +5834,7 @@ is_get:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'n'
     ; Parameter 'n' arrived in register rdx
-ir_entry_433:
+ir_entry_439:
     ; Load variable: n
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -5781,26 +5847,26 @@ ir_entry_433:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_435
+    jz ir_if_next_441
     mov rax, 0
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_436
-    jmp ir_errdefer_end_437
-ir_errdefer_ok_436:
-ir_errdefer_end_437:
+    jz ir_errdefer_ok_442
+    jmp ir_errdefer_end_443
+ir_errdefer_ok_442:
+ir_errdefer_end_443:
     mov rax, 0
     jmp Lis_get_exit
-    jmp ir_if_end_434
-ir_if_next_435:
-ir_if_end_434:
+    jmp ir_if_end_440
+ir_if_next_441:
+ir_if_end_440:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_440
-    jmp ir_nonnull_441
-ir_trap_null_440:
+    jz ir_trap_null_446
+    jmp ir_nonnull_447
+ir_trap_null_446:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5817,7 +5883,7 @@ ir_trap_null_440:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_441:
+ir_nonnull_447:
     mov rax, 0
     push rax
     mov rax, 1
@@ -5847,26 +5913,26 @@ ir_nonnull_441:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_if_next_439
+    jz ir_if_next_445
     mov rax, 0
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_errdefer_ok_442
-    jmp ir_errdefer_end_443
-ir_errdefer_ok_442:
-ir_errdefer_end_443:
+    jz ir_errdefer_ok_448
+    jmp ir_errdefer_end_449
+ir_errdefer_ok_448:
+ir_errdefer_end_449:
     mov rax, 0
     jmp Lis_get_exit
-    jmp ir_if_end_438
-ir_if_next_439:
-ir_if_end_438:
+    jmp ir_if_end_444
+ir_if_next_445:
+ir_if_end_444:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_446
-    jmp ir_nonnull_447
-ir_trap_null_446:
+    jz ir_trap_null_452
+    jmp ir_nonnull_453
+ir_trap_null_452:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5883,7 +5949,7 @@ ir_trap_null_446:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_447:
+ir_nonnull_453:
     mov rax, 1
     push rax
     mov rax, 1
@@ -5913,26 +5979,26 @@ ir_nonnull_447:
     mov [rbp - 104], rax
     mov rax, [rbp - 104]
     test rax, rax
-    jz ir_if_next_445
+    jz ir_if_next_451
     mov rax, 0
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_448
-    jmp ir_errdefer_end_449
-ir_errdefer_ok_448:
-ir_errdefer_end_449:
+    jz ir_errdefer_ok_454
+    jmp ir_errdefer_end_455
+ir_errdefer_ok_454:
+ir_errdefer_end_455:
     mov rax, 0
     jmp Lis_get_exit
-    jmp ir_if_end_444
-ir_if_next_445:
-ir_if_end_444:
+    jmp ir_if_end_450
+ir_if_next_451:
+ir_if_end_450:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_452
-    jmp ir_nonnull_453
-ir_trap_null_452:
+    jz ir_trap_null_458
+    jmp ir_nonnull_459
+ir_trap_null_458:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -5949,7 +6015,7 @@ ir_trap_null_452:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_453:
+ir_nonnull_459:
     mov rax, 2
     push rax
     mov rax, 1
@@ -5979,26 +6045,26 @@ ir_nonnull_453:
     mov [rbp - 144], rax
     mov rax, [rbp - 144]
     test rax, rax
-    jz ir_if_next_451
+    jz ir_if_next_457
     mov rax, 0
     mov [rbp - 152], rax
     mov rax, [rbp - 152]
     test rax, rax
-    jz ir_errdefer_ok_454
-    jmp ir_errdefer_end_455
-ir_errdefer_ok_454:
-ir_errdefer_end_455:
+    jz ir_errdefer_ok_460
+    jmp ir_errdefer_end_461
+ir_errdefer_ok_460:
+ir_errdefer_end_461:
     mov rax, 0
     jmp Lis_get_exit
-    jmp ir_if_end_450
-ir_if_next_451:
-ir_if_end_450:
+    jmp ir_if_end_456
+ir_if_next_457:
+ir_if_end_456:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_458
-    jmp ir_nonnull_459
-ir_trap_null_458:
+    jz ir_trap_null_464
+    jmp ir_nonnull_465
+ir_trap_null_464:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6015,7 +6081,7 @@ ir_trap_null_458:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_459:
+ir_nonnull_465:
     mov rax, 3
     push rax
     mov rax, 1
@@ -6045,28 +6111,28 @@ ir_nonnull_459:
     mov [rbp - 184], rax
     mov rax, [rbp - 184]
     test rax, rax
-    jz ir_if_next_457
+    jz ir_if_next_463
     mov rax, 0
     mov [rbp - 192], rax
     mov rax, [rbp - 192]
     test rax, rax
-    jz ir_errdefer_ok_460
-    jmp ir_errdefer_end_461
-ir_errdefer_ok_460:
-ir_errdefer_end_461:
+    jz ir_errdefer_ok_466
+    jmp ir_errdefer_end_467
+ir_errdefer_ok_466:
+ir_errdefer_end_467:
     mov rax, 0
     jmp Lis_get_exit
-    jmp ir_if_end_456
-ir_if_next_457:
-ir_if_end_456:
+    jmp ir_if_end_462
+ir_if_next_463:
+ir_if_end_462:
     mov rax, 1
     mov [rbp - 200], rax
     mov rax, [rbp - 200]
     test rax, rax
-    jz ir_errdefer_ok_462
-    jmp ir_errdefer_end_463
-ir_errdefer_ok_462:
-ir_errdefer_end_463:
+    jz ir_errdefer_ok_468
+    jmp ir_errdefer_end_469
+ir_errdefer_ok_468:
+ir_errdefer_end_469:
     mov rax, 1
     jmp Lis_get_exit
 Lis_get_exit:
@@ -6086,7 +6152,7 @@ is_root:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'n'
     ; Parameter 'n' arrived in register rdx
-ir_entry_464:
+ir_entry_470:
     ; Load variable: n
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -6099,26 +6165,26 @@ ir_entry_464:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_466
+    jz ir_if_next_472
     mov rax, 0
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_467
-    jmp ir_errdefer_end_468
-ir_errdefer_ok_467:
-ir_errdefer_end_468:
+    jz ir_errdefer_ok_473
+    jmp ir_errdefer_end_474
+ir_errdefer_ok_473:
+ir_errdefer_end_474:
     mov rax, 0
     jmp Lis_root_exit
-    jmp ir_if_end_465
-ir_if_next_466:
-ir_if_end_465:
+    jmp ir_if_end_471
+ir_if_next_472:
+ir_if_end_471:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_471
-    jmp ir_nonnull_472
-ir_trap_null_471:
+    jz ir_trap_null_477
+    jmp ir_nonnull_478
+ir_trap_null_477:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6135,7 +6201,7 @@ ir_trap_null_471:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_472:
+ir_nonnull_478:
     mov rax, 4
     push rax
     mov rax, 1
@@ -6165,26 +6231,26 @@ ir_nonnull_472:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_if_next_470
+    jz ir_if_next_476
     mov rax, 0
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_errdefer_ok_473
-    jmp ir_errdefer_end_474
-ir_errdefer_ok_473:
-ir_errdefer_end_474:
+    jz ir_errdefer_ok_479
+    jmp ir_errdefer_end_480
+ir_errdefer_ok_479:
+ir_errdefer_end_480:
     mov rax, 0
     jmp Lis_root_exit
-    jmp ir_if_end_469
-ir_if_next_470:
-ir_if_end_469:
+    jmp ir_if_end_475
+ir_if_next_476:
+ir_if_end_475:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_477
-    jmp ir_nonnull_478
-ir_trap_null_477:
+    jz ir_trap_null_483
+    jmp ir_nonnull_484
+ir_trap_null_483:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6201,7 +6267,7 @@ ir_trap_null_477:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_478:
+ir_nonnull_484:
     mov rax, 5
     push rax
     mov rax, 1
@@ -6231,28 +6297,28 @@ ir_nonnull_478:
     mov [rbp - 104], rax
     mov rax, [rbp - 104]
     test rax, rax
-    jz ir_if_next_476
+    jz ir_if_next_482
     mov rax, 0
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_479
-    jmp ir_errdefer_end_480
-ir_errdefer_ok_479:
-ir_errdefer_end_480:
+    jz ir_errdefer_ok_485
+    jmp ir_errdefer_end_486
+ir_errdefer_ok_485:
+ir_errdefer_end_486:
     mov rax, 0
     jmp Lis_root_exit
-    jmp ir_if_end_475
-ir_if_next_476:
-ir_if_end_475:
+    jmp ir_if_end_481
+ir_if_next_482:
+ir_if_end_481:
     mov rax, 1
     mov [rbp - 120], rax
     mov rax, [rbp - 120]
     test rax, rax
-    jz ir_errdefer_ok_481
-    jmp ir_errdefer_end_482
-ir_errdefer_ok_481:
-ir_errdefer_end_482:
+    jz ir_errdefer_ok_487
+    jmp ir_errdefer_end_488
+ir_errdefer_ok_487:
+ir_errdefer_end_488:
     mov rax, 1
     jmp Lis_root_exit
 Lis_root_exit:
@@ -6272,7 +6338,7 @@ is_health:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'n'
     ; Parameter 'n' arrived in register rdx
-ir_entry_483:
+ir_entry_489:
     ; Load variable: n
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -6285,26 +6351,26 @@ ir_entry_483:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_485
+    jz ir_if_next_491
     mov rax, 0
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_486
-    jmp ir_errdefer_end_487
-ir_errdefer_ok_486:
-ir_errdefer_end_487:
+    jz ir_errdefer_ok_492
+    jmp ir_errdefer_end_493
+ir_errdefer_ok_492:
+ir_errdefer_end_493:
     mov rax, 0
     jmp Lis_health_exit
-    jmp ir_if_end_484
-ir_if_next_485:
-ir_if_end_484:
+    jmp ir_if_end_490
+ir_if_next_491:
+ir_if_end_490:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_490
-    jmp ir_nonnull_491
-ir_trap_null_490:
+    jz ir_trap_null_496
+    jmp ir_nonnull_497
+ir_trap_null_496:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6321,7 +6387,7 @@ ir_trap_null_490:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_491:
+ir_nonnull_497:
     mov rax, 4
     push rax
     mov rax, 1
@@ -6351,26 +6417,26 @@ ir_nonnull_491:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_if_next_489
+    jz ir_if_next_495
     mov rax, 0
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_errdefer_ok_492
-    jmp ir_errdefer_end_493
-ir_errdefer_ok_492:
-ir_errdefer_end_493:
+    jz ir_errdefer_ok_498
+    jmp ir_errdefer_end_499
+ir_errdefer_ok_498:
+ir_errdefer_end_499:
     mov rax, 0
     jmp Lis_health_exit
-    jmp ir_if_end_488
-ir_if_next_489:
-ir_if_end_488:
+    jmp ir_if_end_494
+ir_if_next_495:
+ir_if_end_494:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_496
-    jmp ir_nonnull_497
-ir_trap_null_496:
+    jz ir_trap_null_502
+    jmp ir_nonnull_503
+ir_trap_null_502:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6387,7 +6453,7 @@ ir_trap_null_496:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_497:
+ir_nonnull_503:
     mov rax, 5
     push rax
     mov rax, 1
@@ -6417,26 +6483,26 @@ ir_nonnull_497:
     mov [rbp - 104], rax
     mov rax, [rbp - 104]
     test rax, rax
-    jz ir_if_next_495
+    jz ir_if_next_501
     mov rax, 0
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_498
-    jmp ir_errdefer_end_499
-ir_errdefer_ok_498:
-ir_errdefer_end_499:
+    jz ir_errdefer_ok_504
+    jmp ir_errdefer_end_505
+ir_errdefer_ok_504:
+ir_errdefer_end_505:
     mov rax, 0
     jmp Lis_health_exit
-    jmp ir_if_end_494
-ir_if_next_495:
-ir_if_end_494:
+    jmp ir_if_end_500
+ir_if_next_501:
+ir_if_end_500:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_502
-    jmp ir_nonnull_503
-ir_trap_null_502:
+    jz ir_trap_null_508
+    jmp ir_nonnull_509
+ir_trap_null_508:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6453,7 +6519,7 @@ ir_trap_null_502:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_503:
+ir_nonnull_509:
     mov rax, 6
     push rax
     mov rax, 1
@@ -6483,26 +6549,26 @@ ir_nonnull_503:
     mov [rbp - 144], rax
     mov rax, [rbp - 144]
     test rax, rax
-    jz ir_if_next_501
+    jz ir_if_next_507
     mov rax, 0
     mov [rbp - 152], rax
     mov rax, [rbp - 152]
     test rax, rax
-    jz ir_errdefer_ok_504
-    jmp ir_errdefer_end_505
-ir_errdefer_ok_504:
-ir_errdefer_end_505:
+    jz ir_errdefer_ok_510
+    jmp ir_errdefer_end_511
+ir_errdefer_ok_510:
+ir_errdefer_end_511:
     mov rax, 0
     jmp Lis_health_exit
-    jmp ir_if_end_500
-ir_if_next_501:
-ir_if_end_500:
+    jmp ir_if_end_506
+ir_if_next_507:
+ir_if_end_506:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_508
-    jmp ir_nonnull_509
-ir_trap_null_508:
+    jz ir_trap_null_514
+    jmp ir_nonnull_515
+ir_trap_null_514:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6519,7 +6585,7 @@ ir_trap_null_508:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_509:
+ir_nonnull_515:
     mov rax, 7
     push rax
     mov rax, 1
@@ -6549,26 +6615,26 @@ ir_nonnull_509:
     mov [rbp - 184], rax
     mov rax, [rbp - 184]
     test rax, rax
-    jz ir_if_next_507
+    jz ir_if_next_513
     mov rax, 0
     mov [rbp - 192], rax
     mov rax, [rbp - 192]
     test rax, rax
-    jz ir_errdefer_ok_510
-    jmp ir_errdefer_end_511
-ir_errdefer_ok_510:
-ir_errdefer_end_511:
+    jz ir_errdefer_ok_516
+    jmp ir_errdefer_end_517
+ir_errdefer_ok_516:
+ir_errdefer_end_517:
     mov rax, 0
     jmp Lis_health_exit
-    jmp ir_if_end_506
-ir_if_next_507:
-ir_if_end_506:
+    jmp ir_if_end_512
+ir_if_next_513:
+ir_if_end_512:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_514
-    jmp ir_nonnull_515
-ir_trap_null_514:
+    jz ir_trap_null_520
+    jmp ir_nonnull_521
+ir_trap_null_520:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6585,7 +6651,7 @@ ir_trap_null_514:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_515:
+ir_nonnull_521:
     mov rax, 8
     push rax
     mov rax, 1
@@ -6615,26 +6681,26 @@ ir_nonnull_515:
     mov [rbp - 224], rax
     mov rax, [rbp - 224]
     test rax, rax
-    jz ir_if_next_513
+    jz ir_if_next_519
     mov rax, 0
     mov [rbp - 232], rax
     mov rax, [rbp - 232]
     test rax, rax
-    jz ir_errdefer_ok_516
-    jmp ir_errdefer_end_517
-ir_errdefer_ok_516:
-ir_errdefer_end_517:
+    jz ir_errdefer_ok_522
+    jmp ir_errdefer_end_523
+ir_errdefer_ok_522:
+ir_errdefer_end_523:
     mov rax, 0
     jmp Lis_health_exit
-    jmp ir_if_end_512
-ir_if_next_513:
-ir_if_end_512:
+    jmp ir_if_end_518
+ir_if_next_519:
+ir_if_end_518:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_520
-    jmp ir_nonnull_521
-ir_trap_null_520:
+    jz ir_trap_null_526
+    jmp ir_nonnull_527
+ir_trap_null_526:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6651,7 +6717,7 @@ ir_trap_null_520:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_521:
+ir_nonnull_527:
     mov rax, 9
     push rax
     mov rax, 1
@@ -6681,26 +6747,26 @@ ir_nonnull_521:
     mov [rbp - 264], rax
     mov rax, [rbp - 264]
     test rax, rax
-    jz ir_if_next_519
+    jz ir_if_next_525
     mov rax, 0
     mov [rbp - 272], rax
     mov rax, [rbp - 272]
     test rax, rax
-    jz ir_errdefer_ok_522
-    jmp ir_errdefer_end_523
-ir_errdefer_ok_522:
-ir_errdefer_end_523:
+    jz ir_errdefer_ok_528
+    jmp ir_errdefer_end_529
+ir_errdefer_ok_528:
+ir_errdefer_end_529:
     mov rax, 0
     jmp Lis_health_exit
-    jmp ir_if_end_518
-ir_if_next_519:
-ir_if_end_518:
+    jmp ir_if_end_524
+ir_if_next_525:
+ir_if_end_524:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_526
-    jmp ir_nonnull_527
-ir_trap_null_526:
+    jz ir_trap_null_532
+    jmp ir_nonnull_533
+ir_trap_null_532:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6717,7 +6783,7 @@ ir_trap_null_526:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_527:
+ir_nonnull_533:
     mov rax, 10
     push rax
     mov rax, 1
@@ -6747,26 +6813,26 @@ ir_nonnull_527:
     mov [rbp - 304], rax
     mov rax, [rbp - 304]
     test rax, rax
-    jz ir_if_next_525
+    jz ir_if_next_531
     mov rax, 0
     mov [rbp - 312], rax
     mov rax, [rbp - 312]
     test rax, rax
-    jz ir_errdefer_ok_528
-    jmp ir_errdefer_end_529
-ir_errdefer_ok_528:
-ir_errdefer_end_529:
+    jz ir_errdefer_ok_534
+    jmp ir_errdefer_end_535
+ir_errdefer_ok_534:
+ir_errdefer_end_535:
     mov rax, 0
     jmp Lis_health_exit
-    jmp ir_if_end_524
-ir_if_next_525:
-ir_if_end_524:
+    jmp ir_if_end_530
+ir_if_next_531:
+ir_if_end_530:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_532
-    jmp ir_nonnull_533
-ir_trap_null_532:
+    jz ir_trap_null_538
+    jmp ir_nonnull_539
+ir_trap_null_538:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6783,7 +6849,7 @@ ir_trap_null_532:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_533:
+ir_nonnull_539:
     mov rax, 11
     push rax
     mov rax, 1
@@ -6813,14 +6879,14 @@ ir_nonnull_533:
     mov [rbp - 344], rax
     mov rax, [rbp - 344]
     test rax, rax
-    jz ir_sc_false_536
-ir_sc_rhs_534:
+    jz ir_sc_false_542
+ir_sc_rhs_540:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_538
-    jmp ir_nonnull_539
-ir_trap_null_538:
+    jz ir_trap_null_544
+    jmp ir_nonnull_545
+ir_trap_null_544:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6837,7 +6903,7 @@ ir_trap_null_538:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_539:
+ir_nonnull_545:
     mov rax, 11
     push rax
     mov rax, 1
@@ -6867,39 +6933,39 @@ ir_nonnull_539:
     mov [rbp - 376], rax
     mov rax, [rbp - 376]
     test rax, rax
-    jz ir_sc_false_536
-ir_sc_true_535:
+    jz ir_sc_false_542
+ir_sc_true_541:
     mov rax, 1
     mov [rbp - 384], rax
-    jmp ir_sc_end_537
-ir_sc_false_536:
+    jmp ir_sc_end_543
+ir_sc_false_542:
     mov rax, 0
     mov [rbp - 384], rax
-ir_sc_end_537:
+ir_sc_end_543:
     mov rax, [rbp - 384]
     test rax, rax
-    jz ir_if_next_531
+    jz ir_if_next_537
     mov rax, 0
     mov [rbp - 400], rax
     mov rax, [rbp - 400]
     test rax, rax
-    jz ir_errdefer_ok_540
-    jmp ir_errdefer_end_541
-ir_errdefer_ok_540:
-ir_errdefer_end_541:
+    jz ir_errdefer_ok_546
+    jmp ir_errdefer_end_547
+ir_errdefer_ok_546:
+ir_errdefer_end_547:
     mov rax, 0
     jmp Lis_health_exit
-    jmp ir_if_end_530
-ir_if_next_531:
-ir_if_end_530:
+    jmp ir_if_end_536
+ir_if_next_537:
+ir_if_end_536:
     mov rax, 1
     mov [rbp - 408], rax
     mov rax, [rbp - 408]
     test rax, rax
-    jz ir_errdefer_ok_542
-    jmp ir_errdefer_end_543
-ir_errdefer_ok_542:
-ir_errdefer_end_543:
+    jz ir_errdefer_ok_548
+    jmp ir_errdefer_end_549
+ir_errdefer_ok_548:
+ir_errdefer_end_549:
     mov rax, 1
     jmp Lis_health_exit
 Lis_health_exit:
@@ -6919,7 +6985,7 @@ is_post:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'n'
     ; Parameter 'n' arrived in register rdx
-ir_entry_544:
+ir_entry_550:
     ; Load variable: n
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -6932,26 +6998,26 @@ ir_entry_544:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_546
+    jz ir_if_next_552
     mov rax, 0
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_547
-    jmp ir_errdefer_end_548
-ir_errdefer_ok_547:
-ir_errdefer_end_548:
+    jz ir_errdefer_ok_553
+    jmp ir_errdefer_end_554
+ir_errdefer_ok_553:
+ir_errdefer_end_554:
     mov rax, 0
     jmp Lis_post_exit
-    jmp ir_if_end_545
-ir_if_next_546:
-ir_if_end_545:
+    jmp ir_if_end_551
+ir_if_next_552:
+ir_if_end_551:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_551
-    jmp ir_nonnull_552
-ir_trap_null_551:
+    jz ir_trap_null_557
+    jmp ir_nonnull_558
+ir_trap_null_557:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -6968,7 +7034,7 @@ ir_trap_null_551:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_552:
+ir_nonnull_558:
     mov rax, 0
     push rax
     mov rax, 1
@@ -6998,26 +7064,26 @@ ir_nonnull_552:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_if_next_550
+    jz ir_if_next_556
     mov rax, 0
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_errdefer_ok_553
-    jmp ir_errdefer_end_554
-ir_errdefer_ok_553:
-ir_errdefer_end_554:
+    jz ir_errdefer_ok_559
+    jmp ir_errdefer_end_560
+ir_errdefer_ok_559:
+ir_errdefer_end_560:
     mov rax, 0
     jmp Lis_post_exit
-    jmp ir_if_end_549
-ir_if_next_550:
-ir_if_end_549:
+    jmp ir_if_end_555
+ir_if_next_556:
+ir_if_end_555:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_557
-    jmp ir_nonnull_558
-ir_trap_null_557:
+    jz ir_trap_null_563
+    jmp ir_nonnull_564
+ir_trap_null_563:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7034,7 +7100,7 @@ ir_trap_null_557:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_558:
+ir_nonnull_564:
     mov rax, 1
     push rax
     mov rax, 1
@@ -7064,26 +7130,26 @@ ir_nonnull_558:
     mov [rbp - 104], rax
     mov rax, [rbp - 104]
     test rax, rax
-    jz ir_if_next_556
+    jz ir_if_next_562
     mov rax, 0
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_559
-    jmp ir_errdefer_end_560
-ir_errdefer_ok_559:
-ir_errdefer_end_560:
+    jz ir_errdefer_ok_565
+    jmp ir_errdefer_end_566
+ir_errdefer_ok_565:
+ir_errdefer_end_566:
     mov rax, 0
     jmp Lis_post_exit
-    jmp ir_if_end_555
-ir_if_next_556:
-ir_if_end_555:
+    jmp ir_if_end_561
+ir_if_next_562:
+ir_if_end_561:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_563
-    jmp ir_nonnull_564
-ir_trap_null_563:
+    jz ir_trap_null_569
+    jmp ir_nonnull_570
+ir_trap_null_569:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7100,7 +7166,7 @@ ir_trap_null_563:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_564:
+ir_nonnull_570:
     mov rax, 2
     push rax
     mov rax, 1
@@ -7130,26 +7196,26 @@ ir_nonnull_564:
     mov [rbp - 144], rax
     mov rax, [rbp - 144]
     test rax, rax
-    jz ir_if_next_562
+    jz ir_if_next_568
     mov rax, 0
     mov [rbp - 152], rax
     mov rax, [rbp - 152]
     test rax, rax
-    jz ir_errdefer_ok_565
-    jmp ir_errdefer_end_566
-ir_errdefer_ok_565:
-ir_errdefer_end_566:
+    jz ir_errdefer_ok_571
+    jmp ir_errdefer_end_572
+ir_errdefer_ok_571:
+ir_errdefer_end_572:
     mov rax, 0
     jmp Lis_post_exit
-    jmp ir_if_end_561
-ir_if_next_562:
-ir_if_end_561:
+    jmp ir_if_end_567
+ir_if_next_568:
+ir_if_end_567:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_569
-    jmp ir_nonnull_570
-ir_trap_null_569:
+    jz ir_trap_null_575
+    jmp ir_nonnull_576
+ir_trap_null_575:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7166,7 +7232,7 @@ ir_trap_null_569:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_570:
+ir_nonnull_576:
     mov rax, 3
     push rax
     mov rax, 1
@@ -7196,26 +7262,26 @@ ir_nonnull_570:
     mov [rbp - 184], rax
     mov rax, [rbp - 184]
     test rax, rax
-    jz ir_if_next_568
+    jz ir_if_next_574
     mov rax, 0
     mov [rbp - 192], rax
     mov rax, [rbp - 192]
     test rax, rax
-    jz ir_errdefer_ok_571
-    jmp ir_errdefer_end_572
-ir_errdefer_ok_571:
-ir_errdefer_end_572:
+    jz ir_errdefer_ok_577
+    jmp ir_errdefer_end_578
+ir_errdefer_ok_577:
+ir_errdefer_end_578:
     mov rax, 0
     jmp Lis_post_exit
-    jmp ir_if_end_567
-ir_if_next_568:
-ir_if_end_567:
+    jmp ir_if_end_573
+ir_if_next_574:
+ir_if_end_573:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_575
-    jmp ir_nonnull_576
-ir_trap_null_575:
+    jz ir_trap_null_581
+    jmp ir_nonnull_582
+ir_trap_null_581:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7232,7 +7298,7 @@ ir_trap_null_575:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_576:
+ir_nonnull_582:
     mov rax, 4
     push rax
     mov rax, 1
@@ -7262,28 +7328,28 @@ ir_nonnull_576:
     mov [rbp - 224], rax
     mov rax, [rbp - 224]
     test rax, rax
-    jz ir_if_next_574
+    jz ir_if_next_580
     mov rax, 0
     mov [rbp - 232], rax
     mov rax, [rbp - 232]
     test rax, rax
-    jz ir_errdefer_ok_577
-    jmp ir_errdefer_end_578
-ir_errdefer_ok_577:
-ir_errdefer_end_578:
+    jz ir_errdefer_ok_583
+    jmp ir_errdefer_end_584
+ir_errdefer_ok_583:
+ir_errdefer_end_584:
     mov rax, 0
     jmp Lis_post_exit
-    jmp ir_if_end_573
-ir_if_next_574:
-ir_if_end_573:
+    jmp ir_if_end_579
+ir_if_next_580:
+ir_if_end_579:
     mov rax, 1
     mov [rbp - 240], rax
     mov rax, [rbp - 240]
     test rax, rax
-    jz ir_errdefer_ok_579
-    jmp ir_errdefer_end_580
-ir_errdefer_ok_579:
-ir_errdefer_end_580:
+    jz ir_errdefer_ok_585
+    jmp ir_errdefer_end_586
+ir_errdefer_ok_585:
+ir_errdefer_end_586:
     mov rax, 1
     jmp Lis_post_exit
 Lis_post_exit:
@@ -7305,7 +7371,7 @@ is_forum:
     ; Parameter 'n' arrived in register rdx
     mov [rbp - 24], r8  ; Home param 'path_start'
     ; Parameter 'path_start' arrived in register r8
-ir_entry_581:
+ir_entry_587:
     ; Load variable: path_start
     movsxd rax, dword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -7326,26 +7392,26 @@ ir_entry_581:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_if_next_583
+    jz ir_if_next_589
     mov rax, 0
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_errdefer_ok_584
-    jmp ir_errdefer_end_585
-ir_errdefer_ok_584:
-ir_errdefer_end_585:
+    jz ir_errdefer_ok_590
+    jmp ir_errdefer_end_591
+ir_errdefer_ok_590:
+ir_errdefer_end_591:
     mov rax, 0
     jmp Lis_forum_exit
-    jmp ir_if_end_582
-ir_if_next_583:
-ir_if_end_582:
+    jmp ir_if_end_588
+ir_if_next_589:
+ir_if_end_588:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_588
-    jmp ir_nonnull_589
-ir_trap_null_588:
+    jz ir_trap_null_594
+    jmp ir_nonnull_595
+ir_trap_null_594:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7362,7 +7428,7 @@ ir_trap_null_588:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_589:
+ir_nonnull_595:
     ; Load variable: path_start
     movsxd rax, dword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -7393,20 +7459,20 @@ ir_nonnull_589:
     mov [rbp - 80], rax
     mov rax, [rbp - 80]
     test rax, rax
-    jz ir_if_next_587
+    jz ir_if_next_593
     mov rax, 0
     mov [rbp - 88], rax
     mov rax, [rbp - 88]
     test rax, rax
-    jz ir_errdefer_ok_590
-    jmp ir_errdefer_end_591
-ir_errdefer_ok_590:
-ir_errdefer_end_591:
+    jz ir_errdefer_ok_596
+    jmp ir_errdefer_end_597
+ir_errdefer_ok_596:
+ir_errdefer_end_597:
     mov rax, 0
     jmp Lis_forum_exit
-    jmp ir_if_end_586
-ir_if_next_587:
-ir_if_end_586:
+    jmp ir_if_end_592
+ir_if_next_593:
+ir_if_end_592:
     ; Load variable: path_start
     movsxd rax, dword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -7418,9 +7484,9 @@ ir_if_end_586:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_594
-    jmp ir_nonnull_595
-ir_trap_null_594:
+    jz ir_trap_null_600
+    jmp ir_nonnull_601
+ir_trap_null_600:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7437,7 +7503,7 @@ ir_trap_null_594:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_595:
+ir_nonnull_601:
     mov rax, [rbp - 96]
     push rax
     mov rax, 1
@@ -7467,20 +7533,20 @@ ir_nonnull_595:
     mov [rbp - 128], rax
     mov rax, [rbp - 128]
     test rax, rax
-    jz ir_if_next_593
+    jz ir_if_next_599
     mov rax, 0
     mov [rbp - 136], rax
     mov rax, [rbp - 136]
     test rax, rax
-    jz ir_errdefer_ok_596
-    jmp ir_errdefer_end_597
-ir_errdefer_ok_596:
-ir_errdefer_end_597:
+    jz ir_errdefer_ok_602
+    jmp ir_errdefer_end_603
+ir_errdefer_ok_602:
+ir_errdefer_end_603:
     mov rax, 0
     jmp Lis_forum_exit
-    jmp ir_if_end_592
-ir_if_next_593:
-ir_if_end_592:
+    jmp ir_if_end_598
+ir_if_next_599:
+ir_if_end_598:
     ; Load variable: path_start
     movsxd rax, dword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -7492,9 +7558,9 @@ ir_if_end_592:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_600
-    jmp ir_nonnull_601
-ir_trap_null_600:
+    jz ir_trap_null_606
+    jmp ir_nonnull_607
+ir_trap_null_606:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7511,7 +7577,7 @@ ir_trap_null_600:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_601:
+ir_nonnull_607:
     mov rax, [rbp - 144]
     push rax
     mov rax, 1
@@ -7541,20 +7607,20 @@ ir_nonnull_601:
     mov [rbp - 176], rax
     mov rax, [rbp - 176]
     test rax, rax
-    jz ir_if_next_599
+    jz ir_if_next_605
     mov rax, 0
     mov [rbp - 184], rax
     mov rax, [rbp - 184]
     test rax, rax
-    jz ir_errdefer_ok_602
-    jmp ir_errdefer_end_603
-ir_errdefer_ok_602:
-ir_errdefer_end_603:
+    jz ir_errdefer_ok_608
+    jmp ir_errdefer_end_609
+ir_errdefer_ok_608:
+ir_errdefer_end_609:
     mov rax, 0
     jmp Lis_forum_exit
-    jmp ir_if_end_598
-ir_if_next_599:
-ir_if_end_598:
+    jmp ir_if_end_604
+ir_if_next_605:
+ir_if_end_604:
     ; Load variable: path_start
     movsxd rax, dword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -7566,9 +7632,9 @@ ir_if_end_598:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_606
-    jmp ir_nonnull_607
-ir_trap_null_606:
+    jz ir_trap_null_612
+    jmp ir_nonnull_613
+ir_trap_null_612:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7585,7 +7651,7 @@ ir_trap_null_606:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_607:
+ir_nonnull_613:
     mov rax, [rbp - 192]
     push rax
     mov rax, 1
@@ -7615,20 +7681,20 @@ ir_nonnull_607:
     mov [rbp - 224], rax
     mov rax, [rbp - 224]
     test rax, rax
-    jz ir_if_next_605
+    jz ir_if_next_611
     mov rax, 0
     mov [rbp - 232], rax
     mov rax, [rbp - 232]
     test rax, rax
-    jz ir_errdefer_ok_608
-    jmp ir_errdefer_end_609
-ir_errdefer_ok_608:
-ir_errdefer_end_609:
+    jz ir_errdefer_ok_614
+    jmp ir_errdefer_end_615
+ir_errdefer_ok_614:
+ir_errdefer_end_615:
     mov rax, 0
     jmp Lis_forum_exit
-    jmp ir_if_end_604
-ir_if_next_605:
-ir_if_end_604:
+    jmp ir_if_end_610
+ir_if_next_611:
+ir_if_end_610:
     ; Load variable: path_start
     movsxd rax, dword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -7640,9 +7706,9 @@ ir_if_end_604:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_612
-    jmp ir_nonnull_613
-ir_trap_null_612:
+    jz ir_trap_null_618
+    jmp ir_nonnull_619
+ir_trap_null_618:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7659,7 +7725,7 @@ ir_trap_null_612:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_613:
+ir_nonnull_619:
     mov rax, [rbp - 240]
     push rax
     mov rax, 1
@@ -7689,20 +7755,20 @@ ir_nonnull_613:
     mov [rbp - 272], rax
     mov rax, [rbp - 272]
     test rax, rax
-    jz ir_if_next_611
+    jz ir_if_next_617
     mov rax, 0
     mov [rbp - 280], rax
     mov rax, [rbp - 280]
     test rax, rax
-    jz ir_errdefer_ok_614
-    jmp ir_errdefer_end_615
-ir_errdefer_ok_614:
-ir_errdefer_end_615:
+    jz ir_errdefer_ok_620
+    jmp ir_errdefer_end_621
+ir_errdefer_ok_620:
+ir_errdefer_end_621:
     mov rax, 0
     jmp Lis_forum_exit
-    jmp ir_if_end_610
-ir_if_next_611:
-ir_if_end_610:
+    jmp ir_if_end_616
+ir_if_next_617:
+ir_if_end_616:
     ; Load variable: path_start
     movsxd rax, dword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -7714,9 +7780,9 @@ ir_if_end_610:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_618
-    jmp ir_nonnull_619
-ir_trap_null_618:
+    jz ir_trap_null_624
+    jmp ir_nonnull_625
+ir_trap_null_624:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7733,7 +7799,7 @@ ir_trap_null_618:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_619:
+ir_nonnull_625:
     mov rax, [rbp - 288]
     push rax
     mov rax, 1
@@ -7763,28 +7829,28 @@ ir_nonnull_619:
     mov [rbp - 320], rax
     mov rax, [rbp - 320]
     test rax, rax
-    jz ir_if_next_617
+    jz ir_if_next_623
     mov rax, 0
     mov [rbp - 328], rax
     mov rax, [rbp - 328]
     test rax, rax
-    jz ir_errdefer_ok_620
-    jmp ir_errdefer_end_621
-ir_errdefer_ok_620:
-ir_errdefer_end_621:
+    jz ir_errdefer_ok_626
+    jmp ir_errdefer_end_627
+ir_errdefer_ok_626:
+ir_errdefer_end_627:
     mov rax, 0
     jmp Lis_forum_exit
-    jmp ir_if_end_616
-ir_if_next_617:
-ir_if_end_616:
+    jmp ir_if_end_622
+ir_if_next_623:
+ir_if_end_622:
     mov rax, 1
     mov [rbp - 336], rax
     mov rax, [rbp - 336]
     test rax, rax
-    jz ir_errdefer_ok_622
-    jmp ir_errdefer_end_623
-ir_errdefer_ok_622:
-ir_errdefer_end_623:
+    jz ir_errdefer_ok_628
+    jmp ir_errdefer_end_629
+ir_errdefer_ok_628:
+ir_errdefer_end_629:
     mov rax, 1
     jmp Lis_forum_exit
 Lis_forum_exit:
@@ -7806,7 +7872,7 @@ get_thread_id:
     ; Parameter 'n' arrived in register rdx
     mov [rbp - 24], r8  ; Home param 'path_start'
     ; Parameter 'path_start' arrived in register r8
-ir_entry_624:
+ir_entry_630:
     ; Load variable: path_start
     movsxd rax, dword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -7831,26 +7897,26 @@ ir_entry_624:
     mov [rbp - 48], rax
     mov rax, [rbp - 48]
     test rax, rax
-    jz ir_if_next_626
+    jz ir_if_next_632
     mov rax, 0
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_errdefer_ok_627
-    jmp ir_errdefer_end_628
-ir_errdefer_ok_627:
-ir_errdefer_end_628:
+    jz ir_errdefer_ok_633
+    jmp ir_errdefer_end_634
+ir_errdefer_ok_633:
+ir_errdefer_end_634:
     mov rax, 0
     jmp Lget_thread_id_exit
-    jmp ir_if_end_625
-ir_if_next_626:
-ir_if_end_625:
+    jmp ir_if_end_631
+ir_if_next_632:
+ir_if_end_631:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_631
-    jmp ir_nonnull_632
-ir_trap_null_631:
+    jz ir_trap_null_637
+    jmp ir_nonnull_638
+ir_trap_null_637:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7867,7 +7933,7 @@ ir_trap_null_631:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_632:
+ir_nonnull_638:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -7898,20 +7964,20 @@ ir_nonnull_632:
     mov [rbp - 88], rax
     mov rax, [rbp - 88]
     test rax, rax
-    jz ir_if_next_630
+    jz ir_if_next_636
     mov rax, 0
     mov [rbp - 96], rax
     mov rax, [rbp - 96]
     test rax, rax
-    jz ir_errdefer_ok_633
-    jmp ir_errdefer_end_634
-ir_errdefer_ok_633:
-ir_errdefer_end_634:
+    jz ir_errdefer_ok_639
+    jmp ir_errdefer_end_640
+ir_errdefer_ok_639:
+ir_errdefer_end_640:
     mov rax, 0
     jmp Lget_thread_id_exit
-    jmp ir_if_end_629
-ir_if_next_630:
-ir_if_end_629:
+    jmp ir_if_end_635
+ir_if_next_636:
+ir_if_end_635:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -7943,26 +8009,26 @@ ir_if_end_629:
     mov [rbp - 120], rax
     mov rax, [rbp - 120]
     test rax, rax
-    jz ir_if_next_636
+    jz ir_if_next_642
     mov rax, 0
     mov [rbp - 128], rax
     mov rax, [rbp - 128]
     test rax, rax
-    jz ir_errdefer_ok_637
-    jmp ir_errdefer_end_638
-ir_errdefer_ok_637:
-ir_errdefer_end_638:
+    jz ir_errdefer_ok_643
+    jmp ir_errdefer_end_644
+ir_errdefer_ok_643:
+ir_errdefer_end_644:
     mov rax, 0
     jmp Lget_thread_id_exit
-    jmp ir_if_end_635
-ir_if_next_636:
-ir_if_end_635:
+    jmp ir_if_end_641
+ir_if_next_642:
+ir_if_end_641:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_641
-    jmp ir_nonnull_642
-ir_trap_null_641:
+    jz ir_trap_null_647
+    jmp ir_nonnull_648
+ir_trap_null_647:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -7979,7 +8045,7 @@ ir_trap_null_641:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_642:
+ir_nonnull_648:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8010,9 +8076,9 @@ ir_nonnull_642:
     mov [rbp - 160], rax
     mov rax, [rbp - 160]
     test rax, rax
-    jz ir_sc_rhs_643
-    jmp ir_sc_true_644
-ir_sc_rhs_643:
+    jz ir_sc_rhs_649
+    jmp ir_sc_true_650
+ir_sc_rhs_649:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8024,9 +8090,9 @@ ir_sc_rhs_643:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_647
-    jmp ir_nonnull_648
-ir_trap_null_647:
+    jz ir_trap_null_653
+    jmp ir_nonnull_654
+ir_trap_null_653:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8043,7 +8109,7 @@ ir_trap_null_647:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_648:
+ir_nonnull_654:
     mov rax, [rbp - 168]
     push rax
     mov rax, 1
@@ -8073,20 +8139,20 @@ ir_nonnull_648:
     mov [rbp - 200], rax
     mov rax, [rbp - 200]
     test rax, rax
-    jz ir_sc_false_645
-ir_sc_true_644:
+    jz ir_sc_false_651
+ir_sc_true_650:
     mov rax, 1
     mov [rbp - 208], rax
-    jmp ir_sc_end_646
-ir_sc_false_645:
+    jmp ir_sc_end_652
+ir_sc_false_651:
     mov rax, 0
     mov [rbp - 208], rax
-ir_sc_end_646:
+ir_sc_end_652:
     mov rax, [rbp - 208]
     test rax, rax
-    jz ir_sc_rhs_649
-    jmp ir_sc_true_650
-ir_sc_rhs_649:
+    jz ir_sc_rhs_655
+    jmp ir_sc_true_656
+ir_sc_rhs_655:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8098,9 +8164,9 @@ ir_sc_rhs_649:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_653
-    jmp ir_nonnull_654
-ir_trap_null_653:
+    jz ir_trap_null_659
+    jmp ir_nonnull_660
+ir_trap_null_659:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8117,7 +8183,7 @@ ir_trap_null_653:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_654:
+ir_nonnull_660:
     mov rax, [rbp - 224]
     push rax
     mov rax, 1
@@ -8147,20 +8213,20 @@ ir_nonnull_654:
     mov [rbp - 256], rax
     mov rax, [rbp - 256]
     test rax, rax
-    jz ir_sc_false_651
-ir_sc_true_650:
+    jz ir_sc_false_657
+ir_sc_true_656:
     mov rax, 1
     mov [rbp - 264], rax
-    jmp ir_sc_end_652
-ir_sc_false_651:
+    jmp ir_sc_end_658
+ir_sc_false_657:
     mov rax, 0
     mov [rbp - 264], rax
-ir_sc_end_652:
+ir_sc_end_658:
     mov rax, [rbp - 264]
     test rax, rax
-    jz ir_sc_rhs_655
-    jmp ir_sc_true_656
-ir_sc_rhs_655:
+    jz ir_sc_rhs_661
+    jmp ir_sc_true_662
+ir_sc_rhs_661:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8172,9 +8238,9 @@ ir_sc_rhs_655:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_659
-    jmp ir_nonnull_660
-ir_trap_null_659:
+    jz ir_trap_null_665
+    jmp ir_nonnull_666
+ir_trap_null_665:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8191,7 +8257,7 @@ ir_trap_null_659:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_660:
+ir_nonnull_666:
     mov rax, [rbp - 280]
     push rax
     mov rax, 1
@@ -8221,20 +8287,20 @@ ir_nonnull_660:
     mov [rbp - 312], rax
     mov rax, [rbp - 312]
     test rax, rax
-    jz ir_sc_false_657
-ir_sc_true_656:
+    jz ir_sc_false_663
+ir_sc_true_662:
     mov rax, 1
     mov [rbp - 320], rax
-    jmp ir_sc_end_658
-ir_sc_false_657:
+    jmp ir_sc_end_664
+ir_sc_false_663:
     mov rax, 0
     mov [rbp - 320], rax
-ir_sc_end_658:
+ir_sc_end_664:
     mov rax, [rbp - 320]
     test rax, rax
-    jz ir_sc_rhs_661
-    jmp ir_sc_true_662
-ir_sc_rhs_661:
+    jz ir_sc_rhs_667
+    jmp ir_sc_true_668
+ir_sc_rhs_667:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8246,9 +8312,9 @@ ir_sc_rhs_661:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_665
-    jmp ir_nonnull_666
-ir_trap_null_665:
+    jz ir_trap_null_671
+    jmp ir_nonnull_672
+ir_trap_null_671:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8265,7 +8331,7 @@ ir_trap_null_665:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_666:
+ir_nonnull_672:
     mov rax, [rbp - 336]
     push rax
     mov rax, 1
@@ -8295,20 +8361,20 @@ ir_nonnull_666:
     mov [rbp - 368], rax
     mov rax, [rbp - 368]
     test rax, rax
-    jz ir_sc_false_663
-ir_sc_true_662:
+    jz ir_sc_false_669
+ir_sc_true_668:
     mov rax, 1
     mov [rbp - 376], rax
-    jmp ir_sc_end_664
-ir_sc_false_663:
+    jmp ir_sc_end_670
+ir_sc_false_669:
     mov rax, 0
     mov [rbp - 376], rax
-ir_sc_end_664:
+ir_sc_end_670:
     mov rax, [rbp - 376]
     test rax, rax
-    jz ir_sc_rhs_667
-    jmp ir_sc_true_668
-ir_sc_rhs_667:
+    jz ir_sc_rhs_673
+    jmp ir_sc_true_674
+ir_sc_rhs_673:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8320,9 +8386,9 @@ ir_sc_rhs_667:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_671
-    jmp ir_nonnull_672
-ir_trap_null_671:
+    jz ir_trap_null_677
+    jmp ir_nonnull_678
+ir_trap_null_677:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8339,7 +8405,7 @@ ir_trap_null_671:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_672:
+ir_nonnull_678:
     mov rax, [rbp - 392]
     push rax
     mov rax, 1
@@ -8369,20 +8435,20 @@ ir_nonnull_672:
     mov [rbp - 424], rax
     mov rax, [rbp - 424]
     test rax, rax
-    jz ir_sc_false_669
-ir_sc_true_668:
+    jz ir_sc_false_675
+ir_sc_true_674:
     mov rax, 1
     mov [rbp - 432], rax
-    jmp ir_sc_end_670
-ir_sc_false_669:
+    jmp ir_sc_end_676
+ir_sc_false_675:
     mov rax, 0
     mov [rbp - 432], rax
-ir_sc_end_670:
+ir_sc_end_676:
     mov rax, [rbp - 432]
     test rax, rax
-    jz ir_sc_rhs_673
-    jmp ir_sc_true_674
-ir_sc_rhs_673:
+    jz ir_sc_rhs_679
+    jmp ir_sc_true_680
+ir_sc_rhs_679:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8394,9 +8460,9 @@ ir_sc_rhs_673:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_677
-    jmp ir_nonnull_678
-ir_trap_null_677:
+    jz ir_trap_null_683
+    jmp ir_nonnull_684
+ir_trap_null_683:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8413,7 +8479,7 @@ ir_trap_null_677:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_678:
+ir_nonnull_684:
     mov rax, [rbp - 448]
     push rax
     mov rax, 1
@@ -8443,31 +8509,31 @@ ir_nonnull_678:
     mov [rbp - 480], rax
     mov rax, [rbp - 480]
     test rax, rax
-    jz ir_sc_false_675
-ir_sc_true_674:
+    jz ir_sc_false_681
+ir_sc_true_680:
     mov rax, 1
     mov [rbp - 488], rax
-    jmp ir_sc_end_676
-ir_sc_false_675:
+    jmp ir_sc_end_682
+ir_sc_false_681:
     mov rax, 0
     mov [rbp - 488], rax
-ir_sc_end_676:
+ir_sc_end_682:
     mov rax, [rbp - 488]
     test rax, rax
-    jz ir_if_next_640
+    jz ir_if_next_646
     mov rax, 0
     mov [rbp - 504], rax
     mov rax, [rbp - 504]
     test rax, rax
-    jz ir_errdefer_ok_679
-    jmp ir_errdefer_end_680
-ir_errdefer_ok_679:
-ir_errdefer_end_680:
+    jz ir_errdefer_ok_685
+    jmp ir_errdefer_end_686
+ir_errdefer_ok_685:
+ir_errdefer_end_686:
     mov rax, 0
     jmp Lget_thread_id_exit
-    jmp ir_if_end_639
-ir_if_next_640:
-ir_if_end_639:
+    jmp ir_if_end_645
+ir_if_next_646:
+ir_if_end_645:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8482,7 +8548,7 @@ ir_if_end_639:
     mov rax, 0
     ; Store to variable: id
     mov dword [rbp - 32], eax  ; To stack [rbp - 32]
-ir_while_681:
+ir_while_687:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8496,14 +8562,14 @@ ir_while_681:
     mov [rbp - 520], rax
     mov rax, [rbp - 520]
     test rax, rax
-    jz ir_sc_false_685
-ir_sc_rhs_683:
+    jz ir_sc_false_691
+ir_sc_rhs_689:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_687
-    jmp ir_nonnull_688
-ir_trap_null_687:
+    jz ir_trap_null_693
+    jmp ir_nonnull_694
+ir_trap_null_693:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8520,7 +8586,7 @@ ir_trap_null_687:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_688:
+ir_nonnull_694:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8551,25 +8617,25 @@ ir_nonnull_688:
     mov [rbp - 552], rax
     mov rax, [rbp - 552]
     test rax, rax
-    jz ir_sc_false_685
-ir_sc_true_684:
+    jz ir_sc_false_691
+ir_sc_true_690:
     mov rax, 1
     mov [rbp - 560], rax
-    jmp ir_sc_end_686
-ir_sc_false_685:
+    jmp ir_sc_end_692
+ir_sc_false_691:
     mov rax, 0
     mov [rbp - 560], rax
-ir_sc_end_686:
+ir_sc_end_692:
     mov rax, [rbp - 560]
     test rax, rax
-    jz ir_sc_false_691
-ir_sc_rhs_689:
+    jz ir_sc_false_697
+ir_sc_rhs_695:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_693
-    jmp ir_nonnull_694
-ir_trap_null_693:
+    jz ir_trap_null_699
+    jmp ir_nonnull_700
+ir_trap_null_699:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8586,7 +8652,7 @@ ir_trap_null_693:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_694:
+ir_nonnull_700:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8617,18 +8683,18 @@ ir_nonnull_694:
     mov [rbp - 600], rax
     mov rax, [rbp - 600]
     test rax, rax
-    jz ir_sc_false_691
-ir_sc_true_690:
+    jz ir_sc_false_697
+ir_sc_true_696:
     mov rax, 1
     mov [rbp - 608], rax
-    jmp ir_sc_end_692
-ir_sc_false_691:
+    jmp ir_sc_end_698
+ir_sc_false_697:
     mov rax, 0
     mov [rbp - 608], rax
-ir_sc_end_692:
+ir_sc_end_698:
     mov rax, [rbp - 608]
     test rax, rax
-    jz ir_while_end_682
+    jz ir_while_end_688
     ; Load variable: id
     movsxd rax, dword [rbp - 32]  ; From stack [rbp - 32]
     push rax
@@ -8640,9 +8706,9 @@ ir_sc_end_692:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_695
-    jmp ir_nonnull_696
-ir_trap_null_695:
+    jz ir_trap_null_701
+    jmp ir_nonnull_702
+ir_trap_null_701:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8659,7 +8725,7 @@ ir_trap_null_695:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_696:
+ir_nonnull_702:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -8707,17 +8773,17 @@ ir_nonnull_696:
     mov rax, [rbp - 672]
     ; Store to variable: i
     mov dword [rbp - 28], eax  ; To stack [rbp - 28]
-    jmp ir_while_681
-ir_while_end_682:
+    jmp ir_while_687
+ir_while_end_688:
     ; Load variable: id
     movsxd rax, dword [rbp - 32]  ; From stack [rbp - 32]
     mov [rbp - 680], rax
     mov rax, [rbp - 680]
     test rax, rax
-    jz ir_errdefer_ok_697
-    jmp ir_errdefer_end_698
-ir_errdefer_ok_697:
-ir_errdefer_end_698:
+    jz ir_errdefer_ok_703
+    jmp ir_errdefer_end_704
+ir_errdefer_ok_703:
+ir_errdefer_end_704:
     ; Load variable: id
     movsxd rax, dword [rbp - 32]  ; From stack [rbp - 32]
     jmp Lget_thread_id_exit
@@ -8738,7 +8804,7 @@ is_demo:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'n'
     ; Parameter 'n' arrived in register rdx
-ir_entry_699:
+ir_entry_705:
     ; Load variable: n
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -8751,26 +8817,26 @@ ir_entry_699:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_701
+    jz ir_if_next_707
     mov rax, 0
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_702
-    jmp ir_errdefer_end_703
-ir_errdefer_ok_702:
-ir_errdefer_end_703:
+    jz ir_errdefer_ok_708
+    jmp ir_errdefer_end_709
+ir_errdefer_ok_708:
+ir_errdefer_end_709:
     mov rax, 0
     jmp Lis_demo_exit
-    jmp ir_if_end_700
-ir_if_next_701:
-ir_if_end_700:
+    jmp ir_if_end_706
+ir_if_next_707:
+ir_if_end_706:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_706
-    jmp ir_nonnull_707
-ir_trap_null_706:
+    jz ir_trap_null_712
+    jmp ir_nonnull_713
+ir_trap_null_712:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8787,7 +8853,7 @@ ir_trap_null_706:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_707:
+ir_nonnull_713:
     mov rax, 4
     push rax
     mov rax, 1
@@ -8817,26 +8883,26 @@ ir_nonnull_707:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_if_next_705
+    jz ir_if_next_711
     mov rax, 0
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_errdefer_ok_708
-    jmp ir_errdefer_end_709
-ir_errdefer_ok_708:
-ir_errdefer_end_709:
+    jz ir_errdefer_ok_714
+    jmp ir_errdefer_end_715
+ir_errdefer_ok_714:
+ir_errdefer_end_715:
     mov rax, 0
     jmp Lis_demo_exit
-    jmp ir_if_end_704
-ir_if_next_705:
-ir_if_end_704:
+    jmp ir_if_end_710
+ir_if_next_711:
+ir_if_end_710:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_712
-    jmp ir_nonnull_713
-ir_trap_null_712:
+    jz ir_trap_null_718
+    jmp ir_nonnull_719
+ir_trap_null_718:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8853,7 +8919,7 @@ ir_trap_null_712:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_713:
+ir_nonnull_719:
     mov rax, 5
     push rax
     mov rax, 1
@@ -8883,26 +8949,26 @@ ir_nonnull_713:
     mov [rbp - 104], rax
     mov rax, [rbp - 104]
     test rax, rax
-    jz ir_if_next_711
+    jz ir_if_next_717
     mov rax, 0
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_714
-    jmp ir_errdefer_end_715
-ir_errdefer_ok_714:
-ir_errdefer_end_715:
+    jz ir_errdefer_ok_720
+    jmp ir_errdefer_end_721
+ir_errdefer_ok_720:
+ir_errdefer_end_721:
     mov rax, 0
     jmp Lis_demo_exit
-    jmp ir_if_end_710
-ir_if_next_711:
-ir_if_end_710:
+    jmp ir_if_end_716
+ir_if_next_717:
+ir_if_end_716:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_718
-    jmp ir_nonnull_719
-ir_trap_null_718:
+    jz ir_trap_null_724
+    jmp ir_nonnull_725
+ir_trap_null_724:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8919,7 +8985,7 @@ ir_trap_null_718:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_719:
+ir_nonnull_725:
     mov rax, 6
     push rax
     mov rax, 1
@@ -8949,26 +9015,26 @@ ir_nonnull_719:
     mov [rbp - 144], rax
     mov rax, [rbp - 144]
     test rax, rax
-    jz ir_if_next_717
+    jz ir_if_next_723
     mov rax, 0
     mov [rbp - 152], rax
     mov rax, [rbp - 152]
     test rax, rax
-    jz ir_errdefer_ok_720
-    jmp ir_errdefer_end_721
-ir_errdefer_ok_720:
-ir_errdefer_end_721:
+    jz ir_errdefer_ok_726
+    jmp ir_errdefer_end_727
+ir_errdefer_ok_726:
+ir_errdefer_end_727:
     mov rax, 0
     jmp Lis_demo_exit
-    jmp ir_if_end_716
-ir_if_next_717:
-ir_if_end_716:
+    jmp ir_if_end_722
+ir_if_next_723:
+ir_if_end_722:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_724
-    jmp ir_nonnull_725
-ir_trap_null_724:
+    jz ir_trap_null_730
+    jmp ir_nonnull_731
+ir_trap_null_730:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -8985,7 +9051,7 @@ ir_trap_null_724:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_725:
+ir_nonnull_731:
     mov rax, 7
     push rax
     mov rax, 1
@@ -9015,26 +9081,26 @@ ir_nonnull_725:
     mov [rbp - 184], rax
     mov rax, [rbp - 184]
     test rax, rax
-    jz ir_if_next_723
+    jz ir_if_next_729
     mov rax, 0
     mov [rbp - 192], rax
     mov rax, [rbp - 192]
     test rax, rax
-    jz ir_errdefer_ok_726
-    jmp ir_errdefer_end_727
-ir_errdefer_ok_726:
-ir_errdefer_end_727:
+    jz ir_errdefer_ok_732
+    jmp ir_errdefer_end_733
+ir_errdefer_ok_732:
+ir_errdefer_end_733:
     mov rax, 0
     jmp Lis_demo_exit
-    jmp ir_if_end_722
-ir_if_next_723:
-ir_if_end_722:
+    jmp ir_if_end_728
+ir_if_next_729:
+ir_if_end_728:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_730
-    jmp ir_nonnull_731
-ir_trap_null_730:
+    jz ir_trap_null_736
+    jmp ir_nonnull_737
+ir_trap_null_736:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9051,7 +9117,7 @@ ir_trap_null_730:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_731:
+ir_nonnull_737:
     mov rax, 8
     push rax
     mov rax, 1
@@ -9081,26 +9147,26 @@ ir_nonnull_731:
     mov [rbp - 224], rax
     mov rax, [rbp - 224]
     test rax, rax
-    jz ir_if_next_729
+    jz ir_if_next_735
     mov rax, 0
     mov [rbp - 232], rax
     mov rax, [rbp - 232]
     test rax, rax
-    jz ir_errdefer_ok_732
-    jmp ir_errdefer_end_733
-ir_errdefer_ok_732:
-ir_errdefer_end_733:
+    jz ir_errdefer_ok_738
+    jmp ir_errdefer_end_739
+ir_errdefer_ok_738:
+ir_errdefer_end_739:
     mov rax, 0
     jmp Lis_demo_exit
-    jmp ir_if_end_728
-ir_if_next_729:
-ir_if_end_728:
+    jmp ir_if_end_734
+ir_if_next_735:
+ir_if_end_734:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_736
-    jmp ir_nonnull_737
-ir_trap_null_736:
+    jz ir_trap_null_742
+    jmp ir_nonnull_743
+ir_trap_null_742:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9117,7 +9183,7 @@ ir_trap_null_736:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_737:
+ir_nonnull_743:
     mov rax, 9
     push rax
     mov rax, 1
@@ -9147,14 +9213,14 @@ ir_nonnull_737:
     mov [rbp - 264], rax
     mov rax, [rbp - 264]
     test rax, rax
-    jz ir_sc_false_740
-ir_sc_rhs_738:
+    jz ir_sc_false_746
+ir_sc_rhs_744:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_742
-    jmp ir_nonnull_743
-ir_trap_null_742:
+    jz ir_trap_null_748
+    jmp ir_nonnull_749
+ir_trap_null_748:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9171,7 +9237,7 @@ ir_trap_null_742:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_743:
+ir_nonnull_749:
     mov rax, 9
     push rax
     mov rax, 1
@@ -9201,39 +9267,39 @@ ir_nonnull_743:
     mov [rbp - 296], rax
     mov rax, [rbp - 296]
     test rax, rax
-    jz ir_sc_false_740
-ir_sc_true_739:
+    jz ir_sc_false_746
+ir_sc_true_745:
     mov rax, 1
     mov [rbp - 304], rax
-    jmp ir_sc_end_741
-ir_sc_false_740:
+    jmp ir_sc_end_747
+ir_sc_false_746:
     mov rax, 0
     mov [rbp - 304], rax
-ir_sc_end_741:
+ir_sc_end_747:
     mov rax, [rbp - 304]
     test rax, rax
-    jz ir_if_next_735
+    jz ir_if_next_741
     mov rax, 0
     mov [rbp - 320], rax
     mov rax, [rbp - 320]
     test rax, rax
-    jz ir_errdefer_ok_744
-    jmp ir_errdefer_end_745
-ir_errdefer_ok_744:
-ir_errdefer_end_745:
+    jz ir_errdefer_ok_750
+    jmp ir_errdefer_end_751
+ir_errdefer_ok_750:
+ir_errdefer_end_751:
     mov rax, 0
     jmp Lis_demo_exit
-    jmp ir_if_end_734
-ir_if_next_735:
-ir_if_end_734:
+    jmp ir_if_end_740
+ir_if_next_741:
+ir_if_end_740:
     mov rax, 1
     mov [rbp - 328], rax
     mov rax, [rbp - 328]
     test rax, rax
-    jz ir_errdefer_ok_746
-    jmp ir_errdefer_end_747
-ir_errdefer_ok_746:
-ir_errdefer_end_747:
+    jz ir_errdefer_ok_752
+    jmp ir_errdefer_end_753
+ir_errdefer_ok_752:
+ir_errdefer_end_753:
     mov rax, 1
     jmp Lis_demo_exit
 Lis_demo_exit:
@@ -9253,7 +9319,7 @@ is_benchmarks:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'n'
     ; Parameter 'n' arrived in register rdx
-ir_entry_748:
+ir_entry_754:
     ; Load variable: n
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -9266,26 +9332,26 @@ ir_entry_748:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_750
+    jz ir_if_next_756
     mov rax, 0
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_751
-    jmp ir_errdefer_end_752
-ir_errdefer_ok_751:
-ir_errdefer_end_752:
+    jz ir_errdefer_ok_757
+    jmp ir_errdefer_end_758
+ir_errdefer_ok_757:
+ir_errdefer_end_758:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_749
-ir_if_next_750:
-ir_if_end_749:
+    jmp ir_if_end_755
+ir_if_next_756:
+ir_if_end_755:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_755
-    jmp ir_nonnull_756
-ir_trap_null_755:
+    jz ir_trap_null_761
+    jmp ir_nonnull_762
+ir_trap_null_761:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9302,7 +9368,7 @@ ir_trap_null_755:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_756:
+ir_nonnull_762:
     mov rax, 4
     push rax
     mov rax, 1
@@ -9332,26 +9398,26 @@ ir_nonnull_756:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_if_next_754
+    jz ir_if_next_760
     mov rax, 0
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_errdefer_ok_757
-    jmp ir_errdefer_end_758
-ir_errdefer_ok_757:
-ir_errdefer_end_758:
+    jz ir_errdefer_ok_763
+    jmp ir_errdefer_end_764
+ir_errdefer_ok_763:
+ir_errdefer_end_764:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_753
-ir_if_next_754:
-ir_if_end_753:
+    jmp ir_if_end_759
+ir_if_next_760:
+ir_if_end_759:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_761
-    jmp ir_nonnull_762
-ir_trap_null_761:
+    jz ir_trap_null_767
+    jmp ir_nonnull_768
+ir_trap_null_767:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9368,7 +9434,7 @@ ir_trap_null_761:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_762:
+ir_nonnull_768:
     mov rax, 5
     push rax
     mov rax, 1
@@ -9398,26 +9464,26 @@ ir_nonnull_762:
     mov [rbp - 104], rax
     mov rax, [rbp - 104]
     test rax, rax
-    jz ir_if_next_760
+    jz ir_if_next_766
     mov rax, 0
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_763
-    jmp ir_errdefer_end_764
-ir_errdefer_ok_763:
-ir_errdefer_end_764:
+    jz ir_errdefer_ok_769
+    jmp ir_errdefer_end_770
+ir_errdefer_ok_769:
+ir_errdefer_end_770:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_759
-ir_if_next_760:
-ir_if_end_759:
+    jmp ir_if_end_765
+ir_if_next_766:
+ir_if_end_765:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_767
-    jmp ir_nonnull_768
-ir_trap_null_767:
+    jz ir_trap_null_773
+    jmp ir_nonnull_774
+ir_trap_null_773:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9434,7 +9500,7 @@ ir_trap_null_767:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_768:
+ir_nonnull_774:
     mov rax, 6
     push rax
     mov rax, 1
@@ -9464,26 +9530,26 @@ ir_nonnull_768:
     mov [rbp - 144], rax
     mov rax, [rbp - 144]
     test rax, rax
-    jz ir_if_next_766
+    jz ir_if_next_772
     mov rax, 0
     mov [rbp - 152], rax
     mov rax, [rbp - 152]
     test rax, rax
-    jz ir_errdefer_ok_769
-    jmp ir_errdefer_end_770
-ir_errdefer_ok_769:
-ir_errdefer_end_770:
+    jz ir_errdefer_ok_775
+    jmp ir_errdefer_end_776
+ir_errdefer_ok_775:
+ir_errdefer_end_776:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_765
-ir_if_next_766:
-ir_if_end_765:
+    jmp ir_if_end_771
+ir_if_next_772:
+ir_if_end_771:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_773
-    jmp ir_nonnull_774
-ir_trap_null_773:
+    jz ir_trap_null_779
+    jmp ir_nonnull_780
+ir_trap_null_779:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9500,7 +9566,7 @@ ir_trap_null_773:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_774:
+ir_nonnull_780:
     mov rax, 7
     push rax
     mov rax, 1
@@ -9530,26 +9596,26 @@ ir_nonnull_774:
     mov [rbp - 184], rax
     mov rax, [rbp - 184]
     test rax, rax
-    jz ir_if_next_772
+    jz ir_if_next_778
     mov rax, 0
     mov [rbp - 192], rax
     mov rax, [rbp - 192]
     test rax, rax
-    jz ir_errdefer_ok_775
-    jmp ir_errdefer_end_776
-ir_errdefer_ok_775:
-ir_errdefer_end_776:
+    jz ir_errdefer_ok_781
+    jmp ir_errdefer_end_782
+ir_errdefer_ok_781:
+ir_errdefer_end_782:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_771
-ir_if_next_772:
-ir_if_end_771:
+    jmp ir_if_end_777
+ir_if_next_778:
+ir_if_end_777:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_779
-    jmp ir_nonnull_780
-ir_trap_null_779:
+    jz ir_trap_null_785
+    jmp ir_nonnull_786
+ir_trap_null_785:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9566,7 +9632,7 @@ ir_trap_null_779:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_780:
+ir_nonnull_786:
     mov rax, 8
     push rax
     mov rax, 1
@@ -9596,26 +9662,26 @@ ir_nonnull_780:
     mov [rbp - 224], rax
     mov rax, [rbp - 224]
     test rax, rax
-    jz ir_if_next_778
+    jz ir_if_next_784
     mov rax, 0
     mov [rbp - 232], rax
     mov rax, [rbp - 232]
     test rax, rax
-    jz ir_errdefer_ok_781
-    jmp ir_errdefer_end_782
-ir_errdefer_ok_781:
-ir_errdefer_end_782:
+    jz ir_errdefer_ok_787
+    jmp ir_errdefer_end_788
+ir_errdefer_ok_787:
+ir_errdefer_end_788:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_777
-ir_if_next_778:
-ir_if_end_777:
+    jmp ir_if_end_783
+ir_if_next_784:
+ir_if_end_783:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_785
-    jmp ir_nonnull_786
-ir_trap_null_785:
+    jz ir_trap_null_791
+    jmp ir_nonnull_792
+ir_trap_null_791:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9632,7 +9698,7 @@ ir_trap_null_785:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_786:
+ir_nonnull_792:
     mov rax, 9
     push rax
     mov rax, 1
@@ -9662,26 +9728,26 @@ ir_nonnull_786:
     mov [rbp - 264], rax
     mov rax, [rbp - 264]
     test rax, rax
-    jz ir_if_next_784
+    jz ir_if_next_790
     mov rax, 0
     mov [rbp - 272], rax
     mov rax, [rbp - 272]
     test rax, rax
-    jz ir_errdefer_ok_787
-    jmp ir_errdefer_end_788
-ir_errdefer_ok_787:
-ir_errdefer_end_788:
+    jz ir_errdefer_ok_793
+    jmp ir_errdefer_end_794
+ir_errdefer_ok_793:
+ir_errdefer_end_794:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_783
-ir_if_next_784:
-ir_if_end_783:
+    jmp ir_if_end_789
+ir_if_next_790:
+ir_if_end_789:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_791
-    jmp ir_nonnull_792
-ir_trap_null_791:
+    jz ir_trap_null_797
+    jmp ir_nonnull_798
+ir_trap_null_797:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9698,7 +9764,7 @@ ir_trap_null_791:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_792:
+ir_nonnull_798:
     mov rax, 10
     push rax
     mov rax, 1
@@ -9728,26 +9794,26 @@ ir_nonnull_792:
     mov [rbp - 304], rax
     mov rax, [rbp - 304]
     test rax, rax
-    jz ir_if_next_790
+    jz ir_if_next_796
     mov rax, 0
     mov [rbp - 312], rax
     mov rax, [rbp - 312]
     test rax, rax
-    jz ir_errdefer_ok_793
-    jmp ir_errdefer_end_794
-ir_errdefer_ok_793:
-ir_errdefer_end_794:
+    jz ir_errdefer_ok_799
+    jmp ir_errdefer_end_800
+ir_errdefer_ok_799:
+ir_errdefer_end_800:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_789
-ir_if_next_790:
-ir_if_end_789:
+    jmp ir_if_end_795
+ir_if_next_796:
+ir_if_end_795:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_797
-    jmp ir_nonnull_798
-ir_trap_null_797:
+    jz ir_trap_null_803
+    jmp ir_nonnull_804
+ir_trap_null_803:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9764,7 +9830,7 @@ ir_trap_null_797:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_798:
+ir_nonnull_804:
     mov rax, 11
     push rax
     mov rax, 1
@@ -9794,26 +9860,26 @@ ir_nonnull_798:
     mov [rbp - 344], rax
     mov rax, [rbp - 344]
     test rax, rax
-    jz ir_if_next_796
+    jz ir_if_next_802
     mov rax, 0
     mov [rbp - 352], rax
     mov rax, [rbp - 352]
     test rax, rax
-    jz ir_errdefer_ok_799
-    jmp ir_errdefer_end_800
-ir_errdefer_ok_799:
-ir_errdefer_end_800:
+    jz ir_errdefer_ok_805
+    jmp ir_errdefer_end_806
+ir_errdefer_ok_805:
+ir_errdefer_end_806:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_795
-ir_if_next_796:
-ir_if_end_795:
+    jmp ir_if_end_801
+ir_if_next_802:
+ir_if_end_801:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_803
-    jmp ir_nonnull_804
-ir_trap_null_803:
+    jz ir_trap_null_809
+    jmp ir_nonnull_810
+ir_trap_null_809:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9830,7 +9896,7 @@ ir_trap_null_803:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_804:
+ir_nonnull_810:
     mov rax, 12
     push rax
     mov rax, 1
@@ -9860,26 +9926,26 @@ ir_nonnull_804:
     mov [rbp - 384], rax
     mov rax, [rbp - 384]
     test rax, rax
-    jz ir_if_next_802
+    jz ir_if_next_808
     mov rax, 0
     mov [rbp - 392], rax
     mov rax, [rbp - 392]
     test rax, rax
-    jz ir_errdefer_ok_805
-    jmp ir_errdefer_end_806
-ir_errdefer_ok_805:
-ir_errdefer_end_806:
+    jz ir_errdefer_ok_811
+    jmp ir_errdefer_end_812
+ir_errdefer_ok_811:
+ir_errdefer_end_812:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_801
-ir_if_next_802:
-ir_if_end_801:
+    jmp ir_if_end_807
+ir_if_next_808:
+ir_if_end_807:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_809
-    jmp ir_nonnull_810
-ir_trap_null_809:
+    jz ir_trap_null_815
+    jmp ir_nonnull_816
+ir_trap_null_815:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9896,7 +9962,7 @@ ir_trap_null_809:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_810:
+ir_nonnull_816:
     mov rax, 13
     push rax
     mov rax, 1
@@ -9926,26 +9992,26 @@ ir_nonnull_810:
     mov [rbp - 424], rax
     mov rax, [rbp - 424]
     test rax, rax
-    jz ir_if_next_808
+    jz ir_if_next_814
     mov rax, 0
     mov [rbp - 432], rax
     mov rax, [rbp - 432]
     test rax, rax
-    jz ir_errdefer_ok_811
-    jmp ir_errdefer_end_812
-ir_errdefer_ok_811:
-ir_errdefer_end_812:
+    jz ir_errdefer_ok_817
+    jmp ir_errdefer_end_818
+ir_errdefer_ok_817:
+ir_errdefer_end_818:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_807
-ir_if_next_808:
-ir_if_end_807:
+    jmp ir_if_end_813
+ir_if_next_814:
+ir_if_end_813:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_815
-    jmp ir_nonnull_816
-ir_trap_null_815:
+    jz ir_trap_null_821
+    jmp ir_nonnull_822
+ir_trap_null_821:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -9962,7 +10028,7 @@ ir_trap_null_815:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_816:
+ir_nonnull_822:
     mov rax, 14
     push rax
     mov rax, 1
@@ -9992,26 +10058,26 @@ ir_nonnull_816:
     mov [rbp - 464], rax
     mov rax, [rbp - 464]
     test rax, rax
-    jz ir_if_next_814
+    jz ir_if_next_820
     mov rax, 0
     mov [rbp - 472], rax
     mov rax, [rbp - 472]
     test rax, rax
-    jz ir_errdefer_ok_817
-    jmp ir_errdefer_end_818
-ir_errdefer_ok_817:
-ir_errdefer_end_818:
+    jz ir_errdefer_ok_823
+    jmp ir_errdefer_end_824
+ir_errdefer_ok_823:
+ir_errdefer_end_824:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_813
-ir_if_next_814:
-ir_if_end_813:
+    jmp ir_if_end_819
+ir_if_next_820:
+ir_if_end_819:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_821
-    jmp ir_nonnull_822
-ir_trap_null_821:
+    jz ir_trap_null_827
+    jmp ir_nonnull_828
+ir_trap_null_827:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -10028,7 +10094,7 @@ ir_trap_null_821:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_822:
+ir_nonnull_828:
     mov rax, 15
     push rax
     mov rax, 1
@@ -10058,14 +10124,14 @@ ir_nonnull_822:
     mov [rbp - 504], rax
     mov rax, [rbp - 504]
     test rax, rax
-    jz ir_sc_false_825
-ir_sc_rhs_823:
+    jz ir_sc_false_831
+ir_sc_rhs_829:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_827
-    jmp ir_nonnull_828
-ir_trap_null_827:
+    jz ir_trap_null_833
+    jmp ir_nonnull_834
+ir_trap_null_833:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -10082,7 +10148,7 @@ ir_trap_null_827:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_828:
+ir_nonnull_834:
     mov rax, 15
     push rax
     mov rax, 1
@@ -10112,39 +10178,39 @@ ir_nonnull_828:
     mov [rbp - 536], rax
     mov rax, [rbp - 536]
     test rax, rax
-    jz ir_sc_false_825
-ir_sc_true_824:
+    jz ir_sc_false_831
+ir_sc_true_830:
     mov rax, 1
     mov [rbp - 544], rax
-    jmp ir_sc_end_826
-ir_sc_false_825:
+    jmp ir_sc_end_832
+ir_sc_false_831:
     mov rax, 0
     mov [rbp - 544], rax
-ir_sc_end_826:
+ir_sc_end_832:
     mov rax, [rbp - 544]
     test rax, rax
-    jz ir_if_next_820
+    jz ir_if_next_826
     mov rax, 0
     mov [rbp - 560], rax
     mov rax, [rbp - 560]
     test rax, rax
-    jz ir_errdefer_ok_829
-    jmp ir_errdefer_end_830
-ir_errdefer_ok_829:
-ir_errdefer_end_830:
+    jz ir_errdefer_ok_835
+    jmp ir_errdefer_end_836
+ir_errdefer_ok_835:
+ir_errdefer_end_836:
     mov rax, 0
     jmp Lis_benchmarks_exit
-    jmp ir_if_end_819
-ir_if_next_820:
-ir_if_end_819:
+    jmp ir_if_end_825
+ir_if_next_826:
+ir_if_end_825:
     mov rax, 1
     mov [rbp - 568], rax
     mov rax, [rbp - 568]
     test rax, rax
-    jz ir_errdefer_ok_831
-    jmp ir_errdefer_end_832
-ir_errdefer_ok_831:
-ir_errdefer_end_832:
+    jz ir_errdefer_ok_837
+    jmp ir_errdefer_end_838
+ir_errdefer_ok_837:
+ir_errdefer_end_838:
     mov rax, 1
     jmp Lis_benchmarks_exit
 Lis_benchmarks_exit:
@@ -10164,7 +10230,7 @@ is_docs:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'n'
     ; Parameter 'n' arrived in register rdx
-ir_entry_833:
+ir_entry_839:
     ; Load variable: n
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -10177,26 +10243,26 @@ ir_entry_833:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_835
+    jz ir_if_next_841
     mov rax, 0
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_836
-    jmp ir_errdefer_end_837
-ir_errdefer_ok_836:
-ir_errdefer_end_837:
+    jz ir_errdefer_ok_842
+    jmp ir_errdefer_end_843
+ir_errdefer_ok_842:
+ir_errdefer_end_843:
     mov rax, 0
     jmp Lis_docs_exit
-    jmp ir_if_end_834
-ir_if_next_835:
-ir_if_end_834:
+    jmp ir_if_end_840
+ir_if_next_841:
+ir_if_end_840:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_840
-    jmp ir_nonnull_841
-ir_trap_null_840:
+    jz ir_trap_null_846
+    jmp ir_nonnull_847
+ir_trap_null_846:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -10213,7 +10279,7 @@ ir_trap_null_840:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_841:
+ir_nonnull_847:
     mov rax, 4
     push rax
     mov rax, 1
@@ -10243,26 +10309,26 @@ ir_nonnull_841:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_if_next_839
+    jz ir_if_next_845
     mov rax, 0
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_errdefer_ok_842
-    jmp ir_errdefer_end_843
-ir_errdefer_ok_842:
-ir_errdefer_end_843:
+    jz ir_errdefer_ok_848
+    jmp ir_errdefer_end_849
+ir_errdefer_ok_848:
+ir_errdefer_end_849:
     mov rax, 0
     jmp Lis_docs_exit
-    jmp ir_if_end_838
-ir_if_next_839:
-ir_if_end_838:
+    jmp ir_if_end_844
+ir_if_next_845:
+ir_if_end_844:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_846
-    jmp ir_nonnull_847
-ir_trap_null_846:
+    jz ir_trap_null_852
+    jmp ir_nonnull_853
+ir_trap_null_852:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -10279,7 +10345,7 @@ ir_trap_null_846:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_847:
+ir_nonnull_853:
     mov rax, 5
     push rax
     mov rax, 1
@@ -10309,26 +10375,26 @@ ir_nonnull_847:
     mov [rbp - 104], rax
     mov rax, [rbp - 104]
     test rax, rax
-    jz ir_if_next_845
+    jz ir_if_next_851
     mov rax, 0
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_848
-    jmp ir_errdefer_end_849
-ir_errdefer_ok_848:
-ir_errdefer_end_849:
+    jz ir_errdefer_ok_854
+    jmp ir_errdefer_end_855
+ir_errdefer_ok_854:
+ir_errdefer_end_855:
     mov rax, 0
     jmp Lis_docs_exit
-    jmp ir_if_end_844
-ir_if_next_845:
-ir_if_end_844:
+    jmp ir_if_end_850
+ir_if_next_851:
+ir_if_end_850:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_852
-    jmp ir_nonnull_853
-ir_trap_null_852:
+    jz ir_trap_null_858
+    jmp ir_nonnull_859
+ir_trap_null_858:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -10345,7 +10411,7 @@ ir_trap_null_852:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_853:
+ir_nonnull_859:
     mov rax, 6
     push rax
     mov rax, 1
@@ -10375,26 +10441,26 @@ ir_nonnull_853:
     mov [rbp - 144], rax
     mov rax, [rbp - 144]
     test rax, rax
-    jz ir_if_next_851
+    jz ir_if_next_857
     mov rax, 0
     mov [rbp - 152], rax
     mov rax, [rbp - 152]
     test rax, rax
-    jz ir_errdefer_ok_854
-    jmp ir_errdefer_end_855
-ir_errdefer_ok_854:
-ir_errdefer_end_855:
+    jz ir_errdefer_ok_860
+    jmp ir_errdefer_end_861
+ir_errdefer_ok_860:
+ir_errdefer_end_861:
     mov rax, 0
     jmp Lis_docs_exit
-    jmp ir_if_end_850
-ir_if_next_851:
-ir_if_end_850:
+    jmp ir_if_end_856
+ir_if_next_857:
+ir_if_end_856:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_858
-    jmp ir_nonnull_859
-ir_trap_null_858:
+    jz ir_trap_null_864
+    jmp ir_nonnull_865
+ir_trap_null_864:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -10411,7 +10477,7 @@ ir_trap_null_858:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_859:
+ir_nonnull_865:
     mov rax, 7
     push rax
     mov rax, 1
@@ -10441,26 +10507,26 @@ ir_nonnull_859:
     mov [rbp - 184], rax
     mov rax, [rbp - 184]
     test rax, rax
-    jz ir_if_next_857
+    jz ir_if_next_863
     mov rax, 0
     mov [rbp - 192], rax
     mov rax, [rbp - 192]
     test rax, rax
-    jz ir_errdefer_ok_860
-    jmp ir_errdefer_end_861
-ir_errdefer_ok_860:
-ir_errdefer_end_861:
+    jz ir_errdefer_ok_866
+    jmp ir_errdefer_end_867
+ir_errdefer_ok_866:
+ir_errdefer_end_867:
     mov rax, 0
     jmp Lis_docs_exit
-    jmp ir_if_end_856
-ir_if_next_857:
-ir_if_end_856:
+    jmp ir_if_end_862
+ir_if_next_863:
+ir_if_end_862:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_864
-    jmp ir_nonnull_865
-ir_trap_null_864:
+    jz ir_trap_null_870
+    jmp ir_nonnull_871
+ir_trap_null_870:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -10477,7 +10543,7 @@ ir_trap_null_864:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_865:
+ir_nonnull_871:
     mov rax, 8
     push rax
     mov rax, 1
@@ -10507,26 +10573,26 @@ ir_nonnull_865:
     mov [rbp - 224], rax
     mov rax, [rbp - 224]
     test rax, rax
-    jz ir_if_next_863
+    jz ir_if_next_869
     mov rax, 0
     mov [rbp - 232], rax
     mov rax, [rbp - 232]
     test rax, rax
-    jz ir_errdefer_ok_866
-    jmp ir_errdefer_end_867
-ir_errdefer_ok_866:
-ir_errdefer_end_867:
+    jz ir_errdefer_ok_872
+    jmp ir_errdefer_end_873
+ir_errdefer_ok_872:
+ir_errdefer_end_873:
     mov rax, 0
     jmp Lis_docs_exit
-    jmp ir_if_end_862
-ir_if_next_863:
-ir_if_end_862:
+    jmp ir_if_end_868
+ir_if_next_869:
+ir_if_end_868:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_870
-    jmp ir_nonnull_871
-ir_trap_null_870:
+    jz ir_trap_null_876
+    jmp ir_nonnull_877
+ir_trap_null_876:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -10543,7 +10609,7 @@ ir_trap_null_870:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_871:
+ir_nonnull_877:
     mov rax, 9
     push rax
     mov rax, 1
@@ -10573,14 +10639,14 @@ ir_nonnull_871:
     mov [rbp - 264], rax
     mov rax, [rbp - 264]
     test rax, rax
-    jz ir_sc_false_874
-ir_sc_rhs_872:
+    jz ir_sc_false_880
+ir_sc_rhs_878:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_876
-    jmp ir_nonnull_877
-ir_trap_null_876:
+    jz ir_trap_null_882
+    jmp ir_nonnull_883
+ir_trap_null_882:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -10597,7 +10663,7 @@ ir_trap_null_876:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_877:
+ir_nonnull_883:
     mov rax, 9
     push rax
     mov rax, 1
@@ -10627,39 +10693,39 @@ ir_nonnull_877:
     mov [rbp - 296], rax
     mov rax, [rbp - 296]
     test rax, rax
-    jz ir_sc_false_874
-ir_sc_true_873:
+    jz ir_sc_false_880
+ir_sc_true_879:
     mov rax, 1
     mov [rbp - 304], rax
-    jmp ir_sc_end_875
-ir_sc_false_874:
+    jmp ir_sc_end_881
+ir_sc_false_880:
     mov rax, 0
     mov [rbp - 304], rax
-ir_sc_end_875:
+ir_sc_end_881:
     mov rax, [rbp - 304]
     test rax, rax
-    jz ir_if_next_869
+    jz ir_if_next_875
     mov rax, 0
     mov [rbp - 320], rax
     mov rax, [rbp - 320]
     test rax, rax
-    jz ir_errdefer_ok_878
-    jmp ir_errdefer_end_879
-ir_errdefer_ok_878:
-ir_errdefer_end_879:
+    jz ir_errdefer_ok_884
+    jmp ir_errdefer_end_885
+ir_errdefer_ok_884:
+ir_errdefer_end_885:
     mov rax, 0
     jmp Lis_docs_exit
-    jmp ir_if_end_868
-ir_if_next_869:
-ir_if_end_868:
+    jmp ir_if_end_874
+ir_if_next_875:
+ir_if_end_874:
     mov rax, 1
     mov [rbp - 328], rax
     mov rax, [rbp - 328]
     test rax, rax
-    jz ir_errdefer_ok_880
-    jmp ir_errdefer_end_881
-ir_errdefer_ok_880:
-ir_errdefer_end_881:
+    jz ir_errdefer_ok_886
+    jmp ir_errdefer_end_887
+ir_errdefer_ok_886:
+ir_errdefer_end_887:
     mov rax, 1
     jmp Lis_docs_exit
 Lis_docs_exit:
@@ -10677,7 +10743,7 @@ hex_char_val:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'c'
     ; Parameter 'c' arrived in register rcx
-ir_entry_882:
+ir_entry_888:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -10690,8 +10756,8 @@ ir_entry_882:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_sc_false_887
-ir_sc_rhs_885:
+    jz ir_sc_false_893
+ir_sc_rhs_891:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -10704,18 +10770,18 @@ ir_sc_rhs_885:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_sc_false_887
-ir_sc_true_886:
+    jz ir_sc_false_893
+ir_sc_true_892:
     mov rax, 1
     mov [rbp - 32], rax
-    jmp ir_sc_end_888
-ir_sc_false_887:
+    jmp ir_sc_end_894
+ir_sc_false_893:
     mov rax, 0
     mov [rbp - 32], rax
-ir_sc_end_888:
+ir_sc_end_894:
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_if_next_884
+    jz ir_if_next_890
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -10728,15 +10794,15 @@ ir_sc_end_888:
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_errdefer_ok_889
-    jmp ir_errdefer_end_890
-ir_errdefer_ok_889:
-ir_errdefer_end_890:
+    jz ir_errdefer_ok_895
+    jmp ir_errdefer_end_896
+ir_errdefer_ok_895:
+ir_errdefer_end_896:
     mov rax, [rbp - 48]
     jmp Lhex_char_val_exit
-    jmp ir_if_end_883
-ir_if_next_884:
-ir_if_end_883:
+    jmp ir_if_end_889
+ir_if_next_890:
+ir_if_end_889:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -10749,8 +10815,8 @@ ir_if_end_883:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_sc_false_895
-ir_sc_rhs_893:
+    jz ir_sc_false_901
+ir_sc_rhs_899:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -10763,18 +10829,18 @@ ir_sc_rhs_893:
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_sc_false_895
-ir_sc_true_894:
+    jz ir_sc_false_901
+ir_sc_true_900:
     mov rax, 1
     mov [rbp - 80], rax
-    jmp ir_sc_end_896
-ir_sc_false_895:
+    jmp ir_sc_end_902
+ir_sc_false_901:
     mov rax, 0
     mov [rbp - 80], rax
-ir_sc_end_896:
+ir_sc_end_902:
     mov rax, [rbp - 80]
     test rax, rax
-    jz ir_if_next_892
+    jz ir_if_next_898
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -10794,15 +10860,15 @@ ir_sc_end_896:
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_errdefer_ok_897
-    jmp ir_errdefer_end_898
-ir_errdefer_ok_897:
-ir_errdefer_end_898:
+    jz ir_errdefer_ok_903
+    jmp ir_errdefer_end_904
+ir_errdefer_ok_903:
+ir_errdefer_end_904:
     mov rax, [rbp - 104]
     jmp Lhex_char_val_exit
-    jmp ir_if_end_891
-ir_if_next_892:
-ir_if_end_891:
+    jmp ir_if_end_897
+ir_if_next_898:
+ir_if_end_897:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -10815,8 +10881,8 @@ ir_if_end_891:
     mov [rbp - 120], rax
     mov rax, [rbp - 120]
     test rax, rax
-    jz ir_sc_false_903
-ir_sc_rhs_901:
+    jz ir_sc_false_909
+ir_sc_rhs_907:
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -10829,18 +10895,18 @@ ir_sc_rhs_901:
     mov [rbp - 128], rax
     mov rax, [rbp - 128]
     test rax, rax
-    jz ir_sc_false_903
-ir_sc_true_902:
+    jz ir_sc_false_909
+ir_sc_true_908:
     mov rax, 1
     mov [rbp - 136], rax
-    jmp ir_sc_end_904
-ir_sc_false_903:
+    jmp ir_sc_end_910
+ir_sc_false_909:
     mov rax, 0
     mov [rbp - 136], rax
-ir_sc_end_904:
+ir_sc_end_910:
     mov rax, [rbp - 136]
     test rax, rax
-    jz ir_if_next_900
+    jz ir_if_next_906
     ; Load variable: c
     movsxd rax, dword [rbp - 8]  ; From stack [rbp - 8]
     push rax
@@ -10860,15 +10926,15 @@ ir_sc_end_904:
     mov [rbp - 168], rax
     mov rax, [rbp - 168]
     test rax, rax
-    jz ir_errdefer_ok_905
-    jmp ir_errdefer_end_906
-ir_errdefer_ok_905:
-ir_errdefer_end_906:
+    jz ir_errdefer_ok_911
+    jmp ir_errdefer_end_912
+ir_errdefer_ok_911:
+ir_errdefer_end_912:
     mov rax, [rbp - 160]
     jmp Lhex_char_val_exit
-    jmp ir_if_end_899
-ir_if_next_900:
-ir_if_end_899:
+    jmp ir_if_end_905
+ir_if_next_906:
+ir_if_end_905:
     mov rax, 1
     neg rax
     mov [rbp - 176], rax
@@ -10876,10 +10942,10 @@ ir_if_end_899:
     mov [rbp - 184], rax
     mov rax, [rbp - 184]
     test rax, rax
-    jz ir_errdefer_ok_907
-    jmp ir_errdefer_end_908
-ir_errdefer_ok_907:
-ir_errdefer_end_908:
+    jz ir_errdefer_ok_913
+    jmp ir_errdefer_end_914
+ir_errdefer_ok_913:
+ir_errdefer_end_914:
     mov rax, [rbp - 176]
     jmp Lhex_char_val_exit
 Lhex_char_val_exit:
@@ -10912,7 +10978,7 @@ extract_form_value:
     mov rax, [rbp + 64]  ; Load stack param 'out_max'
     mov [rbp - 56], rax  ; Home param 'out_max'
     ; Parameter 'out_max' arrived on stack [rbp + 64]
-ir_entry_909:
+ir_entry_915:
     ; Load variable: body_start
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     ; Store to variable: i
@@ -10929,7 +10995,7 @@ ir_entry_909:
     mov rax, [rbp - 96]
     ; Store to variable: end
     mov dword [rbp - 64], eax  ; To stack [rbp - 64]
-ir_while_910:
+ir_while_916:
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -10958,14 +11024,14 @@ ir_while_910:
     mov [rbp - 120], rax
     mov rax, [rbp - 120]
     test rax, rax
-    jz ir_while_end_911
+    jz ir_while_end_917
     mov rax, 1
     ; Store to variable: match
     mov dword [rbp - 68], eax  ; To stack [rbp - 68]
     mov rax, 0
     ; Store to variable: k
     mov dword [rbp - 72], eax  ; To stack [rbp - 72]
-ir_while_912:
+ir_while_918:
     ; Load variable: k
     movsxd rax, dword [rbp - 72]  ; From stack [rbp - 72]
     push rax
@@ -10979,7 +11045,7 @@ ir_while_912:
     mov [rbp - 128], rax
     mov rax, [rbp - 128]
     test rax, rax
-    jz ir_while_end_913
+    jz ir_while_end_919
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -10992,9 +11058,9 @@ ir_while_912:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_916
-    jmp ir_nonnull_917
-ir_trap_null_916:
+    jz ir_trap_null_922
+    jmp ir_nonnull_923
+ir_trap_null_922:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11011,7 +11077,7 @@ ir_trap_null_916:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_917:
+ir_nonnull_923:
     mov rax, [rbp - 136]
     push rax
     mov rax, 1
@@ -11033,9 +11099,9 @@ ir_nonnull_917:
     ; Load variable: key
     mov rax, qword [rbp - 32]  ; From stack [rbp - 32]
     test rax, rax
-    jz ir_trap_null_918
-    jmp ir_nonnull_919
-ir_trap_null_918:
+    jz ir_trap_null_924
+    jmp ir_nonnull_925
+ir_trap_null_924:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11052,7 +11118,7 @@ ir_trap_null_918:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_919:
+ir_nonnull_925:
     ; Load variable: k
     movsxd rax, dword [rbp - 72]  ; From stack [rbp - 72]
     push rax
@@ -11083,14 +11149,14 @@ ir_nonnull_919:
     mov [rbp - 192], rax
     mov rax, [rbp - 192]
     test rax, rax
-    jz ir_if_next_915
+    jz ir_if_next_921
     mov rax, 0
     ; Store to variable: match
     mov dword [rbp - 68], eax  ; To stack [rbp - 68]
-    jmp ir_while_end_913
-    jmp ir_if_end_914
-ir_if_next_915:
-ir_if_end_914:
+    jmp ir_while_end_919
+    jmp ir_if_end_920
+ir_if_next_921:
+ir_if_end_920:
     ; Load variable: k
     movsxd rax, dword [rbp - 72]  ; From stack [rbp - 72]
     push rax
@@ -11102,8 +11168,8 @@ ir_if_end_914:
     mov rax, [rbp - 200]
     ; Store to variable: k
     mov dword [rbp - 72], eax  ; To stack [rbp - 72]
-    jmp ir_while_912
-ir_while_end_913:
+    jmp ir_while_918
+ir_while_end_919:
     ; Load variable: match
     movsxd rax, dword [rbp - 68]  ; From stack [rbp - 68]
     push rax
@@ -11116,8 +11182,8 @@ ir_while_end_913:
     mov [rbp - 208], rax
     mov rax, [rbp - 208]
     test rax, rax
-    jz ir_sc_false_924
-ir_sc_rhs_922:
+    jz ir_sc_false_930
+ir_sc_rhs_928:
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -11130,9 +11196,9 @@ ir_sc_rhs_922:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_926
-    jmp ir_nonnull_927
-ir_trap_null_926:
+    jz ir_trap_null_932
+    jmp ir_nonnull_933
+ir_trap_null_932:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11149,7 +11215,7 @@ ir_trap_null_926:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_927:
+ir_nonnull_933:
     mov rax, [rbp - 216]
     push rax
     mov rax, 1
@@ -11179,18 +11245,18 @@ ir_nonnull_927:
     mov [rbp - 248], rax
     mov rax, [rbp - 248]
     test rax, rax
-    jz ir_sc_false_924
-ir_sc_true_923:
+    jz ir_sc_false_930
+ir_sc_true_929:
     mov rax, 1
     mov [rbp - 256], rax
-    jmp ir_sc_end_925
-ir_sc_false_924:
+    jmp ir_sc_end_931
+ir_sc_false_930:
     mov rax, 0
     mov [rbp - 256], rax
-ir_sc_end_925:
+ir_sc_end_931:
     mov rax, [rbp - 256]
     test rax, rax
-    jz ir_if_next_921
+    jz ir_if_next_927
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -11213,7 +11279,7 @@ ir_sc_end_925:
     mov rax, 0
     ; Store to variable: out_len
     mov dword [rbp - 76], eax  ; To stack [rbp - 76]
-ir_while_928:
+ir_while_934:
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -11227,8 +11293,8 @@ ir_while_928:
     mov [rbp - 288], rax
     mov rax, [rbp - 288]
     test rax, rax
-    jz ir_sc_false_932
-ir_sc_rhs_930:
+    jz ir_sc_false_938
+ir_sc_rhs_936:
     ; Load variable: out_max
     movsxd rax, dword [rbp - 56]  ; From stack [rbp - 56]
     push rax
@@ -11249,24 +11315,24 @@ ir_sc_rhs_930:
     mov [rbp - 304], rax
     mov rax, [rbp - 304]
     test rax, rax
-    jz ir_sc_false_932
-ir_sc_true_931:
+    jz ir_sc_false_938
+ir_sc_true_937:
     mov rax, 1
     mov [rbp - 312], rax
-    jmp ir_sc_end_933
-ir_sc_false_932:
+    jmp ir_sc_end_939
+ir_sc_false_938:
     mov rax, 0
     mov [rbp - 312], rax
-ir_sc_end_933:
+ir_sc_end_939:
     mov rax, [rbp - 312]
     test rax, rax
-    jz ir_while_end_929
+    jz ir_while_end_935
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_936
-    jmp ir_nonnull_937
-ir_trap_null_936:
+    jz ir_trap_null_942
+    jmp ir_nonnull_943
+ir_trap_null_942:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11283,7 +11349,7 @@ ir_trap_null_936:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_937:
+ir_nonnull_943:
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -11314,17 +11380,17 @@ ir_nonnull_937:
     mov [rbp - 352], rax
     mov rax, [rbp - 352]
     test rax, rax
-    jz ir_if_next_935
-    jmp ir_while_end_929
-    jmp ir_if_end_934
-ir_if_next_935:
-ir_if_end_934:
+    jz ir_if_next_941
+    jmp ir_while_end_935
+    jmp ir_if_end_940
+ir_if_next_941:
+ir_if_end_940:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_940
-    jmp ir_nonnull_941
-ir_trap_null_940:
+    jz ir_trap_null_946
+    jmp ir_nonnull_947
+ir_trap_null_946:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11341,7 +11407,7 @@ ir_trap_null_940:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_941:
+ir_nonnull_947:
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -11372,13 +11438,13 @@ ir_nonnull_941:
     mov [rbp - 384], rax
     mov rax, [rbp - 384]
     test rax, rax
-    jz ir_if_next_939
+    jz ir_if_next_945
     ; Load variable: out
     mov rax, qword [rbp - 48]  ; From stack [rbp - 48]
     test rax, rax
-    jz ir_trap_null_942
-    jmp ir_nonnull_943
-ir_trap_null_942:
+    jz ir_trap_null_948
+    jmp ir_nonnull_949
+ir_trap_null_948:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11395,7 +11461,7 @@ ir_trap_null_942:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_943:
+ir_nonnull_949:
     ; Load variable: out_len
     movsxd rax, dword [rbp - 76]  ; From stack [rbp - 76]
     push rax
@@ -11440,14 +11506,14 @@ ir_nonnull_943:
     mov rax, [rbp - 424]
     ; Store to variable: i
     mov dword [rbp - 60], eax  ; To stack [rbp - 60]
-    jmp ir_if_end_938
-ir_if_next_939:
+    jmp ir_if_end_944
+ir_if_next_945:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_945
-    jmp ir_nonnull_946
-ir_trap_null_945:
+    jz ir_trap_null_951
+    jmp ir_nonnull_952
+ir_trap_null_951:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11464,7 +11530,7 @@ ir_trap_null_945:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_946:
+ir_nonnull_952:
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -11495,8 +11561,8 @@ ir_nonnull_946:
     mov [rbp - 456], rax
     mov rax, [rbp - 456]
     test rax, rax
-    jz ir_sc_false_949
-ir_sc_rhs_947:
+    jz ir_sc_false_955
+ir_sc_rhs_953:
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -11517,18 +11583,18 @@ ir_sc_rhs_947:
     mov [rbp - 472], rax
     mov rax, [rbp - 472]
     test rax, rax
-    jz ir_sc_false_949
-ir_sc_true_948:
+    jz ir_sc_false_955
+ir_sc_true_954:
     mov rax, 1
     mov [rbp - 480], rax
-    jmp ir_sc_end_950
-ir_sc_false_949:
+    jmp ir_sc_end_956
+ir_sc_false_955:
     mov rax, 0
     mov [rbp - 480], rax
-ir_sc_end_950:
+ir_sc_end_956:
     mov rax, [rbp - 480]
     test rax, rax
-    jz ir_if_next_944
+    jz ir_if_next_950
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -11540,9 +11606,9 @@ ir_sc_end_950:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_951
-    jmp ir_nonnull_952
-ir_trap_null_951:
+    jz ir_trap_null_957
+    jmp ir_nonnull_958
+ir_trap_null_957:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11559,7 +11625,7 @@ ir_trap_null_951:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_952:
+ir_nonnull_958:
     mov rax, [rbp - 496]
     push rax
     mov rax, 1
@@ -11601,9 +11667,9 @@ ir_nonnull_952:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_953
-    jmp ir_nonnull_954
-ir_trap_null_953:
+    jz ir_trap_null_959
+    jmp ir_nonnull_960
+ir_trap_null_959:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11620,7 +11686,7 @@ ir_trap_null_953:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_954:
+ir_nonnull_960:
     mov rax, [rbp - 536]
     push rax
     mov rax, 1
@@ -11663,8 +11729,8 @@ ir_nonnull_954:
     mov [rbp - 576], rax
     mov rax, [rbp - 576]
     test rax, rax
-    jz ir_sc_false_959
-ir_sc_rhs_957:
+    jz ir_sc_false_965
+ir_sc_rhs_963:
     ; Load variable: lo
     movsxd rax, dword [rbp - 84]  ; From stack [rbp - 84]
     push rax
@@ -11677,18 +11743,18 @@ ir_sc_rhs_957:
     mov [rbp - 584], rax
     mov rax, [rbp - 584]
     test rax, rax
-    jz ir_sc_false_959
-ir_sc_true_958:
+    jz ir_sc_false_965
+ir_sc_true_964:
     mov rax, 1
     mov [rbp - 592], rax
-    jmp ir_sc_end_960
-ir_sc_false_959:
+    jmp ir_sc_end_966
+ir_sc_false_965:
     mov rax, 0
     mov [rbp - 592], rax
-ir_sc_end_960:
+ir_sc_end_966:
     mov rax, [rbp - 592]
     test rax, rax
-    jz ir_if_next_956
+    jz ir_if_next_962
     ; Load variable: hi
     movsxd rax, dword [rbp - 80]  ; From stack [rbp - 80]
     push rax
@@ -11709,9 +11775,9 @@ ir_sc_end_960:
     ; Load variable: out
     mov rax, qword [rbp - 48]  ; From stack [rbp - 48]
     test rax, rax
-    jz ir_trap_null_961
-    jmp ir_nonnull_962
-ir_trap_null_961:
+    jz ir_trap_null_967
+    jmp ir_nonnull_968
+ir_trap_null_967:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11728,7 +11794,7 @@ ir_trap_null_961:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_962:
+ir_nonnull_968:
     ; Load variable: out_len
     movsxd rax, dword [rbp - 76]  ; From stack [rbp - 76]
     push rax
@@ -11773,14 +11839,14 @@ ir_nonnull_962:
     mov rax, [rbp - 656]
     ; Store to variable: i
     mov dword [rbp - 60], eax  ; To stack [rbp - 60]
-    jmp ir_if_end_955
-ir_if_next_956:
+    jmp ir_if_end_961
+ir_if_next_962:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_963
-    jmp ir_nonnull_964
-ir_trap_null_963:
+    jz ir_trap_null_969
+    jmp ir_nonnull_970
+ir_trap_null_969:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11797,7 +11863,7 @@ ir_trap_null_963:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_964:
+ir_nonnull_970:
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -11820,9 +11886,9 @@ ir_nonnull_964:
     ; Load variable: out
     mov rax, qword [rbp - 48]  ; From stack [rbp - 48]
     test rax, rax
-    jz ir_trap_null_965
-    jmp ir_nonnull_966
-ir_trap_null_965:
+    jz ir_trap_null_971
+    jmp ir_nonnull_972
+ir_trap_null_971:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11839,7 +11905,7 @@ ir_trap_null_965:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_966:
+ir_nonnull_972:
     ; Load variable: out_len
     movsxd rax, dword [rbp - 76]  ; From stack [rbp - 76]
     push rax
@@ -11884,15 +11950,15 @@ ir_nonnull_966:
     mov rax, [rbp - 720]
     ; Store to variable: i
     mov dword [rbp - 60], eax  ; To stack [rbp - 60]
-ir_if_end_955:
-    jmp ir_if_end_938
-ir_if_next_944:
+ir_if_end_961:
+    jmp ir_if_end_944
+ir_if_next_950:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_967
-    jmp ir_nonnull_968
-ir_trap_null_967:
+    jz ir_trap_null_973
+    jmp ir_nonnull_974
+ir_trap_null_973:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11909,7 +11975,7 @@ ir_trap_null_967:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_968:
+ir_nonnull_974:
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -11932,9 +11998,9 @@ ir_nonnull_968:
     ; Load variable: out
     mov rax, qword [rbp - 48]  ; From stack [rbp - 48]
     test rax, rax
-    jz ir_trap_null_969
-    jmp ir_nonnull_970
-ir_trap_null_969:
+    jz ir_trap_null_975
+    jmp ir_nonnull_976
+ir_trap_null_975:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -11951,7 +12017,7 @@ ir_trap_null_969:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_970:
+ir_nonnull_976:
     ; Load variable: out_len
     movsxd rax, dword [rbp - 76]  ; From stack [rbp - 76]
     push rax
@@ -11996,15 +12062,15 @@ ir_nonnull_970:
     mov rax, [rbp - 784]
     ; Store to variable: i
     mov dword [rbp - 60], eax  ; To stack [rbp - 60]
-ir_if_end_938:
-    jmp ir_while_928
-ir_while_end_929:
+ir_if_end_944:
+    jmp ir_while_934
+ir_while_end_935:
     ; Load variable: out
     mov rax, qword [rbp - 48]  ; From stack [rbp - 48]
     test rax, rax
-    jz ir_trap_null_971
-    jmp ir_nonnull_972
-ir_trap_null_971:
+    jz ir_trap_null_977
+    jmp ir_nonnull_978
+ir_trap_null_977:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -12021,7 +12087,7 @@ ir_trap_null_971:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_972:
+ir_nonnull_978:
     ; Load variable: out_len
     movsxd rax, dword [rbp - 76]  ; From stack [rbp - 76]
     push rax
@@ -12049,16 +12115,16 @@ ir_nonnull_972:
     mov [rbp - 816], rax
     mov rax, [rbp - 816]
     test rax, rax
-    jz ir_errdefer_ok_973
-    jmp ir_errdefer_end_974
-ir_errdefer_ok_973:
-ir_errdefer_end_974:
+    jz ir_errdefer_ok_979
+    jmp ir_errdefer_end_980
+ir_errdefer_ok_979:
+ir_errdefer_end_980:
     ; Load variable: out_len
     movsxd rax, dword [rbp - 76]  ; From stack [rbp - 76]
     jmp Lextract_form_value_exit
-    jmp ir_if_end_920
-ir_if_next_921:
-ir_if_end_920:
+    jmp ir_if_end_926
+ir_if_next_927:
+ir_if_end_926:
     ; Load variable: i
     movsxd rax, dword [rbp - 60]  ; From stack [rbp - 60]
     push rax
@@ -12070,16 +12136,16 @@ ir_if_end_920:
     mov rax, [rbp - 824]
     ; Store to variable: i
     mov dword [rbp - 60], eax  ; To stack [rbp - 60]
-    jmp ir_while_910
-ir_while_end_911:
+    jmp ir_while_916
+ir_while_end_917:
     mov rax, 0
     mov [rbp - 832], rax
     mov rax, [rbp - 832]
     test rax, rax
-    jz ir_errdefer_ok_975
-    jmp ir_errdefer_end_976
-ir_errdefer_ok_975:
-ir_errdefer_end_976:
+    jz ir_errdefer_ok_981
+    jmp ir_errdefer_end_982
+ir_errdefer_ok_981:
+ir_errdefer_end_982:
     mov rax, 0
     jmp Lextract_form_value_exit
 Lextract_form_value_exit:
@@ -12099,7 +12165,7 @@ dbg:
     ; Parameter 'label' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'val'
     ; Parameter 'val' arrived in register rdx
-ir_entry_977:
+ir_entry_983:
     ; Load variable: dbg_on
     movsxd rax, dword [rel dbg_on]  ; From global memory
     push rax
@@ -12112,19 +12178,19 @@ ir_entry_977:
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_if_next_979
+    jz ir_if_next_985
     mov rax, 0
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_errdefer_ok_980
-    jmp ir_errdefer_end_981
-ir_errdefer_ok_980:
-ir_errdefer_end_981:
+    jz ir_errdefer_ok_986
+    jmp ir_errdefer_end_987
+ir_errdefer_ok_986:
+ir_errdefer_end_987:
     jmp Ldbg_exit
-    jmp ir_if_end_978
-ir_if_next_979:
-ir_if_end_978:
+    jmp ir_if_end_984
+ir_if_next_985:
+ir_if_end_984:
     ; IR call: print (1 args)
     sub rsp, 32
     ; Load variable: label
@@ -12171,10 +12237,10 @@ ir_if_end_978:
     mov [rbp - 80], rax
     mov rax, [rbp - 80]
     test rax, rax
-    jz ir_errdefer_ok_982
-    jmp ir_errdefer_end_983
-ir_errdefer_ok_982:
-ir_errdefer_end_983:
+    jz ir_errdefer_ok_988
+    jmp ir_errdefer_end_989
+ir_errdefer_ok_988:
+ir_errdefer_end_989:
     jmp Ldbg_exit
 Ldbg_exit:
     ; Function epilogue
@@ -12191,7 +12257,7 @@ dbg_msg:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 'msg'
     ; Parameter 'msg' arrived in register rcx
-ir_entry_984:
+ir_entry_990:
     ; Load variable: dbg_on
     movsxd rax, dword [rel dbg_on]  ; From global memory
     push rax
@@ -12204,19 +12270,19 @@ ir_entry_984:
     mov [rbp - 16], rax
     mov rax, [rbp - 16]
     test rax, rax
-    jz ir_if_next_986
+    jz ir_if_next_992
     mov rax, 0
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
     test rax, rax
-    jz ir_errdefer_ok_987
-    jmp ir_errdefer_end_988
-ir_errdefer_ok_987:
-ir_errdefer_end_988:
+    jz ir_errdefer_ok_993
+    jmp ir_errdefer_end_994
+ir_errdefer_ok_993:
+ir_errdefer_end_994:
     jmp Ldbg_msg_exit
-    jmp ir_if_end_985
-ir_if_next_986:
-ir_if_end_985:
+    jmp ir_if_end_991
+ir_if_next_992:
+ir_if_end_991:
     ; IR call: println (1 args)
     sub rsp, 32
     ; Load variable: msg
@@ -12245,10 +12311,10 @@ ir_if_end_985:
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_errdefer_ok_989
-    jmp ir_errdefer_end_990
-ir_errdefer_ok_989:
-ir_errdefer_end_990:
+    jz ir_errdefer_ok_995
+    jmp ir_errdefer_end_996
+ir_errdefer_ok_995:
+ir_errdefer_end_996:
     jmp Ldbg_msg_exit
 Ldbg_msg_exit:
     ; Function epilogue
@@ -12267,7 +12333,7 @@ int_to_dec:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'n'
     ; Parameter 'n' arrived in register rdx
-ir_entry_991:
+ir_entry_997:
     mov rax, 0
     ; Store to variable: count
     mov dword [rbp - 100], eax  ; To stack [rbp - 100]
@@ -12283,13 +12349,13 @@ ir_entry_991:
     mov [rbp - 128], rax
     mov rax, [rbp - 128]
     test rax, rax
-    jz ir_if_next_993
+    jz ir_if_next_999
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_994
-    jmp ir_nonnull_995
-ir_trap_null_994:
+    jz ir_trap_null_1000
+    jmp ir_nonnull_1001
+ir_trap_null_1000:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -12306,7 +12372,7 @@ ir_trap_null_994:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_995:
+ir_nonnull_1001:
     mov rax, 0
     push rax
     mov rax, 1
@@ -12332,16 +12398,16 @@ ir_nonnull_995:
     mov [rbp - 160], rax
     mov rax, [rbp - 160]
     test rax, rax
-    jz ir_errdefer_ok_996
-    jmp ir_errdefer_end_997
-ir_errdefer_ok_996:
-ir_errdefer_end_997:
+    jz ir_errdefer_ok_1002
+    jmp ir_errdefer_end_1003
+ir_errdefer_ok_1002:
+ir_errdefer_end_1003:
     mov rax, 1
     jmp Lint_to_dec_exit
-    jmp ir_if_end_992
-ir_if_next_993:
-ir_if_end_992:
-ir_while_998:
+    jmp ir_if_end_998
+ir_if_next_999:
+ir_if_end_998:
+ir_while_1004:
     ; Load variable: n
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -12354,7 +12420,7 @@ ir_while_998:
     mov [rbp - 168], rax
     mov rax, [rbp - 168]
     test rax, rax
-    jz ir_while_end_999
+    jz ir_while_end_1005
     ; Load variable: n
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -12394,9 +12460,9 @@ ir_while_998:
     mov [rbp - 200], rax
     mov rax, [rbp - 200]
     test rax, rax
-    jz ir_trap_bounds_1000
-    jmp ir_in_bounds_1001
-ir_trap_bounds_1000:
+    jz ir_trap_bounds_1006
+    jmp ir_in_bounds_1007
+ir_trap_bounds_1006:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -12413,7 +12479,7 @@ ir_trap_bounds_1000:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1001:
+ir_in_bounds_1007:
     ; Load variable: count
     movsxd rax, dword [rbp - 100]  ; From stack [rbp - 100]
     push rax
@@ -12460,8 +12526,8 @@ ir_in_bounds_1001:
     mov rax, [rbp - 240]
     ; Store to variable: n
     mov qword [rbp - 16], rax  ; To stack [rbp - 16]
-    jmp ir_while_998
-ir_while_end_999:
+    jmp ir_while_1004
+ir_while_end_1005:
     ; Load variable: count
     movsxd rax, dword [rbp - 100]  ; From stack [rbp - 100]
     push rax
@@ -12473,7 +12539,7 @@ ir_while_end_999:
     mov rax, [rbp - 248]
     ; Store to variable: i
     mov dword [rbp - 116], eax  ; To stack [rbp - 116]
-ir_while_1002:
+ir_while_1008:
     ; Load variable: i
     movsxd rax, dword [rbp - 116]  ; From stack [rbp - 116]
     push rax
@@ -12486,7 +12552,7 @@ ir_while_1002:
     mov [rbp - 256], rax
     mov rax, [rbp - 256]
     test rax, rax
-    jz ir_while_end_1003
+    jz ir_while_end_1009
     ; Load variable: i
     movsxd rax, dword [rbp - 116]  ; From stack [rbp - 116]
     push rax
@@ -12499,9 +12565,9 @@ ir_while_1002:
     mov [rbp - 264], rax
     mov rax, [rbp - 264]
     test rax, rax
-    jz ir_trap_bounds_1004
-    jmp ir_in_bounds_1005
-ir_trap_bounds_1004:
+    jz ir_trap_bounds_1010
+    jmp ir_in_bounds_1011
+ir_trap_bounds_1010:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -12518,7 +12584,7 @@ ir_trap_bounds_1004:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1005:
+ir_in_bounds_1011:
     ; Load variable: i
     movsxd rax, dword [rbp - 116]  ; From stack [rbp - 116]
     push rax
@@ -12566,9 +12632,9 @@ ir_in_bounds_1005:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1006
-    jmp ir_nonnull_1007
-ir_trap_null_1006:
+    jz ir_trap_null_1012
+    jmp ir_nonnull_1013
+ir_trap_null_1012:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -12585,7 +12651,7 @@ ir_trap_null_1006:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1007:
+ir_nonnull_1013:
     mov rax, [rbp - 312]
     push rax
     mov rax, 1
@@ -12618,17 +12684,17 @@ ir_nonnull_1007:
     mov rax, [rbp - 344]
     ; Store to variable: i
     mov dword [rbp - 116], eax  ; To stack [rbp - 116]
-    jmp ir_while_1002
-ir_while_end_1003:
+    jmp ir_while_1008
+ir_while_end_1009:
     ; Load variable: count
     movsxd rax, dword [rbp - 100]  ; From stack [rbp - 100]
     mov [rbp - 352], rax
     mov rax, [rbp - 352]
     test rax, rax
-    jz ir_errdefer_ok_1008
-    jmp ir_errdefer_end_1009
-ir_errdefer_ok_1008:
-ir_errdefer_end_1009:
+    jz ir_errdefer_ok_1014
+    jmp ir_errdefer_end_1015
+ir_errdefer_ok_1014:
+ir_errdefer_end_1015:
     ; Load variable: count
     movsxd rax, dword [rbp - 100]  ; From stack [rbp - 100]
     jmp Lint_to_dec_exit
@@ -12647,7 +12713,7 @@ con_writeln:
     ; Registering 1 function parameters
     mov [rbp - 8], rcx  ; Home param 's'
     ; Parameter 's' arrived in register rcx
-ir_entry_1010:
+ir_entry_1016:
     mov rax, 11
     neg rax
     mov [rbp - 32], rax
@@ -12677,8 +12743,8 @@ ir_entry_1010:
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_sc_false_1015
-ir_sc_rhs_1013:
+    jz ir_sc_false_1021
+ir_sc_rhs_1019:
     ; Load variable: h
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     push rax
@@ -12691,18 +12757,18 @@ ir_sc_rhs_1013:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_sc_false_1015
-ir_sc_true_1014:
+    jz ir_sc_false_1021
+ir_sc_true_1020:
     mov rax, 1
     mov [rbp - 72], rax
-    jmp ir_sc_end_1016
-ir_sc_false_1015:
+    jmp ir_sc_end_1022
+ir_sc_false_1021:
     mov rax, 0
     mov [rbp - 72], rax
-ir_sc_end_1016:
+ir_sc_end_1022:
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_if_next_1012
+    jz ir_if_next_1018
     ; Load variable: s
     mov rax, qword [rbp - 8]  ; String param ptr
     push rax
@@ -12736,9 +12802,9 @@ ir_sc_end_1016:
     mov [rbp - 120], rax
     mov rax, [rbp - 120]
     test rax, rax
-    jz ir_trap_bounds_1017
-    jmp ir_in_bounds_1018
-ir_trap_bounds_1017:
+    jz ir_trap_bounds_1023
+    jmp ir_in_bounds_1024
+ir_trap_bounds_1023:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -12755,7 +12821,7 @@ ir_trap_bounds_1017:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1018:
+ir_in_bounds_1024:
     mov rax, 0
     push rax
     mov rax, 1
@@ -12811,9 +12877,9 @@ ir_in_bounds_1018:
     mov [rbp - 168], rax
     mov rax, [rbp - 168]
     test rax, rax
-    jz ir_trap_bounds_1019
-    jmp ir_in_bounds_1020
-ir_trap_bounds_1019:
+    jz ir_trap_bounds_1025
+    jmp ir_in_bounds_1026
+ir_trap_bounds_1025:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -12830,7 +12896,7 @@ ir_trap_bounds_1019:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1020:
+ir_in_bounds_1026:
     mov rax, 0
     push rax
     mov rax, 1
@@ -12864,17 +12930,17 @@ ir_in_bounds_1020:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 192], rax
-    jmp ir_if_end_1011
-ir_if_next_1012:
-ir_if_end_1011:
+    jmp ir_if_end_1017
+ir_if_next_1018:
+ir_if_end_1017:
     mov rax, 0
     mov [rbp - 200], rax
     mov rax, [rbp - 200]
     test rax, rax
-    jz ir_errdefer_ok_1021
-    jmp ir_errdefer_end_1022
-ir_errdefer_ok_1021:
-ir_errdefer_end_1022:
+    jz ir_errdefer_ok_1027
+    jmp ir_errdefer_end_1028
+ir_errdefer_ok_1027:
+ir_errdefer_end_1028:
     jmp Lcon_writeln_exit
 Lcon_writeln_exit:
     ; Function epilogue
@@ -12893,11 +12959,11 @@ parse_content_length:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'n'
     ; Parameter 'n' arrived in register rdx
-ir_entry_1023:
+ir_entry_1029:
     mov rax, 0
     ; Store to variable: i
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-ir_while_1024:
+ir_while_1030:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -12918,14 +12984,14 @@ ir_while_1024:
     mov [rbp - 64], rax
     mov rax, [rbp - 64]
     test rax, rax
-    jz ir_while_end_1025
+    jz ir_while_end_1031
     mov rax, 1
     ; Store to variable: match
     mov dword [rbp - 24], eax  ; To stack [rbp - 24]
     mov rax, 0
     ; Store to variable: k
     mov dword [rbp - 28], eax  ; To stack [rbp - 28]
-ir_while_1026:
+ir_while_1032:
     ; Load variable: k
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -12938,7 +13004,7 @@ ir_while_1026:
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_while_end_1027
+    jz ir_while_end_1033
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -12951,9 +13017,9 @@ ir_while_1026:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1028
-    jmp ir_nonnull_1029
-ir_trap_null_1028:
+    jz ir_trap_null_1034
+    jmp ir_nonnull_1035
+ir_trap_null_1034:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -12970,7 +13036,7 @@ ir_trap_null_1028:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1029:
+ir_nonnull_1035:
     mov rax, [rbp - 80]
     push rax
     mov rax, 1
@@ -13005,9 +13071,9 @@ ir_nonnull_1029:
     mov [rbp - 120], rax
     mov rax, [rbp - 120]
     test rax, rax
-    jz ir_trap_null_1030
-    jmp ir_nonnull_1031
-ir_trap_null_1030:
+    jz ir_trap_null_1036
+    jmp ir_nonnull_1037
+ir_trap_null_1036:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -13024,7 +13090,7 @@ ir_trap_null_1030:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1031:
+ir_nonnull_1037:
     ; Load variable: k
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -13059,9 +13125,9 @@ ir_nonnull_1031:
     mov [rbp - 160], rax
     mov rax, [rbp - 160]
     test rax, rax
-    jz ir_trap_null_1032
-    jmp ir_nonnull_1033
-ir_trap_null_1032:
+    jz ir_trap_null_1038
+    jmp ir_nonnull_1039
+ir_trap_null_1038:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -13078,7 +13144,7 @@ ir_trap_null_1032:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1033:
+ir_nonnull_1039:
     ; Load variable: k
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -13113,8 +13179,8 @@ ir_nonnull_1033:
     mov [rbp - 192], rax
     mov rax, [rbp - 192]
     test rax, rax
-    jz ir_sc_false_1038
-ir_sc_rhs_1036:
+    jz ir_sc_false_1044
+ir_sc_rhs_1042:
     ; Load variable: b
     movsxd rax, dword [rbp - 32]  ; From stack [rbp - 32]
     push rax
@@ -13128,25 +13194,25 @@ ir_sc_rhs_1036:
     mov [rbp - 200], rax
     mov rax, [rbp - 200]
     test rax, rax
-    jz ir_sc_false_1038
-ir_sc_true_1037:
+    jz ir_sc_false_1044
+ir_sc_true_1043:
     mov rax, 1
     mov [rbp - 208], rax
-    jmp ir_sc_end_1039
-ir_sc_false_1038:
+    jmp ir_sc_end_1045
+ir_sc_false_1044:
     mov rax, 0
     mov [rbp - 208], rax
-ir_sc_end_1039:
+ir_sc_end_1045:
     mov rax, [rbp - 208]
     test rax, rax
-    jz ir_if_next_1035
+    jz ir_if_next_1041
     mov rax, 0
     ; Store to variable: match
     mov dword [rbp - 24], eax  ; To stack [rbp - 24]
-    jmp ir_while_end_1027
-    jmp ir_if_end_1034
-ir_if_next_1035:
-ir_if_end_1034:
+    jmp ir_while_end_1033
+    jmp ir_if_end_1040
+ir_if_next_1041:
+ir_if_end_1040:
     ; Load variable: k
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -13158,8 +13224,8 @@ ir_if_end_1034:
     mov rax, [rbp - 224]
     ; Store to variable: k
     mov dword [rbp - 28], eax  ; To stack [rbp - 28]
-    jmp ir_while_1026
-ir_while_end_1027:
+    jmp ir_while_1032
+ir_while_end_1033:
     ; Load variable: match
     movsxd rax, dword [rbp - 24]  ; From stack [rbp - 24]
     push rax
@@ -13172,7 +13238,7 @@ ir_while_end_1027:
     mov [rbp - 232], rax
     mov rax, [rbp - 232]
     test rax, rax
-    jz ir_if_next_1041
+    jz ir_if_next_1047
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13184,7 +13250,7 @@ ir_while_end_1027:
     mov rax, [rbp - 240]
     ; Store to variable: i
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-ir_while_1042:
+ir_while_1048:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13198,14 +13264,14 @@ ir_while_1042:
     mov [rbp - 248], rax
     mov rax, [rbp - 248]
     test rax, rax
-    jz ir_sc_false_1046
-ir_sc_rhs_1044:
+    jz ir_sc_false_1052
+ir_sc_rhs_1050:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1048
-    jmp ir_nonnull_1049
-ir_trap_null_1048:
+    jz ir_trap_null_1054
+    jmp ir_nonnull_1055
+ir_trap_null_1054:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -13222,7 +13288,7 @@ ir_trap_null_1048:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1049:
+ir_nonnull_1055:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13253,15 +13319,15 @@ ir_nonnull_1049:
     mov [rbp - 280], rax
     mov rax, [rbp - 280]
     test rax, rax
-    jz ir_sc_rhs_1050
-    jmp ir_sc_true_1051
-ir_sc_rhs_1050:
+    jz ir_sc_rhs_1056
+    jmp ir_sc_true_1057
+ir_sc_rhs_1056:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1054
-    jmp ir_nonnull_1055
-ir_trap_null_1054:
+    jz ir_trap_null_1060
+    jmp ir_nonnull_1061
+ir_trap_null_1060:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -13278,7 +13344,7 @@ ir_trap_null_1054:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1055:
+ir_nonnull_1061:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13309,29 +13375,29 @@ ir_nonnull_1055:
     mov [rbp - 312], rax
     mov rax, [rbp - 312]
     test rax, rax
+    jz ir_sc_false_1058
+ir_sc_true_1057:
+    mov rax, 1
+    mov [rbp - 320], rax
+    jmp ir_sc_end_1059
+ir_sc_false_1058:
+    mov rax, 0
+    mov [rbp - 320], rax
+ir_sc_end_1059:
+    mov rax, [rbp - 320]
+    test rax, rax
     jz ir_sc_false_1052
 ir_sc_true_1051:
     mov rax, 1
-    mov [rbp - 320], rax
+    mov [rbp - 336], rax
     jmp ir_sc_end_1053
 ir_sc_false_1052:
     mov rax, 0
-    mov [rbp - 320], rax
+    mov [rbp - 336], rax
 ir_sc_end_1053:
-    mov rax, [rbp - 320]
-    test rax, rax
-    jz ir_sc_false_1046
-ir_sc_true_1045:
-    mov rax, 1
-    mov [rbp - 336], rax
-    jmp ir_sc_end_1047
-ir_sc_false_1046:
-    mov rax, 0
-    mov [rbp - 336], rax
-ir_sc_end_1047:
     mov rax, [rbp - 336]
     test rax, rax
-    jz ir_while_end_1043
+    jz ir_while_end_1049
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13343,12 +13409,12 @@ ir_sc_end_1047:
     mov rax, [rbp - 352]
     ; Store to variable: i
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-    jmp ir_while_1042
-ir_while_end_1043:
+    jmp ir_while_1048
+ir_while_end_1049:
     mov rax, 0
     ; Store to variable: val
     mov dword [rbp - 44], eax  ; To stack [rbp - 44]
-ir_while_1056:
+ir_while_1062:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13362,14 +13428,14 @@ ir_while_1056:
     mov [rbp - 360], rax
     mov rax, [rbp - 360]
     test rax, rax
-    jz ir_sc_false_1060
-ir_sc_rhs_1058:
+    jz ir_sc_false_1066
+ir_sc_rhs_1064:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1062
-    jmp ir_nonnull_1063
-ir_trap_null_1062:
+    jz ir_trap_null_1068
+    jmp ir_nonnull_1069
+ir_trap_null_1068:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -13386,7 +13452,7 @@ ir_trap_null_1062:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1063:
+ir_nonnull_1069:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13417,25 +13483,25 @@ ir_nonnull_1063:
     mov [rbp - 392], rax
     mov rax, [rbp - 392]
     test rax, rax
-    jz ir_sc_false_1060
-ir_sc_true_1059:
+    jz ir_sc_false_1066
+ir_sc_true_1065:
     mov rax, 1
     mov [rbp - 400], rax
-    jmp ir_sc_end_1061
-ir_sc_false_1060:
+    jmp ir_sc_end_1067
+ir_sc_false_1066:
     mov rax, 0
     mov [rbp - 400], rax
-ir_sc_end_1061:
+ir_sc_end_1067:
     mov rax, [rbp - 400]
     test rax, rax
-    jz ir_sc_false_1066
-ir_sc_rhs_1064:
+    jz ir_sc_false_1072
+ir_sc_rhs_1070:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1068
-    jmp ir_nonnull_1069
-ir_trap_null_1068:
+    jz ir_trap_null_1074
+    jmp ir_nonnull_1075
+ir_trap_null_1074:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -13452,7 +13518,7 @@ ir_trap_null_1068:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1069:
+ir_nonnull_1075:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13483,18 +13549,18 @@ ir_nonnull_1069:
     mov [rbp - 440], rax
     mov rax, [rbp - 440]
     test rax, rax
-    jz ir_sc_false_1066
-ir_sc_true_1065:
+    jz ir_sc_false_1072
+ir_sc_true_1071:
     mov rax, 1
     mov [rbp - 448], rax
-    jmp ir_sc_end_1067
-ir_sc_false_1066:
+    jmp ir_sc_end_1073
+ir_sc_false_1072:
     mov rax, 0
     mov [rbp - 448], rax
-ir_sc_end_1067:
+ir_sc_end_1073:
     mov rax, [rbp - 448]
     test rax, rax
-    jz ir_while_end_1057
+    jz ir_while_end_1063
     ; Load variable: val
     movsxd rax, dword [rbp - 44]  ; From stack [rbp - 44]
     push rax
@@ -13506,9 +13572,9 @@ ir_sc_end_1067:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1070
-    jmp ir_nonnull_1071
-ir_trap_null_1070:
+    jz ir_trap_null_1076
+    jmp ir_nonnull_1077
+ir_trap_null_1076:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -13525,7 +13591,7 @@ ir_trap_null_1070:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1071:
+ir_nonnull_1077:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13573,23 +13639,23 @@ ir_nonnull_1071:
     mov rax, [rbp - 512]
     ; Store to variable: i
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-    jmp ir_while_1056
-ir_while_end_1057:
+    jmp ir_while_1062
+ir_while_end_1063:
     ; Load variable: val
     movsxd rax, dword [rbp - 44]  ; From stack [rbp - 44]
     mov [rbp - 520], rax
     mov rax, [rbp - 520]
     test rax, rax
-    jz ir_errdefer_ok_1072
-    jmp ir_errdefer_end_1073
-ir_errdefer_ok_1072:
-ir_errdefer_end_1073:
+    jz ir_errdefer_ok_1078
+    jmp ir_errdefer_end_1079
+ir_errdefer_ok_1078:
+ir_errdefer_end_1079:
     ; Load variable: val
     movsxd rax, dword [rbp - 44]  ; From stack [rbp - 44]
     jmp Lparse_content_length_exit
-    jmp ir_if_end_1040
-ir_if_next_1041:
-ir_if_end_1040:
+    jmp ir_if_end_1046
+ir_if_next_1047:
+ir_if_end_1046:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13601,16 +13667,16 @@ ir_if_end_1040:
     mov rax, [rbp - 528]
     ; Store to variable: i
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-    jmp ir_while_1024
-ir_while_end_1025:
+    jmp ir_while_1030
+ir_while_end_1031:
     mov rax, 0
     mov [rbp - 536], rax
     mov rax, [rbp - 536]
     test rax, rax
-    jz ir_errdefer_ok_1074
-    jmp ir_errdefer_end_1075
-ir_errdefer_ok_1074:
-ir_errdefer_end_1075:
+    jz ir_errdefer_ok_1080
+    jmp ir_errdefer_end_1081
+ir_errdefer_ok_1080:
+ir_errdefer_end_1081:
     mov rax, 0
     jmp Lparse_content_length_exit
 Lparse_content_length_exit:
@@ -13630,7 +13696,7 @@ find_body_start:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'n'
     ; Parameter 'n' arrived in register rdx
-ir_entry_1076:
+ir_entry_1082:
     ; Load variable: dbg_on
     movsxd rax, dword [rel dbg_on]  ; From global memory
     push rax
@@ -13643,7 +13709,7 @@ ir_entry_1076:
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
     test rax, rax
-    jz ir_if_next_1078
+    jz ir_if_next_1084
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_fbs_ok
@@ -13661,9 +13727,9 @@ ir_entry_1076:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 48], rax
-    jmp ir_if_end_1077
-ir_if_next_1078:
-ir_if_end_1077:
+    jmp ir_if_end_1083
+ir_if_next_1084:
+ir_if_end_1083:
     ; Load variable: dbg_on
     movsxd rax, dword [rel dbg_on]  ; From global memory
     push rax
@@ -13676,7 +13742,7 @@ ir_if_end_1077:
     mov [rbp - 56], rax
     mov rax, [rbp - 56]
     test rax, rax
-    jz ir_if_next_1080
+    jz ir_if_next_1086
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_fbs_enter
@@ -13697,13 +13763,13 @@ ir_if_end_1077:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 72], rax
-    jmp ir_if_end_1079
-ir_if_next_1080:
-ir_if_end_1079:
+    jmp ir_if_end_1085
+ir_if_next_1086:
+ir_if_end_1085:
     mov rax, 0
     ; Store to variable: i
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-ir_while_1081:
+ir_while_1087:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13724,13 +13790,13 @@ ir_while_1081:
     mov [rbp - 88], rax
     mov rax, [rbp - 88]
     test rax, rax
-    jz ir_while_end_1082
+    jz ir_while_end_1088
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1085
-    jmp ir_nonnull_1086
-ir_trap_null_1085:
+    jz ir_trap_null_1091
+    jmp ir_nonnull_1092
+ir_trap_null_1091:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -13747,7 +13813,7 @@ ir_trap_null_1085:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1086:
+ir_nonnull_1092:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13797,7 +13863,7 @@ ir_nonnull_1086:
     mov [rbp - 128], rax
     mov rax, [rbp - 128]
     test rax, rax
-    jz ir_if_next_1084
+    jz ir_if_next_1090
     ; Load variable: dbg_on
     movsxd rax, dword [rel dbg_on]  ; From global memory
     push rax
@@ -13810,7 +13876,7 @@ ir_nonnull_1086:
     mov [rbp - 136], rax
     mov rax, [rbp - 136]
     test rax, rax
-    jz ir_if_next_1088
+    jz ir_if_next_1094
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_fbs_exit
@@ -13838,9 +13904,9 @@ ir_nonnull_1086:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 160], rax
-    jmp ir_if_end_1087
-ir_if_next_1088:
-ir_if_end_1087:
+    jmp ir_if_end_1093
+ir_if_next_1094:
+ir_if_end_1093:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13853,15 +13919,15 @@ ir_if_end_1087:
     mov [rbp - 176], rax
     mov rax, [rbp - 176]
     test rax, rax
-    jz ir_errdefer_ok_1089
-    jmp ir_errdefer_end_1090
-ir_errdefer_ok_1089:
-ir_errdefer_end_1090:
+    jz ir_errdefer_ok_1095
+    jmp ir_errdefer_end_1096
+ir_errdefer_ok_1095:
+ir_errdefer_end_1096:
     mov rax, [rbp - 168]
     jmp Lfind_body_start_exit
-    jmp ir_if_end_1083
-ir_if_next_1084:
-ir_if_end_1083:
+    jmp ir_if_end_1089
+ir_if_next_1090:
+ir_if_end_1089:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13873,12 +13939,12 @@ ir_if_end_1083:
     mov rax, [rbp - 184]
     ; Store to variable: i
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-    jmp ir_while_1081
-ir_while_end_1082:
+    jmp ir_while_1087
+ir_while_end_1088:
     mov rax, 0
     ; Store to variable: i
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-ir_while_1091:
+ir_while_1097:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13899,13 +13965,13 @@ ir_while_1091:
     mov [rbp - 200], rax
     mov rax, [rbp - 200]
     test rax, rax
-    jz ir_while_end_1092
+    jz ir_while_end_1098
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1095
-    jmp ir_nonnull_1096
-ir_trap_null_1095:
+    jz ir_trap_null_1101
+    jmp ir_nonnull_1102
+ir_trap_null_1101:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -13922,7 +13988,7 @@ ir_trap_null_1095:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1096:
+ir_nonnull_1102:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -13972,7 +14038,7 @@ ir_nonnull_1096:
     mov [rbp - 240], rax
     mov rax, [rbp - 240]
     test rax, rax
-    jz ir_if_next_1094
+    jz ir_if_next_1100
     ; Load variable: dbg_on
     movsxd rax, dword [rel dbg_on]  ; From global memory
     push rax
@@ -13985,7 +14051,7 @@ ir_nonnull_1096:
     mov [rbp - 248], rax
     mov rax, [rbp - 248]
     test rax, rax
-    jz ir_if_next_1098
+    jz ir_if_next_1104
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_fbs_exit
@@ -14013,9 +14079,9 @@ ir_nonnull_1096:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 272], rax
-    jmp ir_if_end_1097
-ir_if_next_1098:
-ir_if_end_1097:
+    jmp ir_if_end_1103
+ir_if_next_1104:
+ir_if_end_1103:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -14028,15 +14094,15 @@ ir_if_end_1097:
     mov [rbp - 288], rax
     mov rax, [rbp - 288]
     test rax, rax
-    jz ir_errdefer_ok_1099
-    jmp ir_errdefer_end_1100
-ir_errdefer_ok_1099:
-ir_errdefer_end_1100:
+    jz ir_errdefer_ok_1105
+    jmp ir_errdefer_end_1106
+ir_errdefer_ok_1105:
+ir_errdefer_end_1106:
     mov rax, [rbp - 280]
     jmp Lfind_body_start_exit
-    jmp ir_if_end_1093
-ir_if_next_1094:
-ir_if_end_1093:
+    jmp ir_if_end_1099
+ir_if_next_1100:
+ir_if_end_1099:
     ; Load variable: i
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -14048,8 +14114,8 @@ ir_if_end_1093:
     mov rax, [rbp - 296]
     ; Store to variable: i
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-    jmp ir_while_1091
-ir_while_end_1092:
+    jmp ir_while_1097
+ir_while_end_1098:
     ; Load variable: dbg_on
     movsxd rax, dword [rel dbg_on]  ; From global memory
     push rax
@@ -14062,7 +14128,7 @@ ir_while_end_1092:
     mov [rbp - 304], rax
     mov rax, [rbp - 304]
     test rax, rax
-    jz ir_if_next_1102
+    jz ir_if_next_1108
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_fbs_exit
@@ -14083,18 +14149,18 @@ ir_while_end_1092:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 320], rax
-    jmp ir_if_end_1101
-ir_if_next_1102:
-ir_if_end_1101:
+    jmp ir_if_end_1107
+ir_if_next_1108:
+ir_if_end_1107:
     ; Load variable: n
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     mov [rbp - 328], rax
     mov rax, [rbp - 328]
     test rax, rax
-    jz ir_errdefer_ok_1103
-    jmp ir_errdefer_end_1104
-ir_errdefer_ok_1103:
-ir_errdefer_end_1104:
+    jz ir_errdefer_ok_1109
+    jmp ir_errdefer_end_1110
+ir_errdefer_ok_1109:
+ir_errdefer_end_1110:
     ; Load variable: n
     movsxd rax, dword [rbp - 16]  ; From stack [rbp - 16]
     jmp Lfind_body_start_exit
@@ -14117,11 +14183,11 @@ send_html_escaped:
     ; Parameter 'src' arrived in register rdx
     mov [rbp - 24], r8  ; Home param 'len'
     ; Parameter 'len' arrived in register r8
-ir_entry_1105:
+ir_entry_1111:
     mov rax, 0
     ; Store to variable: i
     mov dword [rbp - 28], eax  ; To stack [rbp - 28]
-ir_while_1106:
+ir_while_1112:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -14135,13 +14201,13 @@ ir_while_1106:
     mov [rbp - 40], rax
     mov rax, [rbp - 40]
     test rax, rax
-    jz ir_while_end_1107
+    jz ir_while_end_1113
     ; Load variable: src
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     test rax, rax
-    jz ir_trap_null_1108
-    jmp ir_nonnull_1109
-ir_trap_null_1108:
+    jz ir_trap_null_1114
+    jmp ir_nonnull_1115
+ir_trap_null_1114:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -14158,7 +14224,7 @@ ir_trap_null_1108:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1109:
+ir_nonnull_1115:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -14193,7 +14259,7 @@ ir_nonnull_1109:
     mov [rbp - 72], rax
     mov rax, [rbp - 72]
     test rax, rax
-    jz ir_if_next_1111
+    jz ir_if_next_1117
     ; Load variable: html_amp
     lea rax, [rel html_amp]  ; Address of global string
     push rax
@@ -14230,8 +14296,8 @@ ir_nonnull_1109:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 112], rax
-    jmp ir_if_end_1110
-ir_if_next_1111:
+    jmp ir_if_end_1116
+ir_if_next_1117:
     ; Load variable: ch
     movsxd rax, dword [rbp - 32]  ; From stack [rbp - 32]
     push rax
@@ -14244,7 +14310,7 @@ ir_if_next_1111:
     mov [rbp - 120], rax
     mov rax, [rbp - 120]
     test rax, rax
-    jz ir_if_next_1112
+    jz ir_if_next_1118
     ; Load variable: html_lt
     lea rax, [rel html_lt]  ; Address of global string
     push rax
@@ -14281,8 +14347,8 @@ ir_if_next_1111:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 160], rax
-    jmp ir_if_end_1110
-ir_if_next_1112:
+    jmp ir_if_end_1116
+ir_if_next_1118:
     ; Load variable: ch
     movsxd rax, dword [rbp - 32]  ; From stack [rbp - 32]
     push rax
@@ -14295,7 +14361,7 @@ ir_if_next_1112:
     mov [rbp - 168], rax
     mov rax, [rbp - 168]
     test rax, rax
-    jz ir_if_next_1113
+    jz ir_if_next_1119
     ; Load variable: html_gt
     lea rax, [rel html_gt]  ; Address of global string
     push rax
@@ -14332,8 +14398,8 @@ ir_if_next_1112:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 208], rax
-    jmp ir_if_end_1110
-ir_if_next_1113:
+    jmp ir_if_end_1116
+ir_if_next_1119:
     ; Load variable: ch
     movsxd rax, dword [rbp - 32]  ; From stack [rbp - 32]
     push rax
@@ -14346,7 +14412,7 @@ ir_if_next_1113:
     mov [rbp - 216], rax
     mov rax, [rbp - 216]
     test rax, rax
-    jz ir_if_next_1114
+    jz ir_if_next_1120
     ; Load variable: html_quot
     lea rax, [rel html_quot]  ; Address of global string
     push rax
@@ -14383,8 +14449,8 @@ ir_if_next_1113:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 256], rax
-    jmp ir_if_end_1110
-ir_if_next_1114:
+    jmp ir_if_end_1116
+ir_if_next_1120:
     ; Load variable: ch
     movsxd rax, dword [rbp - 32]  ; From stack [rbp - 32]
     push rax
@@ -14397,7 +14463,7 @@ ir_if_next_1114:
     mov [rbp - 264], rax
     mov rax, [rbp - 264]
     test rax, rax
-    jz ir_if_next_1115
+    jz ir_if_next_1121
     ; Load variable: html_apos
     lea rax, [rel html_apos]  ; Address of global string
     push rax
@@ -14434,14 +14500,14 @@ ir_if_next_1114:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 304], rax
-    jmp ir_if_end_1110
-ir_if_next_1115:
+    jmp ir_if_end_1116
+ir_if_next_1121:
     ; Load variable: src
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     test rax, rax
-    jz ir_trap_null_1116
-    jmp ir_nonnull_1117
-ir_trap_null_1116:
+    jz ir_trap_null_1122
+    jmp ir_nonnull_1123
+ir_trap_null_1122:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -14458,7 +14524,7 @@ ir_trap_null_1116:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1117:
+ir_nonnull_1123:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -14489,7 +14555,7 @@ ir_nonnull_1117:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 328], rax
-ir_if_end_1110:
+ir_if_end_1116:
     ; Load variable: i
     movsxd rax, dword [rbp - 28]  ; From stack [rbp - 28]
     push rax
@@ -14501,16 +14567,16 @@ ir_if_end_1110:
     mov rax, [rbp - 336]
     ; Store to variable: i
     mov dword [rbp - 28], eax  ; To stack [rbp - 28]
-    jmp ir_while_1106
-ir_while_end_1107:
+    jmp ir_while_1112
+ir_while_end_1113:
     mov rax, 0
     mov [rbp - 344], rax
     mov rax, [rbp - 344]
     test rax, rax
-    jz ir_errdefer_ok_1118
-    jmp ir_errdefer_end_1119
-ir_errdefer_ok_1118:
-ir_errdefer_end_1119:
+    jz ir_errdefer_ok_1124
+    jmp ir_errdefer_end_1125
+ir_errdefer_ok_1124:
+ir_errdefer_end_1125:
     jmp Lsend_html_escaped_exit
 Lsend_html_escaped_exit:
     ; Function epilogue
@@ -14529,7 +14595,7 @@ build_posts_filename:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'id'
     ; Parameter 'id' arrived in register rdx
-ir_entry_1120:
+ir_entry_1126:
     ; Load variable: fn_posts_prefix
     lea rax, [rel fn_posts_prefix]  ; Address of global string
     push rax
@@ -14579,9 +14645,9 @@ ir_entry_1120:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1121
-    jmp ir_nonnull_1122
-ir_trap_null_1121:
+    jz ir_trap_null_1127
+    jmp ir_nonnull_1128
+ir_trap_null_1127:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -14598,7 +14664,7 @@ ir_trap_null_1121:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1122:
+ir_nonnull_1128:
     mov rax, [rbp - 80]
     push rax
     mov rax, 1
@@ -14651,9 +14717,9 @@ ir_nonnull_1122:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1123
-    jmp ir_nonnull_1124
-ir_trap_null_1123:
+    jz ir_trap_null_1129
+    jmp ir_nonnull_1130
+ir_trap_null_1129:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -14670,7 +14736,7 @@ ir_trap_null_1123:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1124:
+ir_nonnull_1130:
     mov rax, [rbp - 128]
     push rax
     mov rax, 1
@@ -14760,9 +14826,9 @@ ir_nonnull_1124:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1125
-    jmp ir_nonnull_1126
-ir_trap_null_1125:
+    jz ir_trap_null_1131
+    jmp ir_nonnull_1132
+ir_trap_null_1131:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -14779,7 +14845,7 @@ ir_trap_null_1125:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1126:
+ir_nonnull_1132:
     mov rax, [rbp - 232]
     push rax
     mov rax, 1
@@ -14805,10 +14871,10 @@ ir_nonnull_1126:
     mov [rbp - 264], rax
     mov rax, [rbp - 264]
     test rax, rax
-    jz ir_errdefer_ok_1127
-    jmp ir_errdefer_end_1128
-ir_errdefer_ok_1127:
-ir_errdefer_end_1128:
+    jz ir_errdefer_ok_1133
+    jmp ir_errdefer_end_1134
+ir_errdefer_ok_1133:
+ir_errdefer_end_1134:
     jmp Lbuild_posts_filename_exit
 Lbuild_posts_filename_exit:
     ; Function epilogue
@@ -14827,13 +14893,13 @@ build_forum_thread_url:
     ; Parameter 'buf' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'thread_id'
     ; Parameter 'thread_id' arrived in register rdx
-ir_entry_1129:
+ir_entry_1135:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1130
-    jmp ir_nonnull_1131
-ir_trap_null_1130:
+    jz ir_trap_null_1136
+    jmp ir_nonnull_1137
+ir_trap_null_1136:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -14850,7 +14916,7 @@ ir_trap_null_1130:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1131:
+ir_nonnull_1137:
     mov rax, 0
     push rax
     mov rax, 1
@@ -14875,9 +14941,9 @@ ir_nonnull_1131:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1132
-    jmp ir_nonnull_1133
-ir_trap_null_1132:
+    jz ir_trap_null_1138
+    jmp ir_nonnull_1139
+ir_trap_null_1138:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -14894,7 +14960,7 @@ ir_trap_null_1132:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1133:
+ir_nonnull_1139:
     mov rax, 1
     push rax
     mov rax, 1
@@ -14919,9 +14985,9 @@ ir_nonnull_1133:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1134
-    jmp ir_nonnull_1135
-ir_trap_null_1134:
+    jz ir_trap_null_1140
+    jmp ir_nonnull_1141
+ir_trap_null_1140:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -14938,7 +15004,7 @@ ir_trap_null_1134:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1135:
+ir_nonnull_1141:
     mov rax, 2
     push rax
     mov rax, 1
@@ -14963,9 +15029,9 @@ ir_nonnull_1135:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1136
-    jmp ir_nonnull_1137
-ir_trap_null_1136:
+    jz ir_trap_null_1142
+    jmp ir_nonnull_1143
+ir_trap_null_1142:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -14982,7 +15048,7 @@ ir_trap_null_1136:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1137:
+ir_nonnull_1143:
     mov rax, 3
     push rax
     mov rax, 1
@@ -15007,9 +15073,9 @@ ir_nonnull_1137:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1138
-    jmp ir_nonnull_1139
-ir_trap_null_1138:
+    jz ir_trap_null_1144
+    jmp ir_nonnull_1145
+ir_trap_null_1144:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15026,7 +15092,7 @@ ir_trap_null_1138:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1139:
+ir_nonnull_1145:
     mov rax, 4
     push rax
     mov rax, 1
@@ -15051,9 +15117,9 @@ ir_nonnull_1139:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1140
-    jmp ir_nonnull_1141
-ir_trap_null_1140:
+    jz ir_trap_null_1146
+    jmp ir_nonnull_1147
+ir_trap_null_1146:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15070,7 +15136,7 @@ ir_trap_null_1140:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1141:
+ir_nonnull_1147:
     mov rax, 5
     push rax
     mov rax, 1
@@ -15095,9 +15161,9 @@ ir_nonnull_1141:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1142
-    jmp ir_nonnull_1143
-ir_trap_null_1142:
+    jz ir_trap_null_1148
+    jmp ir_nonnull_1149
+ir_trap_null_1148:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15114,7 +15180,7 @@ ir_trap_null_1142:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1143:
+ir_nonnull_1149:
     mov rax, 6
     push rax
     mov rax, 1
@@ -15139,9 +15205,9 @@ ir_nonnull_1143:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1144
-    jmp ir_nonnull_1145
-ir_trap_null_1144:
+    jz ir_trap_null_1150
+    jmp ir_nonnull_1151
+ir_trap_null_1150:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15158,7 +15224,7 @@ ir_trap_null_1144:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1145:
+ir_nonnull_1151:
     mov rax, 7
     push rax
     mov rax, 1
@@ -15183,9 +15249,9 @@ ir_nonnull_1145:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1146
-    jmp ir_nonnull_1147
-ir_trap_null_1146:
+    jz ir_trap_null_1152
+    jmp ir_nonnull_1153
+ir_trap_null_1152:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15202,7 +15268,7 @@ ir_trap_null_1146:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1147:
+ir_nonnull_1153:
     mov rax, 8
     push rax
     mov rax, 1
@@ -15227,9 +15293,9 @@ ir_nonnull_1147:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1148
-    jmp ir_nonnull_1149
-ir_trap_null_1148:
+    jz ir_trap_null_1154
+    jmp ir_nonnull_1155
+ir_trap_null_1154:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15246,7 +15312,7 @@ ir_trap_null_1148:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1149:
+ir_nonnull_1155:
     mov rax, 9
     push rax
     mov rax, 1
@@ -15271,9 +15337,9 @@ ir_nonnull_1149:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1150
-    jmp ir_nonnull_1151
-ir_trap_null_1150:
+    jz ir_trap_null_1156
+    jmp ir_nonnull_1157
+ir_trap_null_1156:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15290,7 +15356,7 @@ ir_trap_null_1150:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1151:
+ir_nonnull_1157:
     mov rax, 10
     push rax
     mov rax, 1
@@ -15315,9 +15381,9 @@ ir_nonnull_1151:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1152
-    jmp ir_nonnull_1153
-ir_trap_null_1152:
+    jz ir_trap_null_1158
+    jmp ir_nonnull_1159
+ir_trap_null_1158:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15334,7 +15400,7 @@ ir_trap_null_1152:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1153:
+ir_nonnull_1159:
     mov rax, 11
     push rax
     mov rax, 1
@@ -15359,9 +15425,9 @@ ir_nonnull_1153:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1154
-    jmp ir_nonnull_1155
-ir_trap_null_1154:
+    jz ir_trap_null_1160
+    jmp ir_nonnull_1161
+ir_trap_null_1160:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15378,7 +15444,7 @@ ir_trap_null_1154:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1155:
+ir_nonnull_1161:
     mov rax, 12
     push rax
     mov rax, 1
@@ -15403,9 +15469,9 @@ ir_nonnull_1155:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1156
-    jmp ir_nonnull_1157
-ir_trap_null_1156:
+    jz ir_trap_null_1162
+    jmp ir_nonnull_1163
+ir_trap_null_1162:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15422,7 +15488,7 @@ ir_trap_null_1156:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1157:
+ir_nonnull_1163:
     mov rax, 13
     push rax
     mov rax, 1
@@ -15447,9 +15513,9 @@ ir_nonnull_1157:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1158
-    jmp ir_nonnull_1159
-ir_trap_null_1158:
+    jz ir_trap_null_1164
+    jmp ir_nonnull_1165
+ir_trap_null_1164:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15466,7 +15532,7 @@ ir_trap_null_1158:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1159:
+ir_nonnull_1165:
     mov rax, 14
     push rax
     mov rax, 1
@@ -15508,9 +15574,9 @@ ir_nonnull_1159:
     ; Load variable: buf
     mov rax, qword [rbp - 8]  ; From stack [rbp - 8]
     test rax, rax
-    jz ir_trap_null_1160
-    jmp ir_nonnull_1161
-ir_trap_null_1160:
+    jz ir_trap_null_1166
+    jmp ir_nonnull_1167
+ir_trap_null_1166:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15527,7 +15593,7 @@ ir_trap_null_1160:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1161:
+ir_nonnull_1167:
     mov rax, [rbp - 392]
     push rax
     mov rax, 1
@@ -15553,10 +15619,10 @@ ir_nonnull_1161:
     mov [rbp - 424], rax
     mov rax, [rbp - 424]
     test rax, rax
-    jz ir_errdefer_ok_1162
-    jmp ir_errdefer_end_1163
-ir_errdefer_ok_1162:
-ir_errdefer_end_1163:
+    jz ir_errdefer_ok_1168
+    jmp ir_errdefer_end_1169
+ir_errdefer_ok_1168:
+ir_errdefer_end_1169:
     jmp Lbuild_forum_thread_url_exit
 Lbuild_forum_thread_url_exit:
     ; Function epilogue
@@ -15571,7 +15637,7 @@ count_threads:
     mov rbp, rsp  ; Set new base pointer
     sub rsp, 432    ; Allocate 432 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_1164:
+ir_entry_1170:
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: fn_threads
@@ -15615,24 +15681,24 @@ ir_entry_1164:
     mov [rbp - 112], rax
     mov rax, [rbp - 112]
     test rax, rax
-    jz ir_if_next_1166
+    jz ir_if_next_1172
     mov rax, 0
     mov [rbp - 120], rax
     mov rax, [rbp - 120]
     test rax, rax
-    jz ir_errdefer_ok_1167
-    jmp ir_errdefer_end_1168
-ir_errdefer_ok_1167:
-ir_errdefer_end_1168:
+    jz ir_errdefer_ok_1173
+    jmp ir_errdefer_end_1174
+ir_errdefer_ok_1173:
+ir_errdefer_end_1174:
     mov rax, 0
     jmp Lcount_threads_exit
-    jmp ir_if_end_1165
-ir_if_next_1166:
-ir_if_end_1165:
+    jmp ir_if_end_1171
+ir_if_next_1172:
+ir_if_end_1171:
     mov rax, 0
     ; Store to variable: count
     mov dword [rbp - 12], eax  ; To stack [rbp - 12]
-ir_while_1169:
+ir_while_1175:
     mov rax, 0
     push rax
     mov rax, 64
@@ -15644,9 +15710,9 @@ ir_while_1169:
     mov [rbp - 128], rax
     mov rax, [rbp - 128]
     test rax, rax
-    jz ir_trap_bounds_1171
-    jmp ir_in_bounds_1172
-ir_trap_bounds_1171:
+    jz ir_trap_bounds_1177
+    jmp ir_in_bounds_1178
+ir_trap_bounds_1177:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -15663,7 +15729,7 @@ ir_trap_bounds_1171:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1172:
+ir_in_bounds_1178:
     mov rax, 0
     push rax
     mov rax, 1
@@ -15703,7 +15769,7 @@ ir_in_bounds_1172:
     mov [rbp - 160], rax
     mov rax, [rbp - 160]
     test rax, rax
-    jz ir_while_end_1170
+    jz ir_while_end_1176
     ; Load variable: count
     movsxd rax, dword [rbp - 12]  ; From stack [rbp - 12]
     push rax
@@ -15715,8 +15781,8 @@ ir_in_bounds_1172:
     mov rax, [rbp - 168]
     ; Store to variable: count
     mov dword [rbp - 12], eax  ; To stack [rbp - 12]
-    jmp ir_while_1169
-ir_while_end_1170:
+    jmp ir_while_1175
+ir_while_end_1176:
     ; IR call: fclose (1 args)
     sub rsp, 32
     ; Load variable: fp
@@ -15732,10 +15798,10 @@ ir_while_end_1170:
     mov [rbp - 184], rax
     mov rax, [rbp - 184]
     test rax, rax
-    jz ir_errdefer_ok_1173
-    jmp ir_errdefer_end_1174
-ir_errdefer_ok_1173:
-ir_errdefer_end_1174:
+    jz ir_errdefer_ok_1179
+    jmp ir_errdefer_end_1180
+ir_errdefer_ok_1179:
+ir_errdefer_end_1180:
     ; Load variable: count
     movsxd rax, dword [rbp - 12]  ; From stack [rbp - 12]
     jmp Lcount_threads_exit
@@ -15756,7 +15822,7 @@ send_redirect:
     ; Parameter 'client' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'location'
     ; Parameter 'location' arrived in register rdx
-ir_entry_1175:
+ir_entry_1181:
     ; Load variable: REDIRECT_302
     lea rax, [rel REDIRECT_302]  ; Address of global string
     push rax
@@ -15796,13 +15862,13 @@ ir_entry_1175:
     mov rax, 0
     ; Store to variable: len
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-ir_while_1176:
+ir_while_1182:
     ; Load variable: location
     mov rax, qword [rbp - 16]  ; From stack [rbp - 16]
     test rax, rax
-    jz ir_trap_null_1178
-    jmp ir_nonnull_1179
-ir_trap_null_1178:
+    jz ir_trap_null_1184
+    jmp ir_nonnull_1185
+ir_trap_null_1184:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (37 bytes)
@@ -15819,7 +15885,7 @@ ir_trap_null_1178:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_nonnull_1179:
+ir_nonnull_1185:
     ; Load variable: len
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -15850,7 +15916,7 @@ ir_nonnull_1179:
     mov [rbp - 96], rax
     mov rax, [rbp - 96]
     test rax, rax
-    jz ir_while_end_1177
+    jz ir_while_end_1183
     ; Load variable: len
     movsxd rax, dword [rbp - 20]  ; From stack [rbp - 20]
     push rax
@@ -15862,8 +15928,8 @@ ir_nonnull_1179:
     mov rax, [rbp - 104]
     ; Store to variable: len
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
-    jmp ir_while_1176
-ir_while_end_1177:
+    jmp ir_while_1182
+ir_while_end_1183:
     ; IR call: send_all (3 args)
     sub rsp, 32
     ; Load variable: client
@@ -15920,10 +15986,10 @@ ir_while_end_1177:
     mov [rbp - 160], rax
     mov rax, [rbp - 160]
     test rax, rax
-    jz ir_errdefer_ok_1180
-    jmp ir_errdefer_end_1181
-ir_errdefer_ok_1180:
-ir_errdefer_end_1181:
+    jz ir_errdefer_ok_1186
+    jmp ir_errdefer_end_1187
+ir_errdefer_ok_1186:
+ir_errdefer_end_1187:
     jmp Lsend_redirect_exit
 Lsend_redirect_exit:
     ; Function epilogue
@@ -15942,7 +16008,7 @@ serve_forum_index:
     ; Parameter 'client' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'show_err_empty'
     ; Parameter 'show_err_empty' arrived in register rdx
-ir_entry_1182:
+ir_entry_1188:
     ; Binary operation: +
     ; String concatenation (+)
     ; Binary operation: +
@@ -16184,11 +16250,11 @@ Lconcat_right_done382:
     mov [rbp - 1256], rax
     mov rax, [rbp - 1256]
     test rax, rax
-    jz ir_if_next_1184
+    jz ir_if_next_1190
     mov rax, 1
     ; Store to variable: line_num
     mov dword [rbp - 556], eax  ; To stack [rbp - 556]
-ir_while_1185:
+ir_while_1191:
     mov rax, 0
     push rax
     mov rax, 512
@@ -16200,9 +16266,9 @@ ir_while_1185:
     mov [rbp - 1264], rax
     mov rax, [rbp - 1264]
     test rax, rax
-    jz ir_trap_bounds_1187
-    jmp ir_in_bounds_1188
-ir_trap_bounds_1187:
+    jz ir_trap_bounds_1193
+    jmp ir_in_bounds_1194
+ir_trap_bounds_1193:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -16219,7 +16285,7 @@ ir_trap_bounds_1187:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1188:
+ir_in_bounds_1194:
     mov rax, 0
     push rax
     mov rax, 1
@@ -16259,11 +16325,11 @@ ir_in_bounds_1188:
     mov [rbp - 1296], rax
     mov rax, [rbp - 1296]
     test rax, rax
-    jz ir_while_end_1186
+    jz ir_while_end_1192
     mov rax, 0
     ; Store to variable: len
     mov dword [rbp - 560], eax  ; To stack [rbp - 560]
-ir_while_1189:
+ir_while_1195:
     ; Load variable: len
     movsxd rax, dword [rbp - 560]  ; From stack [rbp - 560]
     push rax
@@ -16276,9 +16342,9 @@ ir_while_1189:
     mov [rbp - 1304], rax
     mov rax, [rbp - 1304]
     test rax, rax
-    jz ir_trap_bounds_1191
-    jmp ir_in_bounds_1192
-ir_trap_bounds_1191:
+    jz ir_trap_bounds_1197
+    jmp ir_in_bounds_1198
+ir_trap_bounds_1197:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -16295,7 +16361,7 @@ ir_trap_bounds_1191:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1192:
+ir_in_bounds_1198:
     ; Load variable: len
     movsxd rax, dword [rbp - 560]  ; From stack [rbp - 560]
     push rax
@@ -16326,8 +16392,8 @@ ir_in_bounds_1192:
     mov [rbp - 1336], rax
     mov rax, [rbp - 1336]
     test rax, rax
-    jz ir_sc_false_1195
-ir_sc_rhs_1193:
+    jz ir_sc_false_1201
+ir_sc_rhs_1199:
     ; Load variable: len
     movsxd rax, dword [rbp - 560]  ; From stack [rbp - 560]
     push rax
@@ -16340,9 +16406,9 @@ ir_sc_rhs_1193:
     mov [rbp - 1344], rax
     mov rax, [rbp - 1344]
     test rax, rax
-    jz ir_trap_bounds_1197
-    jmp ir_in_bounds_1198
-ir_trap_bounds_1197:
+    jz ir_trap_bounds_1203
+    jmp ir_in_bounds_1204
+ir_trap_bounds_1203:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -16359,7 +16425,7 @@ ir_trap_bounds_1197:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1198:
+ir_in_bounds_1204:
     ; Load variable: len
     movsxd rax, dword [rbp - 560]  ; From stack [rbp - 560]
     push rax
@@ -16390,19 +16456,19 @@ ir_in_bounds_1198:
     mov [rbp - 1376], rax
     mov rax, [rbp - 1376]
     test rax, rax
-    jz ir_sc_false_1195
-ir_sc_true_1194:
+    jz ir_sc_false_1201
+ir_sc_true_1200:
     mov rax, 1
     mov [rbp - 1384], rax
-    jmp ir_sc_end_1196
-ir_sc_false_1195:
+    jmp ir_sc_end_1202
+ir_sc_false_1201:
     mov rax, 0
     mov [rbp - 1384], rax
-ir_sc_end_1196:
+ir_sc_end_1202:
     mov rax, [rbp - 1384]
     test rax, rax
-    jz ir_sc_false_1201
-ir_sc_rhs_1199:
+    jz ir_sc_false_1207
+ir_sc_rhs_1205:
     ; Load variable: len
     movsxd rax, dword [rbp - 560]  ; From stack [rbp - 560]
     push rax
@@ -16415,9 +16481,9 @@ ir_sc_rhs_1199:
     mov [rbp - 1400], rax
     mov rax, [rbp - 1400]
     test rax, rax
-    jz ir_trap_bounds_1203
-    jmp ir_in_bounds_1204
-ir_trap_bounds_1203:
+    jz ir_trap_bounds_1209
+    jmp ir_in_bounds_1210
+ir_trap_bounds_1209:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -16434,7 +16500,7 @@ ir_trap_bounds_1203:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1204:
+ir_in_bounds_1210:
     ; Load variable: len
     movsxd rax, dword [rbp - 560]  ; From stack [rbp - 560]
     push rax
@@ -16465,18 +16531,18 @@ ir_in_bounds_1204:
     mov [rbp - 1432], rax
     mov rax, [rbp - 1432]
     test rax, rax
-    jz ir_sc_false_1201
-ir_sc_true_1200:
+    jz ir_sc_false_1207
+ir_sc_true_1206:
     mov rax, 1
     mov [rbp - 1440], rax
-    jmp ir_sc_end_1202
-ir_sc_false_1201:
+    jmp ir_sc_end_1208
+ir_sc_false_1207:
     mov rax, 0
     mov [rbp - 1440], rax
-ir_sc_end_1202:
+ir_sc_end_1208:
     mov rax, [rbp - 1440]
     test rax, rax
-    jz ir_while_end_1190
+    jz ir_while_end_1196
     ; Load variable: len
     movsxd rax, dword [rbp - 560]  ; From stack [rbp - 560]
     push rax
@@ -16488,8 +16554,8 @@ ir_sc_end_1202:
     mov rax, [rbp - 1456]
     ; Store to variable: len
     mov dword [rbp - 560], eax  ; To stack [rbp - 560]
-    jmp ir_while_1189
-ir_while_end_1190:
+    jmp ir_while_1195
+ir_while_end_1196:
     ; Load variable: len
     movsxd rax, dword [rbp - 560]  ; From stack [rbp - 560]
     push rax
@@ -16502,7 +16568,7 @@ ir_while_end_1190:
     mov [rbp - 1464], rax
     mov rax, [rbp - 1464]
     test rax, rax
-    jz ir_if_next_1206
+    jz ir_if_next_1212
     mov rax, 0
     push rax
     mov rax, 600
@@ -16514,9 +16580,9 @@ ir_while_end_1190:
     mov [rbp - 1472], rax
     mov rax, [rbp - 1472]
     test rax, rax
-    jz ir_trap_bounds_1207
-    jmp ir_in_bounds_1208
-ir_trap_bounds_1207:
+    jz ir_trap_bounds_1213
+    jmp ir_in_bounds_1214
+ir_trap_bounds_1213:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -16533,7 +16599,7 @@ ir_trap_bounds_1207:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1208:
+ir_in_bounds_1214:
     mov rax, 0
     push rax
     mov rax, 1
@@ -16605,9 +16671,9 @@ ir_in_bounds_1208:
     mov [rbp - 1552], rax
     mov rax, [rbp - 1552]
     test rax, rax
-    jz ir_trap_bounds_1209
-    jmp ir_in_bounds_1210
-ir_trap_bounds_1209:
+    jz ir_trap_bounds_1215
+    jmp ir_in_bounds_1216
+ir_trap_bounds_1215:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -16624,7 +16690,7 @@ ir_trap_bounds_1209:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1210:
+ir_in_bounds_1216:
     mov rax, [rbp - 1544]
     push rax
     mov rax, 1
@@ -16685,9 +16751,9 @@ ir_in_bounds_1210:
     mov [rbp - 1608], rax
     mov rax, [rbp - 1608]
     test rax, rax
-    jz ir_trap_bounds_1211
-    jmp ir_in_bounds_1212
-ir_trap_bounds_1211:
+    jz ir_trap_bounds_1217
+    jmp ir_in_bounds_1218
+ir_trap_bounds_1217:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -16704,7 +16770,7 @@ ir_trap_bounds_1211:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1212:
+ir_in_bounds_1218:
     mov rax, [rbp - 1600]
     push rax
     mov rax, 1
@@ -16810,13 +16876,13 @@ ir_in_bounds_1212:
     mov [rbp - 1720], rax
     mov rax, [rbp - 1720]
     test rax, rax
-    jz ir_if_next_1214
+    jz ir_if_next_1220
     mov rax, 200
     ; Store to variable: copy_len
     mov dword [rbp - 1172], eax  ; To stack [rbp - 1172]
-    jmp ir_if_end_1213
-ir_if_next_1214:
-ir_if_end_1213:
+    jmp ir_if_end_1219
+ir_if_next_1220:
+ir_if_end_1219:
     mov rax, 0
     push rax
     mov rax, 600
@@ -16828,9 +16894,9 @@ ir_if_end_1213:
     mov [rbp - 1728], rax
     mov rax, [rbp - 1728]
     test rax, rax
-    jz ir_trap_bounds_1215
-    jmp ir_in_bounds_1216
-ir_trap_bounds_1215:
+    jz ir_trap_bounds_1221
+    jmp ir_in_bounds_1222
+ir_trap_bounds_1221:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -16847,7 +16913,7 @@ ir_trap_bounds_1215:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1216:
+ir_in_bounds_1222:
     mov rax, 0
     push rax
     mov rax, 1
@@ -16889,9 +16955,9 @@ ir_in_bounds_1216:
     mov [rbp - 1760], rax
     mov rax, [rbp - 1760]
     test rax, rax
-    jz ir_trap_bounds_1217
-    jmp ir_in_bounds_1218
-ir_trap_bounds_1217:
+    jz ir_trap_bounds_1223
+    jmp ir_in_bounds_1224
+ir_trap_bounds_1223:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -16908,7 +16974,7 @@ ir_trap_bounds_1217:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1218:
+ir_in_bounds_1224:
     mov rax, 0
     push rax
     mov rax, 1
@@ -16974,9 +17040,9 @@ ir_in_bounds_1218:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 1824], rax
-    jmp ir_if_end_1205
-ir_if_next_1206:
-ir_if_end_1205:
+    jmp ir_if_end_1211
+ir_if_next_1212:
+ir_if_end_1211:
     ; Load variable: line_num
     movsxd rax, dword [rbp - 556]  ; From stack [rbp - 556]
     push rax
@@ -16988,8 +17054,8 @@ ir_if_end_1205:
     mov rax, [rbp - 1832]
     ; Store to variable: line_num
     mov dword [rbp - 556], eax  ; To stack [rbp - 556]
-    jmp ir_while_1185
-ir_while_end_1186:
+    jmp ir_while_1191
+ir_while_end_1192:
     ; IR call: fclose (1 args)
     sub rsp, 32
     ; Load variable: fp
@@ -17000,9 +17066,9 @@ ir_while_end_1186:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 1840], rax
-    jmp ir_if_end_1183
-ir_if_next_1184:
-ir_if_end_1183:
+    jmp ir_if_end_1189
+ir_if_next_1190:
+ir_if_end_1189:
     ; Load variable: FORUM_INDEX_END
     lea rax, [rel FORUM_INDEX_END]  ; Address of global string
     push rax
@@ -17051,7 +17117,7 @@ ir_if_end_1183:
     mov [rbp - 1888], rax
     mov rax, [rbp - 1888]
     test rax, rax
-    jz ir_if_next_1220
+    jz ir_if_next_1226
     ; Load variable: FORUM_ERR_EMPTY
     lea rax, [rel FORUM_ERR_EMPTY]  ; Address of global string
     push rax
@@ -17088,9 +17154,9 @@ ir_if_end_1183:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 1928], rax
-    jmp ir_if_end_1219
-ir_if_next_1220:
-ir_if_end_1219:
+    jmp ir_if_end_1225
+ir_if_next_1226:
+ir_if_end_1225:
     ; Load variable: FORUM_FORM
     lea rax, [rel FORUM_FORM]  ; Address of global string
     push rax
@@ -17131,10 +17197,10 @@ ir_if_end_1219:
     mov [rbp - 1976], rax
     mov rax, [rbp - 1976]
     test rax, rax
-    jz ir_errdefer_ok_1221
-    jmp ir_errdefer_end_1222
-ir_errdefer_ok_1221:
-ir_errdefer_end_1222:
+    jz ir_errdefer_ok_1227
+    jmp ir_errdefer_end_1228
+ir_errdefer_ok_1227:
+ir_errdefer_end_1228:
     jmp Lserve_forum_index_exit
 Lserve_forum_index_exit:
     ; Function epilogue
@@ -17158,7 +17224,7 @@ serve_forum_thread:
     ; Parameter 'client' arrived in register rcx
     mov [rbp - 16], rdx  ; Home param 'thread_id'
     ; Parameter 'thread_id' arrived in register rdx
-ir_entry_1223:
+ir_entry_1229:
     ; Binary operation: +
     ; String concatenation (+)
     ; Binary operation: +
@@ -17368,9 +17434,9 @@ Lconcat_right_done412:
     mov [rbp - 944], rax
     mov rax, [rbp - 944]
     test rax, rax
-    jz ir_trap_bounds_1224
-    jmp ir_in_bounds_1225
-ir_trap_bounds_1224:
+    jz ir_trap_bounds_1230
+    jmp ir_in_bounds_1231
+ir_trap_bounds_1230:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -17387,7 +17453,7 @@ ir_trap_bounds_1224:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1225:
+ir_in_bounds_1231:
     mov rax, 0
     push rax
     mov rax, 1
@@ -17420,9 +17486,9 @@ ir_in_bounds_1225:
     mov [rbp - 976], rax
     mov rax, [rbp - 976]
     test rax, rax
-    jz ir_trap_bounds_1226
-    jmp ir_in_bounds_1227
-ir_trap_bounds_1226:
+    jz ir_trap_bounds_1232
+    jmp ir_in_bounds_1233
+ir_trap_bounds_1232:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -17439,7 +17505,7 @@ ir_trap_bounds_1226:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1227:
+ir_in_bounds_1233:
     mov rax, 1
     push rax
     mov rax, 1
@@ -17472,9 +17538,9 @@ ir_in_bounds_1227:
     mov [rbp - 1008], rax
     mov rax, [rbp - 1008]
     test rax, rax
-    jz ir_trap_bounds_1228
-    jmp ir_in_bounds_1229
-ir_trap_bounds_1228:
+    jz ir_trap_bounds_1234
+    jmp ir_in_bounds_1235
+ir_trap_bounds_1234:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -17491,7 +17557,7 @@ ir_trap_bounds_1228:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1229:
+ir_in_bounds_1235:
     mov rax, 2
     push rax
     mov rax, 1
@@ -17524,9 +17590,9 @@ ir_in_bounds_1229:
     mov [rbp - 1040], rax
     mov rax, [rbp - 1040]
     test rax, rax
-    jz ir_trap_bounds_1230
-    jmp ir_in_bounds_1231
-ir_trap_bounds_1230:
+    jz ir_trap_bounds_1236
+    jmp ir_in_bounds_1237
+ir_trap_bounds_1236:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -17543,7 +17609,7 @@ ir_trap_bounds_1230:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1231:
+ir_in_bounds_1237:
     mov rax, 3
     push rax
     mov rax, 1
@@ -17576,9 +17642,9 @@ ir_in_bounds_1231:
     mov [rbp - 1072], rax
     mov rax, [rbp - 1072]
     test rax, rax
-    jz ir_trap_bounds_1232
-    jmp ir_in_bounds_1233
-ir_trap_bounds_1232:
+    jz ir_trap_bounds_1238
+    jmp ir_in_bounds_1239
+ir_trap_bounds_1238:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -17595,7 +17661,7 @@ ir_trap_bounds_1232:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1233:
+ir_in_bounds_1239:
     mov rax, 4
     push rax
     mov rax, 1
@@ -17628,9 +17694,9 @@ ir_in_bounds_1233:
     mov [rbp - 1104], rax
     mov rax, [rbp - 1104]
     test rax, rax
-    jz ir_trap_bounds_1234
-    jmp ir_in_bounds_1235
-ir_trap_bounds_1234:
+    jz ir_trap_bounds_1240
+    jmp ir_in_bounds_1241
+ir_trap_bounds_1240:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -17647,7 +17713,7 @@ ir_trap_bounds_1234:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1235:
+ir_in_bounds_1241:
     mov rax, 5
     push rax
     mov rax, 1
@@ -17680,9 +17746,9 @@ ir_in_bounds_1235:
     mov [rbp - 1136], rax
     mov rax, [rbp - 1136]
     test rax, rax
-    jz ir_trap_bounds_1236
-    jmp ir_in_bounds_1237
-ir_trap_bounds_1236:
+    jz ir_trap_bounds_1242
+    jmp ir_in_bounds_1243
+ir_trap_bounds_1242:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -17699,7 +17765,7 @@ ir_trap_bounds_1236:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1237:
+ir_in_bounds_1243:
     mov rax, 6
     push rax
     mov rax, 1
@@ -17732,9 +17798,9 @@ ir_in_bounds_1237:
     mov [rbp - 1168], rax
     mov rax, [rbp - 1168]
     test rax, rax
-    jz ir_trap_bounds_1238
-    jmp ir_in_bounds_1239
-ir_trap_bounds_1238:
+    jz ir_trap_bounds_1244
+    jmp ir_in_bounds_1245
+ir_trap_bounds_1244:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -17751,7 +17817,7 @@ ir_trap_bounds_1238:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1239:
+ir_in_bounds_1245:
     mov rax, 7
     push rax
     mov rax, 1
@@ -17816,11 +17882,11 @@ ir_in_bounds_1239:
     mov [rbp - 1224], rax
     mov rax, [rbp - 1224]
     test rax, rax
-    jz ir_if_next_1241
+    jz ir_if_next_1247
     mov rax, 1
     ; Store to variable: line_num
     mov dword [rbp - 812], eax  ; To stack [rbp - 812]
-ir_while_1242:
+ir_while_1248:
     mov rax, 0
     push rax
     mov rax, 512
@@ -17832,9 +17898,9 @@ ir_while_1242:
     mov [rbp - 1232], rax
     mov rax, [rbp - 1232]
     test rax, rax
-    jz ir_trap_bounds_1244
-    jmp ir_in_bounds_1245
-ir_trap_bounds_1244:
+    jz ir_trap_bounds_1250
+    jmp ir_in_bounds_1251
+ir_trap_bounds_1250:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -17851,7 +17917,7 @@ ir_trap_bounds_1244:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1245:
+ir_in_bounds_1251:
     mov rax, 0
     push rax
     mov rax, 1
@@ -17891,7 +17957,7 @@ ir_in_bounds_1245:
     mov [rbp - 1264], rax
     mov rax, [rbp - 1264]
     test rax, rax
-    jz ir_while_end_1243
+    jz ir_while_end_1249
     ; Load variable: line_num
     movsxd rax, dword [rbp - 812]  ; From stack [rbp - 812]
     push rax
@@ -17905,11 +17971,11 @@ ir_in_bounds_1245:
     mov [rbp - 1272], rax
     mov rax, [rbp - 1272]
     test rax, rax
-    jz ir_if_next_1247
+    jz ir_if_next_1253
     mov rax, 0
     ; Store to variable: len
     mov dword [rbp - 816], eax  ; To stack [rbp - 816]
-ir_while_1248:
+ir_while_1254:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -17922,9 +17988,9 @@ ir_while_1248:
     mov [rbp - 1280], rax
     mov rax, [rbp - 1280]
     test rax, rax
-    jz ir_trap_bounds_1250
-    jmp ir_in_bounds_1251
-ir_trap_bounds_1250:
+    jz ir_trap_bounds_1256
+    jmp ir_in_bounds_1257
+ir_trap_bounds_1256:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -17941,7 +18007,7 @@ ir_trap_bounds_1250:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1251:
+ir_in_bounds_1257:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -17972,8 +18038,8 @@ ir_in_bounds_1251:
     mov [rbp - 1312], rax
     mov rax, [rbp - 1312]
     test rax, rax
-    jz ir_sc_false_1254
-ir_sc_rhs_1252:
+    jz ir_sc_false_1260
+ir_sc_rhs_1258:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -17986,9 +18052,9 @@ ir_sc_rhs_1252:
     mov [rbp - 1320], rax
     mov rax, [rbp - 1320]
     test rax, rax
-    jz ir_trap_bounds_1256
-    jmp ir_in_bounds_1257
-ir_trap_bounds_1256:
+    jz ir_trap_bounds_1262
+    jmp ir_in_bounds_1263
+ir_trap_bounds_1262:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18005,7 +18071,7 @@ ir_trap_bounds_1256:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1257:
+ir_in_bounds_1263:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18036,19 +18102,19 @@ ir_in_bounds_1257:
     mov [rbp - 1352], rax
     mov rax, [rbp - 1352]
     test rax, rax
-    jz ir_sc_false_1254
-ir_sc_true_1253:
+    jz ir_sc_false_1260
+ir_sc_true_1259:
     mov rax, 1
     mov [rbp - 1360], rax
-    jmp ir_sc_end_1255
-ir_sc_false_1254:
+    jmp ir_sc_end_1261
+ir_sc_false_1260:
     mov rax, 0
     mov [rbp - 1360], rax
-ir_sc_end_1255:
+ir_sc_end_1261:
     mov rax, [rbp - 1360]
     test rax, rax
-    jz ir_sc_false_1260
-ir_sc_rhs_1258:
+    jz ir_sc_false_1266
+ir_sc_rhs_1264:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18061,9 +18127,9 @@ ir_sc_rhs_1258:
     mov [rbp - 1376], rax
     mov rax, [rbp - 1376]
     test rax, rax
-    jz ir_trap_bounds_1262
-    jmp ir_in_bounds_1263
-ir_trap_bounds_1262:
+    jz ir_trap_bounds_1268
+    jmp ir_in_bounds_1269
+ir_trap_bounds_1268:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18080,7 +18146,7 @@ ir_trap_bounds_1262:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1263:
+ir_in_bounds_1269:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18111,18 +18177,18 @@ ir_in_bounds_1263:
     mov [rbp - 1408], rax
     mov rax, [rbp - 1408]
     test rax, rax
-    jz ir_sc_false_1260
-ir_sc_true_1259:
+    jz ir_sc_false_1266
+ir_sc_true_1265:
     mov rax, 1
     mov [rbp - 1416], rax
-    jmp ir_sc_end_1261
-ir_sc_false_1260:
+    jmp ir_sc_end_1267
+ir_sc_false_1266:
     mov rax, 0
     mov [rbp - 1416], rax
-ir_sc_end_1261:
+ir_sc_end_1267:
     mov rax, [rbp - 1416]
     test rax, rax
-    jz ir_while_end_1249
+    jz ir_while_end_1255
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18135,7 +18201,7 @@ ir_sc_end_1261:
     mov [rbp - 1432], rax
     mov rax, [rbp - 1432]
     test rax, rax
-    jz ir_if_next_1265
+    jz ir_if_next_1271
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18148,9 +18214,9 @@ ir_sc_end_1261:
     mov [rbp - 1440], rax
     mov rax, [rbp - 1440]
     test rax, rax
-    jz ir_trap_bounds_1266
-    jmp ir_in_bounds_1267
-ir_trap_bounds_1266:
+    jz ir_trap_bounds_1272
+    jmp ir_in_bounds_1273
+ir_trap_bounds_1272:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18167,7 +18233,7 @@ ir_trap_bounds_1266:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1267:
+ir_in_bounds_1273:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18199,9 +18265,9 @@ ir_in_bounds_1267:
     mov [rbp - 1472], rax
     mov rax, [rbp - 1472]
     test rax, rax
-    jz ir_trap_bounds_1268
-    jmp ir_in_bounds_1269
-ir_trap_bounds_1268:
+    jz ir_trap_bounds_1274
+    jmp ir_in_bounds_1275
+ir_trap_bounds_1274:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18218,7 +18284,7 @@ ir_trap_bounds_1268:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1269:
+ir_in_bounds_1275:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18241,9 +18307,9 @@ ir_in_bounds_1269:
     mov rcx, rax
     pop rax
     mov byte [rax], cl
-    jmp ir_if_end_1264
-ir_if_next_1265:
-ir_if_end_1264:
+    jmp ir_if_end_1270
+ir_if_next_1271:
+ir_if_end_1270:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18255,8 +18321,8 @@ ir_if_end_1264:
     mov rax, [rbp - 1504]
     ; Store to variable: len
     mov dword [rbp - 816], eax  ; To stack [rbp - 816]
-    jmp ir_while_1248
-ir_while_end_1249:
+    jmp ir_while_1254
+ir_while_end_1255:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18269,7 +18335,7 @@ ir_while_end_1249:
     mov [rbp - 1512], rax
     mov rax, [rbp - 1512]
     test rax, rax
-    jz ir_if_next_1271
+    jz ir_if_next_1277
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18282,9 +18348,9 @@ ir_while_end_1249:
     mov [rbp - 1520], rax
     mov rax, [rbp - 1520]
     test rax, rax
-    jz ir_trap_bounds_1272
-    jmp ir_in_bounds_1273
-ir_trap_bounds_1272:
+    jz ir_trap_bounds_1278
+    jmp ir_in_bounds_1279
+ir_trap_bounds_1278:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18301,7 +18367,7 @@ ir_trap_bounds_1272:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1273:
+ir_in_bounds_1279:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18324,8 +18390,8 @@ ir_in_bounds_1273:
     mov rcx, rax
     pop rax
     mov byte [rax], cl
-    jmp ir_if_end_1270
-ir_if_next_1271:
+    jmp ir_if_end_1276
+ir_if_next_1277:
     mov rax, 255
     push rax
     mov rax, 256
@@ -18337,9 +18403,9 @@ ir_if_next_1271:
     mov [rbp - 1552], rax
     mov rax, [rbp - 1552]
     test rax, rax
-    jz ir_trap_bounds_1274
-    jmp ir_in_bounds_1275
-ir_trap_bounds_1274:
+    jz ir_trap_bounds_1280
+    jmp ir_in_bounds_1281
+ir_trap_bounds_1280:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18356,7 +18422,7 @@ ir_trap_bounds_1274:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1275:
+ir_in_bounds_1281:
     mov rax, 255
     push rax
     mov rax, 1
@@ -18378,11 +18444,11 @@ ir_in_bounds_1275:
     mov rcx, rax
     pop rax
     mov byte [rax], cl
-ir_if_end_1270:
-    jmp ir_while_end_1243
-    jmp ir_if_end_1246
-ir_if_next_1247:
-ir_if_end_1246:
+ir_if_end_1276:
+    jmp ir_while_end_1249
+    jmp ir_if_end_1252
+ir_if_next_1253:
+ir_if_end_1252:
     ; Load variable: line_num
     movsxd rax, dword [rbp - 812]  ; From stack [rbp - 812]
     push rax
@@ -18394,8 +18460,8 @@ ir_if_end_1246:
     mov rax, [rbp - 1584]
     ; Store to variable: line_num
     mov dword [rbp - 812], eax  ; To stack [rbp - 812]
-    jmp ir_while_1242
-ir_while_end_1243:
+    jmp ir_while_1248
+ir_while_end_1249:
     ; IR call: fclose (1 args)
     sub rsp, 32
     ; Load variable: fp
@@ -18406,13 +18472,13 @@ ir_while_end_1243:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 1592], rax
-    jmp ir_if_end_1240
-ir_if_next_1241:
-ir_if_end_1240:
+    jmp ir_if_end_1246
+ir_if_next_1247:
+ir_if_end_1246:
     mov rax, 0
     ; Store to variable: title_len
     mov dword [rbp - 820], eax  ; To stack [rbp - 820]
-ir_while_1276:
+ir_while_1282:
     ; Load variable: title_len
     movsxd rax, dword [rbp - 820]  ; From stack [rbp - 820]
     push rax
@@ -18425,9 +18491,9 @@ ir_while_1276:
     mov [rbp - 1600], rax
     mov rax, [rbp - 1600]
     test rax, rax
-    jz ir_trap_bounds_1278
-    jmp ir_in_bounds_1279
-ir_trap_bounds_1278:
+    jz ir_trap_bounds_1284
+    jmp ir_in_bounds_1285
+ir_trap_bounds_1284:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18444,7 +18510,7 @@ ir_trap_bounds_1278:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1279:
+ir_in_bounds_1285:
     ; Load variable: title_len
     movsxd rax, dword [rbp - 820]  ; From stack [rbp - 820]
     push rax
@@ -18475,7 +18541,7 @@ ir_in_bounds_1279:
     mov [rbp - 1632], rax
     mov rax, [rbp - 1632]
     test rax, rax
-    jz ir_while_end_1277
+    jz ir_while_end_1283
     ; Load variable: title_len
     movsxd rax, dword [rbp - 820]  ; From stack [rbp - 820]
     push rax
@@ -18487,8 +18553,8 @@ ir_in_bounds_1279:
     mov rax, [rbp - 1640]
     ; Store to variable: title_len
     mov dword [rbp - 820], eax  ; To stack [rbp - 820]
-    jmp ir_while_1276
-ir_while_end_1277:
+    jmp ir_while_1282
+ir_while_end_1283:
     mov rax, 0
     push rax
     mov rax, 256
@@ -18500,9 +18566,9 @@ ir_while_end_1277:
     mov [rbp - 1648], rax
     mov rax, [rbp - 1648]
     test rax, rax
-    jz ir_trap_bounds_1280
-    jmp ir_in_bounds_1281
-ir_trap_bounds_1280:
+    jz ir_trap_bounds_1286
+    jmp ir_in_bounds_1287
+ir_trap_bounds_1286:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18519,7 +18585,7 @@ ir_trap_bounds_1280:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1281:
+ir_in_bounds_1287:
     mov rax, 0
     push rax
     mov rax, 1
@@ -18596,9 +18662,9 @@ ir_in_bounds_1281:
     mov [rbp - 1720], rax
     mov rax, [rbp - 1720]
     test rax, rax
-    jz ir_trap_bounds_1282
-    jmp ir_in_bounds_1283
-ir_trap_bounds_1282:
+    jz ir_trap_bounds_1288
+    jmp ir_in_bounds_1289
+ir_trap_bounds_1288:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18615,7 +18681,7 @@ ir_trap_bounds_1282:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1283:
+ir_in_bounds_1289:
     mov rax, 0
     push rax
     mov rax, 1
@@ -18656,9 +18722,9 @@ ir_in_bounds_1283:
     mov [rbp - 1752], rax
     mov rax, [rbp - 1752]
     test rax, rax
-    jz ir_trap_bounds_1284
-    jmp ir_in_bounds_1285
-ir_trap_bounds_1284:
+    jz ir_trap_bounds_1290
+    jmp ir_in_bounds_1291
+ir_trap_bounds_1290:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18675,7 +18741,7 @@ ir_trap_bounds_1284:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1285:
+ir_in_bounds_1291:
     mov rax, 0
     push rax
     mov rax, 1
@@ -18725,8 +18791,8 @@ ir_in_bounds_1285:
     mov [rbp - 1792], rax
     mov rax, [rbp - 1792]
     test rax, rax
-    jz ir_if_next_1287
-ir_while_1288:
+    jz ir_if_next_1293
+ir_while_1294:
     mov rax, 0
     push rax
     mov rax, 2048
@@ -18738,9 +18804,9 @@ ir_while_1288:
     mov [rbp - 1800], rax
     mov rax, [rbp - 1800]
     test rax, rax
-    jz ir_trap_bounds_1290
-    jmp ir_in_bounds_1291
-ir_trap_bounds_1290:
+    jz ir_trap_bounds_1296
+    jmp ir_in_bounds_1297
+ir_trap_bounds_1296:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18757,7 +18823,7 @@ ir_trap_bounds_1290:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1291:
+ir_in_bounds_1297:
     mov rax, 0
     push rax
     mov rax, 1
@@ -18797,11 +18863,11 @@ ir_in_bounds_1291:
     mov [rbp - 1832], rax
     mov rax, [rbp - 1832]
     test rax, rax
-    jz ir_while_end_1289
+    jz ir_while_end_1295
     mov rax, 0
     ; Store to variable: len
     mov dword [rbp - 816], eax  ; To stack [rbp - 816]
-ir_while_1292:
+ir_while_1298:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18814,9 +18880,9 @@ ir_while_1292:
     mov [rbp - 1840], rax
     mov rax, [rbp - 1840]
     test rax, rax
-    jz ir_trap_bounds_1294
-    jmp ir_in_bounds_1295
-ir_trap_bounds_1294:
+    jz ir_trap_bounds_1300
+    jmp ir_in_bounds_1301
+ir_trap_bounds_1300:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18833,7 +18899,7 @@ ir_trap_bounds_1294:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1295:
+ir_in_bounds_1301:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18864,8 +18930,8 @@ ir_in_bounds_1295:
     mov [rbp - 1872], rax
     mov rax, [rbp - 1872]
     test rax, rax
-    jz ir_sc_false_1298
-ir_sc_rhs_1296:
+    jz ir_sc_false_1304
+ir_sc_rhs_1302:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18878,9 +18944,9 @@ ir_sc_rhs_1296:
     mov [rbp - 1880], rax
     mov rax, [rbp - 1880]
     test rax, rax
-    jz ir_trap_bounds_1300
-    jmp ir_in_bounds_1301
-ir_trap_bounds_1300:
+    jz ir_trap_bounds_1306
+    jmp ir_in_bounds_1307
+ir_trap_bounds_1306:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18897,7 +18963,7 @@ ir_trap_bounds_1300:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1301:
+ir_in_bounds_1307:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18928,19 +18994,19 @@ ir_in_bounds_1301:
     mov [rbp - 1912], rax
     mov rax, [rbp - 1912]
     test rax, rax
-    jz ir_sc_false_1298
-ir_sc_true_1297:
+    jz ir_sc_false_1304
+ir_sc_true_1303:
     mov rax, 1
     mov [rbp - 1920], rax
-    jmp ir_sc_end_1299
-ir_sc_false_1298:
+    jmp ir_sc_end_1305
+ir_sc_false_1304:
     mov rax, 0
     mov [rbp - 1920], rax
-ir_sc_end_1299:
+ir_sc_end_1305:
     mov rax, [rbp - 1920]
     test rax, rax
-    jz ir_sc_false_1304
-ir_sc_rhs_1302:
+    jz ir_sc_false_1310
+ir_sc_rhs_1308:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -18953,9 +19019,9 @@ ir_sc_rhs_1302:
     mov [rbp - 1936], rax
     mov rax, [rbp - 1936]
     test rax, rax
-    jz ir_trap_bounds_1306
-    jmp ir_in_bounds_1307
-ir_trap_bounds_1306:
+    jz ir_trap_bounds_1312
+    jmp ir_in_bounds_1313
+ir_trap_bounds_1312:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -18972,7 +19038,7 @@ ir_trap_bounds_1306:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1307:
+ir_in_bounds_1313:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -19003,18 +19069,18 @@ ir_in_bounds_1307:
     mov [rbp - 1968], rax
     mov rax, [rbp - 1968]
     test rax, rax
-    jz ir_sc_false_1304
-ir_sc_true_1303:
+    jz ir_sc_false_1310
+ir_sc_true_1309:
     mov rax, 1
     mov [rbp - 1976], rax
-    jmp ir_sc_end_1305
-ir_sc_false_1304:
+    jmp ir_sc_end_1311
+ir_sc_false_1310:
     mov rax, 0
     mov [rbp - 1976], rax
-ir_sc_end_1305:
+ir_sc_end_1311:
     mov rax, [rbp - 1976]
     test rax, rax
-    jz ir_while_end_1293
+    jz ir_while_end_1299
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -19026,8 +19092,8 @@ ir_sc_end_1305:
     mov rax, [rbp - 1992]
     ; Store to variable: len
     mov dword [rbp - 816], eax  ; To stack [rbp - 816]
-    jmp ir_while_1292
-ir_while_end_1293:
+    jmp ir_while_1298
+ir_while_end_1299:
     ; Load variable: len
     movsxd rax, dword [rbp - 816]  ; From stack [rbp - 816]
     push rax
@@ -19040,7 +19106,7 @@ ir_while_end_1293:
     mov [rbp - 2000], rax
     mov rax, [rbp - 2000]
     test rax, rax
-    jz ir_if_next_1309
+    jz ir_if_next_1315
     mov rax, 1
     ; Store to variable: had_posts
     mov dword [rbp - 860], eax  ; To stack [rbp - 860]
@@ -19091,9 +19157,9 @@ ir_while_end_1293:
     mov [rbp - 2048], rax
     mov rax, [rbp - 2048]
     test rax, rax
-    jz ir_trap_bounds_1310
-    jmp ir_in_bounds_1311
-ir_trap_bounds_1310:
+    jz ir_trap_bounds_1316
+    jmp ir_in_bounds_1317
+ir_trap_bounds_1316:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -19110,7 +19176,7 @@ ir_trap_bounds_1310:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1311:
+ir_in_bounds_1317:
     mov rax, 0
     push rax
     mov rax, 1
@@ -19176,11 +19242,11 @@ ir_in_bounds_1311:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 2112], rax
-    jmp ir_if_end_1308
-ir_if_next_1309:
-ir_if_end_1308:
-    jmp ir_while_1288
-ir_while_end_1289:
+    jmp ir_if_end_1314
+ir_if_next_1315:
+ir_if_end_1314:
+    jmp ir_while_1294
+ir_while_end_1295:
     ; IR call: fclose (1 args)
     sub rsp, 32
     ; Load variable: fp
@@ -19191,9 +19257,9 @@ ir_while_end_1289:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 2120], rax
-    jmp ir_if_end_1286
-ir_if_next_1287:
-ir_if_end_1286:
+    jmp ir_if_end_1292
+ir_if_next_1293:
+ir_if_end_1292:
     ; Load variable: had_posts
     movsxd rax, dword [rbp - 860]  ; From stack [rbp - 860]
     push rax
@@ -19206,7 +19272,7 @@ ir_if_end_1286:
     mov [rbp - 2128], rax
     mov rax, [rbp - 2128]
     test rax, rax
-    jz ir_if_next_1313
+    jz ir_if_next_1319
     ; Load variable: FORUM_NO_POSTS
     lea rax, [rel FORUM_NO_POSTS]  ; Address of global string
     push rax
@@ -19243,9 +19309,9 @@ ir_if_end_1286:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 2168], rax
-    jmp ir_if_end_1312
-ir_if_next_1313:
-ir_if_end_1312:
+    jmp ir_if_end_1318
+ir_if_next_1319:
+ir_if_end_1318:
     ; Load variable: FORUM_THREAD_END
     lea rax, [rel FORUM_THREAD_END]  ; Address of global string
     push rax
@@ -19293,9 +19359,9 @@ ir_if_end_1312:
     mov [rbp - 2216], rax
     mov rax, [rbp - 2216]
     test rax, rax
-    jz ir_trap_bounds_1314
-    jmp ir_in_bounds_1315
-ir_trap_bounds_1314:
+    jz ir_trap_bounds_1320
+    jmp ir_in_bounds_1321
+ir_trap_bounds_1320:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -19312,7 +19378,7 @@ ir_trap_bounds_1314:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1315:
+ir_in_bounds_1321:
     mov rax, 0
     push rax
     mov rax, 1
@@ -19354,9 +19420,9 @@ ir_in_bounds_1315:
     mov [rbp - 2248], rax
     mov rax, [rbp - 2248]
     test rax, rax
-    jz ir_trap_bounds_1316
-    jmp ir_in_bounds_1317
-ir_trap_bounds_1316:
+    jz ir_trap_bounds_1322
+    jmp ir_in_bounds_1323
+ir_trap_bounds_1322:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -19373,7 +19439,7 @@ ir_trap_bounds_1316:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1317:
+ir_in_bounds_1323:
     mov rax, 0
     push rax
     mov rax, 1
@@ -19444,10 +19510,10 @@ ir_in_bounds_1317:
     mov [rbp - 2320], rax
     mov rax, [rbp - 2320]
     test rax, rax
-    jz ir_errdefer_ok_1318
-    jmp ir_errdefer_end_1319
-ir_errdefer_ok_1318:
-ir_errdefer_end_1319:
+    jz ir_errdefer_ok_1324
+    jmp ir_errdefer_end_1325
+ir_errdefer_ok_1324:
+ir_errdefer_end_1325:
     jmp Lserve_forum_thread_exit
 Lserve_forum_thread_exit:
     ; Function epilogue
@@ -19468,7 +19534,7 @@ handle_post_new_thread:
     ; Parameter 'buf' arrived in register rdx
     mov [rbp - 24], r8  ; Home param 'n'
     ; Parameter 'n' arrived in register r8
-ir_entry_1320:
+ir_entry_1326:
     ; IR call: find_body_start (2 args)
     sub rsp, 32
     ; Load variable: buf
@@ -19509,7 +19575,7 @@ ir_entry_1320:
     mov [rbp - 368], rax
     mov rax, [rbp - 368]
     test rax, rax
-    jz ir_if_next_1322
+    jz ir_if_next_1328
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_bs
@@ -19550,9 +19616,9 @@ ir_entry_1320:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 400], rax
-    jmp ir_if_end_1321
-ir_if_next_1322:
-ir_if_end_1321:
+    jmp ir_if_end_1327
+ir_if_next_1328:
+ir_if_end_1327:
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: key_title
@@ -19573,9 +19639,9 @@ ir_if_end_1321:
     mov [rbp - 416], rax
     mov rax, [rbp - 416]
     test rax, rax
-    jz ir_trap_bounds_1323
-    jmp ir_in_bounds_1324
-ir_trap_bounds_1323:
+    jz ir_trap_bounds_1329
+    jmp ir_in_bounds_1330
+ir_trap_bounds_1329:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -19592,7 +19658,7 @@ ir_trap_bounds_1323:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1324:
+ir_in_bounds_1330:
     mov rax, 0
     push rax
     mov rax, 1
@@ -19647,7 +19713,7 @@ ir_in_bounds_1324:
     mov [rbp - 448], rax
     mov rax, [rbp - 448]
     test rax, rax
-    jz ir_if_next_1326
+    jz ir_if_next_1332
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_title
@@ -19668,9 +19734,9 @@ ir_in_bounds_1324:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 464], rax
-    jmp ir_if_end_1325
-ir_if_next_1326:
-ir_if_end_1325:
+    jmp ir_if_end_1331
+ir_if_next_1332:
+ir_if_end_1331:
     ; Load variable: got
     movsxd rax, dword [rbp - 292]  ; From stack [rbp - 292]
     push rax
@@ -19683,7 +19749,7 @@ ir_if_end_1325:
     mov [rbp - 472], rax
     mov rax, [rbp - 472]
     test rax, rax
-    jz ir_if_next_1328
+    jz ir_if_next_1334
     ; IR call: count_threads (0 args)
     sub rsp, 32
     call count_threads
@@ -19737,7 +19803,7 @@ ir_if_end_1325:
     mov [rbp - 512], rax
     mov rax, [rbp - 512]
     test rax, rax
-    jz ir_if_next_1330
+    jz ir_if_next_1336
     ; Load variable: fp
     mov rax, qword [rbp - 304]  ; From stack [rbp - 304]
     push rax
@@ -19750,7 +19816,7 @@ ir_if_end_1325:
     mov [rbp - 520], rax
     mov rax, [rbp - 520]
     test rax, rax
-    jz ir_if_next_1332
+    jz ir_if_next_1338
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_fopen_ok
@@ -19768,8 +19834,8 @@ ir_if_end_1325:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 536], rax
-    jmp ir_if_end_1331
-ir_if_next_1332:
+    jmp ir_if_end_1337
+ir_if_next_1338:
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_fopen_fail
@@ -19787,10 +19853,10 @@ ir_if_next_1332:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 552], rax
-ir_if_end_1331:
-    jmp ir_if_end_1329
-ir_if_next_1330:
-ir_if_end_1329:
+ir_if_end_1337:
+    jmp ir_if_end_1335
+ir_if_next_1336:
+ir_if_end_1335:
     ; Load variable: fp
     mov rax, qword [rbp - 304]  ; From stack [rbp - 304]
     push rax
@@ -19803,7 +19869,7 @@ ir_if_end_1329:
     mov [rbp - 560], rax
     mov rax, [rbp - 560]
     test rax, rax
-    jz ir_if_next_1334
+    jz ir_if_next_1340
     mov rax, 0
     push rax
     mov rax, 256
@@ -19815,9 +19881,9 @@ ir_if_end_1329:
     mov [rbp - 568], rax
     mov rax, [rbp - 568]
     test rax, rax
-    jz ir_trap_bounds_1335
-    jmp ir_in_bounds_1336
-ir_trap_bounds_1335:
+    jz ir_trap_bounds_1341
+    jmp ir_in_bounds_1342
+ir_trap_bounds_1341:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -19834,7 +19900,7 @@ ir_trap_bounds_1335:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1336:
+ir_in_bounds_1342:
     mov rax, 0
     push rax
     mov rax, 1
@@ -19915,9 +19981,9 @@ ir_in_bounds_1336:
     mov [rbp - 632], rax
     mov rax, [rbp - 632]
     test rax, rax
-    jz ir_trap_bounds_1337
-    jmp ir_in_bounds_1338
-ir_trap_bounds_1337:
+    jz ir_trap_bounds_1343
+    jmp ir_in_bounds_1344
+ir_trap_bounds_1343:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -19934,7 +20000,7 @@ ir_trap_bounds_1337:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1338:
+ir_in_bounds_1344:
     mov rax, 0
     push rax
     mov rax, 1
@@ -19972,9 +20038,9 @@ ir_in_bounds_1338:
     mov [rbp - 664], rax
     mov rax, [rbp - 664]
     test rax, rax
-    jz ir_trap_bounds_1339
-    jmp ir_in_bounds_1340
-ir_trap_bounds_1339:
+    jz ir_trap_bounds_1345
+    jmp ir_in_bounds_1346
+ir_trap_bounds_1345:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -19991,7 +20057,7 @@ ir_trap_bounds_1339:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1340:
+ir_in_bounds_1346:
     mov rax, 0
     push rax
     mov rax, 1
@@ -20022,17 +20088,17 @@ ir_in_bounds_1340:
     mov [rbp - 696], rax
     mov rax, [rbp - 696]
     test rax, rax
-    jz ir_errdefer_ok_1341
-    jmp ir_errdefer_end_1342
-ir_errdefer_ok_1341:
-ir_errdefer_end_1342:
+    jz ir_errdefer_ok_1347
+    jmp ir_errdefer_end_1348
+ir_errdefer_ok_1347:
+ir_errdefer_end_1348:
     jmp Lhandle_post_new_thread_exit
+    jmp ir_if_end_1339
+ir_if_next_1340:
+ir_if_end_1339:
     jmp ir_if_end_1333
 ir_if_next_1334:
 ir_if_end_1333:
-    jmp ir_if_end_1327
-ir_if_next_1328:
-ir_if_end_1327:
     ; Load variable: got
     movsxd rax, dword [rbp - 292]  ; From stack [rbp - 292]
     push rax
@@ -20058,10 +20124,10 @@ ir_if_end_1327:
     mov [rbp - 720], rax
     mov rax, [rbp - 720]
     test rax, rax
-    jz ir_errdefer_ok_1343
-    jmp ir_errdefer_end_1344
-ir_errdefer_ok_1343:
-ir_errdefer_end_1344:
+    jz ir_errdefer_ok_1349
+    jmp ir_errdefer_end_1350
+ir_errdefer_ok_1349:
+ir_errdefer_end_1350:
     jmp Lhandle_post_new_thread_exit
 Lhandle_post_new_thread_exit:
     ; Function epilogue
@@ -20084,7 +20150,7 @@ handle_post_reply:
     ; Parameter 'n' arrived in register r8
     mov [rbp - 32], r9  ; Home param 'thread_id'
     ; Parameter 'thread_id' arrived in register r9
-ir_entry_1345:
+ir_entry_1351:
     ; IR call: find_body_start (2 args)
     sub rsp, 32
     ; Load variable: buf
@@ -20125,7 +20191,7 @@ ir_entry_1345:
     mov [rbp - 2192], rax
     mov rax, [rbp - 2192]
     test rax, rax
-    jz ir_if_next_1347
+    jz ir_if_next_1353
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_bs
@@ -20166,9 +20232,9 @@ ir_entry_1345:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 2224], rax
-    jmp ir_if_end_1346
-ir_if_next_1347:
-ir_if_end_1346:
+    jmp ir_if_end_1352
+ir_if_next_1353:
+ir_if_end_1352:
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: key_body
@@ -20189,9 +20255,9 @@ ir_if_end_1346:
     mov [rbp - 2240], rax
     mov rax, [rbp - 2240]
     test rax, rax
-    jz ir_trap_bounds_1348
-    jmp ir_in_bounds_1349
-ir_trap_bounds_1348:
+    jz ir_trap_bounds_1354
+    jmp ir_in_bounds_1355
+ir_trap_bounds_1354:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -20208,7 +20274,7 @@ ir_trap_bounds_1348:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1349:
+ir_in_bounds_1355:
     mov rax, 0
     push rax
     mov rax, 1
@@ -20263,7 +20329,7 @@ ir_in_bounds_1349:
     mov [rbp - 2272], rax
     mov rax, [rbp - 2272]
     test rax, rax
-    jz ir_if_next_1351
+    jz ir_if_next_1357
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_title
@@ -20284,9 +20350,9 @@ ir_in_bounds_1349:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 2288], rax
-    jmp ir_if_end_1350
-ir_if_next_1351:
-ir_if_end_1350:
+    jmp ir_if_end_1356
+ir_if_next_1357:
+ir_if_end_1356:
     ; Load variable: got
     movsxd rax, dword [rbp - 2092]  ; From stack [rbp - 2092]
     push rax
@@ -20299,7 +20365,7 @@ ir_if_end_1350:
     mov [rbp - 2296], rax
     mov rax, [rbp - 2296]
     test rax, rax
-    jz ir_if_next_1353
+    jz ir_if_next_1359
     mov rax, 0
     push rax
     mov rax, 32
@@ -20311,9 +20377,9 @@ ir_if_end_1350:
     mov [rbp - 2304], rax
     mov rax, [rbp - 2304]
     test rax, rax
-    jz ir_trap_bounds_1354
-    jmp ir_in_bounds_1355
-ir_trap_bounds_1354:
+    jz ir_trap_bounds_1360
+    jmp ir_in_bounds_1361
+ir_trap_bounds_1360:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -20330,7 +20396,7 @@ ir_trap_bounds_1354:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1355:
+ir_in_bounds_1361:
     mov rax, 0
     push rax
     mov rax, 1
@@ -20368,9 +20434,9 @@ ir_in_bounds_1355:
     mov [rbp - 2336], rax
     mov rax, [rbp - 2336]
     test rax, rax
-    jz ir_trap_bounds_1356
-    jmp ir_in_bounds_1357
-ir_trap_bounds_1356:
+    jz ir_trap_bounds_1362
+    jmp ir_in_bounds_1363
+ir_trap_bounds_1362:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -20387,7 +20453,7 @@ ir_trap_bounds_1356:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1357:
+ir_in_bounds_1363:
     mov rax, 0
     push rax
     mov rax, 1
@@ -20437,7 +20503,7 @@ ir_in_bounds_1357:
     mov [rbp - 2376], rax
     mov rax, [rbp - 2376]
     test rax, rax
-    jz ir_if_next_1359
+    jz ir_if_next_1365
     ; Load variable: fp
     mov rax, qword [rbp - 2136]  ; From stack [rbp - 2136]
     push rax
@@ -20450,7 +20516,7 @@ ir_in_bounds_1357:
     mov [rbp - 2384], rax
     mov rax, [rbp - 2384]
     test rax, rax
-    jz ir_if_next_1361
+    jz ir_if_next_1367
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_fopen_ok
@@ -20468,8 +20534,8 @@ ir_in_bounds_1357:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 2400], rax
-    jmp ir_if_end_1360
-ir_if_next_1361:
+    jmp ir_if_end_1366
+ir_if_next_1367:
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_fopen_fail
@@ -20487,10 +20553,10 @@ ir_if_next_1361:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 2416], rax
-ir_if_end_1360:
-    jmp ir_if_end_1358
-ir_if_next_1359:
-ir_if_end_1358:
+ir_if_end_1366:
+    jmp ir_if_end_1364
+ir_if_next_1365:
+ir_if_end_1364:
     ; Load variable: fp
     mov rax, qword [rbp - 2136]  ; From stack [rbp - 2136]
     push rax
@@ -20503,7 +20569,7 @@ ir_if_end_1358:
     mov [rbp - 2424], rax
     mov rax, [rbp - 2424]
     test rax, rax
-    jz ir_if_next_1363
+    jz ir_if_next_1369
     mov rax, 0
     push rax
     mov rax, 2048
@@ -20515,9 +20581,9 @@ ir_if_end_1358:
     mov [rbp - 2432], rax
     mov rax, [rbp - 2432]
     test rax, rax
-    jz ir_trap_bounds_1364
-    jmp ir_in_bounds_1365
-ir_trap_bounds_1364:
+    jz ir_trap_bounds_1370
+    jmp ir_in_bounds_1371
+ir_trap_bounds_1370:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -20534,7 +20600,7 @@ ir_trap_bounds_1364:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1365:
+ir_in_bounds_1371:
     mov rax, 0
     push rax
     mov rax, 1
@@ -20593,12 +20659,12 @@ ir_in_bounds_1365:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 2480], rax
-    jmp ir_if_end_1362
-ir_if_next_1363:
-ir_if_end_1362:
-    jmp ir_if_end_1352
-ir_if_next_1353:
-ir_if_end_1352:
+    jmp ir_if_end_1368
+ir_if_next_1369:
+ir_if_end_1368:
+    jmp ir_if_end_1358
+ir_if_next_1359:
+ir_if_end_1358:
     mov rax, 0
     push rax
     mov rax, 32
@@ -20610,9 +20676,9 @@ ir_if_end_1352:
     mov [rbp - 2488], rax
     mov rax, [rbp - 2488]
     test rax, rax
-    jz ir_trap_bounds_1366
-    jmp ir_in_bounds_1367
-ir_trap_bounds_1366:
+    jz ir_trap_bounds_1372
+    jmp ir_in_bounds_1373
+ir_trap_bounds_1372:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -20629,7 +20695,7 @@ ir_trap_bounds_1366:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1367:
+ir_in_bounds_1373:
     mov rax, 0
     push rax
     mov rax, 1
@@ -20667,9 +20733,9 @@ ir_in_bounds_1367:
     mov [rbp - 2520], rax
     mov rax, [rbp - 2520]
     test rax, rax
-    jz ir_trap_bounds_1368
-    jmp ir_in_bounds_1369
-ir_trap_bounds_1368:
+    jz ir_trap_bounds_1374
+    jmp ir_in_bounds_1375
+ir_trap_bounds_1374:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -20686,7 +20752,7 @@ ir_trap_bounds_1368:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1369:
+ir_in_bounds_1375:
     mov rax, 0
     push rax
     mov rax, 1
@@ -20717,10 +20783,10 @@ ir_in_bounds_1369:
     mov [rbp - 2552], rax
     mov rax, [rbp - 2552]
     test rax, rax
-    jz ir_errdefer_ok_1370
-    jmp ir_errdefer_end_1371
-ir_errdefer_ok_1370:
-ir_errdefer_end_1371:
+    jz ir_errdefer_ok_1376
+    jmp ir_errdefer_end_1377
+ir_errdefer_ok_1376:
+ir_errdefer_end_1377:
     jmp Lhandle_post_reply_exit
 Lhandle_post_reply_exit:
     ; Function epilogue
@@ -20740,7 +20806,7 @@ main:
     add rsp, 32
     sub rsp, rax    ; Allocate 11680 bytes on stack (probed)
     ; Registering 0 function parameters
-ir_entry_1372:
+ir_entry_1378:
     ; IR call: gc_init (0 args)
     sub rsp, 32
     call gc_init
@@ -20773,9 +20839,9 @@ ir_entry_1372:
     mov [rbp - 4216], rax
     mov rax, [rbp - 4216]
     test rax, rax
-    jz ir_sc_rhs_1375
-    jmp ir_sc_true_1376
-ir_sc_rhs_1375:
+    jz ir_sc_rhs_1381
+    jmp ir_sc_true_1382
+ir_sc_rhs_1381:
     mov rax, 1
     neg rax
     mov [rbp - 4224], rax
@@ -20791,18 +20857,18 @@ ir_sc_rhs_1375:
     mov [rbp - 4232], rax
     mov rax, [rbp - 4232]
     test rax, rax
-    jz ir_sc_false_1377
-ir_sc_true_1376:
+    jz ir_sc_false_1383
+ir_sc_true_1382:
     mov rax, 1
     mov [rbp - 4240], rax
-    jmp ir_sc_end_1378
-ir_sc_false_1377:
+    jmp ir_sc_end_1384
+ir_sc_false_1383:
     mov rax, 0
     mov [rbp - 4240], rax
-ir_sc_end_1378:
+ir_sc_end_1384:
     mov rax, [rbp - 4240]
     test rax, rax
-    jz ir_if_next_1374
+    jz ir_if_next_1380
     ; IR call: AllocConsole (0 args)
     sub rsp, 32
     call AllocConsole
@@ -20810,9 +20876,9 @@ ir_sc_end_1378:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 4256], rax
-    jmp ir_if_end_1373
-ir_if_next_1374:
-ir_if_end_1373:
+    jmp ir_if_end_1379
+ir_if_next_1380:
+ir_if_end_1379:
     ; IR call: net_init (0 args)
     sub rsp, 32
     call net_init
@@ -20831,7 +20897,7 @@ ir_if_end_1373:
     mov [rbp - 4272], rax
     mov rax, [rbp - 4272]
     test rax, rax
-    jz ir_if_next_1380
+    jz ir_if_next_1386
     ; IR call: con_writeln (1 args)
     sub rsp, 32
     ; Load variable: err_net_init
@@ -20845,15 +20911,15 @@ ir_if_end_1373:
     mov [rbp - 4288], rax
     mov rax, [rbp - 4288]
     test rax, rax
-    jz ir_errdefer_ok_1381
-    jmp ir_errdefer_end_1382
-ir_errdefer_ok_1381:
-ir_errdefer_end_1382:
+    jz ir_errdefer_ok_1387
+    jmp ir_errdefer_end_1388
+ir_errdefer_ok_1387:
+ir_errdefer_end_1388:
     mov rax, 1
     jmp Lmain_exit
-    jmp ir_if_end_1379
-ir_if_next_1380:
-ir_if_end_1379:
+    jmp ir_if_end_1385
+ir_if_next_1386:
+ir_if_end_1385:
     ; IR call: socket_tcp (0 args)
     sub rsp, 32
     call socket_tcp
@@ -20881,7 +20947,7 @@ ir_if_end_1379:
     mov [rbp - 4312], rax
     mov rax, [rbp - 4312]
     test rax, rax
-    jz ir_if_next_1384
+    jz ir_if_next_1390
     ; IR call: con_writeln (1 args)
     sub rsp, 32
     ; Load variable: err_socket
@@ -20902,15 +20968,15 @@ ir_if_end_1379:
     mov [rbp - 4336], rax
     mov rax, [rbp - 4336]
     test rax, rax
-    jz ir_errdefer_ok_1385
-    jmp ir_errdefer_end_1386
-ir_errdefer_ok_1385:
-ir_errdefer_end_1386:
+    jz ir_errdefer_ok_1391
+    jmp ir_errdefer_end_1392
+ir_errdefer_ok_1391:
+ir_errdefer_end_1392:
     mov rax, 1
     jmp Lmain_exit
-    jmp ir_if_end_1383
-ir_if_next_1384:
-ir_if_end_1383:
+    jmp ir_if_end_1389
+ir_if_next_1390:
+ir_if_end_1389:
     ; IR call: set_reuseaddr (2 args)
     sub rsp, 32
     ; Load variable: sock
@@ -20934,7 +21000,7 @@ ir_if_end_1383:
     mov [rbp - 4352], rax
     mov rax, [rbp - 4352]
     test rax, rax
-    jz ir_if_next_1388
+    jz ir_if_next_1394
     ; IR call: con_writeln (1 args)
     sub rsp, 32
     ; Load variable: err_reuseaddr
@@ -20965,15 +21031,15 @@ ir_if_end_1383:
     mov [rbp - 4384], rax
     mov rax, [rbp - 4384]
     test rax, rax
-    jz ir_errdefer_ok_1389
-    jmp ir_errdefer_end_1390
-ir_errdefer_ok_1389:
-ir_errdefer_end_1390:
+    jz ir_errdefer_ok_1395
+    jmp ir_errdefer_end_1396
+ir_errdefer_ok_1395:
+ir_errdefer_end_1396:
     mov rax, 1
     jmp Lmain_exit
-    jmp ir_if_end_1387
-ir_if_next_1388:
-ir_if_end_1387:
+    jmp ir_if_end_1393
+ir_if_next_1394:
+ir_if_end_1393:
     ; IR call: sockaddr_in_any (1 args)
     sub rsp, 32
     mov rax, 5000
@@ -20997,7 +21063,7 @@ ir_if_end_1387:
     mov [rbp - 4400], rax
     mov rax, [rbp - 4400]
     test rax, rax
-    jz ir_if_next_1392
+    jz ir_if_next_1398
     ; IR call: con_writeln (1 args)
     sub rsp, 32
     ; Load variable: err_sockaddr
@@ -21028,15 +21094,15 @@ ir_if_end_1387:
     mov [rbp - 4432], rax
     mov rax, [rbp - 4432]
     test rax, rax
-    jz ir_errdefer_ok_1393
-    jmp ir_errdefer_end_1394
-ir_errdefer_ok_1393:
-ir_errdefer_end_1394:
+    jz ir_errdefer_ok_1399
+    jmp ir_errdefer_end_1400
+ir_errdefer_ok_1399:
+ir_errdefer_end_1400:
     mov rax, 1
     jmp Lmain_exit
-    jmp ir_if_end_1391
-ir_if_next_1392:
-ir_if_end_1391:
+    jmp ir_if_end_1397
+ir_if_next_1398:
+ir_if_end_1397:
     ; IR call: bind (3 args)
     sub rsp, 32
     ; Load variable: sock
@@ -21063,7 +21129,7 @@ ir_if_end_1391:
     mov [rbp - 4448], rax
     mov rax, [rbp - 4448]
     test rax, rax
-    jz ir_if_next_1396
+    jz ir_if_next_1402
     ; IR call: con_writeln (1 args)
     sub rsp, 32
     ; Load variable: err_bind
@@ -21103,15 +21169,15 @@ ir_if_end_1391:
     mov [rbp - 4488], rax
     mov rax, [rbp - 4488]
     test rax, rax
-    jz ir_errdefer_ok_1397
-    jmp ir_errdefer_end_1398
-ir_errdefer_ok_1397:
-ir_errdefer_end_1398:
+    jz ir_errdefer_ok_1403
+    jmp ir_errdefer_end_1404
+ir_errdefer_ok_1403:
+ir_errdefer_end_1404:
     mov rax, 1
     jmp Lmain_exit
-    jmp ir_if_end_1395
-ir_if_next_1396:
-ir_if_end_1395:
+    jmp ir_if_end_1401
+ir_if_next_1402:
+ir_if_end_1401:
     ; IR call: free (1 args)
     sub rsp, 32
     ; Load variable: addr
@@ -21144,7 +21210,7 @@ ir_if_end_1395:
     mov [rbp - 4512], rax
     mov rax, [rbp - 4512]
     test rax, rax
-    jz ir_if_next_1400
+    jz ir_if_next_1406
     ; IR call: con_writeln (1 args)
     sub rsp, 32
     ; Load variable: err_listen
@@ -21175,15 +21241,15 @@ ir_if_end_1395:
     mov [rbp - 4544], rax
     mov rax, [rbp - 4544]
     test rax, rax
-    jz ir_errdefer_ok_1401
-    jmp ir_errdefer_end_1402
-ir_errdefer_ok_1401:
-ir_errdefer_end_1402:
+    jz ir_errdefer_ok_1407
+    jmp ir_errdefer_end_1408
+ir_errdefer_ok_1407:
+ir_errdefer_end_1408:
     mov rax, 1
     jmp Lmain_exit
-    jmp ir_if_end_1399
-ir_if_next_1400:
-ir_if_end_1399:
+    jmp ir_if_end_1405
+ir_if_next_1406:
+ir_if_end_1405:
     ; IR call: con_writeln (1 args)
     sub rsp, 32
     ; Load variable: msg_ready
@@ -21204,9 +21270,9 @@ ir_if_end_1399:
     mov [rbp - 4560], rax
     mov rax, [rbp - 4560]
     test rax, rax
-    jz ir_trap_bounds_1403
-    jmp ir_in_bounds_1404
-ir_trap_bounds_1403:
+    jz ir_trap_bounds_1409
+    jmp ir_in_bounds_1410
+ir_trap_bounds_1409:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21223,7 +21289,7 @@ ir_trap_bounds_1403:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1404:
+ir_in_bounds_1410:
     mov rax, 0
     push rax
     mov rax, 1
@@ -21256,9 +21322,9 @@ ir_in_bounds_1404:
     mov [rbp - 4592], rax
     mov rax, [rbp - 4592]
     test rax, rax
-    jz ir_trap_bounds_1405
-    jmp ir_in_bounds_1406
-ir_trap_bounds_1405:
+    jz ir_trap_bounds_1411
+    jmp ir_in_bounds_1412
+ir_trap_bounds_1411:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21275,7 +21341,7 @@ ir_trap_bounds_1405:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1406:
+ir_in_bounds_1412:
     mov rax, 1
     push rax
     mov rax, 1
@@ -21308,9 +21374,9 @@ ir_in_bounds_1406:
     mov [rbp - 4624], rax
     mov rax, [rbp - 4624]
     test rax, rax
-    jz ir_trap_bounds_1407
-    jmp ir_in_bounds_1408
-ir_trap_bounds_1407:
+    jz ir_trap_bounds_1413
+    jmp ir_in_bounds_1414
+ir_trap_bounds_1413:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21327,7 +21393,7 @@ ir_trap_bounds_1407:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1408:
+ir_in_bounds_1414:
     mov rax, 2
     push rax
     mov rax, 1
@@ -21360,9 +21426,9 @@ ir_in_bounds_1408:
     mov [rbp - 4656], rax
     mov rax, [rbp - 4656]
     test rax, rax
-    jz ir_trap_bounds_1409
-    jmp ir_in_bounds_1410
-ir_trap_bounds_1409:
+    jz ir_trap_bounds_1415
+    jmp ir_in_bounds_1416
+ir_trap_bounds_1415:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21379,7 +21445,7 @@ ir_trap_bounds_1409:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1410:
+ir_in_bounds_1416:
     mov rax, 3
     push rax
     mov rax, 1
@@ -21401,10 +21467,10 @@ ir_in_bounds_1410:
     mov rcx, rax
     pop rax
     mov byte [rax], cl
-ir_while_1411:
+ir_while_1417:
     mov rax, 1
     test rax, rax
-    jz ir_while_end_1412
+    jz ir_while_end_1418
     mov rax, 0
     push rax
     mov rax, 4
@@ -21416,9 +21482,9 @@ ir_while_1411:
     mov [rbp - 4688], rax
     mov rax, [rbp - 4688]
     test rax, rax
-    jz ir_trap_bounds_1413
-    jmp ir_in_bounds_1414
-ir_trap_bounds_1413:
+    jz ir_trap_bounds_1419
+    jmp ir_in_bounds_1420
+ir_trap_bounds_1419:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21435,7 +21501,7 @@ ir_trap_bounds_1413:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1414:
+ir_in_bounds_1420:
     mov rax, 0
     push rax
     mov rax, 1
@@ -21468,9 +21534,9 @@ ir_in_bounds_1414:
     mov [rbp - 4720], rax
     mov rax, [rbp - 4720]
     test rax, rax
-    jz ir_trap_bounds_1415
-    jmp ir_in_bounds_1416
-ir_trap_bounds_1415:
+    jz ir_trap_bounds_1421
+    jmp ir_in_bounds_1422
+ir_trap_bounds_1421:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21487,7 +21553,7 @@ ir_trap_bounds_1415:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1416:
+ir_in_bounds_1422:
     mov rax, 1
     push rax
     mov rax, 1
@@ -21520,9 +21586,9 @@ ir_in_bounds_1416:
     mov [rbp - 4752], rax
     mov rax, [rbp - 4752]
     test rax, rax
-    jz ir_trap_bounds_1417
-    jmp ir_in_bounds_1418
-ir_trap_bounds_1417:
+    jz ir_trap_bounds_1423
+    jmp ir_in_bounds_1424
+ir_trap_bounds_1423:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21539,7 +21605,7 @@ ir_trap_bounds_1417:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1418:
+ir_in_bounds_1424:
     mov rax, 2
     push rax
     mov rax, 1
@@ -21572,9 +21638,9 @@ ir_in_bounds_1418:
     mov [rbp - 4784], rax
     mov rax, [rbp - 4784]
     test rax, rax
-    jz ir_trap_bounds_1419
-    jmp ir_in_bounds_1420
-ir_trap_bounds_1419:
+    jz ir_trap_bounds_1425
+    jmp ir_in_bounds_1426
+ir_trap_bounds_1425:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21591,7 +21657,7 @@ ir_trap_bounds_1419:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1420:
+ir_in_bounds_1426:
     mov rax, 3
     push rax
     mov rax, 1
@@ -21624,9 +21690,9 @@ ir_in_bounds_1420:
     mov [rbp - 4816], rax
     mov rax, [rbp - 4816]
     test rax, rax
-    jz ir_trap_bounds_1421
-    jmp ir_in_bounds_1422
-ir_trap_bounds_1421:
+    jz ir_trap_bounds_1427
+    jmp ir_in_bounds_1428
+ir_trap_bounds_1427:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21643,7 +21709,7 @@ ir_trap_bounds_1421:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1422:
+ir_in_bounds_1428:
     mov rax, 0
     push rax
     mov rax, 1
@@ -21670,9 +21736,9 @@ ir_in_bounds_1422:
     mov [rbp - 4840], rax
     mov rax, [rbp - 4840]
     test rax, rax
-    jz ir_trap_bounds_1423
-    jmp ir_in_bounds_1424
-ir_trap_bounds_1423:
+    jz ir_trap_bounds_1429
+    jmp ir_in_bounds_1430
+ir_trap_bounds_1429:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21689,7 +21755,7 @@ ir_trap_bounds_1423:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1424:
+ir_in_bounds_1430:
     mov rax, 0
     push rax
     mov rax, 1
@@ -21739,11 +21805,11 @@ ir_in_bounds_1424:
     mov [rbp - 4880], rax
     mov rax, [rbp - 4880]
     test rax, rax
-    jz ir_if_next_1426
-    jmp ir_while_1411
-    jmp ir_if_end_1425
-ir_if_next_1426:
-ir_if_end_1425:
+    jz ir_if_next_1432
+    jmp ir_while_1417
+    jmp ir_if_end_1431
+ir_if_next_1432:
+ir_if_end_1431:
     mov rax, 0
     push rax
     mov rax, 4096
@@ -21755,9 +21821,9 @@ ir_if_end_1425:
     mov [rbp - 4888], rax
     mov rax, [rbp - 4888]
     test rax, rax
-    jz ir_trap_bounds_1427
-    jmp ir_in_bounds_1428
-ir_trap_bounds_1427:
+    jz ir_trap_bounds_1433
+    jmp ir_in_bounds_1434
+ir_trap_bounds_1433:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21774,7 +21840,7 @@ ir_trap_bounds_1427:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1428:
+ir_in_bounds_1434:
     mov rax, 0
     push rax
     mov rax, 1
@@ -21821,7 +21887,7 @@ ir_in_bounds_1428:
     mov [rbp - 4920], rax
     mov rax, [rbp - 4920]
     test rax, rax
-    jz ir_if_next_1430
+    jz ir_if_next_1436
     mov rax, 0
     push rax
     mov rax, 4096
@@ -21833,9 +21899,9 @@ ir_in_bounds_1428:
     mov [rbp - 4928], rax
     mov rax, [rbp - 4928]
     test rax, rax
-    jz ir_trap_bounds_1433
-    jmp ir_in_bounds_1434
-ir_trap_bounds_1433:
+    jz ir_trap_bounds_1439
+    jmp ir_in_bounds_1440
+ir_trap_bounds_1439:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21852,7 +21918,7 @@ ir_trap_bounds_1433:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1434:
+ir_in_bounds_1440:
     mov rax, 0
     push rax
     mov rax, 1
@@ -21891,7 +21957,7 @@ ir_in_bounds_1434:
     mov [rbp - 4960], rax
     mov rax, [rbp - 4960]
     test rax, rax
-    jz ir_if_next_1432
+    jz ir_if_next_1438
     mov rax, 0
     push rax
     mov rax, 4096
@@ -21903,9 +21969,9 @@ ir_in_bounds_1434:
     mov [rbp - 4968], rax
     mov rax, [rbp - 4968]
     test rax, rax
-    jz ir_trap_bounds_1435
-    jmp ir_in_bounds_1436
-ir_trap_bounds_1435:
+    jz ir_trap_bounds_1441
+    jmp ir_in_bounds_1442
+ir_trap_bounds_1441:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -21922,7 +21988,7 @@ ir_trap_bounds_1435:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1436:
+ir_in_bounds_1442:
     mov rax, 0
     push rax
     mov rax, 1
@@ -21965,7 +22031,7 @@ ir_in_bounds_1436:
     mov [rbp - 5000], rax
     mov rax, [rbp - 5000]
     test rax, rax
-    jz ir_if_next_1438
+    jz ir_if_next_1444
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_post
@@ -21986,9 +22052,9 @@ ir_in_bounds_1436:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 5016], rax
-    jmp ir_if_end_1437
-ir_if_next_1438:
-ir_if_end_1437:
+    jmp ir_if_end_1443
+ir_if_next_1444:
+ir_if_end_1443:
     ; Load variable: dbg_on
     movsxd rax, dword [rel dbg_on]  ; From global memory
     push rax
@@ -22001,7 +22067,7 @@ ir_if_end_1437:
     mov [rbp - 5024], rax
     mov rax, [rbp - 5024]
     test rax, rax
-    jz ir_if_next_1440
+    jz ir_if_next_1446
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_bs
@@ -22022,9 +22088,9 @@ ir_if_end_1437:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 5040], rax
-    jmp ir_if_end_1439
-ir_if_next_1440:
-ir_if_end_1439:
+    jmp ir_if_end_1445
+ir_if_next_1446:
+ir_if_end_1445:
     mov rax, 0
     push rax
     mov rax, 4096
@@ -22036,9 +22102,9 @@ ir_if_end_1439:
     mov [rbp - 5048], rax
     mov rax, [rbp - 5048]
     test rax, rax
-    jz ir_trap_bounds_1441
-    jmp ir_in_bounds_1442
-ir_trap_bounds_1441:
+    jz ir_trap_bounds_1447
+    jmp ir_in_bounds_1448
+ir_trap_bounds_1447:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -22055,7 +22121,7 @@ ir_trap_bounds_1441:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1442:
+ir_in_bounds_1448:
     mov rax, 0
     push rax
     mov rax, 1
@@ -22098,7 +22164,7 @@ ir_in_bounds_1442:
     mov [rbp - 5080], rax
     mov rax, [rbp - 5080]
     test rax, rax
-    jz ir_if_next_1444
+    jz ir_if_next_1450
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_cl
@@ -22119,9 +22185,9 @@ ir_in_bounds_1442:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 5096], rax
-    jmp ir_if_end_1443
-ir_if_next_1444:
-ir_if_end_1443:
+    jmp ir_if_end_1449
+ir_if_next_1450:
+ir_if_end_1449:
     ; Load variable: body_start
     movsxd rax, dword [rbp - 4160]  ; From stack [rbp - 4160]
     push rax
@@ -22146,7 +22212,7 @@ ir_if_end_1443:
     mov [rbp - 5112], rax
     mov rax, [rbp - 5112]
     test rax, rax
-    jz ir_if_next_1446
+    jz ir_if_next_1452
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_need
@@ -22167,9 +22233,9 @@ ir_if_end_1443:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 5128], rax
-    jmp ir_if_end_1445
-ir_if_next_1446:
-ir_if_end_1445:
+    jmp ir_if_end_1451
+ir_if_next_1452:
+ir_if_end_1451:
     ; Load variable: content_len
     movsxd rax, dword [rbp - 4164]  ; From stack [rbp - 4164]
     push rax
@@ -22182,8 +22248,8 @@ ir_if_end_1445:
     mov [rbp - 5136], rax
     mov rax, [rbp - 5136]
     test rax, rax
-    jz ir_sc_false_1451
-ir_sc_rhs_1449:
+    jz ir_sc_false_1457
+ir_sc_rhs_1455:
     ; Load variable: need
     movsxd rax, dword [rbp - 4168]  ; From stack [rbp - 4168]
     push rax
@@ -22196,19 +22262,19 @@ ir_sc_rhs_1449:
     mov [rbp - 5144], rax
     mov rax, [rbp - 5144]
     test rax, rax
-    jz ir_sc_false_1451
-ir_sc_true_1450:
+    jz ir_sc_false_1457
+ir_sc_true_1456:
     mov rax, 1
     mov [rbp - 5152], rax
-    jmp ir_sc_end_1452
-ir_sc_false_1451:
+    jmp ir_sc_end_1458
+ir_sc_false_1457:
     mov rax, 0
     mov [rbp - 5152], rax
-ir_sc_end_1452:
+ir_sc_end_1458:
     mov rax, [rbp - 5152]
     test rax, rax
-    jz ir_sc_false_1455
-ir_sc_rhs_1453:
+    jz ir_sc_false_1461
+ir_sc_rhs_1459:
     ; Load variable: n
     movsxd rax, dword [rbp - 4156]  ; From stack [rbp - 4156]
     push rax
@@ -22222,19 +22288,19 @@ ir_sc_rhs_1453:
     mov [rbp - 5168], rax
     mov rax, [rbp - 5168]
     test rax, rax
-    jz ir_sc_false_1455
-ir_sc_true_1454:
+    jz ir_sc_false_1461
+ir_sc_true_1460:
     mov rax, 1
     mov [rbp - 5176], rax
-    jmp ir_sc_end_1456
-ir_sc_false_1455:
+    jmp ir_sc_end_1462
+ir_sc_false_1461:
     mov rax, 0
     mov [rbp - 5176], rax
-ir_sc_end_1456:
+ir_sc_end_1462:
     mov rax, [rbp - 5176]
     test rax, rax
-    jz ir_if_next_1448
-ir_while_1457:
+    jz ir_if_next_1454
+ir_while_1463:
     ; Load variable: n
     movsxd rax, dword [rbp - 4156]  ; From stack [rbp - 4156]
     push rax
@@ -22248,7 +22314,7 @@ ir_while_1457:
     mov [rbp - 5192], rax
     mov rax, [rbp - 5192]
     test rax, rax
-    jz ir_while_end_1458
+    jz ir_while_end_1464
     ; Load variable: n
     movsxd rax, dword [rbp - 4156]  ; From stack [rbp - 4156]
     push rax
@@ -22261,9 +22327,9 @@ ir_while_1457:
     mov [rbp - 5200], rax
     mov rax, [rbp - 5200]
     test rax, rax
-    jz ir_trap_bounds_1459
-    jmp ir_in_bounds_1460
-ir_trap_bounds_1459:
+    jz ir_trap_bounds_1465
+    jmp ir_in_bounds_1466
+ir_trap_bounds_1465:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -22280,7 +22346,7 @@ ir_trap_bounds_1459:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1460:
+ir_in_bounds_1466:
     ; Load variable: n
     movsxd rax, dword [rbp - 4156]  ; From stack [rbp - 4156]
     push rax
@@ -22337,7 +22403,7 @@ ir_in_bounds_1460:
     mov [rbp - 5240], rax
     mov rax, [rbp - 5240]
     test rax, rax
-    jz ir_if_next_1462
+    jz ir_if_next_1468
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_got
@@ -22358,9 +22424,9 @@ ir_in_bounds_1460:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 5256], rax
-    jmp ir_if_end_1461
-ir_if_next_1462:
-ir_if_end_1461:
+    jmp ir_if_end_1467
+ir_if_next_1468:
+ir_if_end_1467:
     ; Load variable: got
     movsxd rax, dword [rbp - 4172]  ; From stack [rbp - 4172]
     push rax
@@ -22373,11 +22439,11 @@ ir_if_end_1461:
     mov [rbp - 5264], rax
     mov rax, [rbp - 5264]
     test rax, rax
-    jz ir_if_next_1464
-    jmp ir_while_end_1458
-    jmp ir_if_end_1463
-ir_if_next_1464:
-ir_if_end_1463:
+    jz ir_if_next_1470
+    jmp ir_while_end_1464
+    jmp ir_if_end_1469
+ir_if_next_1470:
+ir_if_end_1469:
     ; Load variable: n
     movsxd rax, dword [rbp - 4156]  ; From stack [rbp - 4156]
     push rax
@@ -22390,11 +22456,11 @@ ir_if_end_1463:
     mov rax, [rbp - 5272]
     ; Store to variable: n
     mov dword [rbp - 4156], eax  ; To stack [rbp - 4156]
-    jmp ir_while_1457
-ir_while_end_1458:
-    jmp ir_if_end_1447
-ir_if_next_1448:
-ir_if_end_1447:
+    jmp ir_while_1463
+ir_while_end_1464:
+    jmp ir_if_end_1453
+ir_if_next_1454:
+ir_if_end_1453:
     ; Load variable: dbg_on
     movsxd rax, dword [rel dbg_on]  ; From global memory
     push rax
@@ -22407,7 +22473,7 @@ ir_if_end_1447:
     mov [rbp - 5280], rax
     mov rax, [rbp - 5280]
     test rax, rax
-    jz ir_if_next_1466
+    jz ir_if_next_1472
     ; IR call: cstr (1 args)
     sub rsp, 32
     ; Load variable: dbg_n
@@ -22428,12 +22494,12 @@ ir_if_end_1447:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 5296], rax
-    jmp ir_if_end_1465
-ir_if_next_1466:
-ir_if_end_1465:
-    jmp ir_if_end_1431
-ir_if_next_1432:
-ir_if_end_1431:
+    jmp ir_if_end_1471
+ir_if_next_1472:
+ir_if_end_1471:
+    jmp ir_if_end_1437
+ir_if_next_1438:
+ir_if_end_1437:
     ; Load variable: n
     movsxd rax, dword [rbp - 4156]  ; From stack [rbp - 4156]
     push rax
@@ -22446,7 +22512,7 @@ ir_if_end_1431:
     mov [rbp - 5304], rax
     mov rax, [rbp - 5304]
     test rax, rax
-    jz ir_if_next_1468
+    jz ir_if_next_1474
     mov rax, 0
     push rax
     mov rax, 4096
@@ -22458,9 +22524,9 @@ ir_if_end_1431:
     mov [rbp - 5312], rax
     mov rax, [rbp - 5312]
     test rax, rax
-    jz ir_trap_bounds_1471
-    jmp ir_in_bounds_1472
-ir_trap_bounds_1471:
+    jz ir_trap_bounds_1477
+    jmp ir_in_bounds_1478
+ir_trap_bounds_1477:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -22477,7 +22543,7 @@ ir_trap_bounds_1471:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1472:
+ir_in_bounds_1478:
     mov rax, 0
     push rax
     mov rax, 1
@@ -22516,7 +22582,7 @@ ir_in_bounds_1472:
     mov [rbp - 5344], rax
     mov rax, [rbp - 5344]
     test rax, rax
-    jz ir_if_next_1470
+    jz ir_if_next_1476
     mov rax, 0
     push rax
     mov rax, 4096
@@ -22528,9 +22594,9 @@ ir_in_bounds_1472:
     mov [rbp - 5352], rax
     mov rax, [rbp - 5352]
     test rax, rax
-    jz ir_trap_bounds_1475
-    jmp ir_in_bounds_1476
-ir_trap_bounds_1475:
+    jz ir_trap_bounds_1481
+    jmp ir_in_bounds_1482
+ir_trap_bounds_1481:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -22547,7 +22613,7 @@ ir_trap_bounds_1475:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1476:
+ir_in_bounds_1482:
     mov rax, 0
     push rax
     mov rax, 1
@@ -22586,7 +22652,7 @@ ir_in_bounds_1476:
     mov [rbp - 5384], rax
     mov rax, [rbp - 5384]
     test rax, rax
-    jz ir_if_next_1474
+    jz ir_if_next_1480
     ; Load variable: HTTP_HEALTH_HEADER
     lea rax, [rel HTTP_HEALTH_HEADER]  ; Address of global string
     push rax
@@ -22648,8 +22714,8 @@ ir_in_bounds_1476:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 5448], rax
-    jmp ir_if_end_1473
-ir_if_next_1474:
+    jmp ir_if_end_1479
+ir_if_next_1480:
     mov rax, 0
     push rax
     mov rax, 4096
@@ -22661,9 +22727,9 @@ ir_if_next_1474:
     mov [rbp - 5456], rax
     mov rax, [rbp - 5456]
     test rax, rax
-    jz ir_trap_bounds_1478
-    jmp ir_in_bounds_1479
-ir_trap_bounds_1478:
+    jz ir_trap_bounds_1484
+    jmp ir_in_bounds_1485
+ir_trap_bounds_1484:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -22680,7 +22746,7 @@ ir_trap_bounds_1478:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1479:
+ir_in_bounds_1485:
     mov rax, 0
     push rax
     mov rax, 1
@@ -22719,7 +22785,7 @@ ir_in_bounds_1479:
     mov [rbp - 5488], rax
     mov rax, [rbp - 5488]
     test rax, rax
-    jz ir_if_next_1477
+    jz ir_if_next_1483
     ; Load variable: HTTP_PAGE_HEADER
     lea rax, [rel HTTP_PAGE_HEADER]  ; Address of global string
     push rax
@@ -22778,7 +22844,7 @@ ir_in_bounds_1479:
     mov [rbp - 5552], rax
     mov rax, [rbp - 5552]
     test rax, rax
-    jz ir_if_next_1481
+    jz ir_if_next_1487
     ; Load variable: PAGE_CONTENT
     lea rax, [rel PAGE_CONTENT]  ; Address of global string
     push rax
@@ -22815,11 +22881,11 @@ ir_in_bounds_1479:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 5592], rax
-    jmp ir_if_end_1480
-ir_if_next_1481:
-ir_if_end_1480:
-    jmp ir_if_end_1473
-ir_if_next_1477:
+    jmp ir_if_end_1486
+ir_if_next_1487:
+ir_if_end_1486:
+    jmp ir_if_end_1479
+ir_if_next_1483:
     mov rax, 0
     push rax
     mov rax, 4096
@@ -22831,9 +22897,9 @@ ir_if_next_1477:
     mov [rbp - 5600], rax
     mov rax, [rbp - 5600]
     test rax, rax
-    jz ir_trap_bounds_1483
-    jmp ir_in_bounds_1484
-ir_trap_bounds_1483:
+    jz ir_trap_bounds_1489
+    jmp ir_in_bounds_1490
+ir_trap_bounds_1489:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -22850,7 +22916,7 @@ ir_trap_bounds_1483:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1484:
+ir_in_bounds_1490:
     mov rax, 0
     push rax
     mov rax, 1
@@ -22889,7 +22955,7 @@ ir_in_bounds_1484:
     mov [rbp - 5632], rax
     mov rax, [rbp - 5632]
     test rax, rax
-    jz ir_if_next_1482
+    jz ir_if_next_1488
     ; Load variable: HTTP_DEMO_HEADER
     lea rax, [rel HTTP_DEMO_HEADER]  ; Address of global string
     push rax
@@ -22948,7 +23014,7 @@ ir_in_bounds_1484:
     mov [rbp - 5696], rax
     mov rax, [rbp - 5696]
     test rax, rax
-    jz ir_if_next_1486
+    jz ir_if_next_1492
     ; Load variable: DEMO_CONTENT
     lea rax, [rel DEMO_CONTENT]  ; Address of global string
     push rax
@@ -22985,11 +23051,11 @@ ir_in_bounds_1484:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 5736], rax
-    jmp ir_if_end_1485
-ir_if_next_1486:
-ir_if_end_1485:
-    jmp ir_if_end_1473
-ir_if_next_1482:
+    jmp ir_if_end_1491
+ir_if_next_1492:
+ir_if_end_1491:
+    jmp ir_if_end_1479
+ir_if_next_1488:
     mov rax, 0
     push rax
     mov rax, 4096
@@ -23001,9 +23067,9 @@ ir_if_next_1482:
     mov [rbp - 5744], rax
     mov rax, [rbp - 5744]
     test rax, rax
-    jz ir_trap_bounds_1488
-    jmp ir_in_bounds_1489
-ir_trap_bounds_1488:
+    jz ir_trap_bounds_1494
+    jmp ir_in_bounds_1495
+ir_trap_bounds_1494:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -23020,7 +23086,7 @@ ir_trap_bounds_1488:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1489:
+ir_in_bounds_1495:
     mov rax, 0
     push rax
     mov rax, 1
@@ -23059,7 +23125,7 @@ ir_in_bounds_1489:
     mov [rbp - 5776], rax
     mov rax, [rbp - 5776]
     test rax, rax
-    jz ir_if_next_1487
+    jz ir_if_next_1493
     ; Load variable: HTTP_BENCHMARKS_HEADER
     lea rax, [rel HTTP_BENCHMARKS_HEADER]  ; Address of global string
     push rax
@@ -23118,7 +23184,7 @@ ir_in_bounds_1489:
     mov [rbp - 5840], rax
     mov rax, [rbp - 5840]
     test rax, rax
-    jz ir_if_next_1491
+    jz ir_if_next_1497
     ; Load variable: BENCHMARKS_CONTENT
     lea rax, [rel BENCHMARKS_CONTENT]  ; Address of global string
     push rax
@@ -23155,11 +23221,11 @@ ir_in_bounds_1489:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 5880], rax
-    jmp ir_if_end_1490
-ir_if_next_1491:
-ir_if_end_1490:
-    jmp ir_if_end_1473
-ir_if_next_1487:
+    jmp ir_if_end_1496
+ir_if_next_1497:
+ir_if_end_1496:
+    jmp ir_if_end_1479
+ir_if_next_1493:
     mov rax, 0
     push rax
     mov rax, 4096
@@ -23171,9 +23237,9 @@ ir_if_next_1487:
     mov [rbp - 5888], rax
     mov rax, [rbp - 5888]
     test rax, rax
-    jz ir_trap_bounds_1493
-    jmp ir_in_bounds_1494
-ir_trap_bounds_1493:
+    jz ir_trap_bounds_1499
+    jmp ir_in_bounds_1500
+ir_trap_bounds_1499:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -23190,7 +23256,7 @@ ir_trap_bounds_1493:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1494:
+ir_in_bounds_1500:
     mov rax, 0
     push rax
     mov rax, 1
@@ -23229,7 +23295,7 @@ ir_in_bounds_1494:
     mov [rbp - 5920], rax
     mov rax, [rbp - 5920]
     test rax, rax
-    jz ir_if_next_1492
+    jz ir_if_next_1498
     ; Load variable: HTTP_DOCS_HEADER
     lea rax, [rel HTTP_DOCS_HEADER]  ; Address of global string
     push rax
@@ -23288,7 +23354,7 @@ ir_in_bounds_1494:
     mov [rbp - 5984], rax
     mov rax, [rbp - 5984]
     test rax, rax
-    jz ir_if_next_1496
+    jz ir_if_next_1502
     ; Load variable: DOCS_CONTENT
     lea rax, [rel DOCS_CONTENT]  ; Address of global string
     push rax
@@ -23325,11 +23391,11 @@ ir_in_bounds_1494:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 6024], rax
-    jmp ir_if_end_1495
-ir_if_next_1496:
-ir_if_end_1495:
-    jmp ir_if_end_1473
-ir_if_next_1492:
+    jmp ir_if_end_1501
+ir_if_next_1502:
+ir_if_end_1501:
+    jmp ir_if_end_1479
+ir_if_next_1498:
     mov rax, 0
     push rax
     mov rax, 4096
@@ -23341,9 +23407,9 @@ ir_if_next_1492:
     mov [rbp - 6032], rax
     mov rax, [rbp - 6032]
     test rax, rax
-    jz ir_trap_bounds_1498
-    jmp ir_in_bounds_1499
-ir_trap_bounds_1498:
+    jz ir_trap_bounds_1504
+    jmp ir_in_bounds_1505
+ir_trap_bounds_1504:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -23360,7 +23426,7 @@ ir_trap_bounds_1498:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1499:
+ir_in_bounds_1505:
     mov rax, 0
     push rax
     mov rax, 1
@@ -23401,7 +23467,7 @@ ir_in_bounds_1499:
     mov [rbp - 6064], rax
     mov rax, [rbp - 6064]
     test rax, rax
-    jz ir_if_next_1497
+    jz ir_if_next_1503
     mov rax, 0
     push rax
     mov rax, 4096
@@ -23413,9 +23479,9 @@ ir_in_bounds_1499:
     mov [rbp - 6072], rax
     mov rax, [rbp - 6072]
     test rax, rax
-    jz ir_trap_bounds_1500
-    jmp ir_in_bounds_1501
-ir_trap_bounds_1500:
+    jz ir_trap_bounds_1506
+    jmp ir_in_bounds_1507
+ir_trap_bounds_1506:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -23432,7 +23498,7 @@ ir_trap_bounds_1500:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1501:
+ir_in_bounds_1507:
     mov rax, 0
     push rax
     mov rax, 1
@@ -23477,7 +23543,7 @@ ir_in_bounds_1501:
     mov [rbp - 6104], rax
     mov rax, [rbp - 6104]
     test rax, rax
-    jz ir_if_next_1503
+    jz ir_if_next_1509
     ; IR call: count_threads (0 args)
     sub rsp, 32
     call count_threads
@@ -23501,7 +23567,7 @@ ir_in_bounds_1501:
     mov [rbp - 6120], rax
     mov rax, [rbp - 6120]
     test rax, rax
-    jz ir_if_next_1505
+    jz ir_if_next_1511
     ; IR call: serve_forum_thread (2 args)
     sub rsp, 32
     ; Load variable: client
@@ -23514,8 +23580,8 @@ ir_in_bounds_1501:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 6128], rax
-    jmp ir_if_end_1504
-ir_if_next_1505:
+    jmp ir_if_end_1510
+ir_if_next_1511:
     ; Load variable: HTTP_404_HEADER
     lea rax, [rel HTTP_404_HEADER]  ; Address of global string
     push rax
@@ -23577,9 +23643,9 @@ ir_if_next_1505:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 6192], rax
-ir_if_end_1504:
-    jmp ir_if_end_1502
-ir_if_next_1503:
+ir_if_end_1510:
+    jmp ir_if_end_1508
+ir_if_next_1509:
     ; IR call: serve_forum_index (2 args)
     sub rsp, 32
     ; Load variable: client
@@ -23591,9 +23657,9 @@ ir_if_next_1503:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 6200], rax
-ir_if_end_1502:
-    jmp ir_if_end_1473
-ir_if_next_1497:
+ir_if_end_1508:
+    jmp ir_if_end_1479
+ir_if_next_1503:
     ; Load variable: HTTP_404_HEADER
     lea rax, [rel HTTP_404_HEADER]  ; Address of global string
     push rax
@@ -23655,9 +23721,9 @@ ir_if_next_1497:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 6264], rax
-ir_if_end_1473:
-    jmp ir_if_end_1469
-ir_if_next_1470:
+ir_if_end_1479:
+    jmp ir_if_end_1475
+ir_if_next_1476:
     mov rax, 0
     push rax
     mov rax, 4096
@@ -23669,9 +23735,9 @@ ir_if_next_1470:
     mov [rbp - 6272], rax
     mov rax, [rbp - 6272]
     test rax, rax
-    jz ir_trap_bounds_1507
-    jmp ir_in_bounds_1508
-ir_trap_bounds_1507:
+    jz ir_trap_bounds_1513
+    jmp ir_in_bounds_1514
+ir_trap_bounds_1513:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -23688,7 +23754,7 @@ ir_trap_bounds_1507:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1508:
+ir_in_bounds_1514:
     mov rax, 0
     push rax
     mov rax, 1
@@ -23727,7 +23793,7 @@ ir_in_bounds_1508:
     mov [rbp - 6304], rax
     mov rax, [rbp - 6304]
     test rax, rax
-    jz ir_if_next_1506
+    jz ir_if_next_1512
     mov rax, 0
     push rax
     mov rax, 4096
@@ -23739,9 +23805,9 @@ ir_in_bounds_1508:
     mov [rbp - 6312], rax
     mov rax, [rbp - 6312]
     test rax, rax
-    jz ir_trap_bounds_1511
-    jmp ir_in_bounds_1512
-ir_trap_bounds_1511:
+    jz ir_trap_bounds_1517
+    jmp ir_in_bounds_1518
+ir_trap_bounds_1517:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -23758,7 +23824,7 @@ ir_trap_bounds_1511:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1512:
+ir_in_bounds_1518:
     mov rax, 0
     push rax
     mov rax, 1
@@ -23799,7 +23865,7 @@ ir_in_bounds_1512:
     mov [rbp - 6344], rax
     mov rax, [rbp - 6344]
     test rax, rax
-    jz ir_if_next_1510
+    jz ir_if_next_1516
     mov rax, 0
     push rax
     mov rax, 4096
@@ -23811,9 +23877,9 @@ ir_in_bounds_1512:
     mov [rbp - 6352], rax
     mov rax, [rbp - 6352]
     test rax, rax
-    jz ir_trap_bounds_1513
-    jmp ir_in_bounds_1514
-ir_trap_bounds_1513:
+    jz ir_trap_bounds_1519
+    jmp ir_in_bounds_1520
+ir_trap_bounds_1519:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -23830,7 +23896,7 @@ ir_trap_bounds_1513:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1514:
+ir_in_bounds_1520:
     mov rax, 0
     push rax
     mov rax, 1
@@ -23875,7 +23941,7 @@ ir_in_bounds_1514:
     mov [rbp - 6384], rax
     mov rax, [rbp - 6384]
     test rax, rax
-    jz ir_if_next_1516
+    jz ir_if_next_1522
     ; IR call: count_threads (0 args)
     sub rsp, 32
     call count_threads
@@ -23899,7 +23965,7 @@ ir_in_bounds_1514:
     mov [rbp - 6400], rax
     mov rax, [rbp - 6400]
     test rax, rax
-    jz ir_if_next_1518
+    jz ir_if_next_1524
     mov rax, 0
     push rax
     mov rax, 4096
@@ -23911,9 +23977,9 @@ ir_in_bounds_1514:
     mov [rbp - 6408], rax
     mov rax, [rbp - 6408]
     test rax, rax
-    jz ir_trap_bounds_1519
-    jmp ir_in_bounds_1520
-ir_trap_bounds_1519:
+    jz ir_trap_bounds_1525
+    jmp ir_in_bounds_1526
+ir_trap_bounds_1525:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -23930,7 +23996,7 @@ ir_trap_bounds_1519:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1520:
+ir_in_bounds_1526:
     mov rax, 0
     push rax
     mov rax, 1
@@ -23963,8 +24029,8 @@ ir_in_bounds_1520:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 6432], rax
-    jmp ir_if_end_1517
-ir_if_next_1518:
+    jmp ir_if_end_1523
+ir_if_next_1524:
     ; Load variable: HTTP_404_HEADER
     lea rax, [rel HTTP_404_HEADER]  ; Address of global string
     push rax
@@ -24026,9 +24092,9 @@ ir_if_next_1518:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 6496], rax
-ir_if_end_1517:
-    jmp ir_if_end_1515
-ir_if_next_1516:
+ir_if_end_1523:
+    jmp ir_if_end_1521
+ir_if_next_1522:
     mov rax, 0
     push rax
     mov rax, 4096
@@ -24040,9 +24106,9 @@ ir_if_next_1516:
     mov [rbp - 6504], rax
     mov rax, [rbp - 6504]
     test rax, rax
-    jz ir_trap_bounds_1521
-    jmp ir_in_bounds_1522
-ir_trap_bounds_1521:
+    jz ir_trap_bounds_1527
+    jmp ir_in_bounds_1528
+ir_trap_bounds_1527:
     ; IR call: puts (1 args)
     sub rsp, 32
     ; String literal (38 bytes)
@@ -24059,7 +24125,7 @@ ir_trap_bounds_1521:
     call exit
     add rsp, 32
     ; Unknown return type - assuming integer
-ir_in_bounds_1522:
+ir_in_bounds_1528:
     mov rax, 0
     push rax
     mov rax, 1
@@ -24089,9 +24155,9 @@ ir_in_bounds_1522:
     add rsp, 32
     ; Void return - no value to handle
     mov [rbp - 6528], rax
-ir_if_end_1515:
-    jmp ir_if_end_1509
-ir_if_next_1510:
+ir_if_end_1521:
+    jmp ir_if_end_1515
+ir_if_next_1516:
     ; Load variable: HTTP_404_HEADER
     lea rax, [rel HTTP_404_HEADER]  ; Address of global string
     push rax
@@ -24153,9 +24219,9 @@ ir_if_next_1510:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 6592], rax
-ir_if_end_1509:
-    jmp ir_if_end_1469
-ir_if_next_1506:
+ir_if_end_1515:
+    jmp ir_if_end_1475
+ir_if_next_1512:
     ; Load variable: HTTP_404_HEADER
     lea rax, [rel HTTP_404_HEADER]  ; Address of global string
     push rax
@@ -24217,13 +24283,13 @@ ir_if_next_1506:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 6656], rax
-ir_if_end_1469:
-    jmp ir_if_end_1467
-ir_if_next_1468:
-ir_if_end_1467:
-    jmp ir_if_end_1429
-ir_if_next_1430:
-ir_if_end_1429:
+ir_if_end_1475:
+    jmp ir_if_end_1473
+ir_if_next_1474:
+ir_if_end_1473:
+    jmp ir_if_end_1435
+ir_if_next_1436:
+ir_if_end_1435:
     ; IR call: SD_BOTH (0 args)
     sub rsp, 32
     call SD_BOTH
@@ -24253,8 +24319,8 @@ ir_if_end_1429:
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
     mov [rbp - 6680], rax
-    jmp ir_while_1411
-ir_while_end_1412:
+    jmp ir_while_1417
+ir_while_end_1418:
     ; IR call: closesocket (1 args)
     sub rsp, 32
     ; Load variable: sock
@@ -24276,10 +24342,10 @@ ir_while_end_1412:
     mov [rbp - 6704], rax
     mov rax, [rbp - 6704]
     test rax, rax
-    jz ir_errdefer_ok_1523
-    jmp ir_errdefer_end_1524
-ir_errdefer_ok_1523:
-ir_errdefer_end_1524:
+    jz ir_errdefer_ok_1529
+    jmp ir_errdefer_end_1530
+ir_errdefer_ok_1529:
+ir_errdefer_end_1530:
     mov rax, 0
     jmp Lmain_exit
 Lmain_exit:

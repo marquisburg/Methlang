@@ -77,3 +77,28 @@ function main() -> int32 {
   return p->x + p->y;
 }
 ```
+
+## With Generics
+
+Generic functions and structs with compile-time monomorphization. See [Declarations](declarations.md#generic-functions) and [Types](types.md#generic-type-parameters).
+
+```masm
+struct Pair<A, B> {
+  first: A;
+  second: B;
+}
+
+function swap<T>(a: T*, b: T*) -> void {
+  var tmp: T = *a;
+  *a = *b;
+  *b = tmp;
+}
+
+function main() -> int32 {
+  var p: Pair<int32, int32>;
+  p.first = 10;
+  p.second = 20;
+  swap<int32>(&p.first, &p.second);
+  return p.first + p.second;
+}
+```

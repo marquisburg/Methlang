@@ -29,6 +29,27 @@ function greet() {  // void return
 
 A function named `main` with signature `() -> int32` serves as the program entry point when present. The compiler emits `_start` which calls `main` and passes its return value to the runtime.
 
+## Generic Functions
+
+Functions can declare type parameters in angle brackets before the parameter list. Call sites must provide type arguments: `f<T>(args)` or `f<int32>(args)`.
+
+```masm
+function swap<T>(a: T*, b: T*) -> void {
+  var tmp: T = *a;
+  *a = *b;
+  *b = tmp;
+}
+
+function main() -> int32 {
+  var x: int32 = 10;
+  var y: int32 = 20;
+  swap<int32>(&x, &y);
+  return x + y;
+}
+```
+
+The compiler monomorphizes each unique instantiation before type checking. Type parameters can appear in parameter types, return type, and local variable types. See [Types](types.md#generic-type-parameters) for instantiation syntax.
+
 ## Forward Declarations
 
 Functions can be declared before definition. The forward declaration ends with a semicolon. The definition must match the forward declaration (same name, parameter types, return type).
@@ -58,6 +79,32 @@ Extern variables refer to C globals. They must have an explicit type and cannot 
 ```masm
 extern var errno_value: int32 = "errno";
 ```
+
+## Generic Structs
+
+Structs can declare type parameters in angle brackets. Use the struct with type arguments when declaring variables: `Pair<int32, int32>`, `List<float64>`.
+
+```masm
+struct Pair<A, B> {
+  first: A;
+  second: B;
+}
+
+struct List<T> {
+  data: T*;
+  length: int32;
+  capacity: int32;
+}
+
+function main() -> int32 {
+  var p: Pair<int32, int32>;
+  p.first = 10;
+  p.second = 20;
+  return p.first + p.second;
+}
+```
+
+The compiler monomorphizes each unique struct instantiation. Generic structs can have multiple type parameters. See [Types](types.md#generic-type-parameters).
 
 ## Structs and Enums
 
