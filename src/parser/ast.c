@@ -124,6 +124,7 @@ ASTNode *ast_clone_node(ASTNode *node) {
     dst->function_name = src->function_name ? strdup(src->function_name) : NULL;
     dst->argument_count = src->argument_count;
     dst->type_arg_count = src->type_arg_count;
+    dst->is_indirect_call = src->is_indirect_call;
     dst->object = src->object ? ast_clone_node(src->object) : NULL;
     if (dst->object) ast_add_child(clone, dst->object);
     if (src->argument_count > 0) {
@@ -142,6 +143,30 @@ ASTNode *ast_clone_node(ASTNode *node) {
       }
     } else {
       dst->type_args = NULL;
+    }
+    clone->data = dst;
+    break;
+  }
+  case AST_FUNC_PTR_CALL: {
+    FuncPtrCall *src = (FuncPtrCall *)node->data;
+    FuncPtrCall *dst = malloc(sizeof(FuncPtrCall));
+    if (!dst) {
+      free(clone);
+      return NULL;
+    }
+    dst->function = src->function ? ast_clone_node(src->function) : NULL;
+    if (dst->function)
+      ast_add_child(clone, dst->function);
+    dst->argument_count = src->argument_count;
+    if (src->argument_count > 0) {
+      dst->arguments = malloc(src->argument_count * sizeof(ASTNode *));
+      for (size_t i = 0; i < src->argument_count; i++) {
+        dst->arguments[i] = ast_clone_node(src->arguments[i]);
+        if (dst->arguments[i])
+          ast_add_child(clone, dst->arguments[i]);
+      }
+    } else {
+      dst->arguments = NULL;
     }
     clone->data = dst;
     break;
@@ -507,6 +532,14 @@ void ast_destroy_node(ASTNode *node) {
       }
       free(call_expr->type_args);
       free(call_expr);
+    }
+    break;
+  }
+  case AST_FUNC_PTR_CALL: {
+    FuncPtrCall *fp_call = (FuncPtrCall *)node->data;
+    if (fp_call) {
+      free(fp_call->arguments);
+      free(fp_call);
     }
     break;
   }
@@ -894,6 +927,7 @@ ASTNode *ast_create_call_expression(const char *function_name,
   call_expr->object = NULL;
   call_expr->type_args = NULL;
   call_expr->type_arg_count = 0;
+  call_expr->is_indirect_call = 0;
 
   if (argument_count > 0) {
     call_expr->arguments = malloc(argument_count * sizeof(ASTNode *));
@@ -908,6 +942,43 @@ ASTNode *ast_create_call_expression(const char *function_name,
   }
 
   node->data = call_expr;
+
+  return node;
+}
+
+ASTNode *ast_create_func_ptr_call(ASTNode *function, ASTNode **arguments,
+                                  size_t argument_count,
+                                  SourceLocation location) {
+  ASTNode *node = ast_create_node(AST_FUNC_PTR_CALL, location);
+  if (!node)
+    return NULL;
+
+  FuncPtrCall *fp_call = malloc(sizeof(FuncPtrCall));
+  if (!fp_call) {
+    free(node);
+    return NULL;
+  }
+
+  fp_call->function = function;
+  fp_call->argument_count = argument_count;
+
+  if (function) {
+    ast_add_child(node, function);
+  }
+
+  if (argument_count > 0) {
+    fp_call->arguments = malloc(argument_count * sizeof(ASTNode *));
+    for (size_t i = 0; i < argument_count; i++) {
+      fp_call->arguments[i] = arguments[i];
+      if (arguments[i]) {
+        ast_add_child(node, arguments[i]);
+      }
+    }
+  } else {
+    fp_call->arguments = NULL;
+  }
+
+  node->data = fp_call;
 
   return node;
 }
@@ -1142,6 +1213,7 @@ ASTNode *ast_create_method_call(ASTNode *object, const char *method_name,
   call_expr->object = object;
   call_expr->type_args = NULL;
   call_expr->type_arg_count = 0;
+  call_expr->is_indirect_call = 0;
 
   if (argument_count > 0) {
     call_expr->arguments = malloc(argument_count * sizeof(ASTNode *));

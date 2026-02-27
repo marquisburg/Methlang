@@ -1,0 +1,26 @@
+function main() -> int32 {
+    // Basic modulo
+    var a : int32 = 10 % 3;
+    if (a != 1) { return 1; }
+
+    // Modulo with variables
+    var b : int32 = 17;
+    var c : int32 = 5;
+    var d : int32 = b % c;
+    if (d != 2) { return 2; }
+
+    // Modulo result is zero
+    var e : int32 = 9 % 3;
+    if (e != 0) { return 3; }
+
+    // Modulo with larger divisor
+    var f : int32 = 3 % 10;
+    if (f != 3) { return 4; }
+
+    // Modulo precedence (same as * and /)
+    // 10 + 7 % 3 should be 10 + 1 = 11 (% binds tighter than +)
+    var g : int32 = 10 + 7 % 3;
+    if (g != 11) { return 5; }
+
+    return 0;
+}

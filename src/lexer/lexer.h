@@ -35,6 +35,10 @@ typedef enum {
   TOKEN_ASM,
   TOKEN_THIS,
   TOKEN_NEW,
+  TOKEN_TRAIT,
+  TOKEN_IMPL,
+  TOKEN_WHERE,
+  TOKEN_FN,
 
   // Type keywords
   TOKEN_INT8,
@@ -79,6 +83,8 @@ typedef enum {
   TOKEN_AND_AND,
   TOKEN_OR_OR,
   TOKEN_DIVIDE,
+  TOKEN_PERCENT,
+  TOKEN_NOT,
   TOKEN_DOT,
   TOKEN_NEWLINE,
 
@@ -171,3 +177,4 @@ int lexer_has_error(Lexer *lexer);
 void lexer_clear_error(Lexer *lexer);
 
 #endif // LEXER_H
+

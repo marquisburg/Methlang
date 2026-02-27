@@ -202,6 +202,8 @@ static const char *token_type_to_string(TokenType type) {
     return "'||'";
   case TOKEN_DIVIDE:
     return "'/'";
+  case TOKEN_PERCENT:
+    return "'%'";
   case TOKEN_DOT:
     return "'.'";
   case TOKEN_NEWLINE:
@@ -373,6 +375,7 @@ int parser_get_operator_precedence(TokenType type) {
     return 13; // Member access (highest precedence)
   case TOKEN_MULTIPLY:
   case TOKEN_DIVIDE:
+  case TOKEN_PERCENT:
     return 11; // Multiplicative
   case TOKEN_PLUS:
   case TOKEN_MINUS:
@@ -409,6 +412,7 @@ int parser_is_binary_operator(TokenType type) {
   case TOKEN_MINUS:
   case TOKEN_MULTIPLY:
   case TOKEN_DIVIDE:
+  case TOKEN_PERCENT:
   case TOKEN_EQUALS_EQUALS:
   case TOKEN_NOT_EQUALS:
   case TOKEN_LESS_THAN:
@@ -436,6 +440,7 @@ int parser_is_unary_operator(TokenType type) {
   case TOKEN_MULTIPLY:
   case TOKEN_AMPERSAND:
   case TOKEN_TILDE:
+  case TOKEN_NOT:
     return 1;
   default:
     return 0;
@@ -816,16 +821,97 @@ static char *parser_parse_type_annotation(Parser *parser) {
   if (!parser)
     return NULL;
 
-  if (!parser_is_type_keyword(parser->current_token.type) &&
-      !parser_is_identifier_like(parser->current_token.type)) {
-    return NULL;
-  }
+  char *type_name = NULL;
 
-  char *type_name = strdup(parser->current_token.value);
-  parser_advance(parser);
-
-  if (!type_name) {
+  /* Function pointer type: fn(param_types) -> return_type */
+  if (parser->current_token.type == TOKEN_FN) {
+    parser_advance(parser); /* consume 'fn' */
+    if (!parser_expect(parser, TOKEN_LPAREN)) {
+      parser_set_error(parser, "Expected '(' after 'fn' in function pointer type");
+      return NULL;
+    }
+    char *params_buf = malloc(1024);
+    if (!params_buf)
+      return NULL;
+    size_t params_len = 0;
+    size_t params_cap = 1024;
+    params_buf[0] = '\0';
+    int first = 1;
+    while (parser->current_token.type != TOKEN_RPAREN &&
+           parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+      if (!first) {
+        if (parser->current_token.type != TOKEN_COMMA) {
+          parser_set_error(parser, "Expected ',' or ')' in function pointer parameter list");
+          free(params_buf);
+          return NULL;
+        }
+        parser_advance(parser); /* consume ',' */
+        if (params_len + 1 >= params_cap) {
+          params_cap *= 2;
+          params_buf = realloc(params_buf, params_cap);
+          if (!params_buf)
+            return NULL;
+        }
+        params_buf[params_len++] = ',';
+        params_buf[params_len] = '\0';
+      }
+      first = 0;
+      char *param = parser_parse_type_annotation(parser);
+      if (!param) {
+        if (!parser->has_error)
+          parser_set_error(parser, "Expected type in function pointer parameter list");
+        free(params_buf);
+        return NULL;
+      }
+      size_t plen = strlen(param);
+      while (params_len + plen + 1 >= params_cap) {
+        params_cap *= 2;
+        params_buf = realloc(params_buf, params_cap);
+        if (!params_buf) {
+          free(param);
+          free(params_buf);
+          return NULL;
+        }
+      }
+      memcpy(params_buf + params_len, param, plen + 1);
+      params_len += plen;
+      free(param);
+    }
+    if (!parser_expect(parser, TOKEN_RPAREN)) {
+      free(params_buf);
+      return NULL;
+    }
+    if (!parser_expect(parser, TOKEN_ARROW)) {
+      parser_set_error(parser, "Expected '->' after ')' in function pointer type");
+      free(params_buf);
+      return NULL;
+    }
+    char *ret = parser_parse_type_annotation(parser);
+    if (!ret) {
+      if (!parser->has_error)
+        parser_set_error(parser, "Expected return type after '->' in function pointer type");
+      free(params_buf);
+      return NULL;
+    }
+    size_t fn_len = 4 + params_len + 3 + strlen(ret) + 1; /* "fn(" + params + ")->" + ret + NUL */
+    type_name = malloc(fn_len);
+    if (!type_name) {
+      free(params_buf);
+      free(ret);
+      return NULL;
+    }
+    snprintf(type_name, fn_len, "fn(%s)->%s", params_buf, ret);
+    free(params_buf);
+    free(ret);
+    /* Continue to allow * and [] suffixes (e.g. fn()->int32* is nonsensical but we handle it) */
+  } else if (!parser_is_type_keyword(parser->current_token.type) &&
+             !parser_is_identifier_like(parser->current_token.type)) {
     return NULL;
+  } else {
+    type_name = strdup(parser->current_token.value);
+    parser_advance(parser);
+    if (!type_name)
+      return NULL;
   }
 
   if (parser->current_token.type == TOKEN_LESS_THAN) {
@@ -1269,7 +1355,7 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
                                       location);
         free(method_name);
       } else if (expr->type == AST_IDENTIFIER) {
-        // Regular function call
+        // Regular function call (or function pointer variable - type checker validates)
         Identifier *id_data = (Identifier *)expr->data;
         char *func_name = strdup(id_data->name);
         ast_destroy_node(expr);
@@ -1278,7 +1364,8 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
                                           location);
         free(func_name);
       } else {
-        parser_set_error(parser, "Invalid function call");
+        // Expression like (*fp)(args) or (expr)(args) - function pointer call
+        expr = ast_create_func_ptr_call(expr, arguments, arg_count, location);
         for (size_t i = 0; i < arg_count; i++) {
           ast_destroy_node(arguments[i]);
         }

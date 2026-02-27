@@ -1,0 +1,47 @@
+function main() -> int32 {
+    // NOT of zero is 1
+    var a: int32 = !0;
+    if (a != 1) { return 1; }
+
+    // NOT of non-zero is 0
+    var b: int32 = !1;
+    if (b != 0) { return 2; }
+
+    // NOT of a larger non-zero value
+    var c: int32 = !42;
+    if (c != 0) { return 3; }
+
+    // Double NOT restores truthiness
+    var d: int32 = !!5;
+    if (d != 1) { return 4; }
+
+    // NOT in a condition
+    var x: int32 = 0;
+    if (!x) {
+        x = 10;
+    }
+    if (x != 10) { return 5; }
+
+    // NOT of a non-zero variable - condition should be false, so we skip the return
+    var y: int32 = 7;
+    if (!y) {
+        return 6;
+    }
+
+    // NOT with pointer (null = false)
+    var ptr: int32* = 0;
+    var not_ptr: int32 = !ptr;
+    if (not_ptr != 1) { return 7; }
+
+    // NOT with non-null pointer (true)
+    var z: int32 = 99;
+    var ptr2: int32* = &z;
+    var not_ptr2: int32 = !ptr2;
+    if (not_ptr2 != 0) { return 8; }
+
+    // NOT of negative (non-zero = true, so !(-1) = 0)
+    var neg: int32 = !(-1);
+    if (neg != 0) { return 9; }
+
+    return 0;
+}

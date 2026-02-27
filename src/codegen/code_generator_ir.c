@@ -339,8 +339,29 @@ static int code_generator_emit_ir_address_of(CodeGenerator *generator,
 
   Symbol *symbol =
       symbol_table_lookup(generator->symbol_table, instruction->lhs.name);
-  if (!symbol ||
-      (symbol->kind != SYMBOL_VARIABLE && symbol->kind != SYMBOL_PARAMETER)) {
+  if (!symbol) {
+    code_generator_set_error(generator, "Unknown addr_of symbol '%s'",
+                             instruction->lhs.name);
+    return 0;
+  }
+
+  if (symbol->kind == SYMBOL_FUNCTION) {
+    const char *func_name =
+        code_generator_get_link_symbol_name(generator, instruction->lhs.name);
+    if (!func_name) {
+      code_generator_set_error(generator, "Invalid function symbol in IR addr_of");
+      return 0;
+    }
+    if (symbol->is_extern &&
+        !code_generator_emit_extern_symbol(generator, func_name)) {
+      return 0;
+    }
+    code_generator_emit(generator, "    lea rax, [rel %s]\n", func_name);
+    return code_generator_store_ir_destination(generator, &instruction->dest,
+                                               temp_table);
+  }
+
+  if (symbol->kind != SYMBOL_VARIABLE && symbol->kind != SYMBOL_PARAMETER) {
     code_generator_set_error(generator, "Unknown addr_of symbol '%s'",
                              instruction->lhs.name);
     return 0;
@@ -1056,6 +1077,153 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
     }
     return code_generator_store_ir_destination(generator, &instruction->dest,
                                                temp_table);
+
+  case IR_OP_CALL_INDIRECT: {
+    CallingConventionSpec *conv_spec =
+        generator->register_allocator->calling_convention;
+    if (!conv_spec) {
+      code_generator_set_error(generator, "No calling convention configured");
+      return 0;
+    }
+
+    size_t argument_count = instruction->argument_count;
+    int *is_float = NULL;
+    int *goes_on_stack = NULL;
+    if (argument_count > 0) {
+      is_float = calloc(argument_count, sizeof(int));
+      goes_on_stack = calloc(argument_count, sizeof(int));
+      if (!is_float || !goes_on_stack) {
+        free(is_float);
+        free(goes_on_stack);
+        code_generator_set_error(generator, "Out of memory for indirect call");
+        return 0;
+      }
+    }
+
+    int int_reg_cursor = 0;
+    int float_reg_cursor = 0;
+    size_t ms_param_slot_count = 0;
+    if (conv_spec->convention == CALLING_CONV_MS_X64) {
+      ms_param_slot_count = conv_spec->int_param_count;
+      if (conv_spec->float_param_count < ms_param_slot_count) {
+        ms_param_slot_count = conv_spec->float_param_count;
+      }
+    }
+    int stack_argument_count = 0;
+    for (size_t i = 0; i < argument_count; i++) {
+      is_float[i] = code_generator_ir_call_argument_is_float(
+          generator, NULL, instruction, i);
+      if (conv_spec->convention == CALLING_CONV_MS_X64) {
+        if (i >= ms_param_slot_count) {
+          goes_on_stack[i] = 1;
+          stack_argument_count++;
+        }
+      } else if (is_float[i]) {
+        if (float_reg_cursor < (int)conv_spec->float_param_count) {
+          float_reg_cursor++;
+        } else {
+          goes_on_stack[i] = 1;
+          stack_argument_count++;
+        }
+      } else {
+        if (int_reg_cursor < (int)conv_spec->int_param_count) {
+          int_reg_cursor++;
+        } else {
+          goes_on_stack[i] = 1;
+          stack_argument_count++;
+        }
+      }
+    }
+
+    code_generator_emit(generator, "    ; Indirect function call\n");
+
+    int shadow_space = (conv_spec->convention == CALLING_CONV_MS_X64)
+                          ? conv_spec->shadow_space_size
+                          : 0;
+    int stack_arg_space = stack_argument_count * 8;
+    int call_stack_total = shadow_space + stack_arg_space;
+    if ((call_stack_total % 16) != 0) {
+      call_stack_total += 8;
+    }
+    if (call_stack_total > 0) {
+      code_generator_emit(generator, "    sub rsp, %d\n", call_stack_total);
+    }
+
+    int stack_arg_index = 0;
+    for (size_t i = 0; i < argument_count; i++) {
+      if (!goes_on_stack || !goes_on_stack[i]) {
+        continue;
+      }
+      int slot_offset = shadow_space + (stack_arg_index * 8);
+      if (!code_generator_emit_ir_call_argument_stack(
+              generator, &instruction->arguments[i], temp_table, slot_offset)) {
+        free(is_float);
+        free(goes_on_stack);
+        return 0;
+      }
+      stack_arg_index++;
+    }
+
+    int_reg_cursor = 0;
+    float_reg_cursor = 0;
+    for (size_t i = 0; i < argument_count; i++) {
+      if (goes_on_stack && goes_on_stack[i]) {
+        continue;
+      }
+      if (conv_spec->convention == CALLING_CONV_MS_X64) {
+        x86Register target_register = (is_float && is_float[i])
+                                          ? conv_spec->float_param_registers[i]
+                                          : conv_spec->int_param_registers[i];
+        if (!code_generator_emit_ir_call_argument_register(
+                generator, &instruction->arguments[i], temp_table,
+                target_register, (is_float && is_float[i]) ? 1 : 0)) {
+          free(is_float);
+          free(goes_on_stack);
+          return 0;
+        }
+      } else {
+        if (is_float && is_float[i]) {
+          x86Register target_register =
+              conv_spec->float_param_registers[float_reg_cursor++];
+          if (!code_generator_emit_ir_call_argument_register(
+                  generator, &instruction->arguments[i], temp_table,
+                  target_register, 1)) {
+            free(is_float);
+            free(goes_on_stack);
+            return 0;
+          }
+        } else {
+          x86Register target_register =
+              conv_spec->int_param_registers[int_reg_cursor++];
+          if (!code_generator_emit_ir_call_argument_register(
+                  generator, &instruction->arguments[i], temp_table,
+                  target_register, 0)) {
+            free(is_float);
+            free(goes_on_stack);
+            return 0;
+          }
+        }
+      }
+    }
+
+    if (!code_generator_load_ir_operand(generator, &instruction->lhs,
+                                        temp_table)) {
+      free(is_float);
+      free(goes_on_stack);
+      return 0;
+    }
+    code_generator_emit(generator, "    call rax\n");
+
+    if (call_stack_total > 0) {
+      code_generator_emit(generator, "    add rsp, %d\n", call_stack_total);
+    }
+
+    free(is_float);
+    free(goes_on_stack);
+    code_generator_handle_return_value(generator, NULL);
+    return code_generator_store_ir_destination(generator, &instruction->dest,
+                                               temp_table);
+  }
 
   case IR_OP_NEW:
     return code_generator_emit_ir_new(generator, instruction, temp_table);

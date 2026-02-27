@@ -878,6 +878,8 @@ static int ir_lower_call_expression(IRLoweringContext *context,
     return 0;
   }
 
+  int is_func_ptr_var = call->is_indirect_call;
+
   IROperand destination = ir_operand_none();
   if (!ir_make_temp_operand(context, &destination)) {
     return 0;
@@ -906,12 +908,28 @@ static int ir_lower_call_expression(IRLoweringContext *context,
   }
 
   IRInstruction instruction = {0};
-  instruction.op = IR_OP_CALL;
   instruction.location = expression->location;
   instruction.dest = destination;
-  instruction.text = call->function_name;
   instruction.arguments = arguments;
   instruction.argument_count = call->argument_count;
+
+  if (is_func_ptr_var) {
+    instruction.op = IR_OP_CALL_INDIRECT;
+    instruction.lhs = ir_operand_symbol(call->function_name);
+    if (instruction.lhs.kind != IR_OPERAND_SYMBOL || !instruction.lhs.name) {
+      ir_operand_destroy(&instruction.lhs);
+      for (size_t i = 0; i < call->argument_count; i++) {
+        ir_operand_destroy(&arguments[i]);
+      }
+      free(arguments);
+      ir_operand_destroy(&destination);
+      ir_set_error(context, "Out of memory while lowering function pointer call");
+      return 0;
+    }
+  } else {
+    instruction.op = IR_OP_CALL;
+    instruction.text = call->function_name;
+  }
 
   if (!ir_emit(context, function, &instruction)) {
     for (size_t i = 0; i < call->argument_count; i++) {
@@ -1752,6 +1770,79 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
 
   case AST_FUNCTION_CALL:
     return ir_lower_call_expression(context, function, expression, out_value);
+
+  case AST_FUNC_PTR_CALL: {
+    FuncPtrCall *fp_call = (FuncPtrCall *)expression->data;
+    if (!fp_call || !fp_call->function) {
+      ir_set_error(context, "Invalid function pointer call");
+      return 0;
+    }
+
+    IROperand destination = ir_operand_none();
+    if (!ir_make_temp_operand(context, &destination)) {
+      return 0;
+    }
+
+    // Lower the function pointer expression
+    IROperand func_ptr = ir_operand_none();
+    if (!ir_lower_expression(context, function, fp_call->function, &func_ptr)) {
+      ir_operand_destroy(&destination);
+      return 0;
+    }
+
+    // Lower arguments
+    IROperand *arguments = NULL;
+    if (fp_call->argument_count > 0) {
+      arguments = calloc(fp_call->argument_count, sizeof(IROperand));
+      if (!arguments) {
+        ir_operand_destroy(&func_ptr);
+        ir_operand_destroy(&destination);
+        ir_set_error(context, "Out of memory while lowering function pointer call arguments");
+        return 0;
+      }
+    }
+
+    for (size_t i = 0; i < fp_call->argument_count; i++) {
+      if (!ir_lower_expression(context, function, fp_call->arguments[i],
+                               &arguments[i])) {
+        for (size_t j = 0; j < i; j++) {
+          ir_operand_destroy(&arguments[j]);
+        }
+        free(arguments);
+        ir_operand_destroy(&func_ptr);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+    }
+
+    IRInstruction instruction = {0};
+    instruction.op = IR_OP_CALL_INDIRECT;
+    instruction.location = expression->location;
+    instruction.dest = destination;
+    // For indirect calls, we use lhs to hold the function pointer operand
+    instruction.lhs = func_ptr;
+    instruction.arguments = arguments;
+    instruction.argument_count = fp_call->argument_count;
+
+    if (!ir_emit(context, function, &instruction)) {
+      for (size_t i = 0; i < fp_call->argument_count; i++) {
+        ir_operand_destroy(&arguments[i]);
+      }
+      free(arguments);
+      ir_operand_destroy(&func_ptr);
+      ir_operand_destroy(&destination);
+      return 0;
+    }
+
+    for (size_t i = 0; i < fp_call->argument_count; i++) {
+      ir_operand_destroy(&arguments[i]);
+    }
+    free(arguments);
+    ir_operand_destroy(&func_ptr);
+
+    *out_value = destination;
+    return 1;
+  }
 
   default:
     ir_set_error(context, "Unsupported expression type in pure IR lowering");

@@ -36,6 +36,21 @@ static int symbol_table_types_compatible(const Type *lhs, const Type *rhs) {
   }
 
   switch (lhs->kind) {
+  case TYPE_FUNCTION_POINTER:
+    if (lhs->fn_param_count != rhs->fn_param_count) {
+      return 0;
+    }
+    if (!symbol_table_types_compatible(lhs->fn_return_type,
+                                       rhs->fn_return_type)) {
+      return 0;
+    }
+    for (size_t i = 0; i < lhs->fn_param_count; i++) {
+      if (!symbol_table_types_compatible(lhs->fn_param_types[i],
+                                         rhs->fn_param_types[i])) {
+        return 0;
+      }
+    }
+    return 1;
   case TYPE_ARRAY:
     return lhs->array_size == rhs->array_size &&
            symbol_table_types_compatible(lhs->base_type, rhs->base_type);
@@ -288,6 +303,9 @@ Type *type_create(TypeKind kind, const char *name) {
   type->alignment = 0;
   type->base_type = NULL;
   type->array_size = 0;
+  type->fn_param_types = NULL;
+  type->fn_param_count = 0;
+  type->fn_return_type = NULL;
 
   // Initialize struct-specific fields
   type->field_names = NULL;
@@ -347,10 +365,39 @@ void type_destroy(Type *type) {
     if (type->field_offsets) {
       free(type->field_offsets);
     }
+    if (type->fn_param_types) {
+      free(type->fn_param_types);
+    }
 
     free(type->name);
     free(type);
   }
+}
+
+Type *type_create_function_pointer(Type **param_types, size_t param_count,
+                                   Type *return_type) {
+  Type *type = type_create(TYPE_FUNCTION_POINTER, "function");
+  if (!type) {
+    return NULL;
+  }
+
+  type->size = 8;
+  type->alignment = 8;
+  type->fn_param_count = param_count;
+  type->fn_return_type = return_type;
+
+  if (param_count > 0) {
+    type->fn_param_types = malloc(param_count * sizeof(Type *));
+    if (!type->fn_param_types) {
+      type_destroy(type);
+      return NULL;
+    }
+    for (size_t i = 0; i < param_count; i++) {
+      type->fn_param_types[i] = param_types ? param_types[i] : NULL;
+    }
+  }
+
+  return type;
 }
 
 Scope *symbol_table_get_current_scope(SymbolTable *table) {

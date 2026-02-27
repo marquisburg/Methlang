@@ -39,7 +39,106 @@ struct SockAddrIn {
 Link the compiled assembly with the C runtime and any required libraries. For programs using `new` (GC), include `gc.c` in the link. Example:
 
 ```bash
+# Windows (Winsock2)
 gcc -nostartfiles main.o gc.o -o main -lws2_32 -lkernel32
 ```
 
 Use `-nostartfiles` when the program provides its own entry point (e.g. `_start` that calls `main`).
+
+## POSIX Networking (Linux / macOS)
+
+For networking on Linux or macOS, use `stdlib/std/net_posix.masm`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
+
+**Link command:**
+
+```bash
+# Linux
+gcc -o myapp output.s stdlib/posix_helpers.c -lpthread
+
+# macOS
+gcc -o myapp output.s stdlib/posix_helpers.c
+```
+
+**With GC runtime:**
+
+```bash
+# Linux
+gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c -lpthread
+
+# macOS
+gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c
+```
+
+The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `recv`, `close`) are in libc on both Linux and macOS, so no extra libraries are needed beyond the C runtime. The `posix_helpers.c` file provides:
+
+- `posix_get_errno()` – thread-safe errno access
+- `posix_cas_i32()` – atomic compare-and-swap
+- `posix_yield()` – CPU yield for spin locks
+- `posix_atomic_exchange_i32()` – atomic exchange
+
+**Note:** On macOS, `SOL_SOCKET` is 0xFFFF and `SO_REUSEADDR` is 4. On Linux, they are 1 and 2 respectively. Use the constants from `std/net_posix` (which default to Linux values) or override them at call site for macOS.
+
+## POSIX Networking (Linux / macOS)
+
+For networking on Linux or macOS, use `stdlib/std/net_posix.masm`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
+
+**Link command:**
+
+```bash
+# Linux
+gcc -o myapp output.s stdlib/posix_helpers.c -lpthread
+
+# macOS
+gcc -o myapp output.s stdlib/posix_helpers.c
+```
+
+**With GC runtime:**
+
+```bash
+# Linux
+gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c -lpthread
+
+# macOS
+gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c
+```
+
+The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `recv`, `close`) are in libc on both Linux and macOS, so no extra libraries are needed beyond the C runtime. The `posix_helpers.c` file provides:
+
+- `posix_get_errno()` – thread-safe errno access
+- `posix_cas_i32()` – atomic compare-and-swap
+- `posix_yield()` – CPU yield for spin locks
+- `posix_atomic_exchange_i32()` – atomic exchange
+
+**Note:** On macOS, `SOL_SOCKET` is 0xFFFF and `SO_REUSEADDR` is 4. On Linux, they are 1 and 2 respectively. Use the constants from `std/net_posix` (which default to Linux values) or override them at call site for macOS.
+
+
+For networking on Linux or macOS, use `stdlib/std/net_posix.masm`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
+
+**Link command:**
+
+```bash
+# Linux
+gcc -o myapp output.s stdlib/posix_helpers.c -lpthread
+
+# macOS
+gcc -o myapp output.s stdlib/posix_helpers.c
+```
+
+**With GC runtime:**
+
+```bash
+# Linux
+gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c -lpthread
+
+# macOS
+gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c
+```
+
+The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `recv`, `close`) are in libc on both Linux and macOS, so no extra libraries are needed beyond the C runtime. The `posix_helpers.c` file provides:
+- `posix_get_errno()` – thread-safe errno access
+- `posix_cas_i32()` – atomic compare-and-swap
+- `posix_yield()` – CPU yield for spin locks
+- `posix_atomic_exchange_i32()` – atomic exchange
+
+**Note:** On macOS, `SOL_SOCKET` is 0xFFFF and `SO_REUSEADDR` is 4. On Linux, they are 1 and 2 respectively. Use the constants from `std/net_posix` (which default to Linux values) or override them at call site for macOS.
+

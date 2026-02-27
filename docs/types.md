@@ -40,6 +40,57 @@ The null pointer is written `0`. Pointers and `0` are comparable for equality.
 
 **Null dereference:** Dereferencing a null pointer (`*p` when `p` is 0) produces undefined behavior. On typical systems it results in a crash (access violation). The compiler does not insert null checks.
 
+## Function Pointer Types
+
+Function pointers are first-class values that can be stored, passed as arguments, and called indirectly. They enable callbacks and function references.
+
+### Function Pointer Type Syntax
+
+Function pointer types use the `fn` keyword with parameter types and return type:
+
+```masm
+var fp: fn(int32, int32) -> int32;  // pointer to function taking (int32, int32) returning int32
+var void_fn: fn() -> void;           // pointer to function taking nothing returning nothing
+```
+
+### Taking Function Addresses
+
+Use the address-of operator `&` to create a function pointer:
+
+```masm
+function add(a: int32, b: int32) -> int32 {
+  return a + b;
+}
+
+var fp: fn(int32, int32) -> int32;
+fp = &add;  // & takes the address of a function
+```
+
+### Calling Through Function Pointers
+
+Call a function pointer like a regular function:
+
+```masm
+var result: int32 = fp(3, 4);  // calls the function pointed to by fp
+```
+
+### Function Pointer Use Cases
+
+Function pointers are useful for callbacks, strategy patterns, and C interop:
+
+```masm
+// Callback pattern
+function apply(op: fn(int32, int32) -> int32, a: int32, b: int32) -> int32 {
+  return op(a, b);
+}
+
+function main() -> int32 {
+  return apply(&add, 5, 3);  // passes add as callback
+}
+```
+
+**Type equality:** Two function pointer types are equal if they have the same parameter types and return type. `fn(int32) -> int32` is compatible with `fn(int32) -> int32` but not with `fn(int32, int32) -> int32`.
+
 ## Array Types
 
 Fixed-size arrays use `[N]` where N is a constant. Arrays are value types; the elements are laid out contiguously. Indexing is zero-based.

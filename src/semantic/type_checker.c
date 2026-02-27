@@ -146,6 +146,22 @@ static int type_checker_types_equal(const Type *lhs, const Type *rhs) {
       return strcmp(lhs->name, rhs->name) == 0;
     }
     return lhs->name == rhs->name;
+  case TYPE_FUNCTION_POINTER:
+    // Function pointer types with same signature are equal
+    if (lhs->fn_param_count != rhs->fn_param_count) {
+      return 0;
+    }
+    // Check return type
+    if (!type_checker_types_equal(lhs->fn_return_type, rhs->fn_return_type)) {
+      return 0;
+    }
+    // Check parameter types
+    for (size_t i = 0; i < lhs->fn_param_count; i++) {
+      if (!type_checker_types_equal(lhs->fn_param_types[i], rhs->fn_param_types[i])) {
+        return 0;
+      }
+    }
+    return 1;
   default:
     return 1;
   }
@@ -854,6 +870,31 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     }
 
     if (strcmp(unop->operator, "&") == 0) {
+      // Check if operand is an identifier that refers to a function
+      if (unop->operand->type == AST_IDENTIFIER) {
+        Identifier *id = (Identifier *)unop->operand->data;
+        if (id && id->name) {
+          Symbol *sym = symbol_table_lookup(checker->symbol_table, id->name);
+          if (sym && sym->kind == SYMBOL_FUNCTION) {
+            // Taking address of a function - create function pointer type
+            Type **param_types = sym->data.function.parameter_types;
+            size_t param_count = sym->data.function.parameter_count;
+            Type *return_type = sym->data.function.return_type;
+            if (!return_type) {
+              return_type = checker->builtin_void;
+            }
+            Type *fp_type = type_create_function_pointer(param_types, param_count, return_type);
+            if (!fp_type) {
+              type_checker_set_error_at_location(checker, expression->location,
+                                                 "Failed to create function pointer type");
+              return NULL;
+            }
+            return fp_type;
+          }
+        }
+      }
+
+      // Not a function reference - treat as regular address-of
       if (!type_checker_is_lvalue_expression(unop->operand)) {
         type_checker_set_error_at_location(
             checker, unop->operand->location,
@@ -930,6 +971,18 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       return operand_type;
     }
 
+    if (strcmp(unop->operator, "!") == 0) {
+      if (!type_checker_is_numeric_type(operand_type) &&
+          operand_type->kind != TYPE_POINTER) {
+        type_checker_report_type_mismatch(checker, unop->operand->location,
+                                          "numeric or pointer type",
+                                          operand_type->name);
+        return NULL;
+      }
+      // Logical NOT always produces an int32 (0 or 1)
+      return checker->builtin_int32;
+    }
+
     type_checker_set_error_at_location(checker, expression->location,
                                        "Unsupported unary operator '%s'",
                                        unop->operator);
@@ -944,6 +997,38 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       type_checker_report_undefined_symbol(checker, expression->location,
                                            call->function_name, "function");
       return NULL;
+    }
+
+    /* Variable with function pointer type can be called like a function */
+    if (func_symbol->kind == SYMBOL_VARIABLE &&
+        func_symbol->type && func_symbol->type->kind == TYPE_FUNCTION_POINTER) {
+      call->is_indirect_call = 1;
+      Type *fp_type = func_symbol->type;
+      if (call->argument_count != fp_type->fn_param_count) {
+        char error_msg[512];
+        snprintf(error_msg, sizeof(error_msg),
+                 "Function pointer expects %llu arguments, got %llu",
+                 (unsigned long long)fp_type->fn_param_count,
+                 (unsigned long long)call->argument_count);
+        type_checker_set_error_at_location(checker, expression->location,
+                                           error_msg);
+        return NULL;
+      }
+      for (size_t i = 0; i < call->argument_count; i++) {
+        Type *arg_type = type_checker_infer_type(checker, call->arguments[i]);
+        if (!arg_type)
+          return NULL;
+        Type *param_type = fp_type->fn_param_types[i];
+        int is_null = (param_type && param_type->kind == TYPE_POINTER &&
+                       type_checker_is_null_pointer_constant(call->arguments[i]));
+        if (!is_null &&
+            !type_checker_is_assignable(checker, param_type, arg_type)) {
+          type_checker_report_type_mismatch(checker, call->arguments[i]->location,
+                                            param_type->name, arg_type->name);
+          return NULL;
+        }
+      }
+      return fp_type->fn_return_type;
     }
 
     if (func_symbol->kind != SYMBOL_FUNCTION) {
@@ -1005,6 +1090,80 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     }
 
     return func_symbol->data.function.return_type;
+  }
+
+  case AST_FUNC_PTR_CALL: {
+    FuncPtrCall *fp_call = (FuncPtrCall *)expression->data;
+    if (!fp_call || !fp_call->function) {
+      type_checker_set_error_at_location(checker, expression->location,
+                                       "Invalid function pointer call");
+      return NULL;
+    }
+
+    Type *func_type = type_checker_infer_type(checker, fp_call->function);
+    if (!func_type) {
+      return NULL;
+    }
+
+    /* If expression is identifier resolving to a function, synthesize function pointer type */
+    if (func_type->kind != TYPE_FUNCTION_POINTER &&
+        fp_call->function->type == AST_IDENTIFIER) {
+      Identifier *id = (Identifier *)fp_call->function->data;
+      Symbol *sym = symbol_table_lookup(checker->symbol_table, id->name);
+      if (sym && sym->kind == SYMBOL_FUNCTION) {
+        Type **param_types = sym->data.function.parameter_types;
+        size_t param_count = sym->data.function.parameter_count;
+        Type *return_type = sym->data.function.return_type;
+        if (!return_type)
+          return_type = checker->builtin_void;
+        func_type = type_create_function_pointer(param_types, param_count,
+                                                 return_type);
+        if (!func_type) {
+          type_checker_set_error_at_location(checker, expression->location,
+                                             "Failed to create function pointer type");
+          return NULL;
+        }
+      }
+    }
+
+    if (func_type->kind != TYPE_FUNCTION_POINTER) {
+      type_checker_set_error_at_location(checker, expression->location,
+                                       "Cannot call non-function-pointer expression");
+      return NULL;
+    }
+
+    // Check argument count
+    if (fp_call->argument_count != func_type->fn_param_count) {
+      char error_msg[512];
+      snprintf(error_msg, sizeof(error_msg),
+               "Function pointer expects %llu arguments, got %llu",
+               (unsigned long long)func_type->fn_param_count,
+               (unsigned long long)fp_call->argument_count);
+      type_checker_set_error_at_location(checker, expression->location, error_msg);
+      return NULL;
+    }
+
+    // Check each argument type
+    for (size_t i = 0; i < fp_call->argument_count; i++) {
+      Type *arg_type = type_checker_infer_type(checker, fp_call->arguments[i]);
+      if (!arg_type) {
+        return NULL;
+      }
+
+      Type *param_type = func_type->fn_param_types[i];
+      int is_null_pointer_arg =
+          (param_type && param_type->kind == TYPE_POINTER &&
+           type_checker_is_null_pointer_constant(fp_call->arguments[i]));
+      if (!is_null_pointer_arg &&
+          !type_checker_is_assignable(checker, param_type, arg_type)) {
+        type_checker_report_type_mismatch(checker, fp_call->arguments[i]->location,
+                                        param_type->name, arg_type->name);
+        return NULL;
+      }
+    }
+
+    // Return the function pointer's return type
+    return func_type->fn_return_type;
   }
 
   case AST_MEMBER_ACCESS: {
@@ -1268,6 +1427,93 @@ Type *type_checker_get_builtin_type(TypeChecker *checker, TypeKind kind) {
   }
 }
 
+static Type *type_checker_parse_function_pointer_type(TypeChecker *checker,
+                                                     const char *name) {
+  if (!checker || !name) {
+    return NULL;
+  }
+
+  // Check if it's a function pointer type: fn(param1,param2)->returntype
+  if (strlen(name) < 4 || strncmp(name, "fn(", 3) != 0) {
+    return NULL;
+  }
+
+  // Find the -> that separates params from return type
+  const char *arrow = strstr(name, ")->");
+  if (!arrow) {
+    return NULL;
+  }
+
+  // Parse parameter types
+  const char *params_start = name + 3; // skip "fn("
+  const char *params_end = arrow;
+  size_t params_len = params_end - params_start;
+
+  Type **param_types = NULL;
+  size_t param_count = 0;
+
+  if (params_len > 0) {
+    // Parse comma-separated parameter types
+    char *params_copy = malloc(params_len + 1);
+    if (!params_copy) {
+      return NULL;
+    }
+    memcpy(params_copy, params_start, params_len);
+    params_copy[params_len] = '\0';
+
+    // Count parameters by counting commas
+    param_count = 1;
+    for (size_t i = 0; i < params_len; i++) {
+      if (params_copy[i] == ',') {
+        param_count++;
+      }
+    }
+
+    param_types = calloc(param_count, sizeof(Type *));
+    if (!param_types) {
+      free(params_copy);
+      return NULL;
+    }
+
+    // Parse each parameter type
+    char *param_start = params_copy;
+    size_t param_idx = 0;
+    for (size_t i = 0; i <= params_len; i++) {
+      if (params_copy[i] == ',' || params_copy[i] == '\0') {
+        params_copy[i] = '\0';
+        Type *param_type = type_checker_get_type_by_name(checker, param_start);
+        if (!param_type) {
+          free(params_copy);
+          free(param_types);
+          return NULL;
+        }
+        if (param_idx < param_count) {
+          param_types[param_idx++] = param_type;
+        }
+        param_start = params_copy + i + 1;
+      }
+    }
+
+    free(params_copy);
+  }
+
+  // Parse return type
+  const char *return_type_start = arrow + 3; // skip ")->"
+  Type *return_type = type_checker_get_type_by_name(checker, return_type_start);
+  if (!return_type) {
+    // Default to void if return type not found
+    return_type = checker->builtin_void;
+  }
+
+  Type *fp_type = type_create_function_pointer(param_types, param_count, return_type);
+  if (!fp_type) {
+    free(param_types);
+    return NULL;
+  }
+
+  return fp_type;
+}
+
 Type *type_checker_get_type_by_name(TypeChecker *checker, const char *name) {
   if (!checker || !name)
     return NULL;
@@ -1299,6 +1545,14 @@ Type *type_checker_get_type_by_name(TypeChecker *checker, const char *name) {
     return checker->builtin_cstring;
   if (strcmp(name, "void") == 0)
     return checker->builtin_void;
+
+  // Check for function pointer types: fn(param1,param2)->returntype
+  if (strncmp(name, "fn(", 3) == 0) {
+    Type *fp_type = type_checker_parse_function_pointer_type(checker, name);
+    if (fp_type) {
+      return fp_type;
+    }
+  }
 
   if (strchr(name, '[') && strchr(name, ']')) {
     Type *array_type = type_checker_parse_array_type(checker, name);

@@ -363,6 +363,8 @@ $cases = @(
 
   @{ Name = "stress_integrated"; Path = "tests/test_stress_integrated.masm"; ShouldSucceed = $true },
   @{ Name = "bitwise"; Path = "tests/test_bitwise.masm"; ShouldSucceed = $true },
+  @{ Name = "modulo"; Path = "tests/test_modulo.masm"; ShouldSucceed = $true },
+  @{ Name = "logical_not"; Path = "tests/test_logical_not.masm"; ShouldSucceed = $true },
   @{ Name = "string_concat"; Path = "tests/test_string_concat.masm"; ShouldSucceed = $true },
   @{ Name = "defer_single"; Path = "tests/test_defer_single.masm"; ShouldSucceed = $true },
   @{ Name = "defer_lifo"; Path = "tests/test_defer_lifo.masm"; ShouldSucceed = $true },
@@ -627,6 +629,46 @@ foreach ($case in $cases) {
     $failed++
     Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
   }
+}
+
+# Function pointer test: compile, assemble, link, and run
+$total++
+try {
+  $fpAsm = Join-Path $tmpDir "test_function_pointer.s"
+  $fpObj = Join-Path $tmpDir "test_function_pointer.o"
+  $fpGc = Join-Path $tmpDir "test_function_pointer_gc.o"
+  $fpExe = Join-Path $tmpDir "test_function_pointer.exe"
+
+  $fpOut = & $CompilerPath tests\test_function_pointer.masm -o $fpAsm 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Function pointer compile failed: $fpOut"
+  }
+
+  & nasm -f win64 $fpAsm -o $fpObj 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Function pointer NASM assembly failed"
+  }
+
+  & gcc -c src\runtime\gc.c -o $fpGc -Isrc 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Function pointer gc.c compile failed"
+  }
+
+  & gcc -nostartfiles $fpObj $fpGc -o $fpExe -lkernel32 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Function pointer link failed (use -nostartfiles like web server)"
+  }
+
+  $fpResult = & $fpExe 2>&1
+  if ($LASTEXITCODE -ne 1) {
+    throw "Function pointer test exited with $LASTEXITCODE (expected 1)"
+  }
+
+  Write-CaseResult -Name "function_pointer" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "function_pointer" -Passed $false -Reason $_.Exception.Message
 }
 
 if (-not $SkipRuntime) {

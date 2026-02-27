@@ -104,7 +104,7 @@ Token lexer_next_token(Lexer *lexer) {
       lexer->column += 2;
       return token;
     }
-    token.type = TOKEN_ERROR;
+    token.type = TOKEN_NOT;
     break;
   case '<':
     if (lexer->position + 1 < lexer->length) {
@@ -197,6 +197,9 @@ Token lexer_next_token(Lexer *lexer) {
   case '/':
     // Note: comments (//) are already handled above before this switch
     token.type = TOKEN_DIVIDE;
+    break;
+  case '%':
+    token.type = TOKEN_PERCENT;
     break;
   case '.':
     token.type = TOKEN_DOT;
@@ -450,6 +453,8 @@ Token lexer_next_token(Lexer *lexer) {
       token.type = TOKEN_THIS;
     else if (strcmp(token.value, "new") == 0)
       token.type = TOKEN_NEW;
+    else if (strcmp(token.value, "fn") == 0)
+      token.type = TOKEN_FN;
 
     // Type keywords
     else if (strcmp(token.value, "int8") == 0)

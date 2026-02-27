@@ -15,6 +15,7 @@ typedef enum {
   AST_METHOD_DECLARATION,
   AST_ASSIGNMENT,
   AST_FUNCTION_CALL,
+  AST_FUNC_PTR_CALL,
   AST_RETURN_STATEMENT,
   AST_IF_STATEMENT,
   AST_WHILE_STATEMENT,
@@ -121,7 +122,14 @@ typedef struct {
   ASTNode *object; // Non-null for method calls (obj.method(args))
   char **type_args;
   size_t type_arg_count;
+  int is_indirect_call; // 1 if callee is a variable with function pointer type
 } CallExpression;
+
+typedef struct {
+  ASTNode *function;
+  ASTNode **arguments;
+  size_t argument_count;
+} FuncPtrCall;
 
 typedef struct {
   char *variable_name;
@@ -243,6 +251,9 @@ ASTNode *ast_create_enum_declaration(const char *name, EnumVariant *variants,
 ASTNode *ast_create_call_expression(const char *function_name,
                                     ASTNode **arguments, size_t argument_count,
                                     SourceLocation location);
+ASTNode *ast_create_func_ptr_call(ASTNode *function, ASTNode **arguments,
+                                  size_t argument_count,
+                                  SourceLocation location);
 ASTNode *ast_create_assignment(const char *variable_name, ASTNode *value,
                                SourceLocation location);
 ASTNode *ast_create_inline_asm(const char *assembly_code,
