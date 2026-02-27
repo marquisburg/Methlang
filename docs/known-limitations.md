@@ -21,15 +21,25 @@ No explicit cast syntax. The compiler may suggest `(type)value` in error message
 
 No pointer arithmetic with `ptr + n`. Use indexing `ptr[i]` instead, which scales by element size.
 
+Null pointer dereference is diagnosed for constant nulls such as `*0`, and runtime null checks are emitted for dynamic dereference and pointer-based indexing. Pointers originating from C or inline assembly can still be invalid in ways the compiler cannot prove.
+
+Fixed-size array indexing is checked at compile time for constant indices and guarded at runtime for dynamic indices. Pointer indexing is still unchecked for bounds because the compiler does not know the pointee extent.
+
 No compound assignment (`+=`, `-=`, `*=`, `/=`). Use `x = x + 1` instead of `x += 1`.
 
 No labeled `break` or `continue` (e.g. `break outer`). Use flags or restructure nested loops.
+
+Deferred calls capture variables by reference, not by value. In loops, copy the current value into a temporary first if the deferred call should see the declaration-time value.
+
+`errdefer` is function-only and convention-based. It is valid only inside functions, and any non-zero explicit return value is treated as an error.
 
 Unreachable code analysis is currently block-local and conservative; some dead paths in complex control-flow may not be diagnosed yet.
 
 No function pointers. Functions cannot be passed as arguments or stored in variables. For callbacks, use C externs.
 
-No string concatenation with `+`. Allocate a buffer and copy bytes manually.
+String concatenation via `+` is now supported, but it allocates via the GC runtime (`gc_alloc`). Link `gc.c` and initialize the runtime before using `string + string`.
+
+Managed pointers that cross into C remain a hazard. The compiler now warns when a managed struct pointer is passed to an `extern function` or stored in an `extern` variable, but C code that retains such pointers must still register the storage slot with `gc_register_root`.
 
 No conditional imports. All `import` directives are unconditional; there is no platform or flag-based import.
 

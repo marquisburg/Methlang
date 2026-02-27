@@ -11,7 +11,6 @@ Pattern checks for common issues based on the MethASM language reference:
 
 **Unsupported operators:**
 - **Modulo `%`** — Use a helper or inline logic
-- **Bitwise `~`, `<<`, `>>`, `|`, `^`** — Use inline assembly or C externs (`&` is valid for address-of, `||` for logical OR)
 - **Unary logical NOT `!`** — Use `== 0` or `!= 0` for comparisons
 - **Compound assignment `+=`, `-=`, `*=`, `/=`** — Use `x = x + 1` instead of `x += 1`
 

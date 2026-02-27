@@ -1,0 +1,10 @@
+import "std/io";
+
+function a() { puts(cstr("A\n")); }
+
+function main() -> int32 {
+  if (1) {
+    defer a();
+  }
+  return 0;
+}

@@ -1,0 +1,22 @@
+import "std/io";
+
+function a() { puts(cstr("A\n")); }
+function b() { puts(cstr("B\n")); }
+function c() { puts(cstr("C\n")); }
+function d() { puts(cstr("D\n")); }
+function e() { puts(cstr("E\n")); }
+function f() { puts(cstr("F\n")); }
+
+function main() -> int32 {
+  defer a();
+  defer b();
+  {
+    defer c();
+    {
+      defer d();
+      defer e();
+    }
+    defer f();
+  }
+  return 0;
+}

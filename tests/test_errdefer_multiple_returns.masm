@@ -1,0 +1,16 @@
+import "std/io";
+
+function ok() { puts(cstr("OK\n")); }
+function err() { puts(cstr("ERR\n")); }
+
+function main() -> int32 {
+  if (1) {
+    errdefer err();
+    defer ok();
+    return 2;
+  }
+
+  errdefer err();
+  defer ok();
+  return 0;
+}

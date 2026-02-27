@@ -1,0 +1,14 @@
+import "std/io";
+
+function before() { puts(cstr("BEFORE\n")); }
+function inside() { puts(cstr("INSIDE\n")); }
+function after() { puts(cstr("AFTER\n")); }
+
+function main() -> int32 {
+  before();
+  defer {
+    inside();
+    after();
+  }
+  return 0;
+}

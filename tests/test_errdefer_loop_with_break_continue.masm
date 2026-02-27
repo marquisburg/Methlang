@@ -1,0 +1,36 @@
+import "std/io";
+
+function iter_err() { puts(cstr("ITER_ERR\n")); }
+function iter_ok() { puts(cstr("ITER_OK\n")); }
+function loop_err() { puts(cstr("LOOP_ERR\n")); }
+function loop_ok() { puts(cstr("LOOP_OK\n")); }
+function outer_err() { puts(cstr("OUTER_ERR\n")); }
+function outer_ok() { puts(cstr("OUTER_OK\n")); }
+
+function main() -> int32 {
+  errdefer outer_err();
+  defer outer_ok();
+
+  var i: int32 = 0;
+  while (i < 3) {
+    errdefer loop_err();
+    defer loop_ok();
+
+    if (i == 1) {
+      i = i + 1;
+      continue;
+    }
+
+    {
+      errdefer iter_err();
+      defer iter_ok();
+      if (i == 2) {
+        break;
+      }
+    }
+
+    i = i + 1;
+  }
+
+  return 0;
+}

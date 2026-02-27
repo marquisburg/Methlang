@@ -21,6 +21,8 @@ function main() -> int32 {
 }
 ```
 
+See [Imports](imports.md) for path resolution and `import_str`.
+
 ## With Prelude
 
 ```masm

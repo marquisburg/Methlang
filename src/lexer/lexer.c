@@ -107,24 +107,38 @@ Token lexer_next_token(Lexer *lexer) {
     token.type = TOKEN_ERROR;
     break;
   case '<':
-    if (lexer->position + 1 < lexer->length &&
-        lexer->source[lexer->position + 1] == '=') {
-      token.type = TOKEN_LESS_EQUALS;
-      token.value = strdup("<=");
-      lexer->position += 2;
-      lexer->column += 2;
-      return token;
+    if (lexer->position + 1 < lexer->length) {
+      if (lexer->source[lexer->position + 1] == '=') {
+        token.type = TOKEN_LESS_EQUALS;
+        token.value = strdup("<=");
+        lexer->position += 2;
+        lexer->column += 2;
+        return token;
+      } else if (lexer->source[lexer->position + 1] == '<') {
+        token.type = TOKEN_LSHIFT;
+        token.value = strdup("<<");
+        lexer->position += 2;
+        lexer->column += 2;
+        return token;
+      }
     }
     token.type = TOKEN_LESS_THAN;
     break;
   case '>':
-    if (lexer->position + 1 < lexer->length &&
-        lexer->source[lexer->position + 1] == '=') {
-      token.type = TOKEN_GREATER_EQUALS;
-      token.value = strdup(">=");
-      lexer->position += 2;
-      lexer->column += 2;
-      return token;
+    if (lexer->position + 1 < lexer->length) {
+      if (lexer->source[lexer->position + 1] == '=') {
+        token.type = TOKEN_GREATER_EQUALS;
+        token.value = strdup(">=");
+        lexer->position += 2;
+        lexer->column += 2;
+        return token;
+      } else if (lexer->source[lexer->position + 1] == '>') {
+        token.type = TOKEN_RSHIFT;
+        token.value = strdup(">>");
+        lexer->position += 2;
+        lexer->column += 2;
+        return token;
+      }
     }
     token.type = TOKEN_GREATER_THAN;
     break;
@@ -172,12 +186,14 @@ Token lexer_next_token(Lexer *lexer) {
       lexer->column += 2;
       return token;
     }
-    token.type = TOKEN_ERROR;
-    token.value = strdup("Unknown character: |");
-    lexer_set_error(lexer, token.value);
-    lexer->position++;
-    lexer->column++;
-    return token;
+    token.type = TOKEN_PIPE;
+    break;
+  case '^':
+    token.type = TOKEN_CARET;
+    break;
+  case '~':
+    token.type = TOKEN_TILDE;
+    break;
   case '/':
     // Note: comments (//) are already handled above before this switch
     token.type = TOKEN_DIVIDE;
@@ -280,9 +296,11 @@ Token lexer_next_token(Lexer *lexer) {
 
     lexer->position++;
     lexer->column++;
-    if (lexer->position >= lexer->length || lexer->source[lexer->position] != '\'') {
+    if (lexer->position >= lexer->length ||
+        lexer->source[lexer->position] != '\'') {
       token.type = TOKEN_ERROR;
-      token.value = strdup("Character literal must contain exactly one character");
+      token.value =
+          strdup("Character literal must contain exactly one character");
       lexer_set_error(lexer, token.value);
       return token;
     }
@@ -422,6 +440,10 @@ Token lexer_next_token(Lexer *lexer) {
       token.type = TOKEN_BREAK;
     else if (strcmp(token.value, "continue") == 0)
       token.type = TOKEN_CONTINUE;
+    else if (strcmp(token.value, "defer") == 0)
+      token.type = TOKEN_DEFER;
+    else if (strcmp(token.value, "errdefer") == 0)
+      token.type = TOKEN_ERRDEFER;
     else if (strcmp(token.value, "asm") == 0)
       token.type = TOKEN_ASM;
     else if (strcmp(token.value, "this") == 0)

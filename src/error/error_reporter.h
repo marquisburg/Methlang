@@ -22,9 +22,16 @@ typedef enum {
 #include "../parser/ast.h"
 
 typedef struct {
+  size_t line;
+  size_t column;
+  size_t length;
+} SourceSpan;
+
+typedef struct {
   ErrorType type;
   ErrorSeverity severity;
   SourceLocation location;
+  SourceSpan span;
   char *message;
   char *suggestion;
   char *code_snippet;
@@ -52,8 +59,15 @@ void error_reporter_add_error_with_suggestion(ErrorReporter *reporter,
                                               SourceLocation location,
                                               const char *message,
                                               const char *suggestion);
+void error_reporter_add_error_with_span(ErrorReporter *reporter, ErrorType type,
+                                        SourceSpan span, const char *message);
+void error_reporter_add_error_with_span_and_suggestion(
+    ErrorReporter *reporter, ErrorType type, SourceSpan span, const char *message,
+    const char *suggestion);
 void error_reporter_add_warning(ErrorReporter *reporter, ErrorType type,
                                 SourceLocation location, const char *message);
+void error_reporter_add_warning_with_span(ErrorReporter *reporter, ErrorType type,
+                                          SourceSpan span, const char *message);
 
 // Error display functions
 void error_reporter_print_errors(ErrorReporter *reporter);
@@ -64,6 +78,8 @@ int error_reporter_get_error_count(ErrorReporter *reporter);
 
 // Utility functions
 SourceLocation source_location_create(size_t line, size_t column);
+SourceSpan source_span_create(size_t line, size_t column, size_t length);
+SourceSpan source_span_from_location(SourceLocation location, size_t length);
 char *error_reporter_get_line_from_source(const char *source,
                                           size_t line_number);
 char *error_reporter_create_caret_line(size_t column, size_t length);

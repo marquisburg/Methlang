@@ -1,0 +1,10 @@
+import "std/io";
+
+function a() { puts(cstr("A\n")); }
+function b() { puts(cstr("B\n")); }
+
+function main() -> int32 {
+  defer a();
+  defer b();
+  return 0;
+}

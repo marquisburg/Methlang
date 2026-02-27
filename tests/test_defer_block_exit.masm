@@ -1,0 +1,16 @@
+import "std/io";
+
+function inner_defer() { puts(cstr("INNER\n")); }
+function after_block() { puts(cstr("AFTER\n")); }
+function outer_defer() { puts(cstr("OUTER\n")); }
+
+function main() -> int32 {
+  defer outer_defer();
+
+  {
+    defer inner_defer();
+  }
+
+  after_block();
+  return 0;
+}

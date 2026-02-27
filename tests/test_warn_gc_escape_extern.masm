@@ -1,0 +1,10 @@
+struct Blob {
+  value: int32
+}
+
+extern function sink(p: Blob*) -> void = "sink";
+
+function main() -> int32 {
+  sink(new Blob);
+  return 0;
+}

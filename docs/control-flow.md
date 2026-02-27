@@ -136,6 +136,402 @@ if (ptr != 0 && ptr->field > 0) {
 }
 ```
 
-## Unreachable Code
+## Defer and Errdefer
 
+`defer` schedules a statement to execute when the current scope exits, while `errdefer` schedules a statement to execute when returning a non-zero value from the current function. Both follow **LIFO (Last In, First Out)** ordering - the most recently deferred statement executes first.
+
+### Syntax and Basic Behavior
+
+Defer statements use the `defer` or `errdefer` keyword followed by a statement:
+
+```masm
+defer cleanup();          // Always runs on scope exit
+errdefer rollback();      // Runs on non-zero return
+```
+
+The current compiler accepts function calls, assignments, and blocks:
+
+```masm
+defer puts("cleanup");
+defer count = count + 1;
+defer {
+  flush();
+  close(handle);
+}
+errdefer handle_error_recovery();
+```
+
+> **Variable capture pitfall:** Deferred statements capture variables **by reference**, not by value. In a loop, `defer print_int(i)` will read `i` when the defer runs—at the end of each iteration—so every deferred call sees the **final** value of `i` after the increment. This causes subtle bugs. Use a temporary: `var current: int32 = i; defer print_int(current);` to capture the value at defer time.
+
+### Implementation Details
+
+**AST Representation:**
+- `defer` statements create `AST_DEFER_STATEMENT` nodes
+- `errdefer` statements create `AST_ERRDEFER_STATEMENT` nodes
+- Both contain a single `statement` field pointing to the deferred statement
+
+**IR Lowering Process:**
+1. **Stack Management:** Each scope has an `IRDeferStack` that tracks deferred statements
+2. **Scope Hierarchy:** `IRDeferScope` structures form a linked list, allowing nested scopes
+3. **Push Operation:** When encountering defer/errdefer, the compiler pushes the AST node onto the current scope's stack with an `is_err` flag
+4. **Emission:** At scope exit, the compiler emits deferred statements in reverse order (LIFO)
+
+**Data Structures:**
+```c
+typedef struct {
+    ASTNode *node;    // The defer/errdefer AST node
+    int is_err;       // 1 for errdefer, 0 for defer
+} IRDeferEntry;
+
+typedef struct {
+    IRDeferEntry *entries;
+    size_t count;
+    size_t capacity;
+} IRDeferStack;
+
+typedef struct {
+    IRDeferStack stack;
+    struct IRDeferScope *parent;  // Link to outer scope
+} IRDeferScope;
+```
+
+**Return Statement Handling:**
+For functions with errdefer statements, the compiler generates two code paths:
+1. **Error Path:** Emits both defer and errdefer statements
+2. **Success Path:** Emits only defer statements
+
+The return value is checked to determine which path to take, using generated labels like `errdefer_ok_N` and `errdefer_end_N`. This is convention-based: `0` means success and any non-zero return value is treated as an error, so `return 42;` also triggers `errdefer`.
+
+**Control Flow Integration:**
+- **Blocks:** Create new `IRDeferScope` with parent link to outer scope
+- **If/Else:** Each branch gets its own defer scope; deferred statements run when branch exits
+- **Loops:** Each iteration creates a new scope; deferred statements run at iteration end
+- **Break/Continue:** Trigger deferred statement emission before jumping
+
+The same success/error split is used for explicit `return` and for implicit fall-through at the end of a function body.
+
+### LIFO Ordering and Execution
+
+Deferred statements execute in reverse order of declaration. This is crucial for resource management where cleanup must happen in reverse of acquisition:
+
+```masm
+func example() {
+  defer puts("first");    // Executes third
+  defer puts("second");   // Executes second  
+  defer puts("third");    // Executes first
+  
+  // Function body...
+  // Output: "third", "second", "first"
+}
+```
+
+**Mixed defer and errdefer:**
+```masm
+func mixed_example() {
+  defer puts("always 1");
+  errdefer puts("error only");
+  defer puts("always 2");
+  
+  if (error_condition) {
+    return err();  // Output: "always 2", "error only", "always 1"
+  }
+  
+  return ok();     // Output: "always 2", "always 1"
+}
+```
+
+### Scope-Level vs Function-Level Behavior
+
+**Function scope:** defer/errdefer execute when the function returns via any path (return, break from main loop, etc.)
+
+**Block scope:** defer/errdefer execute when the block exits, including if/else branches, loop bodies, and switch cases:
+
+```masm
+func demo() {
+  defer puts("function exit");
+  
+  if (condition) {
+    defer puts("if branch exit");  // Runs before function defer
+    // ... branch code ...
+  } else {
+    defer puts("else branch exit");  // Runs before function defer
+    // ... else code ...
+  }
+  
+  // Output on condition=true: "if branch exit", "function exit"
+  // Output on condition=false: "else branch exit", "function exit"
+}
+```
+
+### Control Flow Integration
+
+**Loops:** Each iteration gets its own defer scope. Deferred statements run at the end of each iteration. **Beware:** variables used in deferred statements are captured by reference (see pitfall above)—use a temporary if you need the value at defer time.
+
+```masm
+func loop_example() {
+  defer puts("function cleanup");
+  
+  var i: int32 = 0;
+  while (i < 3) {
+    defer puts("iteration cleanup");  // Runs each iteration
+    puts("iteration start");
+    i = i + 1;
+    
+    if (i == 2) {
+      break;  // Runs iteration defer, then function defer
+    }
+  }
+  
+  // Output: "iteration start", "iteration cleanup", 
+  //         "iteration start", "iteration cleanup",
+  //         "function cleanup"
+}
+```
+
+**Switch statements:** Each case that creates a block gets its own defer scope:
+
+```masm
+func switch_demo(value: int32) {
+  defer puts("function cleanup");
+  
+  switch (value) {
+    case 1: {
+      defer puts("case 1 cleanup");
+      // ... case 1 code ...
+    }
+    case 2: {
+      defer puts("case 2 cleanup");
+      // ... case 2 code ...
+    }
+    default: {
+      defer puts("default cleanup");
+      // ... default code ...
+    }
+  }
+  
+  // Only one case's defer runs, plus function defer
+}
+```
+
+Because `switch` allows fall-through, cleanup order becomes harder to reason about if execution crosses multiple case bodies. Prefer explicit `break` when a case owns deferred cleanup.
+
+**Break and Continue:** These statements trigger deferred statement emission before jumping:
+
+```masm
+func control_flow_demo() {
+  defer puts("function cleanup");
+  
+  while (1) {
+    defer puts("iteration cleanup");
+    
+    if (early_exit) {
+      break;  // Runs "iteration cleanup", then "function cleanup"
+    }
+    
+    if (skip_iteration) {
+      continue;  // Runs "iteration cleanup", then next iteration
+    }
+  }
+}
+```
+
+### Error Handling Patterns
+
+**Resource cleanup with error recovery:**
+```masm
+func process_file(filename: string) {
+  var file: File* = fopen(filename, "r");
+  if (file == 0) {
+    return err();  // No defer to run yet
+  }
+  defer fclose(file);  // Always runs if file was opened
+  
+  var buffer: uint8* = malloc(4096);
+  if (buffer == 0) {
+    return err();  // Runs defer: fclose(file)
+  }
+  errdefer free(buffer);  // Only on error
+  
+  var data: string = read_file_content(file, buffer, 4096);
+  if (data.length == 0) {
+    return err();  // Runs errdefer: free(buffer), then defer: fclose(file)
+  }
+  
+  // Process successful data...
+  return ok();  // Runs only defer: fclose(file)
+}
+```
+
+**Nested error handling:**
+```masm
+func nested_operations() {
+  defer puts("outer cleanup");
+  
+  var resource1: Resource* = acquire_resource();
+  if (resource1 == 0) {
+    return err();
+  }
+  defer release_resource(resource1);
+  
+  {
+    defer puts("inner cleanup");
+    
+    var resource2: Resource* = acquire_resource();
+    if (resource2 == 0) {
+      return err();  // Runs "inner cleanup", "release_resource(resource1)", "outer cleanup"
+    }
+    defer release_resource(resource2);
+    
+    if (processing_error) {
+      return err();  // Runs "release_resource(resource2)", "inner cleanup", 
+                   // "release_resource(resource1)", "outer cleanup"
+    }
+    
+    // Success path...
+    return ok();  // Runs "release_resource(resource2)", "inner cleanup", 
+                   // "release_resource(resource1)", "outer cleanup"
+  }
+}
+```
+
+### Common Pitfalls and Limitations
+
+**Top-level defer:** defer/errdefer can only be used inside functions:
+
+```masm
+// ERROR: defer outside function
+defer puts("this fails");
+
+func valid_function() {
+  defer puts("this works");  // OK
+}
+```
+
+**Supported deferred statements:** `defer` and `errdefer` currently support function calls, assignments, and blocks:
+
+```masm
+func example() {
+  defer close_file(file);    // OK
+  errdefer update_value(x);  // OK
+  defer x = 1;               // OK
+  errdefer {
+    x = x + 1;
+    update_value(x);
+  }
+}
+```
+
+**Variable capture:** Deferred statements capture variables by reference, not value (see the warning callout above). In a loop, `defer print_int(i)` reads `i` when the defer runs, so you get the value at scope exit—not at defer declaration time. Use a temporary so each iteration has its own variable:
+
+```masm
+while (i < 3) {
+  var current: int32 = i;
+  defer print_int(current);  // current holds the value from start of iteration
+  i = i + 1;
+}
+```
+
+**Performance considerations:** Each defer statement adds runtime overhead for stack management and conditional execution. In performance-critical code, consider manual cleanup for simple cases.
+
+### Resource Management Patterns
+
+**File handling with multiple resources:**
+```masm
+func copy_file(src: string, dst: string) {
+  var src_file: File* = fopen(src, "r");
+  if (src_file == 0) {
+    return err();
+  }
+  defer fclose(src_file);
+  
+  var dst_file: File* = fopen(dst, "w");
+  if (dst_file == 0) {
+    return err();
+  }
+  defer fclose(dst_file);  // Runs first (LIFO)
+  
+  var buffer: uint8* = malloc(4096);
+  if (buffer == 0) {
+    return err();
+  }
+  errdefer free(buffer);
+  
+  // Copy loop...
+  while (!feof(src_file)) {
+    var bytes: int32 = fread(buffer, 1, 4096, src_file);
+    if (bytes <= 0) {
+      return err();  // Free buffer, close dst_file, close src_file
+    }
+    fwrite(buffer, 1, bytes, dst_file);
+  }
+  
+  free(buffer);  // Manual cleanup before success return
+  return ok();     // Close dst_file, close src_file
+}
+```
+
+**Socket management in servers:**
+```masm
+func handle_client_connection(client_socket: int32) {
+  defer close_socket(client_socket);
+  
+  // Set socket options
+  if (set_socket_options(client_socket) != 0) {
+    return err();  // Runs defer: close_socket(client_socket)
+  }
+  
+  var buffer: uint8* = malloc(8192);
+  if (buffer == 0) {
+    return err();
+  }
+  errdefer free(buffer);
+  
+  // Read request loop
+  while (1) {
+    var bytes: int32 = recv(client_socket, buffer, 8192, 0);
+    if (bytes <= 0) {
+      break;  // Client disconnected or error
+    }
+    
+    if (process_request(buffer, bytes) != 0) {
+      return err();  // Free buffer, close socket
+    }
+  }
+  
+  return ok();  // Free buffer, close socket
+}
+```
+
+**Memory allocation chains:**
+```masm
+func complex_allocation_chain() {
+  var resource1: Resource* = allocate_resource();
+  if (resource1 == 0) {
+    return err();
+  }
+  defer free_resource(resource1);
+  
+  var resource2: Resource* = allocate_resource();
+  if (resource2 == 0) {
+    return err();
+  }
+  defer free_resource(resource2);
+  
+  var temp_buffer: uint8* = malloc(1024);
+  if (temp_buffer == 0) {
+    return err();
+  }
+  errdefer free(temp_buffer);  // Only on error
+  
+  if (complex_processing(resource1, resource2, temp_buffer) != 0) {
+    return err();  // Free temp_buffer, resource2, resource1
+  }
+  
+  // Success: manually clean up temp_buffer
+  free(temp_buffer);
+  return ok();     // Free resource2, resource1
+}
+```
+
+## Unreachable Code
 The compiler emits a warning for unreachable statements that appear after an unconditional `return`, `break`, or `continue` in the same block.

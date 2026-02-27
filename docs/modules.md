@@ -2,6 +2,8 @@
 
 MethASM supports a module system. Code is organized into files; one file can import declarations from another. Imports are resolved at compile time and flattened into a single program.
 
+For path resolution, compiler options, and `import_str`, see [Imports](imports.md).
+
 ## Import Syntax
 
 The `import` directive takes a string literal path. The path is resolved relative to the current file, or via the stdlib or `-I` directories. The extension `.masm` is added if omitted.

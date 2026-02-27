@@ -1,7 +1,0 @@
-// Test that imports work: import test_module.masm and use its functions
-import "test_module.masm"
-
-function main() -> int64 {
-  var result: int64 = add(10, 32)
-  return result
-}

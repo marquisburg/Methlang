@@ -1,0 +1,1530 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<meta name='description' content='Complete MethASM language documentation, tutorials, and guides.'>
+<title>MethASM — Documentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-color: #05050A;
+    --text-main: #E2E8F0;
+    --text-muted: #94A3B8;
+    --accent-1: #6366F1;
+    --accent-2: #8B5CF6;
+    --accent-3: #EC4899;
+    --accent-4: #10B981;
+    --glass-bg: rgba(255, 255, 255, 0.03);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --code-bg: #0D1117;
+    --success: #10B981;
+    --warning: #F59E0B;
+    --error: #EF4444;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* Animated background mesh */
+  .bg-mesh {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: -1;
+    background: 
+      radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 50% 80%, rgba(139, 92, 246, 0.15) 0%, transparent 50%);
+    filter: blur(60px);
+    animation: pulse 15s ease-in-out infinite alternate;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(1); opacity: 0.8; }
+    100% { transform: scale(1.1); opacity: 1; }
+  }
+
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 2rem;
+  }
+
+  /* Navigation */
+  nav {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 0;
+    margin-bottom: 3rem;
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 2rem;
+    align-items: center;
+  }
+
+  .nav-link {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.3s ease;
+  }
+
+  .nav-link:hover {
+    color: var(--accent-1);
+  }
+
+  /* Sidebar */
+  .sidebar {
+    position: sticky;
+    top: 2rem;
+    height: fit-content;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+  }
+
+  .sidebar-section {
+    margin-bottom: 2rem;
+  }
+
+  .sidebar-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    letter-spacing: 0.05em;
+  }
+
+  .sidebar-links {
+    list-style: none;
+  }
+
+  .sidebar-link {
+    display: block;
+    padding: 0.5rem 1rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    margin-bottom: 0.25rem;
+  }
+
+  .sidebar-link:hover {
+    background: var(--glass-bg);
+    color: var(--text-main);
+  }
+
+  .sidebar-link.active {
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--accent-1);
+    border-left: 3px solid var(--accent-1);
+  }
+
+  /* Main Content */
+  .main-content {
+    animation: fadeUp 0.8s ease-out;
+  }
+
+  .content-section {
+    margin-bottom: 4rem;
+    scroll-margin-top: 2rem;
+  }
+
+  .section-title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 2rem;
+    background: linear-gradient(135deg, var(--text-main) 0%, var(--accent-1) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subsection-title {
+    font-size: 1.8rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    color: white;
+    margin-top: 3rem;
+  }
+
+  .sub-subsection-title {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--text-main);
+    margin-top: 2rem;
+  }
+
+  /* Typography */
+  p {
+    color: var(--text-muted);
+    margin-bottom: 1.5rem;
+    line-height: 1.7;
+  }
+
+  /* Code Blocks */
+  .code-block {
+    background: var(--code-bg);
+    border: 1px solid #30363D;
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 2rem 0;
+  }
+
+  .code-header {
+    background: #161B22;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #30363D;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .code-title {
+    color: var(--text-main);
+    font-weight: 500;
+    font-size: 0.9rem;
+  }
+
+  .code-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .copy-btn {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-muted);
+    padding: 0.3rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+
+  .copy-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-main);
+  }
+
+  pre {
+    padding: 1.5rem;
+    overflow-x: auto;
+    margin: 0;
+  }
+
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+
+  /* Inline Code */
+  p code, li code {
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--accent-1);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+  }
+
+  /* Syntax Highlighting */
+  .k { color: #FF7B72; font-weight: 500; } /* Keyword */
+  .f { color: #D2A8FF; font-weight: 500; } /* Function */
+  .s { color: #A5D6FF; } /* String */
+  .c { color: #8B949E; font-style: italic; } /* Comment */
+  .t { color: #FFA657; } /* Type */
+  .n { color: #79C0FF; } /* Number */
+  .o { color: #FF7B72; } /* Operator */
+
+  /* Lists */
+  ul, ol {
+    color: var(--text-muted);
+    margin-bottom: 1.5rem;
+    padding-left: 2rem;
+  }
+
+  li {
+    margin-bottom: 0.5rem;
+  }
+
+  /* Tables */
+  .table-container {
+    overflow-x: auto;
+    margin: 2rem 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  th, td {
+    padding: 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  th {
+    background: rgba(99, 102, 241, 0.1);
+    color: white;
+    font-weight: 600;
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  /* Alert Boxes */
+  .alert {
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin: 2rem 0;
+    border-left: 4px solid;
+  }
+
+  .alert-info {
+    background: rgba(99, 102, 241, 0.1);
+    border-color: var(--accent-1);
+  }
+
+  .alert-warning {
+    background: rgba(245, 158, 11, 0.1);
+    border-color: var(--warning);
+  }
+
+  .alert-success {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: var(--success);
+  }
+
+  .alert-error {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: var(--error);
+  }
+
+  .alert-title {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--text-main);
+  }
+
+  /* Quick Start Card */
+  .quickstart-card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    backdrop-filter: blur(10px);
+  }
+
+  .quickstart-title {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: white;
+    margin-bottom: 1.5rem;
+  }
+
+  .step-list {
+    counter-reset: step;
+  }
+
+  .step-item {
+    position: relative;
+    padding-left: 3rem;
+    margin-bottom: 2rem;
+    counter-increment: step;
+  }
+
+  .step-item::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 2rem;
+    height: 2rem;
+    background: var(--accent-1);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+  }
+
+  /* Animations */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Responsive */
+  @media (max-width: 1024px) {
+    .container {
+      grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+      position: static;
+      max-height: none;
+      margin-bottom: 2rem;
+    }
+
+    nav {
+      flex-direction: column;
+      gap: 1rem;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .nav-links {
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .section-title {
+      font-size: 2rem;
+    }
+
+    .subsection-title {
+      font-size: 1.5rem;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="bg-mesh"></div>
+  
+  <div class="container">
+    <nav>
+      <div class="nav-links">
+        <a href="/" class="nav-link">Home</a>
+        <a href="/demo" class="nav-link">Demo</a>
+        <a href="/benchmarks" class="nav-link">Benchmarks</a>
+        <a href="/docs" class="nav-link">Docs</a>
+        <a href="/forum" class="nav-link">Forum</a>
+      </div>
+    </nav>
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-title">Getting Started</div>
+        <ul class="sidebar-links">
+          <li><a href="#quickstart" class="sidebar-link">Quick Start</a></li>
+          <li><a href="#installation" class="sidebar-link">Installation</a></li>
+          <li><a href="#hello-world" class="sidebar-link">Hello World</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-title">Language Guide</div>
+        <ul class="sidebar-links">
+          <li><a href="#types" class="sidebar-link">Types</a></li>
+          <li><a href="#variables" class="sidebar-link">Variables</a></li>
+          <li><a href="#functions" class="sidebar-link">Functions</a></li>
+          <li><a href="#control-flow" class="sidebar-link">Control Flow</a></li>
+          <li><a href="#structs" class="sidebar-link">Structs</a></li>
+          <li><a href="#enums" class="sidebar-link">Enums</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-title">Advanced Topics</div>
+        <ul class="sidebar-links">
+          <li><a href="#memory-management" class="sidebar-link">Memory Management</a></li>
+          <li><a href="#c-interop" class="sidebar-link">C Interop</a></li>
+          <li><a href="#modules" class="sidebar-link">Modules</a></li>
+          <li><a href="#compilation" class="sidebar-link">Compilation</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-title">Reference</div>
+        <ul class="sidebar-links">
+          <li><a href="#standard-library" class="sidebar-link">Standard Library</a></li>
+          <li><a href="#compiler-options" class="sidebar-link">Compiler Options</a></li>
+          <li><a href="#troubleshooting" class="sidebar-link">Troubleshooting</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Quick Start -->
+      <section id="quickstart" class="content-section">
+        <h1 class="section-title">Quick Start</h1>
+        
+        <div class="quickstart-card">
+          <h2 class="quickstart-title">Get Started with MethASM in 5 Minutes</h2>
+          <div class="step-list">
+            <div class="step-item">
+              <p><strong>Install the compiler:</strong> Download the latest MethASM release for your platform (Windows x64 currently supported).</p>
+            </div>
+            <div class="step-item">
+              <p><strong>Write your first program:</strong> Create a file called <code>hello.masm</code> with the code shown below.</p>
+            </div>
+            <div class="step-item">
+              <p><strong>Compile and run:</strong> Use the build pipeline to create an executable.</p>
+            </div>
+            <div class="step-item">
+              <p><strong>Explore:</strong> Check out the demo page and documentation for more examples.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Installation -->
+      <section id="installation" class="content-section">
+        <h2 class="subsection-title">Installation</h2>
+        
+        <p>MethASM currently supports Windows x64. Linux support is in development.</p>
+
+        <h3 class="sub-subsection-title">Prerequisites</h3>
+        <ul>
+          <li>Windows 10/11 (x64)</li>
+          <li>NASM assembler (2.15+ recommended)</li>
+          <li>Microsoft Visual C++ Build Tools or Visual Studio 2019+</li>
+          <li>Git (for cloning examples)</li>
+        </ul>
+
+        <h3 class="sub-subsection-title">Download</h3>
+        <p>Download the latest release from the GitHub repository or build from source:</p>
+
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Build from source</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code>git clone https://github.com/your-repo/methasm.git
+cd methasm
+build.bat</code></pre>
+        </div>
+      </section>
+
+      <!-- Hello World -->
+      <section id="hello-world" class="content-section">
+        <h2 class="subsection-title">Hello World</h2>
+        
+        <p>Here's the classic "Hello, World!" program in MethASM:</p>
+
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">hello.masm</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">import</span> <span class="s">"std/io"</span>;
+
+<span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="f">println</span>(<span class="s">"Hello, World!"</span>);
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
+        </div>
+
+        <p>To compile and run:</p>
+
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Compilation commands</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code>methasm hello.masm -o hello.s
+nasm -f win64 hello.s -o hello.o
+gcc hello.o -o hello.exe
+hello.exe</code></pre>
+        </div>
+      </section>
+
+      <!-- Types -->
+      <section id="types" class="content-section">
+        <h2 class="subsection-title">Types</h2>
+        
+        <p>MethASM is statically typed with explicit type declarations. All variables and function parameters must have a declared type.</p>
+
+        <h3 class="sub-subsection-title">Primitive Types</h3>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Size</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>int8, int16, int32, int64</code></td>
+                <td>1, 2, 4, 8 bytes</td>
+                <td>Signed integers</td>
+              </tr>
+              <tr>
+                <td><code>uint8, uint16, uint32, uint64</code></td>
+                <td>1, 2, 4, 8 bytes</td>
+                <td>Unsigned integers</td>
+              </tr>
+              <tr>
+                <td><code>float32, float64</code></td>
+                <td>4, 8 bytes</td>
+                <td>IEEE 754 floating point</td>
+              </tr>
+              <tr>
+                <td><code>string</code></td>
+                <td>16 bytes</td>
+                <td>String struct (pointer + length)</td>
+              </tr>
+              <tr>
+                <td><code>cstring</code></td>
+                <td>8 bytes</td>
+                <td>C string pointer (null-terminated)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub-subsection-title">Type Examples</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Type declarations</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">var</span> age: <span class="t">int32</span> = <span class="n">25</span>;
+<span class="k">var</span> temperature: <span class="t">float64</span> = <span class="n">98.6</span>;
+<span class="k">var</span> name: <span class="t">string</span> = <span class="s">"MethASM"</span>;
+<span class="k">var</span> count: <span class="t">uint64</span> = <span class="n">1000000</span>;</code></pre>
+        </div>
+      </section>
+
+      <!-- Variables -->
+      <section id="variables" class="content-section">
+        <h2 class="subsection-title">Variables</h2>
+        
+        <p>Variables in MethASM are declared with the <code>var</code> keyword and must be explicitly typed.</p>
+
+        <h3 class="sub-subsection-title">Variable Declaration</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Variable examples</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="c">// Variable declaration with initialization</span>
+<span class="k">var</span> x: <span class="t">int32</span> = <span class="n">42</span>;
+<span class="k">var</span> pi: <span class="t">float64</span> = <span class="n">3.14159</span>;
+
+<span class="c">// Declaration without initialization (must be assigned before use)</span>
+<span class="k">var</span> result: <span class="t">int32</span>;
+result = <span class="n">100</span>;
+
+<span class="c">// Arrays</span>
+<span class="k">var</span> numbers: <span class="t">int32</span>[<span class="n">10</span>];
+<span class="k">var</span> buffer: <span class="t">uint8</span>[<span class="n">256</span>];</code></pre>
+        </div>
+
+        <div class="alert alert-warning">
+          <div class="alert-title">⚠️ Initialization Required</div>
+          <p>Local variables must be initialized before their first use. The compiler will error if you try to read an uninitialized variable.</p>
+        </div>
+      </section>
+
+      <!-- Functions -->
+      <section id="functions" class="content-section">
+        <h2 class="subsection-title">Functions</h2>
+        
+        <p>Functions are the primary building blocks in MethASM. They have explicit parameter types and return types.</p>
+
+        <h3 class="sub-subsection-title">Function Definition</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Function examples</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="c">// Simple function with parameters and return value</span>
+<span class="k">function</span> <span class="f">add</span>(a: <span class="t">int32</span>, b: <span class="t">int32</span>) -> <span class="t">int32</span> {
+  <span class="k">return</span> a + b;
+}
+
+<span class="c">// Recursive function</span>
+<span class="k">function</span> <span class="f">factorial</span>(n: <span class="t">int32</span>) -> <span class="t">int32</span> {
+  <span class="k">if</span> (n <= <span class="n">1</span>) {
+    <span class="k">return</span> <span class="n">1</span>;
+  }
+  <span class="k">return</span> n * <span class="f">factorial</span>(n - <span class="n">1</span>);
+}
+
+<span class="c">// Void function (no return value)</span>
+<span class="k">function</span> <span class="f">print_message</span>(msg: <span class="t">string</span>) {
+  <span class="f">println</span>(msg);
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- Control Flow -->
+      <section id="control-flow" class="content-section">
+        <h2 class="subsection-title">Control Flow</h2>
+        
+        <p>MethASM provides structured control flow statements including conditionals, loops, and switches.</p>
+
+        <h3 class="sub-subsection-title">If Statements</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Conditional logic</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">if</span> (x > <span class="n">0</span>) {
+  <span class="f">println</span>(<span class="s">"Positive"</span>);
+} <span class="k">else if</span> (x < <span class="n">0</span>) {
+  <span class="f">println</span>(<span class="s">"Negative"</span>);
+} <span class="k">else</span> {
+  <span class="f">println</span>(<span class="s">"Zero"</span>);
+}</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Loops</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Loop examples</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="c">// While loop</span>
+<span class="k">var</span> i: <span class="t">int32</span> = <span class="n">0</span>;
+<span class="k">while</span> (i < <span class="n">10</span>) {
+  <span class="f">println_int</span>(i);
+  i = i + <span class="n">1</span>;
+}
+
+<span class="c">// For loop</span>
+<span class="k">for</span> (<span class="k">var</span> j: <span class="t">int32</span> = <span class="n">0</span>; j < <span class="n">5</span>; j = j + <span class="n">1</span>) {
+  <span class="f">println_int</span>(j * j);
+}</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Switch Statements</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Switch example</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">switch</span> (grade) {
+  <span class="k">case</span> <span class="n">90</span>:
+    <span class="f">println</span>(<span class="s">"A"</span>);
+    <span class="k">break</span>;
+  <span class="k">case</span> <span class="n">80</span>:
+    <span class="f">println</span>(<span class="s">"B"</span>);
+    <span class="k">break</span>;
+  <span class="k">case</span> <span class="n">70</span>:
+    <span class="f">println</span>(<span class="s">"C"</span>);
+    <span class="k">break</span>;
+  <span class="k">default</span>:
+    <span class="f">println</span>(<span class="s">"F"</span>);
+}</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Defer and Errdefer</h3>
+        <p><code>defer</code> schedules a statement to execute when the current scope exits, while <code>errdefer</code> schedules execution only when exiting with an error. Both follow <strong>LIFO (Last In, First Out)</strong> ordering.</p>
+
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Basic defer usage</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">function</span> <span class="f">open_file</span>() {
+  <span class="k">var</span> file: <span class="t">File</span>* = <span class="f">fopen</span>(<span class="s">"data.txt"</span>, <span class="s">"r"</span>);
+  <span class="k">defer</span> <span class="f">fclose</span>(file);  <span class="c">// Executes when function returns</span>
+  
+  <span class="c">// ... file operations ...</span>
+}</code></pre>
+        </div>
+
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Error handling with errdefer</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">function</span> <span class="f">process_data</span>() {
+  <span class="k">var</span> buffer: <span class="t">uint8</span>* = <span class="f">malloc</span>(<span class="n">1024</span>);
+  <span class="k">errdefer</span> <span class="f">free</span>(buffer);  <span class="c">// Only runs if function returns with error</span>
+  
+  <span class="k">var</span> file: <span class="t">File</span>* = <span class="f">fopen</span>(<span class="s">"data.txt"</span>, <span class="s">"r"</span>);
+  <span class="k">defer</span> <span class="f">fclose</span>(file);     <span class="c">// Always runs</span>
+  
+  <span class="k">if</span> (parse_error) {
+    <span class="k">return</span> <span class="f">err</span>();  <span class="c">// Runs errdefer, then defer</span>
+  }
+  
+  <span class="k">return</span> <span class="f">ok</span>();     <span class="c">// Runs only defer</span>
+}</code></pre>
+        </div>
+
+        <div class="alert alert-info">
+          <div class="alert-title">ℹ️ LIFO Ordering</div>
+          <p>Deferred statements execute in reverse order of declaration. The most recently deferred statement executes first.</p>
+        </div>
+
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Resource management pattern</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">function</span> <span class="f">handle_client</span>(client_socket: <span class="t">int32</span>) {
+  <span class="k">defer</span> <span class="f">close_socket</span>(client_socket);
+  
+  <span class="k">var</span> buffer: <span class="t">uint8</span>* = <span class="f">malloc</span>(<span class="n">1024</span>);
+  <span class="k">errdefer</span> <span class="f">free</span>(buffer);
+  
+  <span class="k">if</span> (read_error) {
+    <span class="k">return</span> <span class="f">err</span>();  <span class="c">// Free buffer, close socket</span>
+  }
+  
+  <span class="k">return</span> <span class="f">ok</span>();     <span class="c">// Close socket only</span>
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- Structs -->
+      <section id="structs" class="content-section">
+        <h2 class="subsection-title">Structs</h2>
+        
+        <p>Structs group related data together and can have methods associated with them.</p>
+
+        <h3 class="sub-subsection-title">Struct Definition</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Struct with methods</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">struct</span> <span class="t">Point</span> {
+  x: <span class="t">float64</span>;
+  y: <span class="t">float64</span>;
+  
+  <span class="k">function</span> <span class="f">distance</span>(other: <span class="t">Point</span>*) -> <span class="t">float64</span> {
+    <span class="k">var</span> dx: <span class="t">float64</span> = <span class="k">this</span>.x - other->x;
+    <span class="k">var</span> dy: <span class="t">float64</span> = <span class="k">this</span>.y - other->y;
+    <span class="k">return</span> dx*dx + dy*dy; <span class="c">// Simplified distance</span>
+  }
+  
+  <span class="k">function</span> <span class="f">move</span>(dx: <span class="t">float64</span>, dy: <span class="t">float64</span>) {
+    <span class="k">this</span>.x = <span class="k">this</span>.x + dx;
+    <span class="k">this</span>.y = <span class="k">this</span>.y + dy;
+  }
+}
+
+<span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="k">var</span> p1: <span class="t">Point</span> = {<span class="n">0.0</span>, <span class="n">0.0</span>};
+  <span class="k">var</span> p2: <span class="t">Point</span> = {<span class="n">3.0</span>, <span class="n">4.0</span>};
+  
+  <span class="k">var</span> dist: <span class="t">float64</span> = <span class="f">p1.distance</span>(&p2);
+  <span class="f">p1.move</span>(<span class="n">1.0</span>, <span class="n">2.0</span>);
+  
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- Enums -->
+      <section id="enums" class="content-section">
+        <h2 class="subsection-title">Enums</h2>
+        
+        <p>Enums define a named type with a set of variants, each having an integer value.</p>
+
+        <h3 class="sub-subsection-title">Enum Definition</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Enum examples</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">enum</span> <span class="t">Direction</span> {
+  North,        <span class="c">// 0</span>
+  East = <span class="n">2</span>,     <span class="c">// 2</span>
+  South,        <span class="c">// 3 (previous + 1)</span>
+  West = <span class="n">-5</span>     <span class="c">// -5</span>
+}
+
+<span class="k">enum</span> <span class="t">Status</span> {
+  Pending = <span class="n">100</span>,
+  InProgress = <span class="n">200</span>,
+  Complete = <span class="n">300</span>,
+  Failed = <span class="n">400</span>
+}
+
+<span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="k">var</span> dir: <span class="t">Direction</span> = North;
+  <span class="k">var</span> status: <span class="t">Status</span> = InProgress;
+  
+  <span class="k">if</span> (dir == East) {
+    <span class="f">println</span>(<span class="s">"Facing East"</span>);
+  }
+  
+  <span class="k">switch</span> (status) {
+    <span class="k">case</span> Complete:
+      <span class="f">println</span>(<span class="s">"Task completed!"</span>);
+      <span class="k">break</span>;
+    <span class="k">case</span> Failed:
+      <span class="f">println</span>(<span class="s">"Task failed!"</span>);
+      <span class="k">break</span>;
+  }
+  
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Enum Properties</h3>
+        <div class="alert alert-info">
+          <div class="alert-title">ℹ️ Enum Characteristics</div>
+          <ul>
+            <li><strong>Underlying Type:</strong> Enums use <code>int64</code> as the underlying representation (8 bytes, aligned to 8)</li>
+            <li><strong>Auto-increment:</strong> Variants without explicit values continue from previous variant (0 if first)</li>
+            <li><strong>Direct Usage:</strong> Variant names are in scope after enum definition (use <code>North</code>, not <code>Direction.North</code>)</li>
+            <li><strong>Comparisons:</strong> Enums can be compared with integers and used in <code>switch</code> cases</li>
+          </ul>
+        </div>
+
+        <h3 class="sub-subsection-title">Type Conversion</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Integer to enum conversion</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">enum</span> <span class="t">Priority</span> {
+  Low = <span class="n">1</span>,
+  Medium = <span class="n">5</span>,
+  High = <span class="n">10</span>
+}
+
+<span class="k">function</span> <span class="f">set_priority</span>(level: <span class="t">int32</span>) -> <span class="t">Priority</span> {
+  <span class="c">// Implicit narrowing conversion</span>
+  <span class="k">var</span> priority: <span class="t">Priority</span> = level;
+  
+  <span class="k">if</span> (priority >= High) {
+    <span class="f">println</span>(<span class="s">"High priority set"</span>);
+  }
+  
+  <span class="k">return</span> priority;
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- Modules -->
+      <section id="modules" class="content-section">
+        <h2 class="subsection-title">Modules</h2>
+        
+        <p>MethASM provides a module system for organizing code and managing dependencies. Modules allow you to split large programs into manageable, reusable components.</p>
+
+        <h3 class="sub-subsection-title">Import System</h3>
+        <p>Use the <code>import</code> statement to include modules in your program.</p>
+
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Import examples</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="c">// Import standard library modules</span>
+<span class="k">import</span> <span class="s">"std/io"</span>;
+<span class="k">import</span> <span class="s">"std/mem"</span>;
+<span class="k">import</span> <span class="s">"std/math"</span>;
+
+<span class="c">// Import custom modules (relative paths)</span>
+<span class="k">import</span> <span class="s">"utils/string_helpers"</span>;
+<span class="k">import</span> <span class="s">"datastructures/list"</span>;
+<span class="k">import</span> <span class="s">"algorithms/sort"</span>;
+
+<span class="c">// Import with absolute path (less common)</span>
+<span class="k">import</span> <span class="s">"/usr/local/lib/custom"</span>;</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Module Resolution</h3>
+        <div class="alert alert-info">
+          <div class="alert-title">ℹ️ Import Search Order</div>
+          <p>The compiler resolves imports in this order:</p>
+          <ol>
+            <li><strong>Relative to current file:</strong> <code>"utils/helpers"</code> looks for <code>utils/helpers.masm</code></li>
+            <li><strong>Include directories:</strong> Paths added with <code>-I</code> flag</li>
+            <li><strong>Standard library:</strong> <code>std/</code> prefix searches in stdlib root</li>
+          </ol>
+        </div>
+
+        <h3 class="sub-subsection-title">Creating Modules</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Creating a custom module</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="c">// File: utils/string_helpers.masm</span>
+
+<span class="c">// Export functions for use by other modules</span>
+<span class="k">export function</span> <span class="f">string_length</span>(s: <span class="t">string</span>) -> <span class="t">int32</span> {
+  <span class="k">return</span> s.length;
+}
+
+<span class="k">export function</span> <span class="f">string_equals</span>(a: <span class="t">string</span>, b: <span class="t">string</span>) -> <span class="t">int32</span> {
+  <span class="k">if</span> (a.length != b.length) {
+    <span class="k">return</span> <span class="n">0</span>; <span class="c">// false</span>
+  }
+  
+  <span class="k">var</span> i: <span class="t">int32</span> = <span class="n">0</span>;
+  <span class="k">while</span> (i < a.length) {
+    <span class="k">if</span> (a.chars[i] != b.chars[i]) {
+      <span class="k">return</span> <span class="n">0</span>; <span class="c">// false</span>
+    }
+    i = i + <span class="n">1</span>;
+  }
+  
+  <span class="k">return</span> <span class="n">1</span>; <span class="c">// true</span>
+}
+
+<span class="c">// Export types for use by other modules</span>
+<span class="k">export</span> <span class="k">struct</span> <span class="t">StringBuilder</span> {
+  buffer: <span class="t">uint8</span>[<span class="n">1024</span>];
+  length: <span class="t">int32</span>;
+  
+  <span class="k">function</span> <span class="f">append</span>(text: <span class="t">string</span>) {
+    <span class="c">// Implementation...</span>
+  }
+}</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Using Custom Modules</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Using custom modules</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="c">// File: main.masm</span>
+
+<span class="k">import</span> <span class="s">"utils/string_helpers"</span>;
+
+<span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="k">var</span> message: <span class="t">string</span> = <span class="s">"Hello, MethASM!"</span>;
+  <span class="k">var</span> length: <span class="t">int32</span> = <span class="f">string_length</span>(message);
+  
+  <span class="f">println</span>(<span class="s">"Message length: "</span>);
+  <span class="f">println_int</span>(length);
+  
+  <span class="k">var</span> builder: <span class="t">StringBuilder</span>;
+  builder.length = <span class="n">0</span>;
+  <span class="f">builder.append</span>(message);
+  
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Module Best Practices</h3>
+        <div class="alert alert-warning">
+          <div class="alert-title">⚠️ Module Guidelines</div>
+          <ul>
+            <li><strong>Single Responsibility:</strong> Each module should have a clear, focused purpose</li>
+            <li><strong>Explicit Exports:</strong> Use <code>export</code> keyword for functions/types meant to be used externally</li>
+            <li><strong>Avoid Circular Dependencies:</strong> Module A shouldn't import module B if B also imports A</li>
+            <li><strong>Consistent Naming:</strong> Use descriptive names and consider prefixing with module category</li>
+            <li><strong>Documentation:</strong> Comment module purpose and exported function behavior</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Memory Management -->
+      <section id="memory-management" class="content-section">
+        <h2 class="subsection-title">Memory Management</h2>
+        
+        <p>MethASM offers both manual memory management and optional garbage collection.</p>
+
+        <h3 class="sub-subsection-title">Stack Allocation</h3>
+        <p>Most variables are allocated on the stack and automatically cleaned up when they go out of scope.</p>
+
+        <h3 class="sub-subsection-title">Manual Memory Management</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Using C malloc/free</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">import</span> <span class="s">"std/mem"</span>;
+
+<span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="c">// Allocate memory</span>
+  <span class="k">var</span> buffer: <span class="t">cstring</span> = <span class="f">malloc</span>(<span class="n">1024</span>);
+  
+  <span class="k">if</span> (buffer != <span class="n">0</span>) {
+    <span class="c">// Use the memory</span>
+    <span class="f">memset</span>(buffer, <span class="n">0</span>, <span class="n">1024</span>);
+    
+    <span class="c">// Free when done</span>
+    <span class="f">free</span>(buffer);
+  }
+  
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Garbage Collection</h3>
+        <div class="alert alert-info">
+          <div class="alert-title">ℹ️ GC Optional</div>
+          <p>When you link the GC runtime, you can use <code>new T</code> for automatic memory management. The GC uses conservative mark-and-sweep collection.</p>
+        </div>
+
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Using garbage collection</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">struct</span> <span class="t">Node</span> {
+  value: <span class="t">int32</span>;
+  next: <span class="t">Node</span>*;
+}
+
+<span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="c">// Allocate with garbage collection</span>
+  <span class="k">var</span> node: <span class="t">Node</span>* = <span class="k">new</span> <span class="t">Node</span>;
+  node->value = <span class="n">42</span>;
+  node->next = <span class="k">new</span> <span class="t">Node</span>;
+  
+  <span class="c">// No need to free - GC will clean up</span>
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- C Interop -->
+      <section id="c-interop" class="content-section">
+        <h2 class="subsection-title">C Interoperability</h2>
+        
+        <p>MethASM provides seamless C interoperability through extern declarations.</p>
+
+        <h3 class="sub-subsection-title">Declaring External Functions</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">C function declarations</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="c">// Declare C functions</span>
+<span class="k">extern function</span> <span class="f">strlen</span>(s: <span class="t">cstring</span>) -> <span class="t">int32</span> = <span class="s">"strlen"</span>;
+<span class="k">extern function</span> <span class="f">strcpy</span>(dest: <span class="t">cstring</span>, src: <span class="t">cstring</span>) -> <span class="t">cstring</span> = <span class="s">"strcpy"</span>;
+<span class="k">extern function</span> <span class="f">malloc</span>(size: <span class="t">int32</span>) -> <span class="t">cstring</span> = <span class="s">"malloc"</span>;
+
+<span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="k">var</span> message: <span class="t">uint8</span>[<span class="n">256</span>];
+  <span class="f">strcpy</span>(&message[<span class="n">0</span>], <span class="s">"Hello from C!"</span>);
+  
+  <span class="k">var</span> len: <span class="t">int32</span> = <span class="f">strlen</span>(&message[<span class="n">0</span>]);
+  <span class="f">println_int</span>(len);
+  
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- Compilation -->
+      <section id="compilation" class="content-section">
+        <h2 class="subsection-title">Compilation</h2>
+        
+        <p>MethASM compiles to x86-64 NASM assembly, which is then assembled and linked to create executables.</p>
+
+        <h3 class="sub-subsection-title">Build Pipeline</h3>
+        <div class="step-list">
+          <div class="step-item">
+            <p><strong>Compile to assembly:</strong> <code>methasm input.masm -o output.s</code></p>
+          </div>
+          <div class="step-item">
+            <p><strong>Assemble to object:</strong> <code>nasm -f win64 output.s -o output.o</code></p>
+          </div>
+          <div class="step-item">
+            <p><strong>Link to executable:</strong> <code>gcc output.o -o output.exe</code></p>
+          </div>
+        </div>
+
+        <h3 class="sub-subsection-title">Compiler Options</h3>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Option</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>-o file</code></td>
+                <td>Output assembly file</td>
+              </tr>
+              <tr>
+                <td><code>-O</code></td>
+                <td>Enable optimizations</td>
+              </tr>
+              <tr>
+                <td><code>-d</code></td>
+                <td>Debug mode</td>
+              </tr>
+              <tr>
+                <td><code>-g</code></td>
+                <td>Generate debug symbols</td>
+              </tr>
+              <tr>
+                <td><code>-I dir</code></td>
+                <td>Add import search directory</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Standard Library -->
+      <section id="standard-library" class="content-section">
+        <h2 class="subsection-title">Standard Library</h2>
+        
+        <p>MethASM includes a comprehensive standard library organized into modules.</p>
+
+        <h3 class="sub-subsection-title">Core Modules</h3>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Module</th>
+                <th>Description</th>
+                <th>Key Functions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>std/io</code></td>
+                <td>Console and file I/O operations</td>
+                <td><code>println</code>, <code>fopen</code>, <code>fread</code></td>
+              </tr>
+              <tr>
+                <td><code>std/mem</code></td>
+                <td>Memory management functions</td>
+                <td><code>malloc</code>, <code>free</code>, <code>memcpy</code></td>
+              </tr>
+              <tr>
+                <td><code>std/math</code></td>
+                <td>Mathematical operations</td>
+                <td><code>abs</code>, <code>min</code>, <code>max</code></td>
+              </tr>
+              <tr>
+                <td><code>std/net</code></td>
+                <td>Network programming (Windows)</td>
+                <td><code>socket</code>, <code>bind</code>, <code>listen</code></td>
+              </tr>
+              <tr>
+                <td><code>std/conv</code></td>
+                <td>Type conversions and utilities</td>
+                <td><code>atoi</code>, <code>strlen</code>, <code>isdigit</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub-subsection-title">Using the Standard Library</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Standard library imports</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">import</span> <span class="s">"std/io"</span>;
+<span class="k">import</span> <span class="s">"std/mem"</span>;
+<span class="k">import</span> <span class="s">"std/math"</span>;
+
+<span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="k">var</span> numbers: <span class="t">int32</span>[<span class="n">5</span>] = {<span class="n">5</span>, <span class="n">2</span>, <span class="n">8</span>, <span class="n">1</span>, <span class="n">9</span>};
+  <span class="k">var</span> max_val: <span class="t">int32</span> = <span class="n">0</span>;
+  
+  <span class="k">for</span> (<span class="k">var</span> i: <span class="t">int32</span> = <span class="n">0</span>; i < <span class="n">5</span>; i = i + <span class="n">1</span>) {
+    max_val = <span class="f">max</span>(max_val, numbers[i]);
+  }
+  
+  <span class="f">println_int</span>(max_val);
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- Compiler Options -->
+      <section id="compiler-options" class="content-section">
+        <h2 class="subsection-title">Compiler Options</h2>
+        
+        <p>The MethASM compiler provides various options for controlling compilation behavior and output.</p>
+
+        <h3 class="sub-subsection-title">Command Line Options</h3>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Option</th>
+                <th>Long Form</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>-o file</code></td>
+                <td><code>--output</code></td>
+                <td>Specify output assembly file (default: output.s)</td>
+              </tr>
+              <tr>
+                <td><code>-i file</code></td>
+                <td><code>--input</code></td>
+                <td>Specify input file (alternative to positional argument)</td>
+              </tr>
+              <tr>
+                <td><code>-I dir</code></td>
+                <td><code>--include</code></td>
+                <td>Add directory to import search path (repeatable)</td>
+              </tr>
+              <tr>
+                <td><code>--stdlib dir</code></td>
+                <td><code>--stdlib</code></td>
+                <td>Set standard library root (default: stdlib)</td>
+              </tr>
+              <tr>
+                <td><code>--prelude</code></td>
+                <td><code>--prelude</code></td>
+                <td>Auto-import std/prelude (includes std/io, std/mem, etc.)</td>
+              </tr>
+              <tr>
+                <td><code>-O</code></td>
+                <td><code>--optimize</code></td>
+                <td>Enable compiler optimizations</td>
+              </tr>
+              <tr>
+                <td><code>-d</code></td>
+                <td><code>--debug</code></td>
+                <td>Enable debug mode (generates IR dump)</td>
+              </tr>
+              <tr>
+                <td><code>-g</code></td>
+                <td><code>--debug-symbols</code></td>
+                <td>Generate debug symbols for debugging</td>
+              </tr>
+              <tr>
+                <td><code>-l</code></td>
+                <td><code>--line-mapping</code></td>
+                <td>Generate source line mapping information</td>
+              </tr>
+              <tr>
+                <td><code>-h</code></td>
+                <td><code>--help</code></td>
+                <td>Print usage information and exit</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sub-subsection-title">Example Usage</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Compiler command examples</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="c">// Basic compilation</span>
+methasm main.masm -o main.s
+
+<span class="c">// With optimizations and debug symbols</span>
+methasm main.masm -O -g -o main.s
+
+<span class="c">// With custom include paths</span>
+methasm main.masm -I ./include -I ../libs -o main.s
+
+<span class="c">// Using prelude (auto-imports common modules)</span>
+methasm --prelude main.masm -o main.s</code></pre>
+        </div>
+      </section>
+
+      <!-- Troubleshooting -->
+      <section id="troubleshooting" class="content-section">
+        <h2 class="subsection-title">Troubleshooting</h2>
+        
+        <p>Common issues and their solutions when working with MethASM.</p>
+
+        <h3 class="sub-subsection-title">Compilation Errors</h3>
+        
+        <div class="alert alert-error">
+          <div class="alert-title">❌ "Undefined reference to `gc_alloc'"</div>
+          <p><strong>Cause:</strong> Using <code>new</code> expressions without linking the GC runtime.</p>
+          <p><strong>Solution:</strong> Compile and link <code>src/runtime/gc.c</code> with your program:</p>
+          <div class="code-block">
+            <div class="code-header">
+              <div class="code-title">Linking with GC</div>
+              <div class="code-actions">
+                <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+              </div>
+            </div>
+            <pre><code>gcc -c src/runtime/gc.c -o gc.o -Isrc
+gcc main.o gc.o -o main</code></pre>
+          </div>
+        </div>
+
+        <div class="alert alert-error">
+          <div class="alert-title">❌ "Cannot open output file: Permission denied"</div>
+          <p><strong>Cause:</strong> The output executable is currently running or locked.</p>
+          <p><strong>Solution:</strong> Stop any running instances of the program before rebuilding.</p>
+        </div>
+
+        <div class="alert alert-warning">
+          <div class="alert-title">⚠️ "Use before initialization" error</div>
+          <p><strong>Cause:</strong> Reading from a local variable before assigning it a value.</p>
+          <p><strong>Solution:</strong> Always initialize variables before use:</p>
+          <div class="code-block">
+            <div class="code-header">
+              <div class="code-title">Variable initialization</div>
+              <div class="code-actions">
+                <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+              </div>
+            </div>
+            <pre><code><span class="c">// Wrong - using uninitialized variable</span>
+<span class="k">var</span> x: <span class="t">int32</span>;
+<span class="k">return</span> x; <span class="c">// Error!</span>
+
+<span class="c">// Correct - initialize before use</span>
+<span class="k">var</span> x: <span class="t">int32</span> = <span class="n">0</span>;
+<span class="k">return</span> x; <span class="c">// OK</span></code></pre>
+          </div>
+        </div>
+
+        <h3 class="sub-subsection-title">Runtime Issues</h3>
+        
+        <div class="alert alert-warning">
+          <div class="alert-title">⚠️ Program crashes on startup</div>
+          <p><strong>Cause:</strong> Missing GC initialization when using <code>new</code> expressions.</p>
+          <p><strong>Solution:</strong> Ensure the entry point calls <code>gc_init()</code> (handled automatically when linking with GC runtime).</p>
+        </div>
+
+        <div class="alert alert-info">
+          <div class="alert-title">ℹ️ Performance slower than expected</div>
+          <p><strong>Possible causes:</strong></p>
+          <ul>
+            <li>Not using optimization flag (<code>-O</code>)</li>
+            <li>Frequent GC collections (consider raising threshold)</li>
+            <li>Excessive memory allocations in hot paths</li>
+          </ul>
+          <p><strong>Solutions:</strong> Use optimizations, profile memory usage, consider stack allocation for performance-critical code.</p>
+        </div>
+
+        <h3 class="sub-subsection-title">Getting Help</h3>
+        <p>If you encounter issues not covered here:</p>
+        <ul>
+          <li>Check the <a href="/forum" style="color: var(--accent-1);">Community Forum</a> for help from other users</li>
+          <li>Review the language reference documentation</li>
+          <li>Try compiling with <code>-d</code> flag to see generated IR</li>
+          <li>Start with minimal examples and gradually add complexity</li>
+        </ul>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    // Copy code functionality
+    function copyCode(button) {
+      const codeBlock = button.closest('.code-block');
+      const code = codeBlock.querySelector('code').textContent;
+      
+      navigator.clipboard.writeText(code).then(() => {
+        const originalText = button.textContent;
+        button.textContent = 'Copied!';
+        button.style.background = 'rgba(16, 185, 129, 0.2)';
+        button.style.color = 'var(--success)';
+        
+        setTimeout(() => {
+          button.textContent = originalText;
+          button.style.background = '';
+          button.style.color = '';
+        }, 2000);
+      });
+    }
+
+    // Smooth scroll and active section highlighting
+    document.addEventListener('DOMContentLoaded', function() {
+      const sections = document.querySelectorAll('.content-section[id]');
+      const navLinks = document.querySelectorAll('.sidebar-link');
+      
+      function updateActiveNav() {
+        let current = '';
+        sections.forEach(section => {
+          const sectionTop = section.offsetTop;
+          const sectionHeight = section.clientHeight;
+          if (scrollY >= (sectionTop - 200)) {
+            current = section.getAttribute('id');
+          }
+        });
+        
+        navLinks.forEach(link => {
+          link.classList.remove('active');
+          if (link.getAttribute('href') === '#' + current) {
+            link.classList.add('active');
+          }
+        });
+      }
+      
+      window.addEventListener('scroll', updateActiveNav);
+      updateActiveNav();
+    });
+  </script>
+</body>
+</html>

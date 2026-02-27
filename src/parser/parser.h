@@ -50,6 +50,8 @@ ASTNode *parser_parse_for_statement(Parser *parser);
 ASTNode *parser_parse_switch_statement(Parser *parser);
 ASTNode *parser_parse_break_statement(Parser *parser);
 ASTNode *parser_parse_continue_statement(Parser *parser);
+ASTNode *parser_parse_defer_statement(Parser *parser);
+ASTNode *parser_parse_errdefer_statement(Parser *parser);
 ASTNode *parser_parse_block(Parser *parser);
 
 // Utility functions

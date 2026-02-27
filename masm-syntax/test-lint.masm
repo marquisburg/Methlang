@@ -4,12 +4,6 @@
 var x: int32 = 42;
 var r: int32 = x % 10;           // modulo - not supported
 
-var mask: int32 = ~0;            // bitwise complement - not supported
-var shifted: int32 = 1 << 4;     // bitwise shift - not supported
-var right: int32 = 64 >> 2;      // bitwise shift - not supported
-var bor: int32 = 1 | 2;          // bitwise OR - not supported
-var bxor: int32 = 1 ^ 2;         // bitwise XOR - not supported
-
 var flag: int32 = 0;
 if (!flag) { }                   // unary ! - not supported, use flag == 0
 

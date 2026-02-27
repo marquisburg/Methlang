@@ -146,6 +146,10 @@ static const char *token_type_to_string(TokenType type) {
     return "'break'";
   case TOKEN_CONTINUE:
     return "'continue'";
+  case TOKEN_DEFER:
+    return "'defer'";
+  case TOKEN_ERRDEFER:
+    return "'errdefer'";
   case TOKEN_ASM:
     return "'asm'";
   case TOKEN_THIS:
@@ -182,6 +186,16 @@ static const char *token_type_to_string(TokenType type) {
     return "'*'";
   case TOKEN_AMPERSAND:
     return "'&'";
+  case TOKEN_PIPE:
+    return "'|'";
+  case TOKEN_CARET:
+    return "'^'";
+  case TOKEN_LSHIFT:
+    return "'<<'";
+  case TOKEN_RSHIFT:
+    return "'>>'";
+  case TOKEN_TILDE:
+    return "'~'";
   case TOKEN_AND_AND:
     return "'&&'";
   case TOKEN_OR_OR:
@@ -276,9 +290,16 @@ void parser_set_error_with_suggestion(Parser *parser, const char *message,
     SourceLocation location = source_location_create(
         parser->current_token.line, parser->current_token.column);
 
+    size_t span_len = 1;
+    if (parser->current_token.value && parser->current_token.value[0] != '\0') {
+      span_len = strlen(parser->current_token.value);
+    }
+    SourceSpan span = source_span_from_location(location, span_len);
+
     if (suggestion) {
-      error_reporter_add_error_with_suggestion(
-          parser->error_reporter, ERROR_SYNTAX, location, message, suggestion);
+      error_reporter_add_error_with_span_and_suggestion(parser->error_reporter,
+                                                        ERROR_SYNTAX, span,
+                                                        message, suggestion);
     } else {
       // Try to generate a helpful suggestion
       const char *auto_suggestion = NULL;
@@ -288,12 +309,13 @@ void parser_set_error_with_suggestion(Parser *parser, const char *message,
       }
 
       if (auto_suggestion) {
-        error_reporter_add_error_with_suggestion(parser->error_reporter,
-                                                 ERROR_SYNTAX, location,
-                                                 message, auto_suggestion);
+        error_reporter_add_error_with_span_and_suggestion(parser->error_reporter,
+                                                          ERROR_SYNTAX, span,
+                                                          message,
+                                                          auto_suggestion);
       } else {
-        error_reporter_add_error(parser->error_reporter, ERROR_SYNTAX, location,
-                                 message);
+        error_reporter_add_error_with_span(parser->error_reporter, ERROR_SYNTAX,
+                                           span, message);
       }
     }
   }
@@ -348,21 +370,30 @@ void parser_synchronize(Parser *parser) {
 int parser_get_operator_precedence(TokenType type) {
   switch (type) {
   case TOKEN_DOT:
-    return 9; // Member access (highest precedence)
+    return 13; // Member access (highest precedence)
   case TOKEN_MULTIPLY:
   case TOKEN_DIVIDE:
-    return 7; // Multiplicative
+    return 11; // Multiplicative
   case TOKEN_PLUS:
   case TOKEN_MINUS:
-    return 6; // Additive
+    return 10; // Additive
+  case TOKEN_LSHIFT:
+  case TOKEN_RSHIFT:
+    return 9; // Shift
   case TOKEN_LESS_THAN:
   case TOKEN_LESS_EQUALS:
   case TOKEN_GREATER_THAN:
   case TOKEN_GREATER_EQUALS:
-    return 5; // Relational
+    return 8; // Relational
   case TOKEN_EQUALS_EQUALS:
   case TOKEN_NOT_EQUALS:
-    return 4; // Equality
+    return 7; // Equality
+  case TOKEN_AMPERSAND:
+    return 6; // Bitwise AND
+  case TOKEN_CARET:
+    return 5; // Bitwise XOR
+  case TOKEN_PIPE:
+    return 4; // Bitwise OR
   case TOKEN_AND_AND:
     return 3; // Logical AND
   case TOKEN_OR_OR:
@@ -386,6 +417,11 @@ int parser_is_binary_operator(TokenType type) {
   case TOKEN_GREATER_EQUALS:
   case TOKEN_AND_AND:
   case TOKEN_OR_OR:
+  case TOKEN_AMPERSAND:
+  case TOKEN_PIPE:
+  case TOKEN_CARET:
+  case TOKEN_LSHIFT:
+  case TOKEN_RSHIFT:
   case TOKEN_DOT:
     return 1;
   default:
@@ -399,6 +435,7 @@ int parser_is_unary_operator(TokenType type) {
   case TOKEN_PLUS:
   case TOKEN_MULTIPLY:
   case TOKEN_AMPERSAND:
+  case TOKEN_TILDE:
     return 1;
   default:
     return 0;
@@ -457,8 +494,6 @@ ASTNode *parser_parse_declaration(Parser *parser) {
   switch (parser->current_token.type) {
   case TOKEN_IMPORT:
     return parser_parse_import_declaration(parser);
-  case TOKEN_ENUM:
-    return parser_parse_enum_declaration(parser);
   case TOKEN_EXTERN: {
     parser_advance(parser); // consume 'extern'
     if (parser->current_token.type == TOKEN_FUNCTION) {
@@ -528,19 +563,24 @@ ASTNode *parser_parse_declaration(Parser *parser) {
         return NULL;
       }
     } else {
-      parser_set_error(
-          parser,
-          "Expected 'function', 'var', 'struct', 'enum', or 'extern' after 'export'");
+      parser_set_error(parser, "Expected 'function', 'var', 'struct', 'enum', "
+                               "or 'extern' after 'export'");
       return NULL;
     }
     return decl;
   }
   case TOKEN_VAR:
     return parser_parse_var_declaration(parser);
+  case TOKEN_DEFER:
+    return parser_parse_defer_statement(parser);
+  case TOKEN_ERRDEFER:
+    return parser_parse_errdefer_statement(parser);
   case TOKEN_FUNCTION:
     return parser_parse_function_declaration(parser);
   case TOKEN_STRUCT:
     return parser_parse_struct_declaration(parser);
+  case TOKEN_ENUM:
+    return parser_parse_enum_declaration(parser);
   default:
     // Try to parse as a statement instead
     return parser_parse_statement(parser);
@@ -624,6 +664,10 @@ ASTNode *parser_parse_statement(Parser *parser) {
     return parser_parse_break_statement(parser);
   case TOKEN_CONTINUE:
     return parser_parse_continue_statement(parser);
+  case TOKEN_DEFER:
+    return parser_parse_defer_statement(parser);
+  case TOKEN_ERRDEFER:
+    return parser_parse_errdefer_statement(parser);
   case TOKEN_ASM:
     return parser_parse_inline_asm(parser);
   case TOKEN_LBRACE:
@@ -642,6 +686,66 @@ ASTNode *parser_parse_statement(Parser *parser) {
   }
 
   return expr;
+}
+
+ASTNode *parser_parse_defer_statement(Parser *parser) {
+  if (!parser) {
+    return NULL;
+  }
+
+  SourceLocation location = {parser->current_token.line,
+                             parser->current_token.column};
+
+  if (!parser_expect(parser, TOKEN_DEFER)) {
+    return NULL;
+  }
+
+  if (parser->current_token.type == TOKEN_SEMICOLON ||
+      parser->current_token.type == TOKEN_NEWLINE) {
+    parser_set_error(parser, "Expected statement after 'defer'");
+    return NULL;
+  }
+
+  ASTNode *stmt = parser_parse_statement(parser);
+  if (!stmt) {
+    if (!parser->has_error) {
+      parser_set_error(parser, "Expected statement after 'defer'");
+    }
+    return NULL;
+  }
+
+  parser_expect_statement_end(parser);
+  return ast_create_defer_statement(stmt, location);
+}
+
+ASTNode *parser_parse_errdefer_statement(Parser *parser) {
+  if (!parser) {
+    return NULL;
+  }
+
+  SourceLocation location = {parser->current_token.line,
+                             parser->current_token.column};
+
+  if (!parser_expect(parser, TOKEN_ERRDEFER)) {
+    return NULL;
+  }
+
+  if (parser->current_token.type == TOKEN_SEMICOLON ||
+      parser->current_token.type == TOKEN_NEWLINE) {
+    parser_set_error(parser, "Expected statement after 'errdefer'");
+    return NULL;
+  }
+
+  ASTNode *stmt = parser_parse_statement(parser);
+  if (!stmt) {
+    if (!parser->has_error) {
+      parser_set_error(parser, "Expected statement after 'errdefer'");
+    }
+    return NULL;
+  }
+
+  parser_expect_statement_end(parser);
+  return ast_create_errdefer_statement(stmt, location);
 }
 
 ASTNode *parser_parse_expression(Parser *parser) {
@@ -2367,8 +2471,10 @@ ASTNode *parser_parse_block(Parser *parser) {
       }
 
       // Attempt to consume optional statement end (semicolon or newline)
-      if (parser->current_token.type == TOKEN_SEMICOLON ||
-          parser->current_token.type == TOKEN_NEWLINE) {
+      // for statements that didn't already consume it.
+      if (stmt->type != AST_DEFER_STATEMENT &&
+          (parser->current_token.type == TOKEN_SEMICOLON ||
+           parser->current_token.type == TOKEN_NEWLINE)) {
         parser_expect_statement_end(parser);
       }
     } else if (parser->has_error) {

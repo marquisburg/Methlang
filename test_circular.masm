@@ -1,6 +1,0 @@
-// Circular import test: imports test_import.masm which imports test_module.masm
-import "test_import.masm"
-
-function circular_test() -> int64 {
-  return 1
-}

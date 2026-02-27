@@ -22,6 +22,7 @@ Current implementation status:
 - Fail-fast diagnostics are enforced across lexer, parser, semantic analysis, and codegen.
 - Arrays, pointers, structured types, and major control-flow constructs are implemented.
 - Runtime GC integration is compiled and exercised by runtime tests.
+- String concatenation is implemented (the compiler now accepts `string + string` and emits GC-backed code), and the Windows web server example exercises that path together with `std/net`.
 - Automated compiler/runtime regression suite is available under `tests/run_tests.ps1`.
 
 ## Compiler Guarantees

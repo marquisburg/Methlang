@@ -31,6 +31,7 @@ typedef struct {
   Type *builtin_cstring;
   Type *builtin_void;
   Symbol *current_function;
+  ASTNode *current_function_decl;
   int loop_depth;
   int switch_depth;
   char **tracked_var_names;

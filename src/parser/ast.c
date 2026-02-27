@@ -17,6 +17,30 @@ ASTNode *ast_create_node(ASTNodeType type, SourceLocation location) {
   return node;
 }
 
+ASTNode *ast_create_errdefer_statement(ASTNode *statement,
+                                       SourceLocation location) {
+  if (!statement) {
+    return NULL;
+  }
+
+  ASTNode *node = ast_create_node(AST_ERRDEFER_STATEMENT, location);
+  if (!node) {
+    return NULL;
+  }
+
+  DeferStatement *defer_statement = malloc(sizeof(DeferStatement));
+  if (!defer_statement) {
+    free(node);
+    return NULL;
+  }
+
+  defer_statement->statement = statement;
+  node->data = defer_statement;
+  ast_add_child(node, statement);
+
+  return node;
+}
+
 void ast_destroy_node(ASTNode *node) {
   if (!node)
     return;
@@ -116,6 +140,22 @@ void ast_destroy_node(ASTNode *node) {
       free(call_expr->function_name);
       free(call_expr->arguments);
       free(call_expr);
+    }
+    break;
+  }
+
+  case AST_DEFER_STATEMENT: {
+    DeferStatement *defer_stmt = (DeferStatement *)node->data;
+    if (defer_stmt) {
+      free(defer_stmt);
+    }
+    break;
+  }
+
+  case AST_ERRDEFER_STATEMENT: {
+    DeferStatement *defer_stmt = (DeferStatement *)node->data;
+    if (defer_stmt) {
+      free(defer_stmt);
     }
     break;
   }
@@ -223,7 +263,7 @@ void ast_destroy_node(ASTNode *node) {
     break;
   }
   default:
-    free(node->data);
+    // For other node types, assume data is managed by children or is NULL
     break;
   }
 
@@ -896,4 +936,23 @@ ASTNode *ast_create_break_statement(SourceLocation location) {
 
 ASTNode *ast_create_continue_statement(SourceLocation location) {
   return ast_create_node(AST_CONTINUE_STATEMENT, location);
+}
+
+ASTNode *ast_create_defer_statement(ASTNode *statement, SourceLocation location) {
+  ASTNode *node = ast_create_node(AST_DEFER_STATEMENT, location);
+  if (!node) {
+    return NULL;
+  }
+
+  DeferStatement *defer_stmt = malloc(sizeof(DeferStatement));
+  if (!defer_stmt) {
+    free(node);
+    return NULL;
+  }
+  defer_stmt->statement = statement;
+  node->data = defer_stmt;
+  if (statement) {
+    ast_add_child(node, statement);
+  }
+  return node;
 }

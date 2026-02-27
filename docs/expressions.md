@@ -139,6 +139,6 @@ Comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) produce `int32` with val
 
 ## String Expressions
 
-**Concatenation:** There is no `+` operator for string concatenation. The `+` operator is numeric only. To build strings at runtime, allocate a buffer, copy bytes (e.g. via C `memcpy`), and assign the `string` struct fields (`.chars` and `.length`).
+**Concatenation:** The `+` operator concatenates two `string` values. Both operands must be `string`; the result is a new GC-managed string whose `.chars` points to a freshly allocated buffer and whose `.length` is the sum of the operand lengths. Because the runtime allocates via `gc_alloc`, link `gc.c` and call `gc_init` (the entry point does this automatically) before using string concatenation or other heap-backed string helpers.
 
 **Indexing:** Use `s.chars[i]` to access the i-th byte of a string. The `.chars` field is a pointer; indexing advances by 1 byte (element size of `uint8`). Bounds are not checked; ensure `i < s.length` to avoid undefined behavior.

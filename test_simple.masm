@@ -1,4 +1,0 @@
-function test() -> int32 {
-    var result: int32 = 42;
-    return result;
-}

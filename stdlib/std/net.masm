@@ -4,12 +4,25 @@
 // Programs using this module must link against ws2_32:
 //   gcc -o myapp output.s -lws2_32
 //
-// Usage pattern:
+// Usage pattern with defer for automatic cleanup:
 //   net_init();
 //   var sock: int64 = socket(AF_INET, SOCK_STREAM, 0);
-//   ... connect / bind / listen / accept / send / recv ...
-//   closesocket(sock);
+//   defer closesocket(sock);
+//   ... connect / send / recv ...
 //   net_cleanup();
+//
+// Server pattern with client socket cleanup:
+//   var server_sock: int64 = socket(AF_INET, SOCK_STREAM, 0);
+//   defer closesocket(server_sock);
+//   bind(server_sock, addr, 16);
+//   listen(server_sock, 5);
+//   while (1) {
+//     var client: int64 = accept(server_sock, ...);
+//     if (client != INVALID_SOCKET()) {
+//       defer closesocket(client);
+//       ... handle client ...
+//     }
+//   }
 
 import "std/mem";
 import "std/thread";

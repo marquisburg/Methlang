@@ -361,7 +361,8 @@ static int code_generator_emit_ir_address_of(CodeGenerator *generator,
                                "Invalid global symbol in IR addr_of");
       return 0;
     }
-    if (symbol->is_extern && !code_generator_emit_extern_symbol(generator, symbol_name)) {
+    if (symbol->is_extern &&
+        !code_generator_emit_extern_symbol(generator, symbol_name)) {
       return 0;
     }
     code_generator_emit(generator, "    lea rax, [rel %s]\n", symbol_name);
@@ -545,6 +546,9 @@ code_generator_emit_ir_binary_fallback(CodeGenerator *generator,
       if (strcmp(op, "%") == 0) {
         code_generator_emit(generator, "    mov rax, rdx\n");
       }
+    } else if (strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) {
+      code_generator_emit(generator, "    mov rcx, r10\n");
+      code_generator_emit(generator, "    %s rax, cl\n", arith);
     } else {
       code_generator_emit(generator, "    %s rax, r10\n", arith);
     }
@@ -691,7 +695,8 @@ static int code_generator_ir_operand_has_float_type(CodeGenerator *generator,
   }
 
   if (operand->kind == IR_OPERAND_SYMBOL && operand->name) {
-    Symbol *symbol = symbol_table_lookup(generator->symbol_table, operand->name);
+    Symbol *symbol =
+        symbol_table_lookup(generator->symbol_table, operand->name);
     if (symbol && symbol->type &&
         code_generator_is_floating_point_type(symbol->type)) {
       return 1;
@@ -704,7 +709,8 @@ static int code_generator_ir_operand_has_float_type(CodeGenerator *generator,
 static int code_generator_ir_call_argument_is_float(
     CodeGenerator *generator, Symbol *function_symbol,
     const IRInstruction *instruction, size_t argument_index) {
-  if (!generator || !instruction || argument_index >= instruction->argument_count) {
+  if (!generator || !instruction ||
+      argument_index >= instruction->argument_count) {
     return 0;
   }
 
@@ -729,7 +735,8 @@ static int code_generator_emit_ir_call_argument_stack(CodeGenerator *generator,
   if (!code_generator_load_ir_operand(generator, operand, temp_table)) {
     return 0;
   }
-  code_generator_emit(generator, "    mov [rsp + %d], rax\n", stack_slot_offset);
+  code_generator_emit(generator, "    mov [rsp + %d], rax\n",
+                      stack_slot_offset);
   return 1;
 }
 
@@ -776,7 +783,7 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
     code_generator_set_error(generator, "Invalid IR call target");
     return 0;
   }
-  if (function_symbol && function_symbol->is_extern) {
+  if ((function_symbol && function_symbol->is_extern) || !function_symbol) {
     if (!code_generator_emit_extern_symbol(generator, call_target)) {
       return 0;
     }
@@ -835,10 +842,9 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
   code_generator_emit(generator, "    ; IR call: %s (%zu args)\n",
                       instruction->text, argument_count);
 
-  int shadow_space =
-      (conv_spec->convention == CALLING_CONV_MS_X64)
-          ? conv_spec->shadow_space_size
-          : 0;
+  int shadow_space = (conv_spec->convention == CALLING_CONV_MS_X64)
+                         ? conv_spec->shadow_space_size
+                         : 0;
   int stack_arg_space = stack_argument_count * 8;
   int call_stack_total = shadow_space + stack_arg_space;
   if ((call_stack_total % 16) != 0) {
@@ -880,9 +886,9 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
         free(goes_on_stack);
         return 0;
       }
-      x86Register target_register =
-          (is_float && is_float[i]) ? conv_spec->float_param_registers[i]
-                                    : conv_spec->int_param_registers[i];
+      x86Register target_register = (is_float && is_float[i])
+                                        ? conv_spec->float_param_registers[i]
+                                        : conv_spec->int_param_registers[i];
       if (!code_generator_emit_ir_call_argument_register(
               generator, &instruction->arguments[i], temp_table,
               target_register, (is_float && is_float[i]) ? 1 : 0)) {
@@ -1089,10 +1095,10 @@ static int code_generator_add_stack_size(CodeGenerator *generator,
     return 0;
   }
   if (*stack_size > INT_MAX - amount) {
-    code_generator_set_error(
-        generator,
-        "Stack frame too large in function '%s' (integer overflow while sizing)",
-        function_name ? function_name : "<unknown>");
+    code_generator_set_error(generator,
+                             "Stack frame too large in function '%s' (integer "
+                             "overflow while sizing)",
+                             function_name ? function_name : "<unknown>");
     return 0;
   }
   *stack_size += amount;
@@ -1209,9 +1215,8 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
         symbol_table_exit_scope(generator->symbol_table);
         return 0;
       }
-      if (!code_generator_add_stack_size(generator, &stack_size,
-                                         local_size + 15,
-                                         function_data->name)) {
+      if (!code_generator_add_stack_size(
+              generator, &stack_size, local_size + 15, function_data->name)) {
         ir_temp_table_destroy(&temp_table);
         ir_local_table_destroy(&local_table);
         symbol_table_exit_scope(generator->symbol_table);
@@ -1252,10 +1257,10 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   if (generator->type_checker && generator->type_checker->error_reporter &&
       stack_size >= STACK_FRAME_WARN_THRESHOLD) {
     char warning[256];
-    snprintf(
-        warning, sizeof(warning),
-        "Large stack frame in function '%s' (%d bytes); this increases stack overflow risk",
-        function_data->name, stack_size);
+    snprintf(warning, sizeof(warning),
+             "Large stack frame in function '%s' (%d bytes); this increases "
+             "stack overflow risk",
+             function_data->name, stack_size);
     error_reporter_add_warning(generator->type_checker->error_reporter,
                                ERROR_SEMANTIC, function_declaration->location,
                                warning);

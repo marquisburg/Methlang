@@ -1,0 +1,20 @@
+import "std/io";
+
+function then_defer() { puts(cstr("THEN_DEFER\n")); }
+function else_defer() { puts(cstr("ELSE_DEFER\n")); }
+function then_body() { puts(cstr("THEN_BODY\n")); }
+function else_body() { puts(cstr("ELSE_BODY\n")); }
+function after_if() { puts(cstr("AFTER_IF\n")); }
+
+function main() -> int32 {
+  if (1) {
+    defer then_defer();
+    then_body();
+  } else {
+    defer else_defer();
+    else_body();
+  }
+
+  after_if();
+  return 0;
+}

@@ -1,6 +1,24 @@
 // MethASM standard library: I/O
 //
 // Console output, file operations, and formatted printing.
+//
+// File I/O pattern with defer for automatic cleanup:
+//   var file: cstring = fopen("data.txt", "r");
+//   if (file != 0) {
+//     defer fclose(file);
+//     ... read/write operations ...
+//   }
+//
+// Multiple resources with LIFO cleanup:
+//   var src: cstring = fopen("input.txt", "r");
+//   if (src == 0) { return err(); }
+//   defer fclose(src);
+//   
+//   var dst: cstring = fopen("output.txt", "w");
+//   if (dst == 0) { return err(); }
+//   defer fclose(dst);  // Runs first (LIFO)
+//   
+//   ... copy data ...
 
 // ─── Console output ─────────────────────────────────────────────────────────
 export extern function puts(msg: cstring) -> int32;

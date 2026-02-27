@@ -3,9 +3,18 @@
 #endif
 #include "error_reporter.h"
 #include "../parser/ast.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <io.h>
+#define isatty _isatty
+#define fileno _fileno
+#else
+#include <unistd.h>
+#endif
 
 #define INITIAL_ERROR_CAPACITY 16
 #define MAX_ERRORS_DEFAULT 100
@@ -14,6 +23,34 @@
 #define ANSI_COLOR_BLUE "\x1b[34m"
 #define ANSI_COLOR_RESET "\x1b[0m"
 #define ANSI_BOLD "\x1b[1m"
+
+static int error_reporter_should_use_color(void) {
+  const char *no_color = getenv("NO_COLOR");
+  if (no_color && no_color[0] != '\0') {
+    return 0;
+  }
+
+  const char *term = getenv("TERM");
+  if (term && strcmp(term, "dumb") == 0) {
+    return 0;
+  }
+
+  int fd = fileno(stdout);
+  if (fd < 0) {
+    return 0;
+  }
+
+  return isatty(fd) ? 1 : 0;
+}
+
+static size_t error_reporter_count_digits(size_t n) {
+  size_t digits = 1;
+  while (n >= 10) {
+    n /= 10;
+    digits++;
+  }
+  return digits;
+}
 
 ErrorReporter *error_reporter_create(const char *filename,
                                      const char *source_code) {
@@ -34,6 +71,18 @@ ErrorReporter *error_reporter_create(const char *filename,
   reporter->filename = filename ? strdup(filename) : NULL;
 
   return reporter;
+}
+
+SourceSpan source_span_create(size_t line, size_t column, size_t length) {
+  SourceSpan span;
+  span.line = line;
+  span.column = column;
+  span.length = length;
+  return span;
+}
+
+SourceSpan source_span_from_location(SourceLocation location, size_t length) {
+  return source_span_create(location.line, location.column, length);
 }
 
 void error_reporter_destroy(ErrorReporter *reporter) {
@@ -76,40 +125,68 @@ void error_reporter_add_error_with_suggestion(ErrorReporter *reporter,
                                               SourceLocation location,
                                               const char *message,
                                               const char *suggestion) {
+  SourceSpan span = source_span_from_location(location, 1);
+  error_reporter_add_error_with_span_and_suggestion(reporter, type, span,
+                                                    message, suggestion);
+}
+
+void error_reporter_add_error_with_span(ErrorReporter *reporter, ErrorType type,
+                                        SourceSpan span, const char *message) {
+  error_reporter_add_error_with_span_and_suggestion(reporter, type, span,
+                                                    message, NULL);
+}
+
+void error_reporter_add_error_with_span_and_suggestion(
+    ErrorReporter *reporter, ErrorType type, SourceSpan span, const char *message,
+    const char *suggestion) {
   if (!reporter || reporter->count >= reporter->max_errors)
     return;
 
   if (!error_reporter_expand_capacity(reporter))
     return;
 
+  if (span.length == 0)
+    span.length = 1;
+
   ErrorReport *error = &reporter->errors[reporter->count];
   error->type = type;
   error->severity = ERROR_SEVERITY_ERROR;
-  error->location = location;
+  error->location = source_location_create(span.line, span.column);
+  error->span = span;
   error->message = strdup(message);
   error->suggestion = suggestion ? strdup(suggestion) : NULL;
   error->code_snippet =
-      error_reporter_get_line_from_source(reporter->source_code, location.line);
+      error_reporter_get_line_from_source(reporter->source_code, span.line);
 
   reporter->count++;
 }
 
 void error_reporter_add_warning(ErrorReporter *reporter, ErrorType type,
                                 SourceLocation location, const char *message) {
+  SourceSpan span = source_span_from_location(location, 1);
+  error_reporter_add_warning_with_span(reporter, type, span, message);
+}
+
+void error_reporter_add_warning_with_span(ErrorReporter *reporter, ErrorType type,
+                                          SourceSpan span, const char *message) {
   if (!reporter || reporter->count >= reporter->max_errors)
     return;
 
   if (!error_reporter_expand_capacity(reporter))
     return;
 
+  if (span.length == 0)
+    span.length = 1;
+
   ErrorReport *error = &reporter->errors[reporter->count];
   error->type = type;
   error->severity = ERROR_SEVERITY_WARNING;
-  error->location = location;
+  error->location = source_location_create(span.line, span.column);
+  error->span = span;
   error->message = strdup(message);
   error->suggestion = NULL;
   error->code_snippet =
-      error_reporter_get_line_from_source(reporter->source_code, location.line);
+      error_reporter_get_line_from_source(reporter->source_code, span.line);
 
   reporter->count++;
 }
@@ -131,49 +208,88 @@ void error_reporter_print_error(ErrorReporter *reporter,
   if (!reporter || !error)
     return;
 
+  const int use_color = error_reporter_should_use_color();
   const char *severity_color = "";
   const char *severity_text = "";
+  const char *reset = "";
+  const char *help_color = "";
 
   switch (error->severity) {
   case ERROR_SEVERITY_ERROR:
-    severity_color = ANSI_COLOR_RED;
+    severity_color = use_color ? ANSI_COLOR_RED : "";
     severity_text = "error";
     break;
   case ERROR_SEVERITY_WARNING:
-    severity_color = ANSI_COLOR_YELLOW;
+    severity_color = use_color ? ANSI_COLOR_YELLOW : "";
     severity_text = "warning";
     break;
   case ERROR_SEVERITY_NOTE:
-    severity_color = ANSI_COLOR_BLUE;
+    severity_color = use_color ? ANSI_COLOR_BLUE : "";
     severity_text = "note";
     break;
   }
 
+  reset = use_color ? ANSI_COLOR_RESET : "";
+  help_color = use_color ? ANSI_COLOR_BLUE : "";
+
   // Print error header
-  printf("%s%s%s: %s\n", severity_color, severity_text, ANSI_COLOR_RESET,
-         error->message);
+  printf("%s%s%s: %s\n", severity_color, severity_text, reset, error->message);
 
   // Print location
-  printf("  --> line %zu, column %zu\n", error->location.line,
-         error->location.column);
+  if (reporter->filename) {
+    printf("  --> %s:%zu:%zu\n", reporter->filename, error->location.line,
+           error->location.column);
+  } else {
+    printf("  --> line %zu, column %zu\n", error->location.line,
+           error->location.column);
+  }
 
-  // Print code snippet with caret
+  // Print code snippet with caret (+ context)
   if (error->code_snippet) {
-    printf("   |\n");
-    printf("%2zu | %s\n", error->location.line, error->code_snippet);
+    const size_t line = error->location.line;
+    const size_t prev_line = (line > 1) ? (line - 1) : 0;
+    const size_t next_line = line + 1;
 
+    char *prev = prev_line ? error_reporter_get_line_from_source(
+                                reporter->source_code, prev_line)
+                          : NULL;
+    char *next = error_reporter_get_line_from_source(reporter->source_code,
+                                                     next_line);
+
+    size_t max_line_num = line;
+    if (next)
+      max_line_num = next_line;
+    if (prev)
+      max_line_num = line;
+    size_t gutter_width = error_reporter_count_digits(max_line_num);
+
+    printf("%*s |\n", (int)gutter_width, "");
+
+    if (prev) {
+      printf("%*zu | %s\n", (int)gutter_width, prev_line, prev);
+    }
+
+    printf("%*zu | %s\n", (int)gutter_width, line, error->code_snippet);
+
+    size_t caret_len = (error->span.length > 0) ? error->span.length : 1;
     char *caret_line =
-        error_reporter_create_caret_line(error->location.column, 1);
+        error_reporter_create_caret_line(error->location.column, caret_len);
     if (caret_line) {
-      printf("   | %s\n", caret_line);
+      printf("%*s | %s\n", (int)gutter_width, "", caret_line);
       free(caret_line);
     }
+
+    if (next) {
+      printf("%*zu | %s\n", (int)gutter_width, next_line, next);
+    }
+
+    free(prev);
+    free(next);
   }
 
   // Print suggestion if available
   if (error->suggestion) {
-    printf("   = %shelp%s: %s\n", ANSI_COLOR_BLUE, ANSI_COLOR_RESET,
-           error->suggestion);
+    printf("   = %shelp%s: %s\n", help_color, reset, error->suggestion);
   }
 }
 

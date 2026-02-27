@@ -4,62 +4,60 @@
 section .text
 ; Code section
 
-; First pass: processing 1 declarations
-; Declaration 0 type: 4 (AST_INLINE_ASM = 18)
+; First pass: processing 2 declarations
+; Declaration 0 type: 4 (AST_INLINE_ASM = 20)
+; Declaration 1 type: 4 (AST_INLINE_ASM = 20)
 
 section .text
 
-global test
+global cleanup
 
-test:
+cleanup:
     push rbp        ; Save old base pointer
     mov rbp, rsp  ; Set new base pointer
-    sub rsp, 80    ; Allocate 80 bytes on stack (aligned)
+    sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
     ; Registering 0 function parameters
 ir_entry_0:
-    mov rax, 5
-    ; Store to variable: x
-    mov dword [rbp - 4], eax  ; To stack [rbp - 4]
-    ; Load variable: x
-    mov eax, dword [rbp - 4]  ; From stack [rbp - 4]
-    push rax
-    mov rax, 1
-    mov r10, rax
-    pop rax
-    cmp rax, r10
-    sete al
-    movzx rax, al
-    mov [rbp - 16], rax
-    mov rax, [rbp - 16]
-    test rax, rax
-    jz ir_if_next_2
-    mov rax, 2
-    ; Store to variable: x
-    mov dword [rbp - 4], eax  ; To stack [rbp - 4]
-    jmp ir_if_end_1
-ir_if_next_2:
-    ; Load variable: x
-    mov eax, dword [rbp - 4]  ; From stack [rbp - 4]
-    push rax
-    mov rax, 2
-    mov r10, rax
-    pop rax
-    cmp rax, r10
-    sete al
-    movzx rax, al
-    mov [rbp - 24], rax
-    mov rax, [rbp - 24]
-    test rax, rax
-    jz ir_if_next_3
-    mov rax, 3
-    ; Store to variable: x
-    mov dword [rbp - 4], eax  ; To stack [rbp - 4]
-    jmp ir_if_end_1
-ir_if_next_3:
-ir_if_end_1:
     mov rax, 0
-    jmp Ltest_exit
-Ltest_exit:
+    mov [rbp - 8], rax
+    mov rax, [rbp - 8]
+    test rax, rax
+    jz ir_errdefer_ok_1
+    jmp ir_errdefer_end_2
+ir_errdefer_ok_1:
+ir_errdefer_end_2:
+    jmp Lcleanup_exit
+Lcleanup_exit:
+    ; Function epilogue
+    mov rsp, rbp  ; Restore stack pointer
+    pop rbp         ; Restore old base pointer
+    ret               ; Return to caller
+
+global main
+
+main:
+    push rbp        ; Save old base pointer
+    mov rbp, rsp  ; Set new base pointer
+    sub rsp, 48    ; Allocate 48 bytes on stack (aligned)
+    ; Registering 0 function parameters
+ir_entry_3:
+    mov rax, 42
+    mov [rbp - 8], rax
+    mov rax, [rbp - 8]
+    test rax, rax
+    jz ir_errdefer_ok_4
+    ; IR call: cleanup (0 args)
+    sub rsp, 32
+    call cleanup
+    add rsp, 32
+    ; Void return - no value to handle
+    mov [rbp - 16], rax
+    jmp ir_errdefer_end_5
+ir_errdefer_ok_4:
+ir_errdefer_end_5:
+    mov rax, 42
+    jmp Lmain_exit
+Lmain_exit:
     ; Function epilogue
     mov rsp, rbp  ; Restore stack pointer
     pop rbp         ; Restore old base pointer
@@ -73,8 +71,11 @@ mainCRTStartup:
     lea rcx, [rsp + 40]
     extern gc_init
     call gc_init
+    ; Call user main function
+    call main
+    mov [rsp + 32], rax ; Preserve main return code
     extern gc_shutdown
     call gc_shutdown
-    mov rcx, 0       ; Default exit status
+    mov rcx, [rsp + 32] ; Use main return as exit code
     extern ExitProcess
     call ExitProcess

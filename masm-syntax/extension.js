@@ -150,15 +150,7 @@ function lintRegex(document) {
         diagnostics.push(mkDiag(lineIdx, idx, 1, 'Modulo % is not supported. Use a helper or inline logic.', 'masm'));
         idx++;
       }
-      idx = seg.start;
-      while ((idx = line.indexOf('~', idx)) !== -1 && idx < seg.end) {
-        diagnostics.push(mkDiag(lineIdx, idx, 1, 'Bitwise complement ~ is not supported. Use inline assembly or C externs.', 'masm'));
-        idx++;
-      }
 
-      add(/<<|>>/g, 'Bitwise shift is not supported. Use inline assembly or C externs.');
-      add(/(?<!\|)\|(?!\|)/g, 'Bitwise OR | is not supported. Use && and || for logical operations.');
-      add(/\^/g, 'Bitwise XOR ^ is not supported. Use inline assembly or C externs.');
       add(/!(?!=)/g, 'Unary logical NOT ! is not supported. Use == 0 or != 0 for comparisons.');
       add(/[+\-*/]=/g, 'Compound assignment (+=, -=, *=, /=) is not supported. Use x = x + 1 instead.');
       add(/\b0[xX](?=\s|$|[^0-9a-fA-F])/g, 'Invalid hex literal. Expected hex digits after 0x.');

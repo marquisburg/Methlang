@@ -1,0 +1,14 @@
+import "std/io";
+
+function a() { puts(cstr("A\n")); }
+function b() { puts(cstr("B\n")); }
+function c() { puts(cstr("C\n")); }
+function d() { puts(cstr("D\n")); }
+
+function main() -> int32 {
+  defer a();
+  errdefer b();
+  defer c();
+  errdefer d();
+  return 1;
+}

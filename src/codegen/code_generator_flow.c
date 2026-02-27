@@ -570,6 +570,9 @@ void code_generator_register_function_parameters(CodeGenerator *generator,
     } else if (!param_symbol->type) {
       param_symbol->type = resolved_param_type;
     }
+    // Semantic passes may predeclare parameters as variables; normalize here so
+    // codegen can apply parameter-specific ABI/storage handling consistently.
+    param_symbol->kind = SYMBOL_PARAMETER;
 
     // Determine if parameter is in register or on stack
     int is_in_register = 0;

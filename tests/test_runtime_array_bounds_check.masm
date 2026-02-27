@@ -1,0 +1,10 @@
+function main() -> int32 {
+  var arr: int32[4];
+  var i: int32 = 3;
+
+  if (i != 0) {
+    i = i + 1;
+  }
+
+  return arr[i];
+}

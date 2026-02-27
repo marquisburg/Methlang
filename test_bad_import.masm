@@ -1,5 +1,0 @@
-import "nonexistent_module.masm"
-
-function test() -> int64 {
-  return 0
-}

@@ -23,6 +23,8 @@ typedef enum {
   AST_CASE_CLAUSE,
   AST_BREAK_STATEMENT,
   AST_CONTINUE_STATEMENT,
+  AST_DEFER_STATEMENT,
+  AST_ERRDEFER_STATEMENT,
   AST_INLINE_ASM,
   AST_IDENTIFIER,
   AST_NUMBER_LITERAL,
@@ -203,6 +205,10 @@ typedef struct {
   ASTNode *value;
 } ReturnStatement;
 
+typedef struct {
+  ASTNode *statement;
+} DeferStatement;
+
 // Function declarations
 ASTNode *ast_create_node(ASTNodeType type, SourceLocation location);
 void ast_destroy_node(ASTNode *node);
@@ -264,5 +270,8 @@ ASTNode *ast_create_switch_statement(ASTNode *expression, ASTNode **cases,
                                      SourceLocation location);
 ASTNode *ast_create_break_statement(SourceLocation location);
 ASTNode *ast_create_continue_statement(SourceLocation location);
+ASTNode *ast_create_defer_statement(ASTNode *statement, SourceLocation location);
+ASTNode *ast_create_errdefer_statement(ASTNode *statement,
+                                       SourceLocation location);
 
 #endif // AST_H

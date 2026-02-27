@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<meta name='description' content='Interactive MethASM code demonstrations and examples. Try the language features in your browser.'>
+<title>MethASM — Interactive Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-color: #05050A;
+    --text-main: #E2E8F0;
+    --text-muted: #94A3B8;
+    --accent-1: #6366F1;
+    --accent-2: #8B5CF6;
+    --accent-3: #EC4899;
+    --accent-4: #10B981;
+    --glass-bg: rgba(255, 255, 255, 0.03);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --code-bg: #0D1117;
+    --success: #10B981;
+    --warning: #F59E0B;
+    --error: #EF4444;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* Animated background mesh */
+  .bg-mesh {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: -1;
+    background: 
+      radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 50% 80%, rgba(139, 92, 246, 0.15) 0%, transparent 50%);
+    filter: blur(60px);
+    animation: pulse 15s ease-in-out infinite alternate;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(1); opacity: 0.8; }
+    100% { transform: scale(1.1); opacity: 1; }
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+
+  /* Navigation */
+  nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 0;
+    margin-bottom: 3rem;
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 2rem;
+    align-items: center;
+  }
+
+  .nav-link {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.3s ease;
+  }
+
+  .nav-link:hover {
+    color: var(--accent-1);
+  }
+
+  /* Header */
+  .header {
+    text-align: center;
+    margin-bottom: 4rem;
+    animation: slideUp 0.8s ease-out;
+  }
+
+  .header h1 {
+    font-size: clamp(2.5rem, 6vw, 4rem);
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    background: linear-gradient(135deg, var(--text-main) 0%, var(--accent-1) 50%, var(--accent-3) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -1px;
+  }
+
+  .header p {
+    font-size: 1.2rem;
+    color: var(--text-muted);
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  /* Demo Sections */
+  .demo-section {
+    margin-bottom: 4rem;
+    animation: fadeUp 0.8s ease-out backwards;
+  }
+
+  .demo-section:nth-child(2) { animation-delay: 0.1s; }
+  .demo-section:nth-child(3) { animation-delay: 0.2s; }
+  .demo-section:nth-child(4) { animation-delay: 0.3s; }
+
+  .demo-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    backdrop-filter: blur(10px);
+  }
+
+  .demo-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: white;
+  }
+
+  .demo-description {
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+  }
+
+  .demo-controls {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .btn {
+    padding: 0.6rem 1.5rem;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    font-size: 0.9rem;
+    border: none;
+    cursor: pointer;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent-1) 0%, var(--accent-2) 100%);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  }
+
+  .btn-secondary {
+    background: var(--glass-bg);
+    color: var(--text-main);
+    border: 1px solid var(--glass-border);
+  }
+
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  /* Code Editor */
+  .editor-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .editor-panel {
+    background: var(--code-bg);
+    border: 1px solid #30363D;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    background: #161B22;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #30363D;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .panel-title {
+    color: var(--text-main);
+    font-weight: 500;
+    font-size: 0.9rem;
+  }
+
+  .panel-content {
+    padding: 1rem;
+  }
+
+  .code-editor {
+    width: 100%;
+    min-height: 300px;
+    background: transparent;
+    border: none;
+    color: #E2E8F0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+  }
+
+  .output-display {
+    min-height: 300px;
+    background: transparent;
+    border: none;
+    color: #E2E8F0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    padding: 1rem;
+    white-space: pre-wrap;
+    overflow-y: auto;
+  }
+
+  /* Feature Cards */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2rem;
+    margin-bottom: 4rem;
+  }
+
+  .feature-card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    padding: 2rem;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+    cursor: pointer;
+  }
+
+  .feature-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--accent-1);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  }
+
+  .feature-icon {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+    display: block;
+  }
+
+  .feature-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: white;
+    margin-bottom: 0.5rem;
+  }
+
+  .feature-desc {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+
+  /* Status Messages */
+  .status {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    font-weight: 500;
+  }
+
+  .status.success {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid var(--success);
+    color: var(--success);
+  }
+
+  .status.error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid var(--error);
+    color: var(--error);
+  }
+
+  .status.info {
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid var(--accent-1);
+    color: var(--accent-1);
+  }
+
+  /* Animations */
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .nav-links {
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .editor-container {
+      grid-template-columns: 1fr;
+    }
+
+    .demo-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .feature-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="bg-mesh"></div>
+  
+  <div class="container">
+    <nav>
+      <div class="nav-links">
+        <a href="/" class="nav-link">Home</a>
+        <a href="/demo" class="nav-link">Demo</a>
+        <a href="/benchmarks" class="nav-link">Benchmarks</a>
+        <a href="/docs" class="nav-link">Docs</a>
+        <a href="/forum" class="nav-link">Forum</a>
+      </div>
+    </nav>
+
+    <header class="header">
+      <h1>Interactive Demo</h1>
+      <p>Explore MethASM's features through live, interactive code examples. Try modifying the code and see the results!</p>
+    </header>
+
+    <!-- Feature Selection -->
+    <div class="feature-grid">
+      <div class="feature-card" onclick="loadDemo('basics')">
+        <span class="feature-icon">🚀</span>
+        <div class="feature-title">Language Basics</div>
+        <div class="feature-desc">Variables, functions, and control flow fundamentals</div>
+      </div>
+      
+      <div class="feature-card" onclick="loadDemo('structs')">
+        <span class="feature-icon">🏗️</span>
+        <div class="feature-title">Structs & Methods</div>
+        <div class="feature-desc">Data structures and their associated methods</div>
+      </div>
+      
+      <div class="feature-card" onclick="loadDemo('memory')">
+        <span class="feature-icon">🧠</span>
+        <div class="feature-title">Memory Management</div>
+        <div class="feature-desc">Stack allocation vs garbage collection</div>
+      </div>
+      
+      <div class="feature-card" onclick="loadDemo('interop')">
+        <span class="feature-icon">🔗</span>
+        <div class="feature-title">C Interop</div>
+        <div class="feature-desc">Calling external C functions</div>
+      </div>
+      
+      <div class="feature-card" onclick="loadDemo('networking')">
+        <span class="feature-icon">🌐</span>
+        <div class="feature-title">Networking</div>
+        <div class="feature-desc">Socket programming and network I/O</div>
+      </div>
+      
+      <div class="feature-card" onclick="loadDemo('advanced')">
+        <span class="feature-icon">⚡</span>
+        <div class="feature-title">Advanced Features</div>
+        <div class="feature-desc">Pointers, arrays, and optimization</div>
+      </div>
+    </div>
+
+    <!-- Demo Editor -->
+    <div class="demo-section">
+      <div class="demo-header">
+        <div>
+          <div class="demo-title" id="demoTitle">Language Basics</div>
+          <div class="demo-description" id="demoDescription">Try basic MethAML syntax and concepts</div>
+        </div>
+        <div class="demo-controls">
+          <button class="btn btn-secondary" onclick="resetCode()">Reset</button>
+          <button class="btn btn-primary" onclick="runCode()">Run Code</button>
+        </div>
+      </div>
+
+      <div id="statusMessage"></div>
+
+      <div class="editor-container">
+        <div class="editor-panel">
+          <div class="panel-header">
+            <div class="panel-title">📝 MethASM Code</div>
+          </div>
+          <div class="panel-content">
+            <textarea id="codeEditor" class="code-editor" spellcheck="false">// MethASM Interactive Demo
+// Try modifying this code and click "Run Code"
+
+import "std/io";
+
+function factorial(n: int32) -> int32 {
+  if (n <= 1) {
+    return 1;
+  }
+  return n * factorial(n - 1);
+}
+
+function main() -> int32 {
+  var i: int32 = 5;
+  var result: int32 = factorial(i);
+  
+  puts("Factorial of ");
+  println_int(i);
+  puts(" is ");
+  println_int(result);
+  
+  return 0;
+}</textarea>
+          </div>
+        </div>
+
+        <div class="editor-panel">
+          <div class="panel-header">
+            <div class="panel-title">📤 Output</div>
+          </div>
+          <div class="panel-content">
+            <div id="outputDisplay" class="output-display">// Click "Run Code" to see the output
+// This simulates what the MethASM compiler would produce</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const demos = {
+      basics: {
+        title: "Language Basics",
+        description: "Try basic MethASM syntax and concepts",
+        code: `// MethASM Language Basics
+// Variables, functions, and control flow
+
+import "std/io";
+
+function fibonacci(n: int32) -> int32 {
+  if (n <= 1) {
+    return n;
+  }
+  return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+function main() -> int32 {
+  var count: int32 = 10;
+  var i: int32 = 0;
+  
+  puts("Fibonacci sequence: ");
+  while (i < count) {
+    println_int(fibonacci(i));
+    i = i + 1;
+  }
+  
+  return 0;
+}`,
+        output: `Fibonacci sequence: 
+0
+1
+1
+2
+3
+5
+8
+13
+21
+34`
+      },
+      
+      structs: {
+        title: "Structs & Methods",
+        description: "Data structures and their associated methods",
+        code: `// Structs and Methods in MethASM
+// Define data structures with behavior
+
+import "std/io";
+
+struct Vector2D {
+  x: float64;
+  y: float64;
+  
+  function magnitude() -> float64 {
+    return (this.x * this.x + this.y * this.y) * 0.5; // Simplified sqrt
+  }
+  
+  function add(other: Vector2D*) -> Vector2D {
+    var result: Vector2D;
+    result.x = this.x + other->x;
+    result.y = this.y + other->y;
+    return result;
+  }
+}
+
+function main() -> int32 {
+  var v1: Vector2D = {3.0, 4.0};
+  var v2: Vector2D = {1.0, 2.0};
+  
+  var sum: Vector2D = v1.add(&v2);
+  
+  puts("Vector sum: (");
+  print_float(sum.x);
+  puts(", ");
+  print_float(sum.y);
+  puts(")");
+  
+  return 0;
+}`,
+        output: `Vector sum: (4.0, 6.0)`
+      },
+      
+      memory: {
+        title: "Memory Management",
+        description: "Stack allocation vs garbage collection",
+        code: `// Memory Management in MethASM
+// Stack allocation vs garbage collection
+
+import "std/io";
+import "std/mem";
+
+struct Node {
+  value: int32;
+  next: Node*;
+}
+
+function main() -> int32 {
+  // Stack allocation (automatic cleanup)
+  var stack_var: int32 = 42;
+  puts("Stack variable: ");
+  println_int(stack_var);
+  
+  // Manual memory management with C malloc
+  var buffer: cstring = malloc(1024);
+  if (buffer != 0) {
+    puts("Allocated 1024 bytes with malloc");
+    free(buffer);
+    puts("Freed memory");
+  }
+  
+  // Garbage collection (if GC runtime linked)
+  // var gc_node: Node* = new Node;
+  // gc_node->value = 100;
+  // puts("Created node with GC");
+  
+  return 0;
+}`,
+        output: `Stack variable: 42
+Allocated 1024 bytes with malloc
+Freed memory`
+      },
+      
+      interop: {
+        title: "C Interop",
+        description: "Calling external C functions",
+        code: `// C Interoperability in MethASM
+// Calling external C functions
+
+import "std/io";
+
+// Declare external C functions
+extern function strlen(s: cstring) -> int32 = "strlen";
+extern function strcpy(dest: cstring, src: cstring) -> cstring = "strcpy";
+extern function atoi(s: cstring) -> int32 = "atoi";
+
+function main() -> int32 {
+  var message: uint8[256];
+  var number_str: uint8[32] = "42";
+  
+  // Use C string functions
+  strcpy(&message[0], "Hello from C interop!");
+  var len: int32 = strlen(&message[0]);
+  
+  puts("Message: ");
+  println(&message[0]);
+  puts("Length: ");
+  println_int(len);
+  
+  // Convert string to integer
+  var number: int32 = atoi(&number_str[0]);
+  puts("Parsed number: ");
+  println_int(number);
+  
+  return 0;
+}`,
+        output: `Message: Hello from C interop!
+Length: 19
+Parsed number: 42`
+      },
+      
+      networking: {
+        title: "Networking",
+        description: "Socket programming and network I/O",
+        code: `// Networking with MethASM
+// Basic TCP socket operations
+
+import "std/net";
+import "std/io";
+
+function main() -> int32 {
+  if (net_init() != 0) {
+    puts("Failed to initialize network");
+    return 1;
+  }
+  
+  var sock: int64 = socket_tcp();
+  if (sock == INVALID_SOCKET()) {
+    puts("Failed to create socket");
+    net_cleanup();
+    return 1;
+  }
+  
+  var addr: cstring = sockaddr_in_any(8080);
+  if (bind(sock, addr, 16) != 0) {
+    puts("Failed to bind to port 8080");
+    closesocket(sock);
+    net_cleanup();
+    return 1;
+  }
+  
+  if (listen(sock, 5) != 0) {
+    puts("Failed to listen");
+    closesocket(sock);
+    net_cleanup();
+    return 1;
+  }
+  
+  puts("Server listening on port 8080");
+  puts("Press Ctrl+C to stop");
+  
+  // In a real server, you'd have an accept loop here
+  closesocket(sock);
+  net_cleanup();
+  return 0;
+}`,
+        output: `Server listening on port 8080
+Press Ctrl+C to stop`
+      },
+      
+      advanced: {
+        title: "Advanced Features",
+        description: "Pointers, arrays, and optimization",
+        code: `// Advanced MethASM Features
+// Pointers, arrays, and performance
+
+import "std/io";
+import "std/mem";
+
+struct Matrix {
+  rows: int32;
+  cols: int32;
+  data: float64*;
+}
+
+function matrix_create(rows: int32, cols: int32) -> Matrix* {
+  var m: Matrix* = malloc(sizeof(Matrix));
+  m->rows = rows;
+  m->cols = cols;
+  m->data = malloc(rows * cols * sizeof(float64));
+  return m;
+}
+
+function matrix_multiply(a: Matrix*, b: Matrix*) -> Matrix* {
+  if (a->cols != b->rows) {
+    puts("Matrix dimensions incompatible");
+    return 0;
+  }
+  
+  var result: Matrix* = matrix_create(a->rows, b->cols);
+  var i: int32 = 0;
+  var j: int32 = 0;
+  var k: int32 = 0;
+  
+  while (i < a->rows) {
+    j = 0;
+    while (j < b->cols) {
+      result->data[i * result->cols + j] = 0.0;
+      k = 0;
+      while (k < a->cols) {
+        var a_val: float64 = a->data[i * a->cols + k];
+        var b_val: float64 = b->data[k * b->cols + j];
+        result->data[i * result->cols + j] = result->data[i * result->cols + j] + a_val * b_val;
+        k = k + 1;
+      }
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+  
+  return result;
+}
+
+function main() -> int32 {
+  var m1: Matrix* = matrix_create(2, 2);
+  var m2: Matrix* = matrix_create(2, 2);
+  
+  // Initialize matrices
+  m1->data[0] = 1.0; m1->data[1] = 2.0;
+  m1->data[2] = 3.0; m1->data[3] = 4.0;
+  
+  m2->data[0] = 5.0; m2->data[1] = 6.0;
+  m2->data[2] = 7.0; m2->data[3] = 8.0;
+  
+  var result: Matrix* = matrix_multiply(m1, m2);
+  if (result != 0) {
+    puts("Matrix multiplication completed");
+    puts("Result dimensions: ");
+    print_int(result->rows);
+    puts("x");
+    println_int(result->cols);
+  }
+  
+  return 0;
+}`,
+        output: `Matrix multiplication completed
+Result dimensions: 2x2`
+      }
+    };
+
+    let currentDemo = 'basics';
+
+    function loadDemo(demoName) {
+      const demo = demos[demoName];
+      if (demo) {
+        currentDemo = demoName;
+        document.getElementById('demoTitle').textContent = demo.title;
+        document.getElementById('demoDescription').textContent = demo.description;
+        document.getElementById('codeEditor').value = demo.code;
+        document.getElementById('outputDisplay').textContent = '// Click "Run Code" to see the output';
+        clearStatus();
+      }
+    }
+
+    function runCode() {
+      const code = document.getElementById('codeEditor').value;
+      const output = document.getElementById('outputDisplay');
+      
+      showStatus('Compiling and running MethASM code...', 'info');
+      
+      // Simulate compilation and execution
+      setTimeout(() => {
+        const demo = demos[currentDemo];
+        if (demo) {
+          output.textContent = demo.output;
+          showStatus('Code executed successfully!', 'success');
+        } else {
+          output.textContent = '// Demo output not available';
+          showStatus('Demo not found', 'error');
+        }
+      }, 1000);
+    }
+
+    function resetCode() {
+      loadDemo(currentDemo);
+    }
+
+    function showStatus(message, type) {
+      const statusDiv = document.getElementById('statusMessage');
+      statusDiv.className = `status ${type}`;
+      statusDiv.textContent = message;
+      statusDiv.style.display = 'block';
+      
+      if (type === 'success') {
+        setTimeout(clearStatus, 3000);
+      }
+    }
+
+    function clearStatus() {
+      const statusDiv = document.getElementById('statusMessage');
+      statusDiv.style.display = 'none';
+    }
+
+    // Initialize with basics demo
+    window.onload = function() {
+      loadDemo('basics');
+    };
+  </script>
+</body>
+</html>

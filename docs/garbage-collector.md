@@ -6,7 +6,7 @@ MethASM provides an optional conservative mark-and-sweep garbage collector for h
 
 Use `new` when you want managed heap allocation: struct instances, dynamic data structures, or values that outlive the current function. The GC reclaims memory when it is no longer reachable. No explicit `free` is needed.
 
-Use C `malloc` (from `std/mem`) when you need unmanaged memory: buffers for I/O, C interop, or when the GC is not linked (e.g. the web server, which avoids GC for simplicity).
+Use C `malloc` (from `std/mem`) when you need unmanaged memory: buffers for I/O, C interop, or when the GC runtime is intentionally omitted (simple CLI utilities can skip the GC). The Windows web server example now links `gc.c` because it uses GC-backed string concatenation for its responses, but it still mixes stack buffers and `malloc` where appropriate.
 
 **Rule of thumb:** Use `new` for program-level data structures whose lifetime is tied to reachability (trees, graphs, long-lived caches). Use `malloc` for buffers and C interop where you control the lifetime explicitly (I/O buffers, structs passed to C APIs that expect manual free).
 
@@ -112,7 +112,7 @@ The GC runtime (`gc.h`) exposes these functions for advanced use:
 
 ## Programs Without GC
 
-Programs that do not use `new` do not need to link `gc.c`. The web server (`web/server.masm`) is an example: it uses only stack allocation and C externs. Build it without the GC object file.
+Programs that do not use `new` or string concatenation do not need to link `gc.c`. The Windows forum server (`web/server.masm`) now calls `gc_init` and relies on `string + string`, so it must link the GC runtime (`gc.o`); simple CLI utilities that stick to stack and `malloc` can still be built without it.
 
 If you use `new` but forget to link `gc.c`, the linker will report undefined references:
 
@@ -144,6 +144,8 @@ A common pitfall: passing a GC-managed pointer to a C function that stores it so
 ## Debugging Memory Issues
 
 If the GC appears to collect too aggressively (use-after-free, premature collection), a managed pointer is likely stored where the GC cannot see it. Register that location with `gc_register_root` or ensure the pointer is on the stack or in a heap object that is reachable.
+
+The compiler emits a warning when a managed struct pointer is passed to an `extern function` or stored in an `extern` variable, because those are common ways to let C retain a GC-managed pointer without registering the storage slot. The warning is heuristic: it does not prove that C will retain the pointer, and it does not eliminate the need to call `gc_register_root` when C-owned storage keeps the reference.
 
 If the GC retains too much memory (growth without bound, high `gc_get_allocated_bytes`), use the diagnostic API to inspect:
 
