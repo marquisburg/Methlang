@@ -1,298 +1,157 @@
-# MethASM
+# Garbage Collector
 
-MethASM is a compiler for a typed assembly-like language that targets x86-64 assembly.
+MethASM provides an optional conservative mark-and-sweep garbage collector for heap allocation. Programs that use the `new` expression must link the GC runtime (`gc.c`). Programs that use only stack allocation and C `malloc` do not need it.
 
-[Language Reference](docs/LANGUAGE.md): Index and links to lexical structure, types, declarations, expressions, control flow, modules, standard library, C interop, compilation, and quick reference.
+## When to Use GC
 
-## Project Status
+Use `new` when you want managed heap allocation: struct instances, dynamic data structures, or values that outlive the current function. The GC reclaims memory when it is no longer reachable. No explicit `free` is needed.
 
-MethASM provides an end-to-end compilation pipeline from `.masm` source to x86-64 assembly output.
+Use C `malloc` (from `std/mem`) when you need unmanaged memory: buffers for I/O, C interop, or when the GC runtime is intentionally omitted (simple CLI utilities can skip the GC). The Windows web server example now links `gc.c` because it uses GC-backed string concatenation for its responses, but it still mixes stack buffers and `malloc` where appropriate.
 
-- Lexing
-- Parsing
-- Semantic and type analysis
-- Code generation
-- Runtime garbage collector integration
+**Rule of thumb:** Use `new` for program-level data structures whose lifetime is tied to reachability (trees, graphs, long-lived caches). Use `malloc` for buffers and C interop where you control the lifetime explicitly (I/O buffers, structs passed to C APIs that expect manual free).
 
-Core compiler and runtime paths are implemented and currently validated by project tests.
+## Linking the GC
 
-Current implementation status:
+When your program uses `new`, compile and link the GC runtime:
 
-- Core language front-end and backend pipeline are operational.
-- Fail-fast diagnostics are enforced across lexer, parser, semantic analysis, and codegen.
-- Arrays, pointers, structured types, and major control-flow constructs are implemented.
-- Runtime GC integration is compiled and exercised by runtime tests.
-- String concatenation is implemented (the compiler now accepts `string + string` and emits GC-backed code), and the Windows web server example exercises that path together with `std/net`.
-- Automated compiler/runtime regression suite is available under `tests/run_tests.ps1`.
+```bash
+methasm main.masm -o main.s
+nasm -f win64 main.s -o main.o
+gcc -c src/runtime/gc.c -o gc.o -Isrc
+gcc main.o gc.o -o main
+```
 
-## Compiler Guarantees
+The compiler emits calls to `gc_alloc` for `new` expressions. The entry point (`_start`) calls `gc_init` with the stack base before invoking `main`. See [Compilation](compilation.md) for the full pipeline.
 
-The compiler uses fail-fast behavior across all major phases.
+## Algorithm
 
-- Lexical errors report precise line and column and stop compilation.
-- Parser recovery is used for diagnostics, but any parser error still causes final failure.
-- Semantic errors include source locations and block backend execution.
-- Code generation rejects unresolved symbols and unsupported constructs instead of emitting fallback output.
-- Unsupported top-level constructs are rejected explicitly.
+The GC uses **conservative mark-and-sweep**:
 
-This reduces silent failures and minimizes incorrect cascading diagnostics.
+1. **Mark:** Starting from roots (stack, registers, registered roots), treat every word that looks like a pointer into the heap as a root. Mark all reachable allocations.
+2. **Sweep:** Free allocations that were not marked.
 
-## Implemented Language Features
+Collection is triggered in two ways: (1) **threshold-based**, when `gc_alloc` would exceed the collection threshold (see [Collection Threshold](#collection-threshold)); (2) **explicit**, by calling `gc_collect_now()` (or `gc_collect` with the current stack pointer). The API table lists these. Use `gc_collect_now` to force a collection at a specific point (e.g. between phases, or before a latency-sensitive critical section).
 
-- Variable declarations with explicit types and initializer-based inference
-- Pointer type annotations (e.g. `int32*`, `Pair*`, `int32**`)
-- Dereference (`*p`) and address-of (`&x`) operators
-- Pointer-to-struct arrow notation (`p->field`)
-- Fixed-size array type annotations (for example `int32[10]`)
-- Functions and function calls
-- Function forward declarations (e.g. `function add(a: int32, b: int32) -> int32;`)
-- Function return type syntax with both `->` and `:`
-- External C function declarations with optional link names
-- External C global declarations with optional link names
-- Struct declarations
-- Struct member access and assignment
-- Struct methods and method calls (`obj.method(args)`)
-- Array and pointer indexing (`arr[i]`, `ptr[i]`) and indexed assignment
-- `cstring` alias type (`uint8*`)
-- `if` and `else`
-- `while`
-- `for`
-- `switch`, `case`, `default`
-- `break` and `continue`
-- `return`
-- Inline assembly blocks
+**"Looks like a pointer into the heap"** means: a word-sized value that falls within the address range of a known GC allocation. The GC maintains heap bounds (`g_heap_min`, `g_heap_max`); any stack or heap word whose value lies in that range is treated as a potential pointer and the corresponding allocation is marked. No type information is needed, but integers that happen to look like heap addresses can cause false retention.
 
-## Type and Semantic Analysis
+**Performance:** Mark-and-sweep pauses all execution during collection. There is no incremental or concurrent collection. For latency-sensitive programs (e.g. the web server), this is one reason to avoid `new` and use `malloc` instead.
 
-- Built-in integer and floating-point types
-- Pointer type resolution (multi-level `T*`, `T**`, etc.) and base-type inference
-- Null pointer constant handling (`0` as valid pointer initializer and in comparisons)
-- Fixed-size array type resolution and element type inference
-- Struct type registration and lookup
-- Method call validation
-- Pointer type compatibility (same base type, or pointer vs null)
-- Assignment compatibility validation
-- Field assignment validation
-- Array index expression validation (index type and target type checks)
-- Loop/switch context checks for `break` and `continue`
-- Switch expression validation and compile-time case constant evaluation
-- Duplicate `case` detection and default-clause uniqueness checks
-- Undefined symbol detection with source locations
-- Forward declaration signature compatibility checks in symbol resolution
-- Extern/non-extern redeclaration and link-name consistency checks
+"Conservative" means the GC may retain some unreachable memory if a non-pointer value happens to look like a valid heap address. This is a trade-off for simplicity and C ABI compatibility. No object headers or type metadata are required in the language.
 
-## Code Generation
+## Roots
 
-- x86-64 assembly emission (Intel/NASM-style syntax)
-- Function prologue and epilogue generation
-- Pure IR-first function body emission (IR -> assembly)
-- Struct field offset-based access and assignment
-- Method call emission (mangled names, `this` as first parameter)
-- Pointer dereference and address-of code generation
-- Array and pointer element address calculation and typed indexed load/store emission
-- Code generation for `if`, `while`, `for`, and `switch` control flow
-- Nested control-flow label management for `break` and `continue`
-- `_start` entry emission that calls `main` when present
-- `extern <symbol>` emission for foreign function/global references
-- Hard failure on unresolved symbols or unsupported generation paths
+The GC scans the stack from the current stack pointer up to the stack base captured at startup. It also uses **registered roots**: pointer slots that the runtime knows contain managed pointers.
 
-## C Interop (v1)
+- **Global variables** that hold pointers are automatically registered as roots.
+- **Local variables** are covered by stack scanning. They do not need `gc_register_root` because the stack scan finds them. The stack is scanned word-by-word; any local that holds a managed pointer is discovered automatically.
+- **Pointers stored inside structs on the heap** are traced automatically during the mark phase. When an allocation is marked, its payload is scanned for pointer-sized values; any value that falls within heap bounds is treated as a pointer and the target allocation is marked. So a struct field that holds a pointer to another GC object is followed without explicit registration.
+- For pointers stored in **non-stack, non-heap** locations (e.g. C globals, static variables in C code), use `gc_register_root` and `gc_unregister_root` so the GC can find them.
 
-MethASM supports call-into-C declarations for external functions and globals.
-
-Syntax:
+**Example (registering a root from MethASM):** When C code stores a managed pointer in a variable the GC cannot otherwise see, declare the extern and pass the address of that variable. The parameter is a double pointer because the GC needs the address of the slot containing the pointer, not the pointer itself, so it can read an updated value if the variable is reassigned.
 
 ```masm
-extern function puts(msg: cstring) -> int32 = "puts";
-extern var errno_value: int32 = "errno";
+struct Data { x: int32; y: int32; }
+
+var c_storage: Data* = 0;  // C code will store a managed pointer here
+extern function gc_register_root(slot: Data**) = "gc_register_root";
+extern function gc_unregister_root(slot: Data**) = "gc_unregister_root";
+
+function init() {
+  gc_register_root(&c_storage);
+  // ... C code may now store a pointer in c_storage; GC will find it
+}
+
+function cleanup() {
+  gc_unregister_root(&c_storage);
+}
 ```
 
-Notes:
+Use the same pointer type for the slot parameter as the variable you are registering (e.g. `Data**` for `var c_storage: Data*`).
 
-- `= "symbol"` is optional; when omitted, the MethASM declaration name is used.
-- `cstring` is a built-in alias for `uint8*`.
-- `extern` declarations are top-level only.
-- Link-name suffixes (`= "..."`) are valid only on `extern` declarations.
-- `extern var` requires an explicit type and cannot have an initializer.
-- `import`/`export` behavior is unchanged in this milestone.
-- ABI follows the active target platform convention:
-  - Windows: Microsoft x64 ABI
-  - Linux/macOS: System V AMD64 ABI
+## Allocation
 
-## Intermediate Representation (IR)
+`new T` allocates `sizeof(T)` bytes via `gc_alloc`. The memory is **zeroed** before the pointer is returned. This avoids uninitialized pointer-shaped values that could confuse the conservative scanner. Zeroed memory means pointer fields start as null and integer fields start as 0, the expected default for `new`. See [Expressions](expressions.md#allocation) and [Types](types.md) for details.
 
-MethASM now includes a real compiler IR stage between semantic analysis and assembly emission.
+**Allocation failure:** If `gc_alloc` cannot satisfy a request, it runs a collection and retries. If allocation still fails, it prints a fatal error and exits. It does not return null.
 
-What it is:
+## Collection Threshold
 
-- Function-level linear IR (`IRProgram` -> `IRFunction` -> `IRInstruction`)
-- Explicit control-flow instructions (`label`, `jump`, conditional branches)
-- Explicit data-flow operands (temps, symbols, literals, labels)
-- Lowered from AST after type checking
-- Consumed by codegen function-by-function for backend emission
-- Dumpable to `<output>.ir` in debug/optimize mode (`-d` or `-O`)
+By default, when total tracked allocations reach 1 MiB, `gc_alloc` triggers a collection before allocating. You can adjust this:
 
-Current backend coverage:
-
-- Control flow (`if`/`while`/`for`/`switch`/`break`/`continue`) is emitted from explicit IR control-flow instructions.
-- Local declarations, assignment, branches, labels, and returns emit directly from IR.
-- IR now models lvalue address and memory operations explicitly (`addr_of`, `load`, `store`) for struct fields, pointer dereference, and indexed access.
-- Heap allocation is modeled as explicit IR (`new`) instead of AST-side expression fallback.
-- Integer binary/unary operations lower to pure IR.
-- Type-aware lowering supports specific floating-point calculations with XMM registers.
-- Function calls and method calls are emitted directly from pure IR call instructions.
-
-What it is not:
-
-- Not SSA form (temps are mutable storage slots, no phi nodes)
-- Not a machine IR or register-allocated IR
-- Not currently used to represent global declarations as first-class IR operations
-
-In-Progress Features:
-- Constant folding IR optimization pass runs if `-O` flag is enabled.
-
-Practical interpretation:
-
-- The main backend path for function bodies is exclusively IR-driven.
-- IR gives a stable seam for future optimization and backend retargeting. It fully isolates semantic type checking from assembly codegen.
-
-## Garbage Collector Runtime
-
-- Heap allocation via `gc_alloc`
-- Conservative mark-and-sweep collection
-- Iterative mark traversal using a worklist
-- Stack root scanning
-- Root registration API: `gc_register_root`, `gc_unregister_root` (pointer globals auto-registered)
-- Collection controls: `gc_collect`, `gc_collect_now`, `gc_set_collection_threshold`, `gc_get_collection_threshold`
-- Runtime cleanup: `gc_shutdown`
-
-## Build
-
-### Windows
-
-```powershell
-.\build.bat
+```c
+// From C or extern
+gc_set_collection_threshold(2 * 1024 * 1024);  // 2 MiB
+size_t current = gc_get_collection_threshold();
 ```
 
-### Linux and macOS
+The threshold check uses **projected bytes**: collection runs when `current_allocated + requested_size` exceeds the threshold, not just when `current_allocated` does. This prevents OOM scenarios where a single large allocation would push the heap over the limit without triggering a collection first. A naive implementation that only checked current bytes could fail to collect in time.
 
-```bash
-make
+The minimum threshold is 4 KiB. Lower thresholds collect more often (less memory use, more CPU); higher thresholds collect less often (more memory, less CPU).
+
+## Runtime API
+
+The GC runtime (`gc.h`) exposes these functions for advanced use:
+
+| Function | Purpose |
+|----------|---------|
+| `gc_init(void *stack_base)` | Initialize; called by entry point |
+| `gc_alloc(size_t size)` | Allocate tracked memory |
+| `gc_collect(void *current_rsp)` | Run a collection cycle |
+| `gc_collect_now(void)` | Convenience: collect using current stack |
+| `gc_register_root(void **root_slot)` | Register a pointer slot as root |
+| `gc_unregister_root(void **root_slot)` | Unregister a root |
+| `gc_set_collection_threshold(size_t bytes)` | Set auto-collection threshold |
+| `gc_get_collection_threshold(void)` | Get current threshold |
+| `gc_get_allocation_count(void)` | Number of tracked allocations |
+| `gc_get_allocated_bytes(void)` | Total tracked bytes |
+| `gc_shutdown(void)` | Free all allocations, reset state |
+
+`gc_get_allocation_count` and `gc_get_allocated_bytes` are for diagnostics and tuning. Use them to identify unexpected allocation or to tune the collection threshold.
+
+`gc_shutdown` is safe to call multiple times. After the first call, the heap is empty and subsequent calls are effectively no-ops. Call it once at program exit if you want to free all tracked memory before terminating.
+
+## Programs Without GC
+
+Programs that do not use `new` or string concatenation do not need to link `gc.c`. The Windows forum server (`web/server.masm`) now calls `gc_init` and relies on `string + string`, so it must link the GC runtime (`gc.o`); simple CLI utilities that stick to stack and `malloc` can still be built without it.
+
+If you use `new` but forget to link `gc.c`, the linker will report undefined references:
+
+```
+undefined reference to `gc_alloc'
+undefined reference to `gc_init'
 ```
 
-Build output:
+Resolve by adding `gc.o` to the link command.
 
-- Windows: `bin\methasm.exe`
-- Linux and macOS: `bin/methasm`
+## GC and Threads
 
-## Usage
+The current GC is **single-threaded**. Using `new` or any GC API from multiple threads is unsafe. Concurrent access to the allocator or collection from another thread can corrupt internal state. Until thread safety is added, use the GC only from the main thread. For multi-threaded programs, prefer `malloc` and explicit lifetime management.
 
-```bash
-methasm [options] <input.masm>
-```
+## Performance Characteristics
 
-Options:
+Collections are typically fast for small heaps (milliseconds or less) but **pause all execution**. There is no incremental or concurrent collection. Pause time grows with heap size and the number of reachable objects.
 
-- `-i <file>` input file
-- `-o <file>` output file
-- `-I <dir>` add an import search directory (repeatable)
-- `--stdlib <dir>` set stdlib root directory (default: `stdlib`)
-- `-d`, `--debug` enable debug mode
-- `-O`, `--optimize` enable optimization flag
-- `-h`, `--help` print usage
+**Rough order of magnitude:** A "small heap" is on the order of hundreds to a few thousand objects and a few hundred KiB to a few MiB. Beyond roughly 10,000 to 50,000 reachable objects or tens of MiB, collection pauses can become noticeable (tens of milliseconds or more). These numbers depend heavily on object graph depth and pointer density, not just count. A linked list of 50,000 nodes with no branching marks differently than a dense graph of 1,000 nodes each pointing to 100 others. Profile with `gc_get_allocation_count` and `gc_get_allocated_bytes` to find where pauses exceed your threshold.
 
-Import resolution behavior:
+For programs that allocate heavily or have large object graphs, consider raising the collection threshold to reduce collection frequency, or use `malloc` for hot paths where latency matters.
 
-- Tries the importer file's directory first.
-- If the import has no extension, `.masm` is tried automatically.
-- `std/...` imports are resolved under the configured stdlib root.
-- `-I` directories are searched after local imports.
+## Interaction with C Interop
 
-Example:
+A common pitfall: passing a GC-managed pointer to a C function that stores it somewhere the GC cannot see (e.g. a C global, a static variable, or a struct allocated with `malloc`). When the GC runs, it will not find that pointer. It only scans the stack, registered roots, and heap object payloads. The C-held reference is invisible, so the GC may collect the object while C still holds a dangling pointer.
 
-```bash
-./bin/methasm tests/test_gc_alloc.masm -o out.s
-```
+**Fix:** Use `gc_register_root` to register the C storage location. Pass the address of the variable that holds the pointer: `gc_register_root(&c_global_that_holds_ptr)`. When the GC runs, it will read that slot and follow the pointer. Call `gc_unregister_root` when the C code no longer holds the reference.
 
-## Testing
+## Debugging Memory Issues
 
-Run runtime and compiler tests with:
+If the GC appears to collect too aggressively (use-after-free, premature collection), a managed pointer is likely stored where the GC cannot see it. Register that location with `gc_register_root` or ensure the pointer is on the stack or in a heap object that is reachable.
 
-```bash
-make test
-```
+The compiler emits a warning when a managed struct pointer is passed to an `extern function` or stored in an `extern` variable, because those are common ways to let C retain a GC-managed pointer without registering the storage slot. The warning is heuristic: it does not prove that C will retain the pointer, and it does not eliminate the need to call `gc_register_root` when C-owned storage keeps the reference.
 
-Automated Windows suite (compiler positives, compiler negatives, assembly syntax checks, GC runtime):
+If the GC retains too much memory (growth without bound, high `gc_get_allocated_bytes`), use the diagnostic API to inspect:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\run_tests.ps1
-```
+- `gc_get_allocation_count()`: number of live objects
+- `gc_get_allocated_bytes()`: total bytes retained
 
-Windows convenience wrapper:
+Log these during allocation or at collection time to see growth patterns. Conservative retention (integers that look like pointers) can cause extra retention; restructuring data to avoid pointer-sized values in hot structs can help. Raising the threshold reduces collection frequency but does not reduce retention. Only reachability determines what is kept.
 
-```powershell
-tests\run_tests.bat
-```
-
-Suite options:
-
-- `-BuildCompiler` rebuilds `bin\methasm.exe` before running tests
-- `-SkipRuntime` skips the GC runtime executable test
-
-Windows manual runtime test:
-
-```powershell
-gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\gc_runtime_test.c src\runtime\gc.c -o bin\gc_runtime_test.exe
-.\bin\gc_runtime_test.exe
-```
-
-Windows compiler smoke tests:
-
-```powershell
-.\bin\methasm.exe test_simple.masm -o out_simple.s
-.\bin\methasm.exe tests\test_gc_alloc.masm -o out_gc.s
-.\bin\methasm.exe tests\test_array_index.masm -o out_array.s
-.\bin\methasm.exe tests\test_control_flow.masm -o out_control_flow.s
-.\bin\methasm.exe tests\test_switch_const_expr.masm -o out_switch_const_expr.s
-.\bin\methasm.exe tests\test_switch_continue_loop.masm -o out_switch_continue_loop.s
-.\bin\methasm.exe tests\test_pointers.masm -o out_pointers.s
-.\bin\methasm.exe tests\test_pointer_null.masm -o out_pointer_null.s
-.\bin\methasm.exe tests\test_forward_decl_pointer.masm -o out_forward_decl_pointer.s
-.\bin\methasm.exe tests\test_pointer_param_address.masm -o out_pointer_param_address.s
-```
-
-## Repository Layout
-
-```text
-src/
-  lexer/      Tokenization
-  parser/     Parsing and AST creation
-  semantic/   Type checking, symbol table, register allocation
-  ir/         AST-to-IR lowering and IR data model
-  codegen/    Assembly generation
-  runtime/    Garbage collector runtime
-  debug/      Debug information helpers
-  error/      Error reporting
-  main.c      CLI entry and compilation flow
-
-tests/        Language and runtime tests
-  run_tests.ps1   Automated compiler/runtime test suite
-  run_tests.bat   Windows wrapper for run_tests.ps1
-build.bat     Windows build
-Makefile      Linux/macOS build and test targets
-```
-
-## Known Limitations
-
-- Optimization passes are limited.
-- Language surface area is still evolving.
-- Some advanced language and backend scenarios are not implemented.
-- `switch` case labels currently require compile-time integer constant expressions and do not yet support range-style cases.
-
-## Contributing
-
-Contributions should include:
-
-- A clear problem statement
-- Tests that validate behavior changes
-- Notes on compatibility impact
+The `-d` (debug) flag dumps the IR to `<output>.ir`. Use it to find unexpected `new` expressions. If allocation is higher than expected, search the IR for `gc_alloc` calls to identify which expressions allocate.
