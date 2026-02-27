@@ -769,6 +769,49 @@ int parser_is_type_keyword(TokenType type) {
   return (type >= TOKEN_INT8 && type <= TOKEN_STRING_TYPE);
 }
 
+static char **parser_parse_type_param_list(Parser *parser,
+                                           size_t *out_count) {
+  *out_count = 0;
+  if (parser->current_token.type != TOKEN_LESS_THAN)
+    return NULL;
+  parser_advance(parser); // consume '<'
+
+  char **params = NULL;
+  size_t count = 0;
+
+  while (parser->current_token.type != TOKEN_GREATER_THAN &&
+         parser->current_token.type != TOKEN_EOF) {
+    if (!parser_is_identifier_like(parser->current_token.type)) {
+      parser_set_error(parser, "Expected type parameter name");
+      for (size_t i = 0; i < count; i++) free(params[i]);
+      free(params);
+      return NULL;
+    }
+    params = realloc(params, (count + 1) * sizeof(char *));
+    params[count] = strdup(parser->current_token.value);
+    count++;
+    parser_advance(parser);
+
+    if (parser->current_token.type == TOKEN_COMMA) {
+      parser_advance(parser);
+    } else if (parser->current_token.type != TOKEN_GREATER_THAN) {
+      parser_set_error(parser, "Expected ',' or '>' in type parameter list");
+      for (size_t i = 0; i < count; i++) free(params[i]);
+      free(params);
+      return NULL;
+    }
+  }
+
+  if (!parser_expect(parser, TOKEN_GREATER_THAN)) {
+    for (size_t i = 0; i < count; i++) free(params[i]);
+    free(params);
+    return NULL;
+  }
+
+  *out_count = count;
+  return params;
+}
+
 static char *parser_parse_type_annotation(Parser *parser) {
   if (!parser)
     return NULL;
@@ -783,6 +826,69 @@ static char *parser_parse_type_annotation(Parser *parser) {
 
   if (!type_name) {
     return NULL;
+  }
+
+  if (parser->current_token.type == TOKEN_LESS_THAN) {
+    parser_advance(parser); // consume '<'
+
+    char *args_buf = malloc(1024);
+    size_t args_len = 0;
+    size_t args_cap = 1024;
+    args_buf[0] = '\0';
+
+    int first = 1;
+    while (parser->current_token.type != TOKEN_GREATER_THAN &&
+           parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+      if (!first) {
+        if (parser->current_token.type != TOKEN_COMMA) {
+          parser_set_error(parser, "Expected ',' or '>' in type argument list");
+          free(args_buf);
+          free(type_name);
+          return NULL;
+        }
+        parser_advance(parser); // consume ','
+
+        if (args_len + 1 >= args_cap) {
+          args_cap *= 2;
+          args_buf = realloc(args_buf, args_cap);
+        }
+        args_buf[args_len++] = ',';
+        args_buf[args_len] = '\0';
+      }
+      first = 0;
+
+      char *arg = parser_parse_type_annotation(parser);
+      if (!arg) {
+        if (!parser->has_error)
+          parser_set_error(parser, "Expected type in type argument list");
+        free(args_buf);
+        free(type_name);
+        return NULL;
+      }
+
+      size_t arg_len = strlen(arg);
+      while (args_len + arg_len + 1 >= args_cap) {
+        args_cap *= 2;
+        args_buf = realloc(args_buf, args_cap);
+      }
+      memcpy(args_buf + args_len, arg, arg_len);
+      args_len += arg_len;
+      args_buf[args_len] = '\0';
+      free(arg);
+    }
+
+    if (!parser_expect(parser, TOKEN_GREATER_THAN)) {
+      free(args_buf);
+      free(type_name);
+      return NULL;
+    }
+
+    size_t full_len = strlen(type_name) + 1 + args_len + 1 + 1;
+    char *full_type = malloc(full_len);
+    snprintf(full_type, full_len, "%s<%s>", type_name, args_buf);
+    free(type_name);
+    free(args_buf);
+    type_name = full_type;
   }
 
   while (parser->current_token.type == TOKEN_MULTIPLY) {
@@ -965,6 +1071,86 @@ ASTNode *parser_parse_unary_expression(Parser *parser) {
   return parser_parse_postfix_expression(parser);
 }
 
+static int parser_try_parse_generic_call_type_args(Parser *parser,
+                                                   char ***out_type_args,
+                                                   size_t *out_type_arg_count) {
+  *out_type_args = NULL;
+  *out_type_arg_count = 0;
+
+  if (parser->current_token.type != TOKEN_LESS_THAN)
+    return 0;
+
+  size_t saved_pos = parser->lexer->position;
+  size_t saved_line = parser->lexer->line;
+  size_t saved_col = parser->lexer->column;
+  Token saved_current = {parser->current_token.type,
+                         parser->current_token.value ? strdup(parser->current_token.value) : NULL,
+                         parser->current_token.line, parser->current_token.column};
+  Token saved_peek = {parser->peek_token.type,
+                      parser->peek_token.value ? strdup(parser->peek_token.value) : NULL,
+                      parser->peek_token.line, parser->peek_token.column};
+  int saved_has_error = parser->has_error;
+  int saved_had_error = parser->had_error;
+  size_t saved_error_count = parser->error_count;
+  char *saved_error_msg = parser->error_message;
+  parser->error_message = NULL;
+
+  parser_advance(parser); // consume '<'
+
+  char **type_args = NULL;
+  size_t type_arg_count = 0;
+  int success = 1;
+
+  while (parser->current_token.type != TOKEN_GREATER_THAN &&
+         parser->current_token.type != TOKEN_EOF) {
+    if (type_arg_count > 0) {
+      if (parser->current_token.type != TOKEN_COMMA) { success = 0; break; }
+      parser_advance(parser);
+    }
+
+    char *arg = parser_parse_type_annotation(parser);
+    if (!arg || parser->has_error) { free(arg); success = 0; break; }
+
+    type_args = realloc(type_args, (type_arg_count + 1) * sizeof(char *));
+    type_args[type_arg_count++] = arg;
+  }
+
+  if (success && parser->current_token.type == TOKEN_GREATER_THAN) {
+    parser_advance(parser); // consume '>'
+    if (parser->current_token.type == TOKEN_LPAREN) {
+      *out_type_args = type_args;
+      *out_type_arg_count = type_arg_count;
+      free(saved_current.value);
+      free(saved_peek.value);
+      free(saved_error_msg);
+      parser->has_error = 0;
+      free(parser->error_message);
+      parser->error_message = NULL;
+      return 1;
+    }
+  }
+
+  for (size_t i = 0; i < type_arg_count; i++) free(type_args[i]);
+  free(type_args);
+
+  parser->lexer->position = saved_pos;
+  parser->lexer->line = saved_line;
+  parser->lexer->column = saved_col;
+
+  free(parser->current_token.value);
+  parser->current_token = saved_current;
+  free(parser->peek_token.value);
+  parser->peek_token = saved_peek;
+
+  parser->has_error = saved_has_error;
+  parser->had_error = saved_had_error;
+  parser->error_count = saved_error_count;
+  free(parser->error_message);
+  parser->error_message = saved_error_msg;
+
+  return 0;
+}
+
 ASTNode *parser_parse_postfix_expression(Parser *parser) {
   if (!parser)
     return NULL;
@@ -976,6 +1162,62 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
   while (1) {
     SourceLocation location = {parser->current_token.line,
                                parser->current_token.column};
+
+    if (expr->type == AST_IDENTIFIER &&
+        parser->current_token.type == TOKEN_LESS_THAN) {
+      char **call_type_args = NULL;
+      size_t call_type_arg_count = 0;
+      if (parser_try_parse_generic_call_type_args(parser, &call_type_args,
+                                                  &call_type_arg_count)) {
+        parser_advance(parser); // consume '('
+
+        ASTNode **arguments = NULL;
+        size_t arg_count = 0;
+
+        if (parser->current_token.type != TOKEN_RPAREN) {
+          do {
+            ASTNode *arg = parser_parse_expression(parser);
+            if (!arg) break;
+            arguments = realloc(arguments, (arg_count + 1) * sizeof(ASTNode *));
+            arguments[arg_count++] = arg;
+            if (parser->current_token.type == TOKEN_COMMA) {
+              parser_advance(parser);
+            } else if (parser->current_token.type == TOKEN_RPAREN) {
+              break;
+            } else {
+              parser_set_error(parser, "Expected ',' or ')' in argument list");
+              break;
+            }
+          } while (1);
+        }
+
+        if (!parser_expect(parser, TOKEN_RPAREN)) {
+          for (size_t i = 0; i < arg_count; i++) ast_destroy_node(arguments[i]);
+          free(arguments);
+          for (size_t i = 0; i < call_type_arg_count; i++) free(call_type_args[i]);
+          free(call_type_args);
+          ast_destroy_node(expr);
+          return NULL;
+        }
+
+        Identifier *id_data = (Identifier *)expr->data;
+        char *func_name = strdup(id_data->name);
+        ast_destroy_node(expr);
+
+        expr = ast_create_call_expression(func_name, arguments, arg_count, location);
+        if (expr && expr->data) {
+          CallExpression *ce = (CallExpression *)expr->data;
+          ce->type_args = call_type_args;
+          ce->type_arg_count = call_type_arg_count;
+        } else {
+          for (size_t i = 0; i < call_type_arg_count; i++) free(call_type_args[i]);
+          free(call_type_args);
+        }
+        free(func_name);
+        continue;
+      }
+    }
+
     if (parser->current_token.type == TOKEN_LPAREN) {
       // Function call or method call
       parser_advance(parser); // consume '('
@@ -1353,8 +1595,20 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
   char *func_name = strdup(parser->current_token.value);
   parser_advance(parser);
 
+  char **func_type_params = NULL;
+  size_t func_type_param_count = 0;
+  if (parser->current_token.type == TOKEN_LESS_THAN) {
+    func_type_params = parser_parse_type_param_list(parser, &func_type_param_count);
+    if (!func_type_params && parser->has_error) {
+      free(func_name);
+      return NULL;
+    }
+  }
+
   // Expect '('
   if (!parser_expect(parser, TOKEN_LPAREN)) {
+    for (size_t i = 0; i < func_type_param_count; i++) free(func_type_params[i]);
+    free(func_type_params);
     free(func_name);
     return NULL;
   }
@@ -1557,6 +1811,16 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
       parser_set_error(parser, "Memory allocation failed for link name");
     }
   }
+  if (func_decl && func_decl->data && func_type_param_count > 0) {
+    FunctionDeclaration *fd = (FunctionDeclaration *)func_decl->data;
+    fd->type_params = malloc(func_type_param_count * sizeof(char *));
+    fd->type_param_count = func_type_param_count;
+    for (size_t i = 0; i < func_type_param_count; i++) {
+      fd->type_params[i] = strdup(func_type_params[i]);
+    }
+  }
+  for (size_t i = 0; i < func_type_param_count; i++) free(func_type_params[i]);
+  free(func_type_params);
 
   // Clean up temporary strings
   free(func_name);
@@ -1686,8 +1950,20 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   char *struct_name = strdup(parser->current_token.value);
   parser_advance(parser);
 
+  char **type_params = NULL;
+  size_t type_param_count = 0;
+  if (parser->current_token.type == TOKEN_LESS_THAN) {
+    type_params = parser_parse_type_param_list(parser, &type_param_count);
+    if (!type_params && parser->has_error) {
+      free(struct_name);
+      return NULL;
+    }
+  }
+
   // Expect '{'
   if (!parser_expect(parser, TOKEN_LBRACE)) {
+    for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+    free(type_params);
     free(struct_name);
     return NULL;
   }
@@ -1823,6 +2099,17 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   ASTNode *struct_decl = ast_create_struct_declaration(
       struct_name, field_names, field_types, field_count, methods, method_count,
       location);
+
+  if (struct_decl && struct_decl->data && type_param_count > 0) {
+    StructDeclaration *sd = (StructDeclaration *)struct_decl->data;
+    sd->type_params = malloc(type_param_count * sizeof(char *));
+    sd->type_param_count = type_param_count;
+    for (size_t i = 0; i < type_param_count; i++) {
+      sd->type_params[i] = strdup(type_params[i]);
+    }
+  }
+  for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+  free(type_params);
 
   // Keep a stable copy for debug output before freeing temporary buffers.
   char *debug_struct_name = strdup(struct_name);

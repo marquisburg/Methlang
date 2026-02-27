@@ -1,0 +1,12 @@
+struct List<T> {
+    data: T*;
+    length: int32;
+    capacity: int32;
+}
+
+function main() -> int32 {
+    var nums: List<int32>;
+    nums.length = 0;
+    nums.capacity = 10;
+    return nums.capacity;
+}

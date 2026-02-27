@@ -1,0 +1,18 @@
+struct List<T> {
+    data: T*;
+    length: int32;
+    capacity: int32;
+}
+
+function list_get<T>(list: List<T>*, index: int32) -> T {
+    var ptr: T* = list->data;
+    var offset: int32 = index;
+    return *(ptr + offset);
+}
+
+function main() -> int32 {
+    var nums: List<int32>;
+    nums.length = 3;
+    nums.capacity = 10;
+    return nums.length;
+}

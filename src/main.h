@@ -8,6 +8,7 @@
 #include "parser/parser.h"
 #include "semantic/register_allocator.h"
 #include "semantic/symbol_table.h"
+#include "semantic/monomorphize.h"
 #include "semantic/type_checker.h"
 #include <stddef.h>
 

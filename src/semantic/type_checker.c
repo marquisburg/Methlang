@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -639,6 +640,85 @@ void type_checker_destroy(TypeChecker *checker) {
   }
 }
 
+static int type_checker_register_function_signature(TypeChecker *checker,
+                                                    ASTNode *declaration) {
+  if (!checker || !declaration ||
+      declaration->type != AST_FUNCTION_DECLARATION) {
+    return 0;
+  }
+
+  FunctionDeclaration *func_decl = (FunctionDeclaration *)declaration->data;
+  if (!func_decl || !func_decl->name)
+    return 0;
+
+  Symbol *existing =
+      symbol_table_lookup_current_scope(checker->symbol_table, func_decl->name);
+  if (existing)
+    return 1;
+
+  Type *return_type = NULL;
+  if (func_decl->return_type) {
+    return_type =
+        type_checker_get_type_by_name(checker, func_decl->return_type);
+    if (!return_type)
+      return 0;
+  } else {
+    return_type = checker->builtin_void;
+  }
+
+  Type **param_types = NULL;
+  if (func_decl->parameter_count > 0) {
+    param_types = malloc(func_decl->parameter_count * sizeof(Type *));
+    if (!param_types)
+      return 0;
+    for (size_t i = 0; i < func_decl->parameter_count; i++) {
+      param_types[i] = type_checker_get_type_by_name(
+          checker, func_decl->parameter_types[i]);
+      if (!param_types[i]) {
+        free(param_types);
+        return 0;
+      }
+    }
+  }
+
+  char **param_names_copy = NULL;
+  if (func_decl->parameter_count > 0) {
+    param_names_copy = malloc(func_decl->parameter_count * sizeof(char *));
+    if (!param_names_copy) {
+      free(param_types);
+      return 0;
+    }
+    for (size_t i = 0; i < func_decl->parameter_count; i++) {
+      param_names_copy[i] = strdup(func_decl->parameter_names[i]);
+    }
+  }
+
+  Symbol *func_symbol =
+      symbol_create(func_decl->name, SYMBOL_FUNCTION, return_type);
+  if (!func_symbol) {
+    for (size_t i = 0; i < func_decl->parameter_count; i++)
+      free(param_names_copy[i]);
+    free(param_names_copy);
+    free(param_types);
+    return 0;
+  }
+
+  func_symbol->data.function.parameter_count = func_decl->parameter_count;
+  func_symbol->data.function.parameter_names = param_names_copy;
+  func_symbol->data.function.parameter_types = param_types;
+  func_symbol->data.function.return_type = return_type;
+  func_symbol->is_extern = func_decl->is_extern;
+  func_symbol->is_initialized = 0;
+  func_symbol->is_forward_declaration = 1;
+
+  if (!symbol_table_declare_forward(checker->symbol_table, func_symbol)) {
+    symbol_destroy(func_symbol);
+    return 0;
+  }
+
+  return 1;
+}
+
 int type_checker_check_program(TypeChecker *checker, ASTNode *program) {
   if (!checker || !program || program->type != AST_PROGRAM) {
     return 0;
@@ -648,12 +728,12 @@ int type_checker_check_program(TypeChecker *checker, ASTNode *program) {
   if (!prog)
     return 0;
 
-  // First pass: Process struct and enum declarations to register types
+  // Pass 1: Register struct and enum types
   for (size_t i = 0; i < prog->declaration_count; i++) {
     ASTNode *decl = prog->declarations[i];
     if (decl && decl->type == AST_STRUCT_DECLARATION) {
       if (!type_checker_process_struct_declaration(checker, decl)) {
-        return 0; // Error in struct declaration
+        return 0;
       }
     } else if (decl && decl->type == AST_ENUM_DECLARATION) {
       if (!type_checker_process_enum_declaration(checker, decl)) {
@@ -662,18 +742,26 @@ int type_checker_check_program(TypeChecker *checker, ASTNode *program) {
     }
   }
 
-  // Second pass: Process other declarations and type check them
+  // Pass 2: Register all function signatures so any function can call any other
+  for (size_t i = 0; i < prog->declaration_count; i++) {
+    ASTNode *decl = prog->declarations[i];
+    if (decl && decl->type == AST_FUNCTION_DECLARATION) {
+      type_checker_register_function_signature(checker, decl);
+    }
+  }
+
+  // Pass 3: Process all declarations (type-check function bodies, etc.)
   for (size_t i = 0; i < prog->declaration_count; i++) {
     ASTNode *decl = prog->declarations[i];
     if (decl && decl->type != AST_STRUCT_DECLARATION &&
         decl->type != AST_ENUM_DECLARATION) {
       if (!type_checker_process_declaration(checker, decl)) {
-        return 0; // Error in declaration
+        return 0;
       }
     }
   }
 
-  return 1; // Success
+  return 1;
 }
 
 static Type *type_checker_infer_type_internal(TypeChecker *checker,
