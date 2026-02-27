@@ -1,3 +1,115 @@
+# MethASM
+
+MethASM is a compiler for a typed assembly-like language that targets x86-64 assembly.
+
+[Language Reference](docs/LANGUAGE.md): Index and links to lexical structure, types, declarations, expressions, control flow, modules, standard library, C interop, compilation, and quick reference.
+
+## Project Status
+
+MethASM provides an end-to-end compilation pipeline from `.masm` source to x86-64 assembly output.
+
+- Lexing
+- Parsing
+- Semantic and type analysis
+- Code generation
+- Runtime garbage collector integration
+
+Core compiler and runtime paths are implemented and currently validated by project tests.
+
+Current implementation status:
+
+- Core language front-end and backend pipeline are operational.
+- Fail-fast diagnostics are enforced across lexer, parser, semantic analysis, and codegen.
+- Arrays, pointers, structured types, and major control-flow constructs are implemented.
+- `defer` and `errdefer` are implemented in the IR pipeline, including assignments and block statements.
+- Runtime GC integration is compiled and exercised by runtime tests.
+- String concatenation is implemented (the compiler now accepts `string + string` and emits GC-backed code), and the Windows web server example exercises that path together with `std/net`.
+- Dynamic null-dereference and fixed-array bounds traps are emitted by the compiler, and obvious GC-managed pointer escapes to C produce warnings.
+- Automated compiler/runtime regression suite is available under `tests/run_tests.ps1`.
+
+## Compiler Guarantees
+
+The compiler uses fail-fast behavior across all major phases.
+
+- Lexical errors report precise line and column and stop compilation.
+- Parser recovery is used for diagnostics, but any parser error still causes final failure.
+- Semantic errors include source locations and block backend execution.
+- Code generation rejects unresolved symbols and unsupported constructs instead of emitting fallback output.
+- Unsupported top-level constructs are rejected explicitly.
+
+This reduces silent failures and minimizes incorrect cascading diagnostics.
+
+## Implemented Language Features
+
+- Variable declarations with explicit types and initializer-based inference
+- Pointer type annotations (e.g. `int32*`, `Pair*`, `int32**`)
+- Dereference (`*p`) and address-of (`&x`) operators
+- Pointer-to-struct arrow notation (`p->field`)
+- Fixed-size array type annotations (for example `int32[10]`)
+- Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
+- Functions and function calls
+- Function forward declarations (e.g. `function add(a: int32, b: int32) -> int32;`)
+- Function return type syntax with both `->` and `:`
+- External C function declarations with optional link names
+- External C global declarations with optional link names
+- Struct declarations
+- Struct member access and assignment
+- Struct methods and method calls (`obj.method(args)`)
+- Array and pointer indexing (`arr[i]`, `ptr[i]`) and indexed assignment
+- `cstring` alias type (`uint8*`)
+- `if` and `else`
+- `while`
+- `for`
+- `switch`, `case`, `default`
+- `break` and `continue`
+- `return`
+- `defer` and `errdefer`
+- Inline assembly blocks
+
+## Type and Semantic Analysis
+
+- Built-in integer and floating-point types
+- Pointer type resolution (multi-level `T*`, `T**`, etc.) and base-type inference
+- Null pointer constant handling (`0` as valid pointer initializer and in comparisons)
+- Fixed-size array type resolution and element type inference
+- Struct type registration and lookup
+- Method call validation
+- Pointer type compatibility (same base type, or pointer vs null)
+- Assignment compatibility validation
+- Field assignment validation
+- Array index expression validation (index type and target type checks)
+- Compile-time rejection of constant null dereference (`*0`)
+- Compile-time rejection of constant fixed-array out-of-bounds indices
+- Loop/switch context checks for `break` and `continue`
+- Switch expression validation and compile-time case constant evaluation
+- Duplicate `case` detection and default-clause uniqueness checks
+- Undefined symbol detection with source locations
+- Forward declaration signature compatibility checks in symbol resolution
+- Extern/non-extern redeclaration and link-name consistency checks
+- Warning on managed struct pointers passed to `extern function` or stored in `extern` variables
+
+## Code Generation
+
+- x86-64 assembly emission (Intel/NASM-style syntax)
+- Function prologue and epilogue generation
+- Pure IR-first function body emission (IR -> assembly)
+- Struct field offset-based access and assignment
+- Method call emission (mangled names, `this` as first parameter)
+- Pointer dereference and address-of code generation
+- Array and pointer element address calculation and typed indexed load/store emission
+- Runtime null checks for dynamic dereference and pointer-based indexing
+- Runtime bounds checks for dynamic indexing into fixed-size arrays
+- Code generation for `if`, `while`, `for`, and `switch` control flow
+- Nested control-flow label management for `break` and `continue`
+- `_start` entry emission that calls `main` when present
+- `extern <symbol>` emission for foreign function/global references
+- Hard failure on unresolved symbols or unsupported generation paths
+
+## C Interop (v1)
+
+MethASM supports call-into-C declarations for external functions and globals.
+
+Syntax:
 # Garbage Collector
 
 MethASM provides an optional conservative mark-and-sweep garbage collector for heap allocation. Programs that use the `new` expression must link the GC runtime (`gc.c`). Programs that use only stack allocation and C `malloc` do not need it.
@@ -21,6 +133,14 @@ gcc -c src/runtime/gc.c -o gc.o -Isrc
 gcc main.o gc.o -o main
 ```
 
+- Control flow (`if`/`while`/`for`/`switch`/`break`/`continue`) is emitted from explicit IR control-flow instructions.
+- Local declarations, assignment, branches, labels, and returns emit directly from IR.
+- IR now models lvalue address and memory operations explicitly (`addr_of`, `load`, `store`) for struct fields, pointer dereference, and indexed access.
+- IR lowering also injects runtime traps for dynamic null dereference and fixed-array out-of-bounds access.
+- Heap allocation is modeled as explicit IR (`new`) instead of AST-side expression fallback.
+- Integer binary/unary operations lower to pure IR.
+- Type-aware lowering supports specific floating-point calculations with XMM registers.
+- Function calls and method calls are emitted directly from pure IR call instructions.
 The compiler emits calls to `gc_alloc` for `new` expressions. The entry point (`_start`) calls `gc_init` with the stack base before invoking `main`. See [Compilation](compilation.md) for the full pipeline.
 
 ## Algorithm
@@ -36,6 +156,14 @@ Collection is triggered in two ways: (1) **threshold-based**, when `gc_alloc` wo
 
 **Performance:** Mark-and-sweep pauses all execution during collection. There is no incremental or concurrent collection. For latency-sensitive programs (e.g. the web server), this is one reason to avoid `new` and use `malloc` instead.
 
+- Heap allocation via `gc_alloc`
+- Conservative mark-and-sweep collection
+- Iterative mark traversal using a worklist
+- Stack root scanning
+- Root registration API: `gc_register_root`, `gc_unregister_root` (pointer globals auto-registered)
+- Compiler warnings for common GC-managed pointer escapes across the C boundary
+- Collection controls: `gc_collect`, `gc_collect_now`, `gc_set_collection_threshold`, `gc_get_collection_threshold`
+- Runtime cleanup: `gc_shutdown`
 "Conservative" means the GC may retain some unreachable memory if a non-pointer value happens to look like a valid heap address. This is a trade-off for simplicity and C ABI compatibility. No object headers or type metadata are required in the language.
 
 ## Roots
@@ -147,6 +275,13 @@ If the GC appears to collect too aggressively (use-after-free, premature collect
 
 The compiler emits a warning when a managed struct pointer is passed to an `extern function` or stored in an `extern` variable, because those are common ways to let C retain a GC-managed pointer without registering the storage slot. The warning is heuristic: it does not prove that C will retain the pointer, and it does not eliminate the need to call `gc_register_root` when C-owned storage keeps the reference.
 
+- Optimization passes are limited.
+- Pointer indexing is only null-checked, not bounds-checked, because raw pointers do not carry extent information.
+- Managed pointers that cross into C remain convention-based: the compiler warns on obvious escape paths, but C-held storage still must use `gc_register_root`.
+- Deferred statements capture variables by reference, not by value.
+- `errdefer` is still convention-based: `0` means success and any non-zero return value is treated as an error path.
+- `switch` case labels currently require compile-time integer constant expressions and do not yet support range-style cases.
+- No labeled `break` or `continue`.
 If the GC retains too much memory (growth without bound, high `gc_get_allocated_bytes`), use the diagnostic API to inspect:
 
 - `gc_get_allocation_count()`: number of live objects

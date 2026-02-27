@@ -1,0 +1,28 @@
+struct List<T> {
+    data: T*;
+    length: int32;
+    capacity: int32;
+}
+
+struct Pair<A, B> {
+    first: A;
+    second: B;
+}
+
+function swap<T>(a: T*, b: T*) -> void {
+    var tmp: T = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+function main() -> int32 {
+    var x: int32 = 10;
+    var y: int32 = 20;
+    swap<int32>(&x, &y);
+
+    var pair: Pair<int32, int32>;
+    pair.first = x;
+    pair.second = y;
+
+    return pair.first + pair.second;
+}

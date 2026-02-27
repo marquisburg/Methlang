@@ -77,6 +77,8 @@ typedef struct {
   int is_exported;
   int is_extern;
   char *link_name;
+  char **type_params;
+  size_t type_param_count;
 } FunctionDeclaration;
 
 typedef struct {
@@ -87,6 +89,8 @@ typedef struct {
   ASTNode **methods;
   size_t method_count;
   int is_exported;
+  char **type_params;
+  size_t type_param_count;
 } StructDeclaration;
 
 typedef struct {
@@ -115,6 +119,8 @@ typedef struct {
   ASTNode **arguments;
   size_t argument_count;
   ASTNode *object; // Non-null for method calls (obj.method(args))
+  char **type_args;
+  size_t type_arg_count;
 } CallExpression;
 
 typedef struct {
@@ -211,6 +217,7 @@ typedef struct {
 
 // Function declarations
 ASTNode *ast_create_node(ASTNodeType type, SourceLocation location);
+ASTNode *ast_clone_node(ASTNode *node);
 void ast_destroy_node(ASTNode *node);
 void ast_add_child(ASTNode *parent, ASTNode *child);
 

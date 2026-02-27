@@ -45,8 +45,8 @@ static void code_generator_emit_runtime_trap(CodeGenerator *generator,
   char *message_label = code_generator_generate_label(generator, "runtime_msg");
   if (!message_label) {
     free(message_label);
-    code_generator_set_error(generator,
-                             "Out of memory while creating runtime trap labels");
+    code_generator_set_error(
+        generator, "Out of memory while creating runtime trap labels");
     return;
   }
 
@@ -83,15 +83,15 @@ static void code_generator_emit_runtime_trap(CodeGenerator *generator,
                         "    sub rsp, %d      ; Shadow space for puts\n",
                         conv_spec->shadow_space_size);
     code_generator_emit(generator, "    call puts\n");
-    code_generator_emit(generator,
-                        "    add rsp, %d\n", conv_spec->shadow_space_size);
+    code_generator_emit(generator, "    add rsp, %d\n",
+                        conv_spec->shadow_space_size);
     code_generator_emit(generator, "    mov ecx, 1\n");
     code_generator_emit(generator,
                         "    sub rsp, %d      ; Shadow space for exit\n",
                         conv_spec->shadow_space_size);
     code_generator_emit(generator, "    call exit\n");
-    code_generator_emit(generator,
-                        "    add rsp, %d\n", conv_spec->shadow_space_size);
+    code_generator_emit(generator, "    add rsp, %d\n",
+                        conv_spec->shadow_space_size);
   } else {
     code_generator_emit(generator, "    call puts\n");
     code_generator_emit(generator, "    mov edi, 1\n");
@@ -116,8 +116,8 @@ static void code_generator_emit_null_check(CodeGenerator *generator,
 
   code_generator_emit(generator, "    test rax, rax\n");
   code_generator_emit(generator, "    jnz %s\n", continue_label);
-  code_generator_emit_runtime_trap(generator, context ? context
-                                                      : "Fatal error: Null pointer dereference");
+  code_generator_emit_runtime_trap(
+      generator, context ? context : "Fatal error: Null pointer dereference");
   code_generator_emit(generator, "%s:\n", continue_label);
   free(continue_label);
 }
@@ -160,93 +160,110 @@ void code_generator_generate_binary_operation(CodeGenerator *generator,
   if (left_type == generator->type_checker->builtin_string &&
       right_type == generator->type_checker->builtin_string &&
       strcmp(op, "+") == 0) {
-      
-      code_generator_emit(generator, "    ; String concatenation (+)\n");
-      code_generator_generate_expression(generator, left);
-      code_generator_emit(generator, "    push rax           ; Save left string ptr\n");
-  
-      code_generator_generate_expression(generator, right);
-      code_generator_emit(generator, "    mov r10, rax       ; right string ptr -> r10\n");
-      code_generator_emit(generator, "    pop rax            ; left string ptr -> rax\n");
-      
-      // Calculate total length
-      code_generator_emit(generator, "    mov rcx, [rax + 8] ; len1\n");
-      code_generator_emit(generator, "    add rcx, [r10 + 8] ; len1 + len2\n");
 
-      // Save ptrs and length
-      code_generator_emit(generator, "    sub rsp, 24        ; Save concat state\n");
-      code_generator_emit(generator, "    mov [rsp], r10     ; right ptr\n");
-      code_generator_emit(generator, "    mov [rsp + 8], rax ; left ptr\n");
-      code_generator_emit(generator, "    mov [rsp + 16], rcx ; total_len\n");
-      
-      // gc_alloc(total_len + 17)
-      const char *size_register = "rdi";
-      CallingConventionSpec *conv_spec = generator->register_allocator ? generator->register_allocator->calling_convention : NULL;
-      if (conv_spec && conv_spec->int_param_count > 0) {
-        const char *cand = code_generator_get_register_name(conv_spec->int_param_registers[0]);
-        if (cand) size_register = cand;
-      }
-      code_generator_emit(generator, "    mov %s, rcx\n", size_register);
-      code_generator_emit(generator, "    add %s, 17\n", size_register);
-      
-      // Call gc_alloc with ABI-safe alignment and shadow space.
-      if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
-        code_generator_emit(generator, "    sub rsp, %d      ; 32-byte shadow + 8-byte align pad\n",
-                            conv_spec->shadow_space_size + 8);
-      }
-      code_generator_emit(generator, "    extern gc_alloc\n    call gc_alloc\n");
-      if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
-        code_generator_emit(generator, "    add rsp, %d\n",
-                            conv_spec->shadow_space_size + 8);
-      }
-      
-      // Restore values
-      code_generator_emit(generator, "    mov rcx, [rsp + 16] ; total_len\n");
-      code_generator_emit(generator, "    mov rdx, [rsp + 8] ; left ptr\n");
-      code_generator_emit(generator, "    mov rsi, [rsp]    ; right ptr\n");
-      code_generator_emit(generator, "    add rsp, 24\n");
-      
-      // Populate struct
-      code_generator_emit(generator, "    lea r8, [rax + 16]\n");
-      code_generator_emit(generator, "    mov [rax], r8\n");
-      code_generator_emit(generator, "    mov [rax + 8], rcx\n");
-      
-      // Generate labels
-      char *label_left_done = code_generator_generate_label(generator, "concat_left_done");
-      char *label_left_loop = code_generator_generate_label(generator, "concat_left_loop");
-      char *label_right_done = code_generator_generate_label(generator, "concat_right_done");
-      char *label_right_loop = code_generator_generate_label(generator, "concat_right_loop");
+    code_generator_emit(generator, "    ; String concatenation (+)\n");
+    code_generator_generate_expression(generator, left);
+    code_generator_emit(generator,
+                        "    push rax           ; Save left string ptr\n");
 
-      // Copy left
-      code_generator_emit(generator, "    mov r9, [rdx + 8]  ; left len\n");
-      code_generator_emit(generator, "    mov rdi, [rdx]     ; left chars\n");
-      code_generator_emit(generator, "    test r9, r9\n");
-      code_generator_emit(generator, "    jz %s\n", label_left_done);
-      code_generator_emit(generator, "%s:\n", label_left_loop);
-      code_generator_emit(generator, "    mov r11b, [rdi]\n");
-      code_generator_emit(generator, "    mov [r8], r11b\n");
-      code_generator_emit(generator, "    inc rdi\n    inc r8\n    dec r9\n");
-      code_generator_emit(generator, "    jnz %s\n", label_left_loop);
-      code_generator_emit(generator, "%s:\n", label_left_done);
-      
-      // Copy right
-      code_generator_emit(generator, "    mov r9, [rsi + 8]  ; right len\n");
-      code_generator_emit(generator, "    mov rdi, [rsi]     ; right chars\n");
-      code_generator_emit(generator, "    test r9, r9\n");
-      code_generator_emit(generator, "    jz %s\n", label_right_done);
-      code_generator_emit(generator, "%s:\n", label_right_loop);
-      code_generator_emit(generator, "    mov r11b, [rdi]\n");
-      code_generator_emit(generator, "    mov [r8], r11b\n");
-      code_generator_emit(generator, "    inc rdi\n    inc r8\n    dec r9\n");
-      code_generator_emit(generator, "    jnz %s\n", label_right_loop);
-      code_generator_emit(generator, "%s:\n", label_right_done);
-      
-      // null term
-      code_generator_emit(generator, "    mov byte [r8], 0\n");
-      
-      free(label_left_done); free(label_left_loop);
-      free(label_right_done); free(label_right_loop);
-      return;
+    code_generator_generate_expression(generator, right);
+    code_generator_emit(generator,
+                        "    mov r10, rax       ; right string ptr -> r10\n");
+    code_generator_emit(generator,
+                        "    pop rax            ; left string ptr -> rax\n");
+
+    // Calculate total length
+    code_generator_emit(generator, "    mov rcx, [rax + 8] ; len1\n");
+    code_generator_emit(generator, "    add rcx, [r10 + 8] ; len1 + len2\n");
+
+    // Save ptrs and length
+    code_generator_emit(generator,
+                        "    sub rsp, 24        ; Save concat state\n");
+    code_generator_emit(generator, "    mov [rsp], r10     ; right ptr\n");
+    code_generator_emit(generator, "    mov [rsp + 8], rax ; left ptr\n");
+    code_generator_emit(generator, "    mov [rsp + 16], rcx ; total_len\n");
+
+    // gc_alloc(total_len + 17)
+    const char *size_register = "rdi";
+    CallingConventionSpec *conv_spec =
+        generator->register_allocator
+            ? generator->register_allocator->calling_convention
+            : NULL;
+    if (conv_spec && conv_spec->int_param_count > 0) {
+      const char *cand =
+          code_generator_get_register_name(conv_spec->int_param_registers[0]);
+      if (cand)
+        size_register = cand;
+    }
+    code_generator_emit(generator, "    mov %s, rcx\n", size_register);
+    code_generator_emit(generator, "    add %s, 17\n", size_register);
+
+    // Call gc_alloc with ABI-safe alignment and shadow space.
+    if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
+      code_generator_emit(
+          generator,
+          "    sub rsp, %d      ; 32-byte shadow + 8-byte align pad\n",
+          conv_spec->shadow_space_size + 8);
+    }
+    code_generator_emit(generator, "    extern gc_alloc\n    call gc_alloc\n");
+    if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
+      code_generator_emit(generator, "    add rsp, %d\n",
+                          conv_spec->shadow_space_size + 8);
+    }
+
+    // Restore values
+    code_generator_emit(generator, "    mov rcx, [rsp + 16] ; total_len\n");
+    code_generator_emit(generator, "    mov rdx, [rsp + 8] ; left ptr\n");
+    code_generator_emit(generator, "    mov rsi, [rsp]    ; right ptr\n");
+    code_generator_emit(generator, "    add rsp, 24\n");
+
+    // Populate struct
+    code_generator_emit(generator, "    lea r8, [rax + 16]\n");
+    code_generator_emit(generator, "    mov [rax], r8\n");
+    code_generator_emit(generator, "    mov [rax + 8], rcx\n");
+
+    // Generate labels
+    char *label_left_done =
+        code_generator_generate_label(generator, "concat_left_done");
+    char *label_left_loop =
+        code_generator_generate_label(generator, "concat_left_loop");
+    char *label_right_done =
+        code_generator_generate_label(generator, "concat_right_done");
+    char *label_right_loop =
+        code_generator_generate_label(generator, "concat_right_loop");
+
+    // Copy left
+    code_generator_emit(generator, "    mov r9, [rdx + 8]  ; left len\n");
+    code_generator_emit(generator, "    mov rdi, [rdx]     ; left chars\n");
+    code_generator_emit(generator, "    test r9, r9\n");
+    code_generator_emit(generator, "    jz %s\n", label_left_done);
+    code_generator_emit(generator, "%s:\n", label_left_loop);
+    code_generator_emit(generator, "    mov r11b, [rdi]\n");
+    code_generator_emit(generator, "    mov [r8], r11b\n");
+    code_generator_emit(generator, "    inc rdi\n    inc r8\n    dec r9\n");
+    code_generator_emit(generator, "    jnz %s\n", label_left_loop);
+    code_generator_emit(generator, "%s:\n", label_left_done);
+
+    // Copy right
+    code_generator_emit(generator, "    mov r9, [rsi + 8]  ; right len\n");
+    code_generator_emit(generator, "    mov rdi, [rsi]     ; right chars\n");
+    code_generator_emit(generator, "    test r9, r9\n");
+    code_generator_emit(generator, "    jz %s\n", label_right_done);
+    code_generator_emit(generator, "%s:\n", label_right_loop);
+    code_generator_emit(generator, "    mov r11b, [rdi]\n");
+    code_generator_emit(generator, "    mov [r8], r11b\n");
+    code_generator_emit(generator, "    inc rdi\n    inc r8\n    dec r9\n");
+    code_generator_emit(generator, "    jnz %s\n", label_right_loop);
+    code_generator_emit(generator, "%s:\n", label_right_done);
+
+    // null term
+    code_generator_emit(generator, "    mov byte [r8], 0\n");
+
+    free(label_left_done);
+    free(label_left_loop);
+    free(label_right_done);
+    free(label_right_loop);
+    return;
   }
 
   int is_float = code_generator_is_floating_point_type(left_type) ||
@@ -336,11 +353,14 @@ void code_generator_generate_binary_operation(CodeGenerator *generator,
         code_generator_emit(generator,
                             "    mov rax, rdx     ; Move remainder to RAX\n");
       } else if (strcmp(op, "<<") == 0) {
-        code_generator_emit(generator, "    mov rcx, r10       ; Move shift amount to CL\n");
+        code_generator_emit(
+            generator, "    mov rcx, r10       ; Move shift amount to CL\n");
         code_generator_emit(generator, "    shl rax, cl        ; Shift left\n");
       } else if (strcmp(op, ">>") == 0) {
-        code_generator_emit(generator, "    mov rcx, r10       ; Move shift amount to CL\n");
-        code_generator_emit(generator, "    sar rax, cl        ; Shift right arithmetic\n");
+        code_generator_emit(
+            generator, "    mov rcx, r10       ; Move shift amount to CL\n");
+        code_generator_emit(
+            generator, "    sar rax, cl        ; Shift right arithmetic\n");
       } else {
         code_generator_emit(generator, "    %s rax, r10      ; %s operation\n",
                             instruction, op);
@@ -717,9 +737,9 @@ void code_generator_store_variable(CodeGenerator *generator,
     if (symbol->type && symbol->type->kind == TYPE_STRING) {
       if (symbol->kind == SYMBOL_PARAMETER) {
         // Parameters store a pointer to a string record in their home slot.
-        code_generator_emit(generator,
-                            "    mov qword [rbp - %d], rax  ; String param ptr\n",
-                            symbol->data.variable.memory_offset);
+        code_generator_emit(
+            generator, "    mov qword [rbp - %d], rax  ; String param ptr\n",
+            symbol->data.variable.memory_offset);
         return;
       }
 
@@ -739,8 +759,7 @@ void code_generator_store_variable(CodeGenerator *generator,
         int length_offset = offset - 8;
         if (length_offset <= 0) {
           code_generator_set_error(
-              generator,
-              "Invalid local string layout for '%s' (offset=%d)",
+              generator, "Invalid local string layout for '%s' (offset=%d)",
               variable_name, offset);
           return;
         }
@@ -852,6 +871,31 @@ void code_generator_load_string_literal(CodeGenerator *generator,
       free(label);
     if (label_struct)
       free(label_struct);
+  }
+}
+
+void code_generator_load_string_literal_as_cstring(CodeGenerator *generator,
+                                                   const char *string_value) {
+  if (!generator || !string_value) {
+    return;
+  }
+
+  code_generator_emit(generator,
+                      "    ; String literal as cstring (%zu bytes)\n",
+                      strlen(string_value));
+
+  char *label = code_generator_generate_label(generator, "str_chars");
+  if (label) {
+    code_generator_emit(
+        generator,
+        "    lea rax, [rel %s]  ; Load cstring (raw chars) address\n", label);
+    code_generator_emit_to_global_buffer(generator, "%s:\n", label);
+    if (!code_generator_emit_escaped_string_bytes(generator, string_value, 1)) {
+      free(label);
+      return;
+    }
+    code_generator_emit_to_global_buffer(generator, "\n");
+    free(label);
   }
 }
 
@@ -1030,7 +1074,7 @@ void code_generator_generate_method_call(CodeGenerator *generator,
       if (call_data->arguments[i]) {
         // Generate argument (starts at parameter index 1 since 0 is "this")
         code_generator_generate_parameter(generator, call_data->arguments[i],
-                                          (int)i + 1, NULL);
+                                          (int)i + 1, NULL, NULL);
       }
     }
   }
@@ -1286,9 +1330,10 @@ static int code_generator_generate_lvalue_address(CodeGenerator *generator,
       if (symbol->kind == SYMBOL_PARAMETER && symbol->type &&
           symbol->type->kind == TYPE_STRING) {
         // String parameters are homed as pointers to string records.
-        code_generator_emit(generator,
-                            "    mov rax, qword [rbp - %d]  ; String param record ptr\n",
-                            offset);
+        code_generator_emit(
+            generator,
+            "    mov rax, qword [rbp - %d]  ; String param record ptr\n",
+            offset);
       } else {
         code_generator_emit(
             generator, "    lea rax, [rbp - %d]  ; Address of local\n", offset);

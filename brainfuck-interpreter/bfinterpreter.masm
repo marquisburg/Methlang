@@ -1,0 +1,122 @@
+import "std/io";
+import "std/mem";
+import "std/conv";
+import "std/process";
+
+var tape: uint8[30000];
+var tape_ptr: int32 = 0;
+
+function find_matching_close(program: cstring, pc: int32, len: int32) -> int32 {
+    var depth: int32 = 1;
+    var i: int32 = pc + 1;
+    while (i < len) {
+        if (program[i] == 91) {
+            depth = depth + 1;
+        }
+        if (program[i] == 93) {
+            depth = depth - 1;
+            if (depth == 0) {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+function find_matching_open(program: cstring, pc: int32) -> int32 {
+    var depth: int32 = 1;
+    var i: int32 = pc - 1;
+    while (i >= 0) {
+        if (program[i] == 93) {
+            depth = depth + 1;
+        }
+        if (program[i] == 91) {
+            depth = depth - 1;
+            if (depth == 0) {
+                return i;
+            }
+        }
+        i = i - 1;
+    }
+    return -1;
+}
+
+function bf_run(program: cstring, len: int32) -> int32 {
+    var pc: int32 = 0;
+
+    var j: int32 = 0;
+    while (j < 30000) {
+        tape[j] = 0;
+        j = j + 1;
+    }
+    tape_ptr = 0;
+
+    while (pc < len) {
+        var cmd: uint8 = program[pc];
+
+        if (cmd == 62) {
+            tape_ptr = tape_ptr + 1;
+            if (tape_ptr >= 30000) {
+                puts("Error: tape pointer out of bounds\n");
+                return 1;
+            }
+        }
+
+        if (cmd == 60) {
+            tape_ptr = tape_ptr - 1;
+            if (tape_ptr < 0) {
+                puts("Error: tape pointer out of bounds\n");
+                return 1;
+            }
+        }
+
+        if (cmd == 43) {
+            tape[tape_ptr] = tape[tape_ptr] + 1;
+        }
+
+        if (cmd == 45) {
+            tape[tape_ptr] = tape[tape_ptr] - 1;
+        }
+
+        if (cmd == 46) {
+            putchar(tape[tape_ptr]);
+        }
+
+        if (cmd == 44) {
+            tape[tape_ptr] = getchar();
+        }
+
+        if (cmd == 91) {
+            if (tape[tape_ptr] == 0) {
+                var close: int32 = find_matching_close(program, pc, len);
+                if (close == -1) {
+                    puts("Error: unmatched [\n");
+                    return 1;
+                }
+                pc = close;
+            }
+        }
+
+        if (cmd == 93) {
+            if (tape[tape_ptr] != 0) {
+                var open: int32 = find_matching_open(program, pc);
+                if (open == -1) {
+                    puts("Error: unmatched ]\n");
+                    return 1;
+                }
+                pc = open;
+            }
+        }
+
+        pc = pc + 1;
+    }
+
+    return 0;
+}
+
+function main() -> int32 {
+    var hello: string = import_str "hello.bf";
+    var result: int32 = bf_run(hello.chars, hello.length);
+    return result;
+}

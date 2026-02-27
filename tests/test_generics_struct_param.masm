@@ -1,0 +1,15 @@
+struct Pair<A, B> {
+    first: A;
+    second: B;
+}
+
+function get_first<T>(p: Pair<T, T>*) -> T {
+    return p->first;
+}
+
+function main() -> int32 {
+    var p: Pair<int32, int32>;
+    p.first = 42;
+    p.second = 99;
+    return get_first<int32>(&p);
+}

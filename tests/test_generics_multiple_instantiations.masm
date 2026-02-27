@@ -1,0 +1,23 @@
+struct Pair<A, B> {
+    first: A;
+    second: B;
+}
+
+function identity<T>(val: T) -> T {
+    return val;
+}
+
+function main() -> int32 {
+    var p1: Pair<int32, int32>;
+    p1.first = 1;
+    p1.second = 2;
+
+    var p2: Pair<int64, int64>;
+    p2.first = 100;
+    p2.second = 200;
+
+    var a: int32 = identity<int32>(42);
+    var b: int64 = identity<int64>(99);
+
+    return a;
+}

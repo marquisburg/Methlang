@@ -340,6 +340,9 @@ int compile_file(const char *input_filename, const char *output_filename,
     goto cleanup;
   }
 
+  // Monomorphize generics (before type checking)
+  monomorphize_program(program);
+
   // Type checking
   if (!type_checker_check_program(type_checker, program)) {
     if (error_reporter_has_errors(error_reporter)) {

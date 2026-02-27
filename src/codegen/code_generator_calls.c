@@ -91,8 +91,8 @@ void code_generator_generate_function_call(CodeGenerator *generator,
   code_generator_align_stack_for_call(generator, call_data->argument_count);
 
   // 2. Pass parameters according to calling convention
-  code_generator_generate_parameter_passing(generator, call_data->arguments,
-                                            call_data->argument_count);
+  code_generator_generate_parameter_passing(
+      generator, call_data->arguments, call_data->argument_count, func_symbol);
 
   // 3. Generate the call instruction
   code_generator_emit(generator, "    call %s\n", call_target);
@@ -117,7 +117,8 @@ void code_generator_generate_function_call(CodeGenerator *generator,
 
 void code_generator_generate_parameter_passing(CodeGenerator *generator,
                                                ASTNode **arguments,
-                                               size_t argument_count) {
+                                               size_t argument_count,
+                                               Symbol *func_symbol) {
   if (!generator || !arguments || argument_count == 0) {
     return;
   }
@@ -186,7 +187,7 @@ void code_generator_generate_parameter_passing(CodeGenerator *generator,
 
         if (goes_on_stack) {
           code_generator_generate_parameter(generator, arguments[i], i,
-                                            param_type);
+                                            param_type, func_symbol);
         }
 
         // Update counters (counting backwards)
@@ -220,7 +221,7 @@ void code_generator_generate_parameter_passing(CodeGenerator *generator,
 
       if (goes_in_register) {
         code_generator_generate_parameter(generator, arguments[i], (int)i,
-                                          param_type);
+                                          param_type, func_symbol);
       }
 
       // Update counters
@@ -235,7 +236,7 @@ void code_generator_generate_parameter_passing(CodeGenerator *generator,
 
 void code_generator_generate_parameter(CodeGenerator *generator,
                                        ASTNode *argument, int param_index,
-                                       Type *param_type) {
+                                       Type *param_type, Symbol *func_symbol) {
   if (!generator || !argument) {
     return;
   }
@@ -246,8 +247,30 @@ void code_generator_generate_parameter(CodeGenerator *generator,
     return;
   }
 
+  // Check if we need string literal -> cstring coercion
+  int is_string_literal_to_cstring = 0;
+  if (argument->type == AST_STRING_LITERAL && func_symbol &&
+      func_symbol->kind == SYMBOL_FUNCTION &&
+      param_index < (int)func_symbol->data.function.parameter_count) {
+    Type *expected_type =
+        func_symbol->data.function.parameter_types[param_index];
+    if (expected_type && expected_type->name &&
+        strcmp(expected_type->name, "cstring") == 0) {
+      is_string_literal_to_cstring = 1;
+    }
+  }
+
   // Generate the argument expression
-  code_generator_generate_expression(generator, argument);
+  if (is_string_literal_to_cstring) {
+    StringLiteral *str_data = (StringLiteral *)argument->data;
+    if (str_data && str_data->value) {
+      code_generator_load_string_literal_as_cstring(generator, str_data->value);
+    } else {
+      code_generator_set_error(generator, "Malformed string literal");
+    }
+  } else {
+    code_generator_generate_expression(generator, argument);
+  }
 
   // Determine parameter type if not provided
   if (!param_type) {
@@ -328,12 +351,14 @@ void code_generator_generate_parameter(CodeGenerator *generator,
       if (param_type && param_type->size <= 4) {
         // 32-bit or smaller - push as 64-bit for alignment
         code_generator_emit(
-            generator, "    push rax          ; Integer parameter %d on stack\n",
+            generator,
+            "    push rax          ; Integer parameter %d on stack\n",
             param_index + 1);
       } else {
         // 64-bit parameter
         code_generator_emit(
-            generator, "    push rax          ; Integer parameter %d on stack\n",
+            generator,
+            "    push rax          ; Integer parameter %d on stack\n",
             param_index + 1);
       }
     }
@@ -480,7 +505,6 @@ void code_generator_align_stack_for_call(CodeGenerator *generator,
                         "    sub rsp, %d      ; Allocate shadow space\n",
                         conv_spec->shadow_space_size);
   }
-
 }
 
 // Helper function to infer expression type (simplified implementation)
@@ -561,7 +585,8 @@ Type *code_generator_infer_expression_type(CodeGenerator *generator,
       Type *array_type =
           code_generator_infer_expression_type(generator, index_expr->array);
       if (array_type &&
-          (array_type->kind == TYPE_ARRAY || array_type->kind == TYPE_POINTER) &&
+          (array_type->kind == TYPE_ARRAY ||
+           array_type->kind == TYPE_POINTER) &&
           array_type->base_type) {
         return array_type->base_type;
       }
@@ -656,5 +681,3 @@ const char *code_generator_get_register_name(x86Register reg) {
     return NULL;
   }
 }
-
-

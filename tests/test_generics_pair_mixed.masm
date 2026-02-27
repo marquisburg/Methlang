@@ -1,0 +1,10 @@
+struct Pair<A, B> {
+    first: A;
+    second: B;
+}
+
+function main() -> int32 {
+    var pair: Pair<int32, cstring>;
+    pair.first = 42;
+    return pair.first;
+}

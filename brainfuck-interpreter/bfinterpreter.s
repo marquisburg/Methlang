@@ -2991,7 +2991,7 @@ global bf_run
 bf_run:
     push rbp        ; Save old base pointer
     mov rbp, rsp  ; Set new base pointer
-    sub rsp, 1856    ; Allocate 1856 bytes on stack (aligned)
+    sub rsp, 1952    ; Allocate 1952 bytes on stack (aligned)
     ; Registering 2 function parameters
     mov [rbp - 8], rcx  ; Home param 'program'
     ; Parameter 'program' arrived in register rcx
@@ -3185,19 +3185,27 @@ ir_nonnull_256:
     mov rax, [rbp - 144]
     test rax, rax
     jz ir_if_next_260
-    ; IR call: puts (1 args)
+    ; IR call: cstr (1 args)
     sub rsp, 32
     ; String literal (34 bytes)
     lea rax, [rel Lstr_struct39]  ; Load string struct address
+    mov rcx, rax
+    call cstr
+    add rsp, 32
+    ; Integer/pointer return value in rax
+    mov [rbp - 152], rax
+    ; IR call: puts (1 args)
+    sub rsp, 32
+    mov rax, [rbp - 152]
     mov rcx, rax
     call puts
     add rsp, 32
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
-    mov [rbp - 152], rax
-    mov rax, 1
     mov [rbp - 160], rax
-    mov rax, [rbp - 160]
+    mov rax, 1
+    mov [rbp - 168], rax
+    mov rax, [rbp - 168]
     test rax, rax
     jz ir_errdefer_ok_261
     jmp ir_errdefer_end_262
@@ -3220,8 +3228,8 @@ ir_if_end_257:
     cmp rax, r10
     sete al
     movzx rax, al
-    mov [rbp - 168], rax
-    mov rax, [rbp - 168]
+    mov [rbp - 176], rax
+    mov rax, [rbp - 176]
     test rax, rax
     jz ir_if_next_264
     ; Load variable: tape_ptr
@@ -3231,8 +3239,8 @@ ir_if_end_257:
     mov r10, rax
     pop rax
     sub rax, r10
-    mov [rbp - 176], rax
-    mov rax, [rbp - 176]
+    mov [rbp - 184], rax
+    mov rax, [rbp - 184]
     ; Store to variable: tape_ptr
     mov dword [rel tape_ptr], eax  ; To global memory
     ; Load variable: tape_ptr
@@ -3244,23 +3252,31 @@ ir_if_end_257:
     cmp rax, r10
     setl al
     movzx rax, al
-    mov [rbp - 184], rax
-    mov rax, [rbp - 184]
+    mov [rbp - 192], rax
+    mov rax, [rbp - 192]
     test rax, rax
     jz ir_if_next_266
-    ; IR call: puts (1 args)
+    ; IR call: cstr (1 args)
     sub rsp, 32
     ; String literal (34 bytes)
     lea rax, [rel Lstr_struct41]  ; Load string struct address
+    mov rcx, rax
+    call cstr
+    add rsp, 32
+    ; Integer/pointer return value in rax
+    mov [rbp - 200], rax
+    ; IR call: puts (1 args)
+    sub rsp, 32
+    mov rax, [rbp - 200]
     mov rcx, rax
     call puts
     add rsp, 32
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
-    mov [rbp - 192], rax
+    mov [rbp - 208], rax
     mov rax, 1
-    mov [rbp - 200], rax
-    mov rax, [rbp - 200]
+    mov [rbp - 216], rax
+    mov rax, [rbp - 216]
     test rax, rax
     jz ir_errdefer_ok_267
     jmp ir_errdefer_end_268
@@ -3283,8 +3299,8 @@ ir_if_end_263:
     cmp rax, r10
     sete al
     movzx rax, al
-    mov [rbp - 208], rax
-    mov rax, [rbp - 208]
+    mov [rbp - 224], rax
+    mov rax, [rbp - 224]
     test rax, rax
     jz ir_if_next_270
     ; Load variable: tape_ptr
@@ -3296,8 +3312,8 @@ ir_if_end_263:
     cmp rax, r10
     setl al
     movzx rax, al
-    mov [rbp - 216], rax
-    mov rax, [rbp - 216]
+    mov [rbp - 232], rax
+    mov rax, [rbp - 232]
     test rax, rax
     jz ir_trap_bounds_271
     jmp ir_in_bounds_272
@@ -3326,25 +3342,25 @@ ir_in_bounds_272:
     mov r10, rax
     pop rax
     imul rax, r10
-    mov [rbp - 224], rax
+    mov [rbp - 240], rax
     ; Load variable: tape
     lea rax, [rel tape]  ; Array base address
     push rax
-    mov rax, [rbp - 224]
+    mov rax, [rbp - 240]
     mov r10, rax
     pop rax
     add rax, r10
-    mov [rbp - 232], rax
-    mov rax, [rbp - 232]
+    mov [rbp - 248], rax
+    mov rax, [rbp - 248]
     movzx rax, byte [rax]
-    mov [rbp - 240], rax
-    mov rax, [rbp - 240]
+    mov [rbp - 256], rax
+    mov rax, [rbp - 256]
     push rax
     mov rax, 1
     mov r10, rax
     pop rax
     add rax, r10
-    mov [rbp - 248], rax
+    mov [rbp - 264], rax
     ; Load variable: tape_ptr
     movsxd rax, dword [rel tape_ptr]  ; From global memory
     push rax
@@ -3354,8 +3370,8 @@ ir_in_bounds_272:
     cmp rax, r10
     setl al
     movzx rax, al
-    mov [rbp - 256], rax
-    mov rax, [rbp - 256]
+    mov [rbp - 272], rax
+    mov rax, [rbp - 272]
     test rax, rax
     jz ir_trap_bounds_273
     jmp ir_in_bounds_274
@@ -3384,18 +3400,18 @@ ir_in_bounds_274:
     mov r10, rax
     pop rax
     imul rax, r10
-    mov [rbp - 264], rax
+    mov [rbp - 280], rax
     ; Load variable: tape
     lea rax, [rel tape]  ; Array base address
     push rax
-    mov rax, [rbp - 264]
+    mov rax, [rbp - 280]
     mov r10, rax
     pop rax
     add rax, r10
-    mov [rbp - 272], rax
-    mov rax, [rbp - 272]
+    mov [rbp - 288], rax
+    mov rax, [rbp - 288]
     push rax
-    mov rax, [rbp - 248]
+    mov rax, [rbp - 264]
     mov rcx, rax
     pop rax
     mov byte [rax], cl
@@ -3411,8 +3427,8 @@ ir_if_end_269:
     cmp rax, r10
     sete al
     movzx rax, al
-    mov [rbp - 288], rax
-    mov rax, [rbp - 288]
+    mov [rbp - 304], rax
+    mov rax, [rbp - 304]
     test rax, rax
     jz ir_if_next_276
     ; Load variable: tape_ptr
@@ -3424,8 +3440,8 @@ ir_if_end_269:
     cmp rax, r10
     setl al
     movzx rax, al
-    mov [rbp - 296], rax
-    mov rax, [rbp - 296]
+    mov [rbp - 312], rax
+    mov rax, [rbp - 312]
     test rax, rax
     jz ir_trap_bounds_277
     jmp ir_in_bounds_278
@@ -3454,25 +3470,25 @@ ir_in_bounds_278:
     mov r10, rax
     pop rax
     imul rax, r10
-    mov [rbp - 304], rax
+    mov [rbp - 320], rax
     ; Load variable: tape
     lea rax, [rel tape]  ; Array base address
     push rax
-    mov rax, [rbp - 304]
+    mov rax, [rbp - 320]
     mov r10, rax
     pop rax
     add rax, r10
-    mov [rbp - 312], rax
-    mov rax, [rbp - 312]
+    mov [rbp - 328], rax
+    mov rax, [rbp - 328]
     movzx rax, byte [rax]
-    mov [rbp - 320], rax
-    mov rax, [rbp - 320]
+    mov [rbp - 336], rax
+    mov rax, [rbp - 336]
     push rax
     mov rax, 1
     mov r10, rax
     pop rax
     sub rax, r10
-    mov [rbp - 328], rax
+    mov [rbp - 344], rax
     ; Load variable: tape_ptr
     movsxd rax, dword [rel tape_ptr]  ; From global memory
     push rax
@@ -3482,8 +3498,8 @@ ir_in_bounds_278:
     cmp rax, r10
     setl al
     movzx rax, al
-    mov [rbp - 336], rax
-    mov rax, [rbp - 336]
+    mov [rbp - 352], rax
+    mov rax, [rbp - 352]
     test rax, rax
     jz ir_trap_bounds_279
     jmp ir_in_bounds_280
@@ -3512,18 +3528,18 @@ ir_in_bounds_280:
     mov r10, rax
     pop rax
     imul rax, r10
-    mov [rbp - 344], rax
+    mov [rbp - 360], rax
     ; Load variable: tape
     lea rax, [rel tape]  ; Array base address
     push rax
-    mov rax, [rbp - 344]
+    mov rax, [rbp - 360]
     mov r10, rax
     pop rax
     add rax, r10
-    mov [rbp - 352], rax
-    mov rax, [rbp - 352]
+    mov [rbp - 368], rax
+    mov rax, [rbp - 368]
     push rax
-    mov rax, [rbp - 328]
+    mov rax, [rbp - 344]
     mov rcx, rax
     pop rax
     mov byte [rax], cl
@@ -3539,8 +3555,8 @@ ir_if_end_275:
     cmp rax, r10
     sete al
     movzx rax, al
-    mov [rbp - 368], rax
-    mov rax, [rbp - 368]
+    mov [rbp - 384], rax
+    mov rax, [rbp - 384]
     test rax, rax
     jz ir_if_next_282
     ; Load variable: tape_ptr
@@ -3552,8 +3568,8 @@ ir_if_end_275:
     cmp rax, r10
     setl al
     movzx rax, al
-    mov [rbp - 376], rax
-    mov rax, [rbp - 376]
+    mov [rbp - 392], rax
+    mov rax, [rbp - 392]
     test rax, rax
     jz ir_trap_bounds_283
     jmp ir_in_bounds_284
@@ -3582,27 +3598,27 @@ ir_in_bounds_284:
     mov r10, rax
     pop rax
     imul rax, r10
-    mov [rbp - 384], rax
+    mov [rbp - 400], rax
     ; Load variable: tape
     lea rax, [rel tape]  ; Array base address
     push rax
-    mov rax, [rbp - 384]
+    mov rax, [rbp - 400]
     mov r10, rax
     pop rax
     add rax, r10
-    mov [rbp - 392], rax
-    mov rax, [rbp - 392]
+    mov [rbp - 408], rax
+    mov rax, [rbp - 408]
     movzx rax, byte [rax]
-    mov [rbp - 400], rax
+    mov [rbp - 416], rax
     ; IR call: putchar (1 args)
     sub rsp, 32
-    mov rax, [rbp - 400]
+    mov rax, [rbp - 416]
     mov rcx, rax
     call putchar
     add rsp, 32
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
-    mov [rbp - 408], rax
+    mov [rbp - 424], rax
     jmp ir_if_end_281
 ir_if_next_282:
 ir_if_end_281:
@@ -3615,8 +3631,8 @@ ir_if_end_281:
     cmp rax, r10
     sete al
     movzx rax, al
-    mov [rbp - 416], rax
-    mov rax, [rbp - 416]
+    mov [rbp - 432], rax
+    mov rax, [rbp - 432]
     test rax, rax
     jz ir_if_next_286
     ; IR call: getchar (0 args)
@@ -3625,7 +3641,7 @@ ir_if_end_281:
     add rsp, 32
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
-    mov [rbp - 424], rax
+    mov [rbp - 440], rax
     ; Load variable: tape_ptr
     movsxd rax, dword [rel tape_ptr]  ; From global memory
     push rax
@@ -3635,8 +3651,8 @@ ir_if_end_281:
     cmp rax, r10
     setl al
     movzx rax, al
-    mov [rbp - 432], rax
-    mov rax, [rbp - 432]
+    mov [rbp - 448], rax
+    mov rax, [rbp - 448]
     test rax, rax
     jz ir_trap_bounds_287
     jmp ir_in_bounds_288
@@ -3665,18 +3681,18 @@ ir_in_bounds_288:
     mov r10, rax
     pop rax
     imul rax, r10
-    mov [rbp - 440], rax
+    mov [rbp - 456], rax
     ; Load variable: tape
     lea rax, [rel tape]  ; Array base address
     push rax
-    mov rax, [rbp - 440]
+    mov rax, [rbp - 456]
     mov r10, rax
     pop rax
     add rax, r10
-    mov [rbp - 448], rax
-    mov rax, [rbp - 448]
+    mov [rbp - 464], rax
+    mov rax, [rbp - 464]
     push rax
-    mov rax, [rbp - 424]
+    mov rax, [rbp - 440]
     mov rcx, rax
     pop rax
     mov byte [rax], cl
@@ -3692,8 +3708,8 @@ ir_if_end_285:
     cmp rax, r10
     sete al
     movzx rax, al
-    mov [rbp - 464], rax
-    mov rax, [rbp - 464]
+    mov [rbp - 480], rax
+    mov rax, [rbp - 480]
     test rax, rax
     jz ir_if_next_290
     ; Load variable: tape_ptr
@@ -3705,8 +3721,8 @@ ir_if_end_285:
     cmp rax, r10
     setl al
     movzx rax, al
-    mov [rbp - 472], rax
-    mov rax, [rbp - 472]
+    mov [rbp - 488], rax
+    mov rax, [rbp - 488]
     test rax, rax
     jz ir_trap_bounds_293
     jmp ir_in_bounds_294
@@ -3735,19 +3751,19 @@ ir_in_bounds_294:
     mov r10, rax
     pop rax
     imul rax, r10
-    mov [rbp - 480], rax
+    mov [rbp - 496], rax
     ; Load variable: tape
     lea rax, [rel tape]  ; Array base address
     push rax
-    mov rax, [rbp - 480]
+    mov rax, [rbp - 496]
     mov r10, rax
     pop rax
     add rax, r10
-    mov [rbp - 488], rax
-    mov rax, [rbp - 488]
+    mov [rbp - 504], rax
+    mov rax, [rbp - 504]
     movzx rax, byte [rax]
-    mov [rbp - 496], rax
-    mov rax, [rbp - 496]
+    mov [rbp - 512], rax
+    mov rax, [rbp - 512]
     push rax
     mov rax, 0
     mov r10, rax
@@ -3755,8 +3771,8 @@ ir_in_bounds_294:
     cmp rax, r10
     sete al
     movzx rax, al
-    mov [rbp - 504], rax
-    mov rax, [rbp - 504]
+    mov [rbp - 520], rax
+    mov rax, [rbp - 520]
     test rax, rax
     jz ir_if_next_292
     ; IR call: find_matching_close (3 args)
@@ -3774,39 +3790,47 @@ ir_in_bounds_294:
     add rsp, 32
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
-    mov [rbp - 512], rax
-    mov rax, [rbp - 512]
+    mov [rbp - 528], rax
+    mov rax, [rbp - 528]
     ; Store to variable: close
     mov dword [rbp - 32], eax  ; To stack [rbp - 32]
     mov rax, 1
     neg rax
-    mov [rbp - 520], rax
+    mov [rbp - 536], rax
     ; Load variable: close
     movsxd rax, dword [rbp - 32]  ; From stack [rbp - 32]
     push rax
-    mov rax, [rbp - 520]
+    mov rax, [rbp - 536]
     mov r10, rax
     pop rax
     cmp rax, r10
     sete al
     movzx rax, al
-    mov [rbp - 528], rax
-    mov rax, [rbp - 528]
+    mov [rbp - 544], rax
+    mov rax, [rbp - 544]
     test rax, rax
     jz ir_if_next_296
-    ; IR call: puts (1 args)
+    ; IR call: cstr (1 args)
     sub rsp, 32
     ; String literal (19 bytes)
     lea rax, [rel Lstr_struct57]  ; Load string struct address
+    mov rcx, rax
+    call cstr
+    add rsp, 32
+    ; Integer/pointer return value in rax
+    mov [rbp - 552], rax
+    ; IR call: puts (1 args)
+    sub rsp, 32
+    mov rax, [rbp - 552]
     mov rcx, rax
     call puts
     add rsp, 32
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
-    mov [rbp - 536], rax
+    mov [rbp - 560], rax
     mov rax, 1
-    mov [rbp - 544], rax
-    mov rax, [rbp - 544]
+    mov [rbp - 568], rax
+    mov rax, [rbp - 568]
     test rax, rax
     jz ir_errdefer_ok_297
     jmp ir_errdefer_end_298
@@ -3836,8 +3860,8 @@ ir_if_end_289:
     cmp rax, r10
     sete al
     movzx rax, al
-    mov [rbp - 552], rax
-    mov rax, [rbp - 552]
+    mov [rbp - 576], rax
+    mov rax, [rbp - 576]
     test rax, rax
     jz ir_if_next_300
     ; Load variable: tape_ptr
@@ -3849,8 +3873,8 @@ ir_if_end_289:
     cmp rax, r10
     setl al
     movzx rax, al
-    mov [rbp - 560], rax
-    mov rax, [rbp - 560]
+    mov [rbp - 584], rax
+    mov rax, [rbp - 584]
     test rax, rax
     jz ir_trap_bounds_303
     jmp ir_in_bounds_304
@@ -3879,19 +3903,19 @@ ir_in_bounds_304:
     mov r10, rax
     pop rax
     imul rax, r10
-    mov [rbp - 568], rax
+    mov [rbp - 592], rax
     ; Load variable: tape
     lea rax, [rel tape]  ; Array base address
     push rax
-    mov rax, [rbp - 568]
+    mov rax, [rbp - 592]
     mov r10, rax
     pop rax
     add rax, r10
-    mov [rbp - 576], rax
-    mov rax, [rbp - 576]
+    mov [rbp - 600], rax
+    mov rax, [rbp - 600]
     movzx rax, byte [rax]
-    mov [rbp - 584], rax
-    mov rax, [rbp - 584]
+    mov [rbp - 608], rax
+    mov rax, [rbp - 608]
     push rax
     mov rax, 0
     mov r10, rax
@@ -3899,8 +3923,8 @@ ir_in_bounds_304:
     cmp rax, r10
     setne al
     movzx rax, al
-    mov [rbp - 592], rax
-    mov rax, [rbp - 592]
+    mov [rbp - 616], rax
+    mov rax, [rbp - 616]
     test rax, rax
     jz ir_if_next_302
     ; IR call: find_matching_open (2 args)
@@ -3915,39 +3939,47 @@ ir_in_bounds_304:
     add rsp, 32
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
-    mov [rbp - 600], rax
-    mov rax, [rbp - 600]
+    mov [rbp - 624], rax
+    mov rax, [rbp - 624]
     ; Store to variable: open
     mov dword [rbp - 36], eax  ; To stack [rbp - 36]
     mov rax, 1
     neg rax
-    mov [rbp - 608], rax
+    mov [rbp - 632], rax
     ; Load variable: open
     movsxd rax, dword [rbp - 36]  ; From stack [rbp - 36]
     push rax
-    mov rax, [rbp - 608]
+    mov rax, [rbp - 632]
     mov r10, rax
     pop rax
     cmp rax, r10
     sete al
     movzx rax, al
-    mov [rbp - 616], rax
-    mov rax, [rbp - 616]
+    mov [rbp - 640], rax
+    mov rax, [rbp - 640]
     test rax, rax
     jz ir_if_next_306
-    ; IR call: puts (1 args)
+    ; IR call: cstr (1 args)
     sub rsp, 32
     ; String literal (19 bytes)
     lea rax, [rel Lstr_struct61]  ; Load string struct address
+    mov rcx, rax
+    call cstr
+    add rsp, 32
+    ; Integer/pointer return value in rax
+    mov [rbp - 648], rax
+    ; IR call: puts (1 args)
+    sub rsp, 32
+    mov rax, [rbp - 648]
     mov rcx, rax
     call puts
     add rsp, 32
     ; Integer/pointer return value in rax
     ; 32-bit return value already in eax
-    mov [rbp - 624], rax
+    mov [rbp - 656], rax
     mov rax, 1
-    mov [rbp - 632], rax
-    mov rax, [rbp - 632]
+    mov [rbp - 664], rax
+    mov rax, [rbp - 664]
     test rax, rax
     jz ir_errdefer_ok_307
     jmp ir_errdefer_end_308
@@ -3975,15 +4007,15 @@ ir_if_end_299:
     mov r10, rax
     pop rax
     add rax, r10
-    mov [rbp - 640], rax
-    mov rax, [rbp - 640]
+    mov [rbp - 672], rax
+    mov rax, [rbp - 672]
     ; Store to variable: pc
     mov dword [rbp - 20], eax  ; To stack [rbp - 20]
     jmp ir_while_253
 ir_while_end_254:
     mov rax, 0
-    mov [rbp - 648], rax
-    mov rax, [rbp - 648]
+    mov [rbp - 680], rax
+    mov rax, [rbp - 680]
     test rax, rax
     jz ir_errdefer_ok_309
     jmp ir_errdefer_end_310
