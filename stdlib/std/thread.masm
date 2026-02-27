@@ -19,6 +19,8 @@ export extern function GetCurrentThreadId() -> uint32 = "GetCurrentThreadId";
 export extern function Sleep(dwMilliseconds: uint32) = "Sleep";
 export extern function CreateMutexA(lpMutexAttributes: cstring, bInitialOwner: int32, lpName: cstring) -> int64 = "CreateMutexA";
 export extern function ReleaseMutex(hMutex: int64) -> int32 = "ReleaseMutex";
+export extern function gc_thread_attach() -> int32 = "gc_thread_attach";
+export extern function gc_thread_detach() -> int32 = "gc_thread_detach";
 
 // Interlocked atomics
 export extern function InterlockedCompareExchange(target: int32*, exchange: int32, comparand: int32) -> int32 = "_InterlockedCompareExchange";
@@ -44,6 +46,17 @@ export function thread_detach(handle: int64) -> int32 {
 
 export function thread_sleep_ms(milliseconds: uint32) {
   Sleep(milliseconds);
+}
+
+// GC lifecycle helpers for worker threads.
+// Call thread_gc_attach() near the beginning of a worker entry function
+// and thread_gc_detach() just before thread exit.
+export function thread_gc_attach() {
+  gc_thread_attach();
+}
+
+export function thread_gc_detach() {
+  gc_thread_detach();
 }
 
 // Mutex wrappers

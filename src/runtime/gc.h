@@ -2,6 +2,7 @@
 #define METHASM_GC_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /**
  * @brief Initialize the garbage collector.
@@ -12,6 +13,21 @@
  * @param stack_base Pointer to the bottom (highest address) of the stack.
  */
 void gc_init(void *stack_base);
+
+/**
+ * @brief Attach the current thread to the GC runtime.
+ *
+ * Registers the calling thread so GC runtime bookkeeping remains consistent
+ * when allocations happen from worker threads.
+ */
+int32_t gc_thread_attach(void);
+
+/**
+ * @brief Detach the current thread from the GC runtime.
+ *
+ * Call this before a worker thread exits.
+ */
+int32_t gc_thread_detach(void);
 
 /**
  * @brief Allocate tracked memory on the heap.

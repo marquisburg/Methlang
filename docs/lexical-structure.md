@@ -57,7 +57,7 @@ Assignment `=`. Comparison `==`, `!=`, `<`, `>`, `<=`, `>=`. Logical `&&`, `||`.
 
 **Modulo:** The modulo operator `%` is not supported. Use a helper or inline logic for remainder operations.
 
-**Bitwise operators:** Bitwise AND (`&`), OR (`|`), XOR (`^`), complement (`~`), and shifts (`<<`, `>>`) are not supported. The `&` token is used only for address-of (unary). For bit manipulation, use inline assembly or C externs.
+**Bitwise operators:** Bitwise AND (`&`), OR (`|`), XOR (`^`), complement (`~`), and shifts (`<<`, `>>`) are supported for integer types. The unary `&` is address-of; the binary `&` is bitwise AND. Context disambiguates.
 
 **Logical operators:** Short-circuit logical AND (`&&`) and OR (`||`) are supported.
 

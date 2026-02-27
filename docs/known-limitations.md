@@ -6,6 +6,8 @@ No block comments. Only line comments (`//`) are supported.
 
 No top-level constant expressions. Use functions that return constant values instead.
 
+Generic type parameters are unconstrained. Operations inside generic bodies must be valid for all possible type arguments; the type checker validates at instantiation time. No generic constraints or trait bounds.
+
 `switch` case values must be compile-time constant integer expressions. Range-style cases (e.g. `case 1..10`) are not supported.
 
 Optimization passes are limited. The `-O` flag enables some optimizations.

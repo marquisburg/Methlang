@@ -708,6 +708,16 @@ static int type_checker_register_function_signature(TypeChecker *checker,
   func_symbol->data.function.parameter_types = param_types;
   func_symbol->data.function.return_type = return_type;
   func_symbol->is_extern = func_decl->is_extern;
+  if (func_decl->is_extern) {
+    const char *effective_link_name = type_checker_decl_link_name(
+        func_decl->name, func_decl->is_extern, func_decl->link_name);
+    func_symbol->link_name =
+        effective_link_name ? strdup(effective_link_name) : NULL;
+    if (!func_symbol->link_name) {
+      symbol_destroy(func_symbol);
+      return 0;
+    }
+  }
   func_symbol->is_initialized = 0;
   func_symbol->is_forward_declaration = 1;
 
