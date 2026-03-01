@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "main.h"
+#include "string_intern.h"
 #include "ir/ir.h"
 #include "ir/ir_optimize.h"
 #include "semantic/import_resolver.h"
@@ -159,6 +160,7 @@ int main(int argc, char *argv[]) {
   int result =
       compile_file(options.input_filename, options.output_filename, &options);
   free((void *)options.import_directories);
+  string_intern_clear();
   return result;
 }
 

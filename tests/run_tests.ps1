@@ -453,6 +453,66 @@ $cases = @(
     ShouldSucceed   = $true
     OutputMustMatch = @("Managed pointer passed to extern function 'sink' may escape GC visibility")
   },
+  @{
+    Name            = "warn_recv_buffer_extent"
+    Path            = "tests/test_warn_recv_buffer_extent.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("recv length 8192 exceeds tracked allocation 4096 bytes for 'buf'")
+  },
+  @{
+    Name             = "no_warn_recv_within_extent"
+    Path             = "tests/test_no_warn_recv_within_extent.masm"
+    ShouldSucceed    = $true
+    OutputMustNotMatch = @("recv length .* exceeds tracked allocation")
+  },
+  @{
+    Name            = "warn_memcpy_src_extent"
+    Path            = "tests/test_warn_memcpy_src_extent.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("memcpy length 200 exceeds known source extent 128 bytes")
+  },
+  @{
+    Name            = "warn_memcpy_dst_extent"
+    Path            = "tests/test_warn_memcpy_dst_extent.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("memcpy length 200 exceeds known destination extent 128 bytes")
+  },
+  @{
+    Name              = "no_warn_memcpy_within_extent"
+    Path              = "tests/test_no_warn_memcpy_within_extent.masm"
+    ShouldSucceed     = $true
+    OutputMustNotMatch = @("memcpy length .* exceeds known (destination|source) extent")
+  },
+  @{
+    Name            = "warn_memmove_src_extent"
+    Path            = "tests/test_warn_memmove_src_extent.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("memmove length 200 exceeds known source extent 128 bytes")
+  },
+  @{
+    Name            = "warn_memmove_dst_extent_offset"
+    Path            = "tests/test_warn_memmove_dst_extent_offset.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("memmove length 220 exceeds known destination extent 192 bytes")
+  },
+  @{
+    Name              = "no_warn_memmove_within_extent_offset"
+    Path              = "tests/test_no_warn_memmove_within_extent_offset.masm"
+    ShouldSucceed     = $true
+    OutputMustNotMatch = @("memmove length .* exceeds known (destination|source) extent")
+  },
+  @{
+    Name            = "warn_cast_alignment_violation"
+    Path            = "tests/test_warn_cast_alignment_violation.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("Cast to int64\* may violate required 8-byte alignment")
+  },
+  @{
+    Name              = "no_warn_cast_alignment_ok"
+    Path              = "tests/test_no_warn_cast_alignment_ok.masm"
+    ShouldSucceed     = $true
+    OutputMustNotMatch = @("Cast to int64\* may violate required 8-byte alignment")
+  },
 
   @{ Name = "err_unknown_char"; Path = "tests/err_unknown_char.masm"; ShouldSucceed = $false; Pattern = "Lexical error|error" },
   @{ Name = "err_invalid_hex"; Path = "tests/err_invalid_hex.masm"; ShouldSucceed = $false; Pattern = "Invalid hexadecimal literal" },

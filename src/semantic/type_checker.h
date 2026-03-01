@@ -8,6 +8,7 @@
 struct SymbolTable;
 struct Type;
 struct Symbol;
+struct TrackedBufferExtent;
 
 #include "symbol_table.h"
 
@@ -43,6 +44,7 @@ typedef struct {
   size_t tracked_scope_count;
   size_t tracked_scope_capacity;
   int tracked_scope_depth;
+  struct TrackedBufferExtent *tracked_buffer_extents;
 } TypeChecker;
 
 // Function declarations

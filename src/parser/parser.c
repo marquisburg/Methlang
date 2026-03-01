@@ -1,5 +1,6 @@
 #include "parser.h"
 #include "../error/error_reporter.h"
+#include "../string_intern.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,6 +86,7 @@ void parser_advance(Parser *parser) {
   parser->peek_token.value = NULL;
   parser->peek_token.line = 0;
   parser->peek_token.column = 0;
+  parser->peek_token.is_interned = 0;
 
   // Get new peek token
   parser->peek_token = lexer_next_token(parser->lexer);
@@ -1155,14 +1157,8 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
   size_t saved_pos = parser->lexer->position;
   size_t saved_line = parser->lexer->line;
   size_t saved_col = parser->lexer->column;
-  Token saved_current = {
-      parser->current_token.type,
-      parser->current_token.value ? strdup(parser->current_token.value) : NULL,
-      parser->current_token.line, parser->current_token.column};
-  Token saved_peek = {
-      parser->peek_token.type,
-      parser->peek_token.value ? strdup(parser->peek_token.value) : NULL,
-      parser->peek_token.line, parser->peek_token.column};
+  Token saved_current = token_clone(&parser->current_token);
+  Token saved_peek = token_clone(&parser->peek_token);
   int saved_has_error = parser->has_error;
   int saved_had_error = parser->had_error;
   size_t saved_error_count = parser->error_count;
@@ -1189,9 +1185,9 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
     parser->lexer->line = saved_line;
     parser->lexer->column = saved_col;
 
-    free(parser->current_token.value);
+    token_destroy(&parser->current_token);
     parser->current_token = saved_current;
-    free(parser->peek_token.value);
+    token_destroy(&parser->peek_token);
     parser->peek_token = saved_peek;
 
     parser->has_error = saved_has_error;
@@ -1223,9 +1219,9 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
     parser->lexer->line = saved_line;
     parser->lexer->column = saved_col;
 
-    free(parser->current_token.value);
+    token_destroy(&parser->current_token);
     parser->current_token = saved_current;
-    free(parser->peek_token.value);
+    token_destroy(&parser->peek_token);
     parser->peek_token = saved_peek;
 
     parser->has_error = saved_has_error;
@@ -1240,8 +1236,8 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
   }
 
   // Valid cast found, discard saved state
-  free(saved_current.value);
-  free(saved_peek.value);
+  token_destroy(&saved_current);
+  token_destroy(&saved_peek);
   free(saved_error_msg);
   parser->has_error = 0;
   if (parser->error_message)
@@ -1301,14 +1297,8 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
   size_t saved_pos = parser->lexer->position;
   size_t saved_line = parser->lexer->line;
   size_t saved_col = parser->lexer->column;
-  Token saved_current = {
-      parser->current_token.type,
-      parser->current_token.value ? strdup(parser->current_token.value) : NULL,
-      parser->current_token.line, parser->current_token.column};
-  Token saved_peek = {
-      parser->peek_token.type,
-      parser->peek_token.value ? strdup(parser->peek_token.value) : NULL,
-      parser->peek_token.line, parser->peek_token.column};
+  Token saved_current = token_clone(&parser->current_token);
+  Token saved_peek = token_clone(&parser->peek_token);
   int saved_has_error = parser->has_error;
   int saved_had_error = parser->had_error;
   size_t saved_error_count = parser->error_count;
@@ -1347,8 +1337,8 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
     if (parser->current_token.type == TOKEN_LPAREN) {
       *out_type_args = type_args;
       *out_type_arg_count = type_arg_count;
-      free(saved_current.value);
-      free(saved_peek.value);
+      token_destroy(&saved_current);
+      token_destroy(&saved_peek);
       free(saved_error_msg);
       parser->has_error = 0;
       free(parser->error_message);
@@ -1365,9 +1355,9 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
   parser->lexer->line = saved_line;
   parser->lexer->column = saved_col;
 
-  free(parser->current_token.value);
+  token_destroy(&parser->current_token);
   parser->current_token = saved_current;
-  free(parser->peek_token.value);
+  token_destroy(&parser->peek_token);
   parser->peek_token = saved_peek;
 
   parser->has_error = saved_has_error;
@@ -2053,7 +2043,7 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
     fd->type_params = malloc(func_type_param_count * sizeof(char *));
     fd->type_param_count = func_type_param_count;
     for (size_t i = 0; i < func_type_param_count; i++) {
-      fd->type_params[i] = strdup(func_type_params[i]);
+      fd->type_params[i] = (char *)string_intern(func_type_params[i]);
     }
   }
   for (size_t i = 0; i < func_type_param_count; i++)
@@ -2344,7 +2334,7 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
     sd->type_params = malloc(type_param_count * sizeof(char *));
     sd->type_param_count = type_param_count;
     for (size_t i = 0; i < type_param_count; i++) {
-      sd->type_params[i] = strdup(type_params[i]);
+      sd->type_params[i] = (char *)string_intern(type_params[i]);
     }
   }
   for (size_t i = 0; i < type_param_count; i++)
@@ -3229,8 +3219,9 @@ ASTNode *parser_parse_method_declaration(Parser *parser) {
     return NULL;
   }
 
-  method_data->name = strdup(method_name);
-  method_data->return_type = return_type ? strdup(return_type) : NULL;
+  method_data->name = (char *)string_intern(method_name);
+  method_data->return_type =
+      return_type ? (char *)string_intern(return_type) : NULL;
   method_data->parameter_count = param_count;
   method_data->body = body;
 
@@ -3239,8 +3230,8 @@ ASTNode *parser_parse_method_declaration(Parser *parser) {
     method_data->parameter_types = malloc(param_count * sizeof(char *));
 
     for (size_t i = 0; i < param_count; i++) {
-      method_data->parameter_names[i] = strdup(param_names[i]);
-      method_data->parameter_types[i] = strdup(param_types[i]);
+      method_data->parameter_names[i] = (char *)string_intern(param_names[i]);
+      method_data->parameter_types[i] = (char *)string_intern(param_types[i]);
     }
   } else {
     method_data->parameter_names = NULL;

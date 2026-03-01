@@ -96,7 +96,11 @@ Windows Win32 thread primitives. Includes:
 - Atomics: `InterlockedCompareExchange`, `InterlockedExchange`, `InterlockedIncrement`, `InterlockedDecrement` with wrapper helpers
 - Spin lock helpers: `spin_try_lock`, `spin_lock`, `spin_unlock` for short critical sections
 
-Due to the language's current lack of function pointer support, practical callback-based thread entry is usually provided via a tiny C bridge function, then called from MethASM.
+`CreateThread` accepts a function pointer `fn(cstring) -> uint32` for the thread entry. Pass `&my_thread_proc` directly; no C bridge is required. See [Types](types.md#function-pointer-type) for function pointer syntax.
+
+## std/thread_posix
+
+pthread-based threading for Linux and macOS. Includes `pthread_create`, `pthread_join`, mutexes, and atomics. Requires linking with `stdlib/posix_helpers.c` and `-lpthread` on Linux. `pthread_create` accepts a function pointer `fn(cstring) -> cstring` for the thread entry; pass `&my_thread_proc` directly.
 
 ## std/prelude
 
@@ -104,65 +108,6 @@ The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process
 
 ```bash
 methasm --prelude main.masm -o main.s
-```
-`net_posix_init`/`net_posix_cleanup` are thread-safe and reference-counted for API compatibility with `std/net`, though POSIX sockets don't require initialization.
-
-Convenience wrappers:
-- `socket_tcp_posix`, `socket_udp_posix`
-- `sockaddr_in_posix(ip, port)`, `sockaddr_in_any_posix(port)`
-- `set_reuseaddr_posix(sock, enabled)`
-- `send_all_posix(sock, buf, len)` (looping send until full write or error)
-- `net_posix_is_initialized()`
-
-The function names are prefixed with `posix_` to avoid conflicts with the Windows `std/net` module when writing cross-platform code.
-
-## std/thread
-
-Windows Win32 thread primitives. Includes:
-- Thread APIs: `CreateThread`, `WaitForSingleObject`, `CloseHandle`, `GetCurrentThreadId`, `Sleep`
-- Mutex APIs: `CreateMutexA`, `ReleaseMutex` with wrappers (`mutex_create`, `mutex_lock`, `mutex_unlock`, `mutex_close`)
-- Atomics: `InterlockedCompareExchange`, `InterlockedExchange`, `InterlockedIncrement`, `InterlockedDecrement` with wrapper helpers
-- Spin lock helpers: `spin_try_lock`, `spin_lock`, `spin_unlock` for short critical sections
-
-Due to the language's current lack of function pointer support, practical callback-based thread entry is usually provided via a tiny C bridge function, then called from MethASM.
-
-## std/prelude
-
-The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process`, and `std/net`. Use with `--prelude` to automatically import these modules without explicit `import` statements. The prelude is opt-in; it is not loaded by default. On Linux, `--prelude` will fail at link time because it pulls in `std/net` (Windows-only). Use explicit imports instead.
-
-```bash
-methasm --prelude main.masm -o main.s
-```
-
-
-`net_posix_init`/`net_posix_cleanup` are thread-safe and reference-counted for API compatibility with `std/net`, though POSIX sockets don't require initialization.
-
-Convenience wrappers:
-- `socket_tcp_posix`, `socket_udp_posix`
-- `sockaddr_in_posix(ip, port)`, `sockaddr_in_any_posix(port)`
-- `set_reuseaddr_posix(sock, enabled)`
-- `send_all_posix(sock, buf, len)` (looping send until full write or error)
-- `net_posix_is_initialized()`
-
-The function names are prefixed with `posix_` to avoid conflicts with the Windows `std/net` module when writing cross-platform code.
-
-## std/thread
-
-Windows Win32 thread primitives. Includes:
-- Thread APIs: `CreateThread`, `WaitForSingleObject`, `CloseHandle`, `GetCurrentThreadId`, `Sleep`
-- Mutex APIs: `CreateMutexA`, `ReleaseMutex` with wrappers (`mutex_create`, `mutex_lock`, `mutex_unlock`, `mutex_close`)
-- Atomics: `InterlockedCompareExchange`, `InterlockedExchange`, `InterlockedIncrement`, `InterlockedDecrement` with wrapper helpers
-- Spin lock helpers: `spin_try_lock`, `spin_lock`, `spin_unlock` for short critical sections
-
-Due to the language's current lack of function pointer support, practical callback-based thread entry is usually provided via a tiny C bridge function, then called from MethASM.
-
-## std/prelude
-
-The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process`, and `std/net`. Use with `--prelude` to automatically import these modules without explicit `import` statements. The prelude is opt-in; it is not loaded by default. On Linux, `--prelude` will fail at link time because it pulls in `std/net` (Windows-only). Use explicit imports instead.
-
-```bash
-methasm --prelude main.masm -o main.s
-```
 ```
 
 

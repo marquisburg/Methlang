@@ -15,7 +15,7 @@ Block comments are not supported. Comments cannot be nested; a second `//` on th
 
 ## Identifiers
 
-Identifiers name variables, functions, types, and other program elements. They must start with a letter or underscore, followed by any combination of letters, digits, or underscores. Identifiers are case-sensitive. There is no documented length limit; the lexer accepts identifiers until it hits a non-alphanumeric character. Identifiers are strictly ASCII; Unicode characters (e.g. `café`, `変数`) are not supported. The lexer uses `isalpha` and `isalnum`, which treat only ASCII letters and digits as valid.
+Identifiers name variables, functions, types, and other program elements. They must start with a letter or underscore, followed by any combination of letters, digits, or underscores. Identifiers are case-sensitive. There is no documented length limit; the lexer accepts identifiers until it hits a non-alphanumeric character. Identifiers are strictly ASCII; Unicode characters (e.g. `café`, `変数`) are not supported. The lexer uses `isalpha` and `isalnum`, which treat only ASCII letters and digits as valid. The compiler interns identifiers for memory efficiency; see [Compilation](compilation.md#string-interning).
 
 ```
 my_var
@@ -51,11 +51,11 @@ Multiline strings are supported. A newline inside the quotes is stored as a lite
 
 ## Operators and Punctuation
 
-Assignment `=`. Comparison `==`, `!=`, `<`, `>`, `<=`, `>=`. Logical `&&`, `||`. Arithmetic `+`, `-`, `*`, `/`. Unary `-` (negation), `*` (dereference), `&` (address-of). Member access `.`. Arrow `->`. Brackets `( )`, `{ }`, `[ ]`. Delimiters `:`, `;`, `,`.
+Assignment `=`. Comparison `==`, `!=`, `<`, `>`, `<=`, `>=`. Logical `&&`, `||`. Arithmetic `+`, `-`, `*`, `/`, `%`. Unary `-` (negation), `*` (dereference), `&` (address-of). Member access `.`. Arrow `->`. Brackets `( )`, `{ }`, `[ ]`. Delimiters `:`, `;`, `,`.
 
-**Operator precedence:** Multiplication and division bind tighter than addition and subtraction. Relational operators bind tighter than equality. Logical AND (`&&`) binds tighter than logical OR (`||`). So `a + b * c` parses as `a + (b * c)`, and `a < b == c` parses as `(a < b) == c`. Precedence levels (highest first): member access (`.`), multiplicative (`*`, `/`), additive (`+`, `-`), relational (`<`, `<=`, `>`, `>=`), equality (`==`, `!=`), logical AND (`&&`), logical OR (`||`). Use parentheses to override.
+**Operator precedence:** Multiplication, division, and modulo bind tighter than addition and subtraction. Relational operators bind tighter than equality. Logical AND (`&&`) binds tighter than logical OR (`||`). So `a + b * c` parses as `a + (b * c)`, and `a < b == c` parses as `(a < b) == c`. Precedence levels (highest first): member access (`.`), multiplicative (`*`, `/`, `%`), additive (`+`, `-`), relational (`<`, `<=`, `>`, `>=`), equality (`==`, `!=`), logical AND (`&&`), logical OR (`||`). Use parentheses to override.
 
-**Modulo:** The modulo operator `%` is not supported. Use a helper or inline logic for remainder operations.
+**Modulo:** The modulo operator `%` returns the remainder of integer division. It requires integer operands. See [Expressions](expressions.md).
 
 **Bitwise operators:** Bitwise AND (`&`), OR (`|`), XOR (`^`), complement (`~`), and shifts (`<<`, `>>`) are supported for integer types. The unary `&` is address-of; the binary `&` is bitwise AND. Context disambiguates.
 

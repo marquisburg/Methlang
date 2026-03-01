@@ -149,6 +149,7 @@ typedef struct {
   char *value;
   size_t line;
   size_t column;
+  unsigned char is_interned;
 } Token;
 
 typedef struct {
@@ -168,6 +169,7 @@ Token lexer_next_token(Lexer *lexer);
 Token lexer_peek_token(Lexer *lexer);
 Token *lexer_tokenize(Lexer *lexer, size_t *token_count);
 void token_destroy(Token *token);
+Token token_clone(const Token *token);
 void tokens_destroy(Token *tokens, size_t count);
 
 // Error reporting functions
@@ -177,4 +179,3 @@ int lexer_has_error(Lexer *lexer);
 void lexer_clear_error(Lexer *lexer);
 
 #endif // LEXER_H
-

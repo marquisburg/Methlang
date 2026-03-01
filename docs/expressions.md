@@ -42,13 +42,14 @@ s.length
 
 ## Arithmetic and Comparison
 
-Arithmetic: `+`, `-`, `*`, `/`. Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`. Operands must have compatible types. Integer division truncates toward zero.
+Arithmetic: `+`, `-`, `*`, `/`, `%`. Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`. Operands must have compatible types. Integer division truncates toward zero. Modulo `%` returns the remainder and requires integer operands.
 
 ```masm
 a + b
 a - b
 a * b
 a / b
+a % b
 a == b
 a != b
 a < b
@@ -56,8 +57,6 @@ a <= b
 a > b
 a >= b
 ```
-
-**Modulo:** The modulo operator `%` is not supported. Use a helper or inline logic for remainder operations. See [Lexical Structure](lexical-structure.md).
 
 **Bitwise operators:** Bitwise AND (`&`), OR (`|`), XOR (`^`), complement (`~`), and shifts (`<<`, `>>`) are supported for integer types. Unary `&` is address-of; binary `&` is bitwise AND. Context disambiguates.
 
@@ -116,7 +115,7 @@ obj.method(args)
 
 **Argument type mismatches:** Argument types must be assignable to the parameter types. Incompatible types (e.g. passing `float64` where `int32` is expected) produce a compile error. Implicit conversions (e.g. `int32` to `int64`) are applied when the type checker allows them. See [Types](types.md#type-conversions).
 
-**Function pointers:** Functions cannot be passed as arguments or stored in variables. There is no function pointer type. For callback-style patterns, use C externs or restructure the code.
+**Function pointers:** Use the `fn(param_types) -> return_type` type to store and pass function addresses. Take the address with `&func` and call like a normal function: `fp(args)`. See [Types](types.md#function-pointer-type) for details.
 
 
 ## Allocation

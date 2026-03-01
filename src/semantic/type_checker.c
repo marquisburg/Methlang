@@ -9,6 +9,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct TrackedBufferExtent {
+  char *name;
+  long long byte_count;
+  long long known_alignment;
+  int scope_depth;
+  struct TrackedBufferExtent *next;
+} TrackedBufferExtent;
+
 static Type *type_checker_parse_array_type(TypeChecker *checker,
                                            const char *name) {
   if (!checker || !name)
@@ -267,6 +275,435 @@ static int type_checker_eval_integer_constant(ASTNode *expression,
   }
 }
 
+static void type_checker_buffer_extent_clear(TypeChecker *checker) {
+  if (!checker) {
+    return;
+  }
+
+  TrackedBufferExtent *node = checker->tracked_buffer_extents;
+  while (node) {
+    TrackedBufferExtent *next = node->next;
+    free(node->name);
+    free(node);
+    node = next;
+  }
+  checker->tracked_buffer_extents = NULL;
+}
+
+static void type_checker_buffer_extent_exit_scope(TypeChecker *checker,
+                                                  int scope_depth) {
+  if (!checker) {
+    return;
+  }
+
+  TrackedBufferExtent **node_ptr = &checker->tracked_buffer_extents;
+  while (*node_ptr) {
+    TrackedBufferExtent *node = *node_ptr;
+    if (node->scope_depth == scope_depth) {
+      *node_ptr = node->next;
+      free(node->name);
+      free(node);
+      continue;
+    }
+    node_ptr = &node->next;
+  }
+}
+
+static TrackedBufferExtent *
+type_checker_buffer_extent_find(TypeChecker *checker, const char *name) {
+  if (!checker || !name) {
+    return NULL;
+  }
+
+  TrackedBufferExtent *node = checker->tracked_buffer_extents;
+  while (node) {
+    if (node->name && strcmp(node->name, name) == 0) {
+      return node;
+    }
+    node = node->next;
+  }
+  return NULL;
+}
+
+static int type_checker_buffer_extent_declare(TypeChecker *checker,
+                                              const char *name,
+                                              long long byte_count,
+                                              long long known_alignment) {
+  if (!checker || !name) {
+    return 0;
+  }
+
+  TrackedBufferExtent *node = malloc(sizeof(TrackedBufferExtent));
+  if (!node) {
+    return 0;
+  }
+
+  node->name = strdup(name);
+  if (!node->name) {
+    free(node);
+    return 0;
+  }
+
+  node->byte_count = byte_count;
+  node->known_alignment = known_alignment;
+  node->scope_depth = checker->tracked_scope_depth;
+  node->next = checker->tracked_buffer_extents;
+  checker->tracked_buffer_extents = node;
+  return 1;
+}
+
+static int type_checker_buffer_extent_set(TypeChecker *checker, const char *name,
+                                          long long byte_count,
+                                          long long known_alignment) {
+  if (!checker || !name) {
+    return 0;
+  }
+
+  TrackedBufferExtent *node = type_checker_buffer_extent_find(checker, name);
+  if (!node) {
+    return type_checker_buffer_extent_declare(checker, name, byte_count,
+                                              known_alignment);
+  }
+
+  node->byte_count = byte_count;
+  node->known_alignment = known_alignment;
+  return 1;
+}
+
+static long long type_checker_default_heap_alignment(void) {
+  // Current backend target is 64-bit; model malloc/calloc as at least 8-byte
+  // aligned so we can reason about common scalar casts.
+  return 8;
+}
+
+static long long
+type_checker_extract_allocation_call_alignment(CallExpression *call) {
+  if (!call || !call->function_name) {
+    return -1;
+  }
+  if (strcmp(call->function_name, "malloc") == 0 ||
+      strcmp(call->function_name, "calloc") == 0) {
+    return type_checker_default_heap_alignment();
+  }
+  return -1;
+}
+
+static long long type_checker_known_alignment_after_offset(long long base_align,
+                                                           long long offset) {
+  if (base_align <= 0) {
+    return -1;
+  }
+  if (offset == 0) {
+    return base_align;
+  }
+  if (offset == LLONG_MIN) {
+    return 1;
+  }
+
+  long long magnitude = offset < 0 ? -offset : offset;
+  long long result = base_align;
+  while (result > 1 && (magnitude % result) != 0) {
+    result /= 2;
+  }
+  return result > 0 ? result : 1;
+}
+
+static const char *type_checker_extract_identifier_name(ASTNode *expression) {
+  if (!expression) {
+    return NULL;
+  }
+
+  if (expression->type == AST_CAST_EXPRESSION) {
+    CastExpression *cast_expr = (CastExpression *)expression->data;
+    if (!cast_expr) {
+      return NULL;
+    }
+    return type_checker_extract_identifier_name(cast_expr->operand);
+  }
+
+  if (expression->type != AST_IDENTIFIER) {
+    return NULL;
+  }
+
+  Identifier *id = (Identifier *)expression->data;
+  if (!id || !id->name) {
+    return NULL;
+  }
+  return id->name;
+}
+
+static long long
+type_checker_extract_allocation_call_extent(CallExpression *call) {
+  if (!call || !call->function_name) {
+    return -1;
+  }
+
+  if (strcmp(call->function_name, "malloc") == 0) {
+    if (call->argument_count != 1) {
+      return -1;
+    }
+    long long size = 0;
+    if (!type_checker_eval_integer_constant(call->arguments[0], &size) ||
+        size < 0) {
+      return -1;
+    }
+    return size;
+  }
+
+  if (strcmp(call->function_name, "calloc") == 0) {
+    if (call->argument_count != 2) {
+      return -1;
+    }
+    long long count = 0;
+    long long size = 0;
+    if (!type_checker_eval_integer_constant(call->arguments[0], &count) ||
+        !type_checker_eval_integer_constant(call->arguments[1], &size) ||
+        count < 0 || size < 0) {
+      return -1;
+    }
+    if (count > 0 && size > (LLONG_MAX / count)) {
+      return -1;
+    }
+    return count * size;
+  }
+
+  return -1;
+}
+
+static long long type_checker_extract_known_buffer_extent(TypeChecker *checker,
+                                                          ASTNode *expression) {
+  if (!expression) {
+    return -1;
+  }
+
+  if (expression->type == AST_CAST_EXPRESSION) {
+    CastExpression *cast_expr = (CastExpression *)expression->data;
+    if (!cast_expr) {
+      return -1;
+    }
+    return type_checker_extract_known_buffer_extent(checker, cast_expr->operand);
+  }
+
+  if (expression->type == AST_FUNCTION_CALL) {
+    CallExpression *call = (CallExpression *)expression->data;
+    return type_checker_extract_allocation_call_extent(call);
+  }
+
+  if (expression->type == AST_BINARY_EXPRESSION) {
+    BinaryExpression *binary_expr = (BinaryExpression *)expression->data;
+    if (!binary_expr || !binary_expr->operator || !binary_expr->left ||
+        !binary_expr->right) {
+      return -1;
+    }
+    if (strcmp(binary_expr->operator, "+") == 0) {
+      long long offset = 0;
+      long long base_extent = -1;
+      if (type_checker_eval_integer_constant(binary_expr->right, &offset)) {
+        base_extent =
+            type_checker_extract_known_buffer_extent(checker, binary_expr->left);
+      } else if (type_checker_eval_integer_constant(binary_expr->left, &offset)) {
+        base_extent =
+            type_checker_extract_known_buffer_extent(checker, binary_expr->right);
+      } else {
+        return -1;
+      }
+      if (base_extent < 0 || offset < 0) {
+        return -1;
+      }
+      if (offset >= base_extent) {
+        return 0;
+      }
+      return base_extent - offset;
+    }
+  }
+
+  const char *name = type_checker_extract_identifier_name(expression);
+  if (!name) {
+    return -1;
+  }
+
+  TrackedBufferExtent *node = type_checker_buffer_extent_find(checker, name);
+  if (!node) {
+    return -1;
+  }
+
+  return node->byte_count;
+}
+
+static long long
+type_checker_extract_known_pointer_alignment(TypeChecker *checker,
+                                             ASTNode *expression) {
+  if (!expression) {
+    return -1;
+  }
+
+  if (expression->type == AST_CAST_EXPRESSION) {
+    CastExpression *cast_expr = (CastExpression *)expression->data;
+    if (!cast_expr) {
+      return -1;
+    }
+    return type_checker_extract_known_pointer_alignment(checker,
+                                                        cast_expr->operand);
+  }
+
+  if (expression->type == AST_FUNCTION_CALL) {
+    CallExpression *call = (CallExpression *)expression->data;
+    return type_checker_extract_allocation_call_alignment(call);
+  }
+
+  if (expression->type == AST_BINARY_EXPRESSION) {
+    BinaryExpression *binary_expr = (BinaryExpression *)expression->data;
+    if (!binary_expr || !binary_expr->operator || !binary_expr->left ||
+        !binary_expr->right) {
+      return -1;
+    }
+
+    if (strcmp(binary_expr->operator, "+") == 0 ||
+        strcmp(binary_expr->operator, "-") == 0) {
+      long long offset = 0;
+      long long base_align = -1;
+
+      if (type_checker_eval_integer_constant(binary_expr->right, &offset)) {
+        base_align = type_checker_extract_known_pointer_alignment(
+            checker, binary_expr->left);
+      } else if (strcmp(binary_expr->operator, "+") == 0 &&
+                 type_checker_eval_integer_constant(binary_expr->left,
+                                                   &offset)) {
+        base_align = type_checker_extract_known_pointer_alignment(
+            checker, binary_expr->right);
+      } else {
+        return -1;
+      }
+
+      if (base_align <= 0) {
+        return -1;
+      }
+      return type_checker_known_alignment_after_offset(base_align, offset);
+    }
+  }
+
+  const char *name = type_checker_extract_identifier_name(expression);
+  if (!name) {
+    return -1;
+  }
+
+  TrackedBufferExtent *node = type_checker_buffer_extent_find(checker, name);
+  if (!node) {
+    return -1;
+  }
+
+  return node->known_alignment;
+}
+
+static void type_checker_warn_potential_misaligned_cast(TypeChecker *checker,
+                                                        ASTNode *expression,
+                                                        CastExpression *cast_expr,
+                                                        Type *target_type) {
+  if (!checker || !checker->error_reporter || !expression || !cast_expr ||
+      !target_type || target_type->kind != TYPE_POINTER ||
+      !target_type->base_type) {
+    return;
+  }
+
+  size_t required_alignment = target_type->base_type->alignment;
+  if (required_alignment <= 1) {
+    return;
+  }
+
+  long long known_alignment =
+      type_checker_extract_known_pointer_alignment(checker, cast_expr->operand);
+  if (known_alignment <= 0) {
+    return;
+  }
+
+  if (known_alignment < (long long)required_alignment) {
+    char message[512];
+    snprintf(
+        message, sizeof(message),
+        "Cast to %s may violate required %zu-byte alignment (known alignment %lld)",
+        target_type->name ? target_type->name : "pointer", required_alignment,
+        known_alignment);
+    error_reporter_add_warning(checker->error_reporter, ERROR_SEMANTIC,
+                               expression->location, message);
+  }
+}
+
+static void type_checker_warn_recv_buffer_bounds(TypeChecker *checker,
+                                                 CallExpression *call) {
+  if (!checker || !checker->error_reporter || !call || !call->function_name) {
+    return;
+  }
+  if (strcmp(call->function_name, "recv") != 0 || call->argument_count < 3) {
+    return;
+  }
+
+  const char *buffer_name = type_checker_extract_identifier_name(call->arguments[1]);
+  if (!buffer_name) {
+    return;
+  }
+
+  TrackedBufferExtent *fact =
+      type_checker_buffer_extent_find(checker, buffer_name);
+  if (!fact || fact->byte_count < 0) {
+    return;
+  }
+
+  long long recv_len = 0;
+  if (!type_checker_eval_integer_constant(call->arguments[2], &recv_len)) {
+    return;
+  }
+
+  char message[512];
+  if (recv_len > fact->byte_count) {
+    snprintf(message, sizeof(message),
+             "recv length %lld exceeds tracked allocation %lld bytes for '%s'",
+             recv_len, fact->byte_count, buffer_name);
+    error_reporter_add_warning(checker->error_reporter, ERROR_SEMANTIC,
+                               call->arguments[2]->location, message);
+  }
+}
+
+static void type_checker_warn_memcpy_buffer_bounds(TypeChecker *checker,
+                                                   CallExpression *call) {
+  if (!checker || !checker->error_reporter || !call || !call->function_name) {
+    return;
+  }
+  int is_memcpy = strcmp(call->function_name, "memcpy") == 0;
+  int is_memmove = strcmp(call->function_name, "memmove") == 0;
+  if ((!is_memcpy && !is_memmove) || call->argument_count < 3) {
+    return;
+  }
+
+  long long copy_len = 0;
+  if (!type_checker_eval_integer_constant(call->arguments[2], &copy_len) ||
+      copy_len < 0) {
+    return;
+  }
+
+  long long dst_extent =
+      type_checker_extract_known_buffer_extent(checker, call->arguments[0]);
+  long long src_extent =
+      type_checker_extract_known_buffer_extent(checker, call->arguments[1]);
+  const char *fn_name = call->function_name;
+
+  char message[512];
+  if (dst_extent >= 0 && copy_len > dst_extent) {
+    snprintf(message, sizeof(message),
+             "%s length %lld exceeds known destination extent %lld bytes",
+             fn_name, copy_len, dst_extent);
+    error_reporter_add_warning(checker->error_reporter, ERROR_SEMANTIC,
+                               call->arguments[2]->location, message);
+  }
+
+  if (src_extent >= 0 && copy_len > src_extent) {
+    snprintf(message, sizeof(message),
+             "%s length %lld exceeds known source extent %lld bytes", fn_name,
+             copy_len, src_extent);
+    error_reporter_add_warning(checker->error_reporter, ERROR_SEMANTIC,
+                               call->arguments[2]->location, message);
+  }
+}
+
 static int type_checker_ast_contains_node_type(ASTNode *node,
                                                ASTNodeType target_type) {
   if (!node) {
@@ -319,6 +756,7 @@ static void type_checker_init_tracker_reset(TypeChecker *checker) {
   checker->tracked_var_count = 0;
   checker->tracked_scope_count = 0;
   checker->tracked_scope_depth = 0;
+  type_checker_buffer_extent_clear(checker);
 }
 
 static int type_checker_init_tracker_ensure_var_capacity(TypeChecker *checker) {
@@ -388,6 +826,7 @@ static void type_checker_init_tracker_exit_scope(TypeChecker *checker) {
   if (!checker || checker->tracked_scope_count == 0) {
     return;
   }
+  int exiting_depth = checker->tracked_scope_depth;
   size_t marker =
       checker->tracked_scope_markers[checker->tracked_scope_count - 1];
   checker->tracked_scope_count--;
@@ -399,6 +838,7 @@ static void type_checker_init_tracker_exit_scope(TypeChecker *checker) {
     checker->tracked_var_scope_depth[idx] = 0;
     checker->tracked_var_count--;
   }
+  type_checker_buffer_extent_exit_scope(checker, exiting_depth);
   if (checker->tracked_scope_depth > 0) {
     checker->tracked_scope_depth--;
   }
@@ -605,6 +1045,7 @@ type_checker_create_with_error_reporter(SymbolTable *symbol_table,
   checker->tracked_scope_count = 0;
   checker->tracked_scope_capacity = 0;
   checker->tracked_scope_depth = 0;
+  checker->tracked_buffer_extents = NULL;
 
   // Initialize built-in type pointers to NULL
   checker->builtin_int8 = NULL;
@@ -651,6 +1092,7 @@ void type_checker_destroy(TypeChecker *checker) {
     free(checker->tracked_var_initialized);
     free(checker->tracked_var_scope_depth);
     free(checker->tracked_scope_markers);
+    type_checker_buffer_extent_clear(checker);
 
     free(checker->error_message);
     free(checker);
@@ -1094,6 +1536,9 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       }
     }
 
+    type_checker_warn_recv_buffer_bounds(checker, call);
+    type_checker_warn_memcpy_buffer_bounds(checker, call);
+
     return func_symbol->data.function.return_type;
   }
 
@@ -1347,6 +1792,9 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
                                          error_msg);
       return NULL;
     }
+
+    type_checker_warn_potential_misaligned_cast(checker, expression, cast_expr,
+                                                target_type);
 
     return target_type;
   }
@@ -2339,6 +2787,23 @@ int type_checker_process_declaration(TypeChecker *checker,
             return 0;
           }
         }
+
+        if (var_type && var_type->kind == TYPE_POINTER) {
+          long long known_extent = type_checker_extract_known_buffer_extent(
+              checker, var_decl->initializer);
+          long long known_alignment =
+              type_checker_extract_known_pointer_alignment(
+                  checker, var_decl->initializer);
+          if (!type_checker_buffer_extent_declare(checker, var_decl->name,
+                                                  known_extent,
+                                                  known_alignment)) {
+            type_checker_set_error_at_location(
+                checker, declaration->location,
+                "Out of memory while tracking buffer extent for '%s'",
+                var_decl->name);
+            return 0;
+          }
+        }
       }
     }
 
@@ -2611,6 +3076,18 @@ int type_checker_process_declaration(TypeChecker *checker,
           symbol_table_exit_scope(checker->symbol_table);
           return 0;
         }
+        Type *param_type = active_param_types ? active_param_types[i] : NULL;
+        if (param_type && param_type->kind == TYPE_POINTER) {
+          if (!type_checker_buffer_extent_declare(
+                  checker, func_decl->parameter_names[i], -1, -1)) {
+            type_checker_set_error_at_location(
+                checker, declaration->location,
+                "Out of memory while tracking pointer parameter extent");
+            type_checker_init_tracker_reset(checker);
+            symbol_table_exit_scope(checker->symbol_table);
+            return 0;
+          }
+        }
       }
     }
 
@@ -2879,6 +3356,20 @@ int type_checker_process_declaration(TypeChecker *checker,
         var_symbol->scope->type != SCOPE_GLOBAL) {
       type_checker_init_tracker_set_initialized(checker,
                                                 assignment->variable_name);
+      if (var_symbol->type && var_symbol->type->kind == TYPE_POINTER) {
+        long long known_extent =
+            type_checker_extract_known_buffer_extent(checker, assignment->value);
+        long long known_alignment = type_checker_extract_known_pointer_alignment(
+            checker, assignment->value);
+        if (!type_checker_buffer_extent_set(checker, assignment->variable_name,
+                                            known_extent, known_alignment)) {
+          type_checker_set_error_at_location(
+              checker, assignment->value->location,
+              "Out of memory while tracking buffer extent for '%s'",
+              assignment->variable_name);
+          return 0;
+        }
+      }
     }
 
     return 1;
@@ -3656,6 +4147,39 @@ Type *type_checker_check_binary_expression(TypeChecker *checker,
     if (left_type == checker->builtin_string &&
         right_type == checker->builtin_string) {
       return checker->builtin_string;
+    }
+  }
+
+  // Pointer arithmetic: allow pointer +/- integer and pointer - pointer.
+  if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0) {
+    int left_is_pointer = left_type->kind == TYPE_POINTER;
+    int right_is_pointer = right_type->kind == TYPE_POINTER;
+    int left_is_integer = type_checker_is_integer_type(left_type);
+    int right_is_integer = type_checker_is_integer_type(right_type);
+
+    if (left_is_pointer || right_is_pointer) {
+      if (strcmp(op, "+") == 0) {
+        if (left_is_pointer && right_is_integer) {
+          return left_type;
+        }
+        if (right_is_pointer && left_is_integer) {
+          return right_type;
+        }
+      } else { // "-"
+        if (left_is_pointer && right_is_integer) {
+          return left_type;
+        }
+        if (left_is_pointer && right_is_pointer &&
+            type_checker_types_equal(left_type, right_type)) {
+          return checker->builtin_int64;
+        }
+      }
+
+      type_checker_set_error_at_location(
+          checker, location,
+          "Pointer arithmetic requires pointer +/- integer or pointer - "
+          "pointer of same type");
+      return NULL;
     }
   }
 

@@ -1,0 +1,46 @@
+@echo off
+REM Build MethASM Hex Dump Utility
+REM Requires: argc/argv -> masm_entry.o and -lshell32
+set APP=%~dp0
+set ROOT=%APP%..\..
+cd /d "%ROOT%"
+
+if not exist bin\methasm.exe (
+    echo Building MethASM compiler...
+    call build.bat
+    if %ERRORLEVEL% NEQ 0 exit /b 1
+)
+
+echo Compiling hexdump.masm...
+bin\methasm.exe examples\hexdump\hexdump.masm -o examples\hexdump\hexdump.s --stdlib stdlib
+if %ERRORLEVEL% NEQ 0 (
+    echo MethASM compilation failed.
+    exit /b 1
+)
+
+echo Assembling and linking...
+where nasm >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    nasm -f win64 examples\hexdump\hexdump.s -o examples\hexdump\hexdump.o
+    if %ERRORLEVEL% NEQ 0 (
+        echo NASM assembly failed.
+        exit /b 1
+    )
+    gcc -c src\runtime\gc.c -o examples\hexdump\gc.o -Isrc
+    if %ERRORLEVEL% NEQ 0 exit /b 1
+    gcc -c src\runtime\masm_entry.c -o examples\hexdump\masm_entry.o -Isrc
+    if %ERRORLEVEL% NEQ 0 exit /b 1
+    gcc -nostartfiles examples\hexdump\hexdump.o examples\hexdump\gc.o examples\hexdump\masm_entry.o -o examples\hexdump\hexdump.exe -lkernel32 -lshell32
+) else (
+    echo NASM required. Install from https://www.nasm.us/
+    exit /b 1
+)
+
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo Build successful! Run: hexdump.exe ^<filename^>
+    echo Example: examples\hexdump\hexdump.exe examples\hexdump\hexdump.masm
+) else (
+    echo Link failed.
+    exit /b 1
+)

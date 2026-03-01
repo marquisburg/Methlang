@@ -2,8 +2,28 @@
 #define _GNU_SOURCE
 #endif
 #include "symbol_table.h"
+#include "../string_intern.h"
 #include <stdlib.h>
 #include <string.h>
+
+static int symbol_table_names_equal(const char *lhs, const char *rhs) {
+  if (lhs == rhs) {
+    return 1;
+  }
+  if (!lhs || !rhs) {
+    return 0;
+  }
+  return strcmp(lhs, rhs) == 0;
+}
+
+static void symbol_table_free_string(char *value) {
+  if (!value) {
+    return;
+  }
+  if (!string_is_interned(value)) {
+    free(value);
+  }
+}
 
 static const char *symbol_table_effective_link_name(const Symbol *symbol) {
   if (!symbol) {
@@ -21,7 +41,7 @@ static int symbol_table_link_names_match(const Symbol *lhs, const Symbol *rhs) {
   if (!lhs_name || !rhs_name) {
     return lhs_name == rhs_name;
   }
-  return strcmp(lhs_name, rhs_name) == 0;
+  return symbol_table_names_equal(lhs_name, rhs_name);
 }
 
 static int symbol_table_types_compatible(const Type *lhs, const Type *rhs) {
@@ -58,7 +78,7 @@ static int symbol_table_types_compatible(const Type *lhs, const Type *rhs) {
     return symbol_table_types_compatible(lhs->base_type, rhs->base_type);
   case TYPE_STRUCT:
     if (lhs->name && rhs->name) {
-      return strcmp(lhs->name, rhs->name) == 0;
+      return symbol_table_names_equal(lhs->name, rhs->name);
     }
     return lhs->name == rhs->name;
   default:
@@ -141,8 +161,8 @@ static void scope_destroy(Scope *scope) {
   for (size_t i = 0; i < scope->symbol_count; i++) {
     Symbol *symbol = scope->symbols[i];
     if (symbol) {
-      free(symbol->name);
-      free(symbol->link_name);
+      symbol_table_free_string(symbol->name);
+      symbol_table_free_string(symbol->link_name);
       if (symbol->kind == SYMBOL_FUNCTION) {
         // Free function parameter names (strings we own)
         for (size_t j = 0; j < symbol->data.function.parameter_count; j++) {
@@ -227,7 +247,8 @@ int symbol_table_declare(SymbolTable *table, Symbol *symbol) {
   // Check for duplicate declaration in current scope only
   for (size_t i = 0; i < table->current_scope->symbol_count; i++) {
     if (table->current_scope->symbols[i] &&
-        strcmp(table->current_scope->symbols[i]->name, symbol->name) == 0) {
+        symbol_table_names_equal(table->current_scope->symbols[i]->name,
+                                 symbol->name)) {
       Symbol *existing = table->current_scope->symbols[i];
       // Allow forward declaration resolution for functions
       if (symbol->kind == SYMBOL_FUNCTION &&
@@ -281,7 +302,7 @@ Symbol *symbol_table_lookup(SymbolTable *table, const char *name) {
     // Search in current scope
     for (size_t i = 0; i < current_scope->symbol_count; i++) {
       if (current_scope->symbols[i] &&
-          strcmp(current_scope->symbols[i]->name, name) == 0) {
+          symbol_table_names_equal(current_scope->symbols[i]->name, name)) {
         return current_scope->symbols[i];
       }
     }
@@ -298,7 +319,7 @@ Type *type_create(TypeKind kind, const char *name) {
     return NULL;
 
   type->kind = kind;
-  type->name = name ? strdup(name) : NULL;
+  type->name = name ? (char *)string_intern(name) : NULL;
   type->size = 0;
   type->alignment = 0;
   type->base_type = NULL;
@@ -351,7 +372,7 @@ void type_destroy(Type *type) {
     // Clean up struct-specific fields
     if (type->field_names) {
       for (size_t i = 0; i < type->field_count; i++) {
-        free(type->field_names[i]);
+        symbol_table_free_string(type->field_names[i]);
       }
       free(type->field_names);
     }
@@ -369,7 +390,7 @@ void type_destroy(Type *type) {
       free(type->fn_param_types);
     }
 
-    free(type->name);
+    symbol_table_free_string(type->name);
     free(type);
   }
 }
@@ -414,7 +435,7 @@ Symbol *symbol_create(const char *name, SymbolKind kind, Type *type) {
   if (!symbol)
     return NULL;
 
-  symbol->name = strdup(name);
+  symbol->name = (char *)string_intern(name);
   if (!symbol->name) {
     free(symbol);
     return NULL;
@@ -458,8 +479,8 @@ void symbol_destroy(Symbol *symbol) {
   if (!symbol)
     return;
 
-  free(symbol->name);
-  free(symbol->link_name);
+  symbol_table_free_string(symbol->name);
+  symbol_table_free_string(symbol->link_name);
 
   if (symbol->kind == SYMBOL_FUNCTION) {
     // Free function parameter names (strings we own)
@@ -488,7 +509,7 @@ Symbol *symbol_table_lookup_current_scope(SymbolTable *table,
   // Search only in current scope
   for (size_t i = 0; i < table->current_scope->symbol_count; i++) {
     if (table->current_scope->symbols[i] &&
-        strcmp(table->current_scope->symbols[i]->name, name) == 0) {
+        symbol_table_names_equal(table->current_scope->symbols[i]->name, name)) {
       return table->current_scope->symbols[i];
     }
   }
@@ -660,7 +681,7 @@ Type *type_create_struct(const char *name, char **field_names,
 
   for (size_t i = 0; i < field_count; i++) {
     // Copy field name
-    struct_type->field_names[i] = strdup(field_names[i]);
+    struct_type->field_names[i] = (char *)string_intern(field_names[i]);
     if (!struct_type->field_names[i]) {
       type_destroy(struct_type);
       return NULL;
@@ -701,7 +722,7 @@ Type *type_get_field_type(Type *struct_type, const char *field_name) {
   }
 
   for (size_t i = 0; i < struct_type->field_count; i++) {
-    if (strcmp(struct_type->field_names[i], field_name) == 0) {
+    if (symbol_table_names_equal(struct_type->field_names[i], field_name)) {
       return struct_type->field_types[i];
     }
   }
@@ -717,7 +738,7 @@ size_t type_get_field_offset(Type *struct_type, const char *field_name) {
   }
 
   for (size_t i = 0; i < struct_type->field_count; i++) {
-    if (strcmp(struct_type->field_names[i], field_name) == 0) {
+    if (symbol_table_names_equal(struct_type->field_names[i], field_name)) {
       return struct_type->field_offsets[i];
     }
   }
@@ -733,7 +754,7 @@ int type_has_field(Type *struct_type, const char *field_name) {
   }
 
   for (size_t i = 0; i < struct_type->field_count; i++) {
-    if (strcmp(struct_type->field_names[i], field_name) == 0) {
+    if (symbol_table_names_equal(struct_type->field_names[i], field_name)) {
       return 1; // Field found
     }
   }

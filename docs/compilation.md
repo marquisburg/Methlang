@@ -27,6 +27,10 @@ The compiler runs these phases in order:
 7. **Optimization** (optional, `-O`) — constant folding and other passes
 8. **Code generation** — emit x86-64 assembly
 
+### String Interning
+
+Identifiers and keywords produced by the lexer are interned: each distinct string is stored once in a hash table, and subsequent occurrences reuse the same pointer. This reduces memory for repeated identifiers (e.g. `function`, `int32`, variable names) and enables O(1) equality checks by pointer comparison. The AST, symbol table, and type checker use interned strings for names and type parameters. The intern table is cleared after each compilation, so it does not persist across invocations.
+
 ## Build Pipeline
 
 1. Compile: `methasm main.masm -o main.s`
