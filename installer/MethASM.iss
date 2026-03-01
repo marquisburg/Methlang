@@ -17,8 +17,6 @@ ArchitecturesInstallIn64BitMode=x64
 Source: "..\bin\methasm.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "..\masmicon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "masm-build.bat"; DestDir: "{app}\bin"; Flags: ignoreversion
-Source: "masm-pkg.bat"; DestDir: "{app}\bin"; Flags: ignoreversion
-Source: "..\tools\masm-pkg\masm-pkg.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "..\stdlib\*"; DestDir: "{app}\stdlib"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\src\runtime\*"; DestDir: "{app}\src\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
 

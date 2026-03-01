@@ -4,7 +4,7 @@ This directory contains the files needed to build a native Windows installer (`.
 
 ## Features
 - Copies `methasm.exe`, `stdlib\`, and `src\runtime\` to the installation directory (`C:\Program Files\MethASM`).
-- Installs `masm-build.bat` plus `masm-pkg` (exe + wrapper) for dependency management and project builds.
+- Installs `masm-build.bat` for project builds.
 - Automatically adds MethASM's `bin\` directory to your user `%PATH%`.
 - Registers the `.masm` file extension with MethASM's icon.
 - Provides a clean uninstaller that removes MethASM and cleans up your `%PATH%`.
@@ -23,10 +23,3 @@ Once installed, users can simply run this command from anywhere:
 masm-build.bat my_program.masm
 ```
 This automatically leverages `methasm`, `nasm`, and `gcc` (must be separately installed and available on `%PATH%`) to produce `my_program.exe` cleanly.
-
-Package manager usage after install:
-```bat
-masm-pkg add mylib ..\shared\mylib
-masm-pkg install
-masm-pkg build
-```

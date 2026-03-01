@@ -2,8 +2,6 @@
 //
 // Uses system() to invoke curl for downloading.
 // Requires curl in PATH. On Windows without curl, use PowerShell (see docs).
-//
-// For package manager: build "curl -sL <url> -o <file>" and call system().
 
 import "std/system";
 import "std/conv";

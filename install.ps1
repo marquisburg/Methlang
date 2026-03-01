@@ -28,16 +28,6 @@ if (Test-Path "installer\masm-build.bat") {
     Copy-Item "installer\masm-build.bat" "$InstallDir\bin\" -Force
 }
 
-if (Test-Path "installer\masm-pkg.bat") {
-    Copy-Item "installer\masm-pkg.bat" "$InstallDir\bin\" -Force
-}
-
-if (Test-Path "bin\masm-pkg.exe") {
-    Copy-Item "bin\masm-pkg.exe" "$InstallDir\bin\" -Force
-} elseif (Test-Path "tools\masm-pkg\masm-pkg.exe") {
-    Copy-Item "tools\masm-pkg\masm-pkg.exe" "$InstallDir\bin\" -Force
-}
-
 Write-Host "Updating Machine PATH variable..."
 $Path = [Environment]::GetEnvironmentVariable("Path", "Machine")
 $TargetBinDir = "$InstallDir\bin"
@@ -65,4 +55,4 @@ if (-not (Get-Command "nasm" -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host ""
-Write-Host "Installation complete! Open a new terminal to use 'masm-build', 'masm-pkg', or 'methasm'. "
+Write-Host "Installation complete! Open a new terminal to use 'masm-build' or 'methasm'. "

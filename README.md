@@ -54,7 +54,6 @@ Use `-nostartfiles` so MethASM's entry point (`mainCRTStartup`) is used instead 
 - Language reference index: [docs/LANGUAGE.md](docs/LANGUAGE.md)
 - Garbage collector guide: [docs/garbage-collector.md](docs/garbage-collector.md)
 - Compilation details: [docs/compilation.md](docs/compilation.md)
-- Package manager guide: [docs/package-manager.md](docs/package-manager.md)
 - Standard library overview: [docs/standard-library.md](docs/standard-library.md)
 
 ## Quick Dev Commands

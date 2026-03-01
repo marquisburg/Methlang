@@ -15,7 +15,7 @@ Block comments are not supported. Comments cannot be nested; a second `//` on th
 
 ## Identifiers
 
-Identifiers name variables, functions, types, and other program elements. They must start with a letter or underscore, followed by any combination of letters, digits, or underscores. Identifiers are case-sensitive. There is no documented length limit; the lexer accepts identifiers until it hits a non-alphanumeric character. Identifiers are strictly ASCII; Unicode characters (e.g. `café`, `変数`) are not supported. The lexer uses `isalpha` and `isalnum`, which treat only ASCII letters and digits as valid. The compiler interns identifiers for memory efficiency; see [Compilation](compilation.md#string-interning).
+Identifiers name variables, functions, types, and other program elements. They must start with a letter or underscore, followed by any combination of letters, digits, or underscores. Identifiers are case-sensitive. There is no documented length limit; the lexer accepts identifiers until it hits a non-alphanumeric character. Identifiers are strictly ASCII; Unicode identifiers are not supported. The lexer uses `isalpha` and `isalnum`, which treat only ASCII letters and digits as valid. The compiler interns identifier-like names for memory efficiency; see [Compilation](compilation.md#string-interning).
 
 ```
 my_var
@@ -70,3 +70,13 @@ function get_x(p: Point*) -> int32 {
   return p->x;
 }
 ```
+
+
+## Lexer Token Model (Implementation Note)
+
+Tokens produced by the lexer carry both:
+
+- `value`: a null-terminated C string used by parser and semantic phases.
+- `lexeme`: a string view (`data` pointer + `length`) for length-aware token text handling without `strlen`.
+
+For identifier-like tokens, `value` points to an interned global string (deduplicated across the compilation). This enables fast pointer-based equality checks for names in later phases.
