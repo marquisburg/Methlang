@@ -17,6 +17,8 @@ typedef struct {
   const char *output_filename;
   int debug_mode;
   int optimize;
+  int release;
+  int strip_asm_comments;
   int generate_debug_symbols;
   int generate_line_mapping;
   int generate_stack_trace_support;

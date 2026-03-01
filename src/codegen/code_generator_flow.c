@@ -171,6 +171,251 @@ static IRFunction *code_generator_find_ir_function(CodeGenerator *generator,
   return NULL;
 }
 
+typedef struct {
+  ASTNode *declaration;
+  FunctionDeclaration *function_data;
+  IRFunction *ir_function;
+  int reachable;
+} CodeGeneratorFunctionReachability;
+
+static int code_generator_find_reachable_function_index(
+    const CodeGeneratorFunctionReachability *entries, size_t count,
+    const char *name) {
+  if (!entries || !name) {
+    return -1;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    if (entries[i].function_data && entries[i].function_data->name &&
+        strcmp(entries[i].function_data->name, name) == 0) {
+      return (int)i;
+    }
+  }
+
+  return -1;
+}
+
+static int code_generator_mark_function_reachable(
+    CodeGeneratorFunctionReachability *entries, size_t count, size_t index,
+    size_t *queue, size_t *queue_tail) {
+  if (!entries || !queue || !queue_tail || index >= count) {
+    return 0;
+  }
+
+  if (entries[index].reachable) {
+    return 1;
+  }
+
+  entries[index].reachable = 1;
+  queue[(*queue_tail)++] = index;
+  return 1;
+}
+
+static int code_generator_collect_reachable_functions(
+    CodeGenerator *generator, Program *program_data,
+    CodeGeneratorFunctionReachability **out_entries, size_t *out_count) {
+  if (!generator || !out_entries || !out_count) {
+    return 0;
+  }
+
+  *out_entries = NULL;
+  *out_count = 0;
+
+  if (!program_data) {
+    return 1;
+  }
+
+  size_t function_count = 0;
+  int has_top_level_inline_asm = 0;
+  for (size_t i = 0; i < program_data->declaration_count; i++) {
+    ASTNode *declaration = program_data->declarations[i];
+    if (!declaration) {
+      continue;
+    }
+
+    if (declaration->type == AST_INLINE_ASM) {
+      InlineAsm *asm_data = (InlineAsm *)declaration->data;
+      if (asm_data && asm_data->assembly_code && asm_data->assembly_code[0]) {
+        has_top_level_inline_asm = 1;
+      }
+      continue;
+    }
+
+    if (declaration->type != AST_FUNCTION_DECLARATION) {
+      continue;
+    }
+
+    FunctionDeclaration *function_data = (FunctionDeclaration *)declaration->data;
+    if (!function_data || function_data->is_extern || !function_data->body ||
+        !function_data->name) {
+      continue;
+    }
+
+    function_count++;
+  }
+
+  if (function_count == 0) {
+    return 1;
+  }
+
+  CodeGeneratorFunctionReachability *entries =
+      calloc(function_count, sizeof(CodeGeneratorFunctionReachability));
+  if (!entries) {
+    code_generator_set_error(generator,
+                             "Out of memory while building function call graph");
+    return 0;
+  }
+
+  size_t entry_index = 0;
+  for (size_t i = 0; i < program_data->declaration_count; i++) {
+    ASTNode *declaration = program_data->declarations[i];
+    if (!declaration || declaration->type != AST_FUNCTION_DECLARATION) {
+      continue;
+    }
+
+    FunctionDeclaration *function_data = (FunctionDeclaration *)declaration->data;
+    if (!function_data || function_data->is_extern || !function_data->body ||
+        !function_data->name) {
+      continue;
+    }
+
+    entries[entry_index].declaration = declaration;
+    entries[entry_index].function_data = function_data;
+    entries[entry_index].ir_function =
+        code_generator_find_ir_function(generator, function_data->name);
+    entries[entry_index].reachable = 0;
+    entry_index++;
+  }
+
+  if (!generator->eliminate_unreachable_functions || has_top_level_inline_asm) {
+    for (size_t i = 0; i < function_count; i++) {
+      entries[i].reachable = 1;
+    }
+    *out_entries = entries;
+    *out_count = function_count;
+    return 1;
+  }
+
+  size_t *queue = malloc(function_count * sizeof(size_t));
+  if (!queue) {
+    free(entries);
+    code_generator_set_error(generator,
+                             "Out of memory while allocating reachability queue");
+    return 0;
+  }
+
+  size_t queue_head = 0;
+  size_t queue_tail = 0;
+  size_t root_count = 0;
+
+  for (size_t i = 0; i < function_count; i++) {
+    FunctionDeclaration *function_data = entries[i].function_data;
+    if (!function_data || !function_data->name) {
+      continue;
+    }
+
+    if (strcmp(function_data->name, "main") == 0 || function_data->is_exported) {
+      if (!code_generator_mark_function_reachable(entries, function_count, i,
+                                                  queue, &queue_tail)) {
+        free(queue);
+        free(entries);
+        return 0;
+      }
+      root_count++;
+    }
+  }
+
+  if (root_count == 0) {
+    for (size_t i = 0; i < function_count; i++) {
+      entries[i].reachable = 1;
+    }
+    free(queue);
+    *out_entries = entries;
+    *out_count = function_count;
+    return 1;
+  }
+
+  int mark_all_reachable = 0;
+  while (queue_head < queue_tail && !mark_all_reachable) {
+    size_t current = queue[queue_head++];
+    IRFunction *ir_function = entries[current].ir_function;
+    if (!ir_function) {
+      code_generator_set_error(generator, "No IR body found for function '%s'",
+                               entries[current].function_data->name);
+      free(queue);
+      free(entries);
+      return 0;
+    }
+
+    for (size_t i = 0; i < ir_function->instruction_count; i++) {
+      IRInstruction *instruction = &ir_function->instructions[i];
+      if (!instruction) {
+        continue;
+      }
+
+      if (instruction->op == IR_OP_CALL && instruction->text &&
+          instruction->text[0] != '\0') {
+        int target_index = code_generator_find_reachable_function_index(
+            entries, function_count, instruction->text);
+        if (target_index >= 0 &&
+            !entries[(size_t)target_index].reachable &&
+            !code_generator_mark_function_reachable(
+                entries, function_count, (size_t)target_index, queue,
+                &queue_tail)) {
+          free(queue);
+          free(entries);
+          return 0;
+        }
+      } else if (instruction->op == IR_OP_ADDRESS_OF &&
+                 instruction->lhs.kind == IR_OPERAND_SYMBOL &&
+                 instruction->lhs.name && instruction->lhs.name[0] != '\0') {
+        int target_index = code_generator_find_reachable_function_index(
+            entries, function_count, instruction->lhs.name);
+        if (target_index >= 0 &&
+            !entries[(size_t)target_index].reachable &&
+            !code_generator_mark_function_reachable(
+                entries, function_count, (size_t)target_index, queue,
+                &queue_tail)) {
+          free(queue);
+          free(entries);
+          return 0;
+        }
+      } else if (instruction->op == IR_OP_CALL_INDIRECT) {
+        // Function pointers can target any function; stay conservative.
+        mark_all_reachable = 1;
+        break;
+      }
+    }
+  }
+
+  if (mark_all_reachable) {
+    for (size_t i = 0; i < function_count; i++) {
+      entries[i].reachable = 1;
+    }
+  }
+
+  free(queue);
+  *out_entries = entries;
+  *out_count = function_count;
+  return 1;
+}
+
+static int code_generator_is_function_reachable(
+    const CodeGeneratorFunctionReachability *entries, size_t count,
+    const char *name) {
+  if (!entries || !name) {
+    return 1;
+  }
+
+  int index =
+      code_generator_find_reachable_function_index(entries, count, name);
+  if (index < 0) {
+    return 1;
+  }
+
+  return entries[(size_t)index].reachable;
+}
+
 static int code_generator_validate_entrypoint_sections(CodeGenerator *generator) {
   if (!generator || !generator->output_buffer) {
     return 1;
@@ -229,6 +474,8 @@ int code_generator_generate_program(CodeGenerator *generator,
 
   // First pass: collect global variables and handle top-level inline assembly
   Program *program_data = (Program *)program->data;
+  CodeGeneratorFunctionReachability *reachable_functions = NULL;
+  size_t reachable_function_count = 0;
   if (program_data) {
     code_generator_emit(generator,
                         "; First pass: processing %zu declarations\n",
@@ -278,6 +525,11 @@ int code_generator_generate_program(CodeGenerator *generator,
   // Global data (including function-local string literals) is emitted later
   // after all codegen passes have populated the global buffer.
   code_generator_emit(generator, "\nsection .text\n");
+  if (!code_generator_collect_reachable_functions(
+          generator, program_data, &reachable_functions,
+          &reachable_function_count)) {
+    return 0;
+  }
 
   // Second pass: process functions and other declarations
   if (program_data) {
@@ -304,8 +556,21 @@ int code_generator_generate_program(CodeGenerator *generator,
         if (!function_data->body) {
           break;
         }
-        IRFunction *ir_function =
-            code_generator_find_ir_function(generator, function_data->name);
+        if (!code_generator_is_function_reachable(reachable_functions,
+                                                  reachable_function_count,
+                                                  function_data->name)) {
+          break;
+        }
+
+        IRFunction *ir_function = NULL;
+        int reachable_index = code_generator_find_reachable_function_index(
+            reachable_functions, reachable_function_count, function_data->name);
+        if (reachable_index >= 0) {
+          ir_function = reachable_functions[(size_t)reachable_index].ir_function;
+        } else {
+          ir_function =
+              code_generator_find_ir_function(generator, function_data->name);
+        }
         if (!ir_function) {
           code_generator_set_error(generator,
                                    "No IR body found for function '%s'",
@@ -333,6 +598,7 @@ int code_generator_generate_program(CodeGenerator *generator,
       }
 
       if (generator->has_error) {
+        free(reachable_functions);
         return 0;
       }
     }
@@ -374,6 +640,7 @@ int code_generator_generate_program(CodeGenerator *generator,
   if (!entry_conv_spec) {
     code_generator_set_error(
         generator, "No calling convention configured for entry point");
+    free(reachable_functions);
     return 0;
   }
 
@@ -457,6 +724,7 @@ int code_generator_generate_program(CodeGenerator *generator,
             "Global variable '%s' is missing type information during "
             "root-registration",
             var_data->name);
+        free(reachable_functions);
         return 0;
       }
 
@@ -551,10 +819,13 @@ int code_generator_generate_program(CodeGenerator *generator,
   }
 
   if (!code_generator_validate_entrypoint_sections(generator)) {
+    free(reachable_functions);
     return 0;
   }
 
-  return generator->has_error ? 0 : 1;
+  int ok = generator->has_error ? 0 : 1;
+  free(reachable_functions);
+  return ok;
 }
 
 // Forward declaration

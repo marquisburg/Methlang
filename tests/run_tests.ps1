@@ -158,7 +158,7 @@ $cases = @(
     Name          = "runtime_array_bounds_check"
     Path          = "tests/test_runtime_array_bounds_check.masm"
     ShouldSucceed = $true
-    AsmMustMatch  = @("Fatal error: Array index out of bounds", "\bsetl al\b")
+    AsmMustMatch  = @("Fatal error: Array index out of bounds", "(\bsetl al\b|\bjge\s+ir_trap_bounds_|\bjl\s+ir_in_bounds_)")
   },
   @{ Name = "pointer_param_address"; Path = "tests/test_pointer_param_address.masm"; ShouldSucceed = $true },
   @{
@@ -365,6 +365,37 @@ $cases = @(
   @{ Name = "bitwise"; Path = "tests/test_bitwise.masm"; ShouldSucceed = $true },
   @{ Name = "modulo"; Path = "tests/test_modulo.masm"; ShouldSucceed = $true },
   @{ Name = "logical_not"; Path = "tests/test_logical_not.masm"; ShouldSucceed = $true },
+  @{
+    Name           = "optimize_ir_passes"
+    Path           = "tests/test_optimize_ir_passes.masm"
+    ShouldSucceed  = $true
+    Args           = @("-O")
+    AsmMustNotMatch = @("\bcall cold_path\b")
+    IrMustMatch    = @("ASSIGN .* <- 42")
+    IrMustNotMatch = @("BRANCH_ZERO 0 ->", "CALL .*cold_path\(")
+  },
+  @{
+    Name          = "opt_dead_temp"
+    Path          = "tests/test_opt_dead_temp.masm"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustNotMatch = @("ASSIGN %t[0-9]+ <- 123456")
+  },
+  @{
+    Name          = "opt_symbol_temp_forwarding"
+    Path          = "tests/test_opt_symbol_temp_forwarding.masm"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustNotMatch = @("ASSIGN %t[0-9]+ <- @x")
+    IrMustMatch   = @("BRANCH_ZERO @x ->")
+  },
+  @{
+    Name            = "release_size_mode"
+    Path            = "tests/test_optimize_ir_passes.masm"
+    ShouldSucceed   = $true
+    Args            = @("--release")
+    AsmMustNotMatch = @("(?m)^\s*;", "\bcall cold_path\b", "(?m)^\s*global\s+cold_path\b")
+  },
   @{ Name = "string_concat"; Path = "tests/test_string_concat.masm"; ShouldSucceed = $true },
   @{ Name = "defer_single"; Path = "tests/test_defer_single.masm"; ShouldSucceed = $true },
   @{ Name = "defer_lifo"; Path = "tests/test_defer_lifo.masm"; ShouldSucceed = $true },
@@ -592,6 +623,8 @@ foreach ($case in $cases) {
         $forbiddenAsmPatterns = @()
         $requiredOutputPatterns = @()
         $forbiddenOutputPatterns = @()
+        $requiredIrPatterns = @()
+        $forbiddenIrPatterns = @()
         if ($case.ContainsKey("AsmMustMatch") -and $case.AsmMustMatch) {
           $requiredAsmPatterns = @($case.AsmMustMatch)
         }
@@ -603,6 +636,12 @@ foreach ($case in $cases) {
         }
         if ($case.ContainsKey("OutputMustNotMatch") -and $case.OutputMustNotMatch) {
           $forbiddenOutputPatterns = @($case.OutputMustNotMatch)
+        }
+        if ($case.ContainsKey("IrMustMatch") -and $case.IrMustMatch) {
+          $requiredIrPatterns = @($case.IrMustMatch)
+        }
+        if ($case.ContainsKey("IrMustNotMatch") -and $case.IrMustNotMatch) {
+          $forbiddenIrPatterns = @($case.IrMustNotMatch)
         }
 
         $asmCheck = Test-AssemblyOutput -AsmPath $outFile `
@@ -633,6 +672,40 @@ foreach ($case in $cases) {
               $passed = $false
               $reason = "Compiler output matched forbidden pattern '$pattern'"
               break
+            }
+          }
+        }
+        if ($passed -and (($requiredIrPatterns.Count -gt 0) -or ($forbiddenIrPatterns.Count -gt 0))) {
+          $irFile = "$outFile.ir"
+          if (-not (Test-Path $irFile)) {
+            $passed = $false
+            $reason = "IR output file not produced"
+          }
+          else {
+            $irText = Get-Content -Path $irFile -Raw
+
+            foreach ($pattern in $requiredIrPatterns) {
+              if ([string]::IsNullOrWhiteSpace($pattern)) {
+                continue
+              }
+              if ($irText -notmatch $pattern) {
+                $passed = $false
+                $reason = "IR output missing required pattern '$pattern'"
+                break
+              }
+            }
+
+            if ($passed) {
+              foreach ($pattern in $forbiddenIrPatterns) {
+                if ([string]::IsNullOrWhiteSpace($pattern)) {
+                  continue
+                }
+                if ($irText -match $pattern) {
+                  $passed = $false
+                  $reason = "IR output matched forbidden pattern '$pattern'"
+                  break
+                }
+              }
             }
           }
         }

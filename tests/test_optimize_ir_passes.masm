@@ -1,0 +1,18 @@
+function cold_path() -> int32 {
+  return 9;
+}
+
+function main() -> int32 {
+  var folded: int32 = 6 * 7;
+  var result: int32 = folded;
+
+  if (0) {
+    result = cold_path();
+  }
+
+  if (1) {
+    result = result + 0;
+  }
+
+  return result;
+}

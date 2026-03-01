@@ -36,6 +36,84 @@ static int code_generator_is_signed_integer_type(Type *type) {
   }
 }
 
+const char *code_generator_get_subregister_name(x86Register reg,
+                                                 int width_bits) {
+  switch (reg) {
+  case REG_RAX:
+    return (width_bits == 8)   ? "al"
+           : (width_bits == 16) ? "ax"
+           : (width_bits == 32) ? "eax"
+                                : "rax";
+  case REG_RBX:
+    return (width_bits == 8)   ? "bl"
+           : (width_bits == 16) ? "bx"
+           : (width_bits == 32) ? "ebx"
+                                : "rbx";
+  case REG_RCX:
+    return (width_bits == 8)   ? "cl"
+           : (width_bits == 16) ? "cx"
+           : (width_bits == 32) ? "ecx"
+                                : "rcx";
+  case REG_RDX:
+    return (width_bits == 8)   ? "dl"
+           : (width_bits == 16) ? "dx"
+           : (width_bits == 32) ? "edx"
+                                : "rdx";
+  case REG_RSI:
+    return (width_bits == 8)   ? "sil"
+           : (width_bits == 16) ? "si"
+           : (width_bits == 32) ? "esi"
+                                : "rsi";
+  case REG_RDI:
+    return (width_bits == 8)   ? "dil"
+           : (width_bits == 16) ? "di"
+           : (width_bits == 32) ? "edi"
+                                : "rdi";
+  case REG_R8:
+    return (width_bits == 8)   ? "r8b"
+           : (width_bits == 16) ? "r8w"
+           : (width_bits == 32) ? "r8d"
+                                : "r8";
+  case REG_R9:
+    return (width_bits == 8)   ? "r9b"
+           : (width_bits == 16) ? "r9w"
+           : (width_bits == 32) ? "r9d"
+                                : "r9";
+  case REG_R10:
+    return (width_bits == 8)   ? "r10b"
+           : (width_bits == 16) ? "r10w"
+           : (width_bits == 32) ? "r10d"
+                                : "r10";
+  case REG_R11:
+    return (width_bits == 8)   ? "r11b"
+           : (width_bits == 16) ? "r11w"
+           : (width_bits == 32) ? "r11d"
+                                : "r11";
+  case REG_R12:
+    return (width_bits == 8)   ? "r12b"
+           : (width_bits == 16) ? "r12w"
+           : (width_bits == 32) ? "r12d"
+                                : "r12";
+  case REG_R13:
+    return (width_bits == 8)   ? "r13b"
+           : (width_bits == 16) ? "r13w"
+           : (width_bits == 32) ? "r13d"
+                                : "r13";
+  case REG_R14:
+    return (width_bits == 8)   ? "r14b"
+           : (width_bits == 16) ? "r14w"
+           : (width_bits == 32) ? "r14d"
+                                : "r14";
+  case REG_R15:
+    return (width_bits == 8)   ? "r15b"
+           : (width_bits == 16) ? "r15w"
+           : (width_bits == 32) ? "r15d"
+                                : "r15";
+  default:
+    return NULL;
+  }
+}
+
 static void code_generator_emit_runtime_trap(CodeGenerator *generator,
                                              const char *message) {
   if (!generator || !message) {
@@ -602,10 +680,67 @@ void code_generator_load_variable(CodeGenerator *generator,
 
     if (symbol->data.variable.is_in_register) {
       x86Register reg = (x86Register)symbol->data.variable.register_id;
-      const char *reg_name = code_generator_get_register_name(reg);
-      if (reg_name) {
+      const char *reg64 = code_generator_get_subregister_name(reg, 64);
+      if (!reg64) {
+        code_generator_set_error(generator, "Invalid register for variable '%s'",
+                                 variable_name);
+        return;
+      }
+
+      if (value_size == 1) {
+        const char *reg8 = code_generator_get_subregister_name(reg, 8);
+        if (!reg8) {
+          code_generator_set_error(generator,
+                                   "Invalid 8-bit register for variable '%s'",
+                                   variable_name);
+          return;
+        }
+        if (signed_integer) {
+          code_generator_emit(generator, "    movsx rax, %s      ; From register "
+                                         "(signed int8)\n",
+                              reg8);
+        } else {
+          code_generator_emit(generator, "    movzx rax, %s      ; From register "
+                                         "(uint8)\n",
+                              reg8);
+        }
+      } else if (value_size == 2) {
+        const char *reg16 = code_generator_get_subregister_name(reg, 16);
+        if (!reg16) {
+          code_generator_set_error(generator,
+                                   "Invalid 16-bit register for variable '%s'",
+                                   variable_name);
+          return;
+        }
+        if (signed_integer) {
+          code_generator_emit(generator, "    movsx rax, %s      ; From register "
+                                         "(signed int16)\n",
+                              reg16);
+        } else {
+          code_generator_emit(generator, "    movzx rax, %s      ; From register "
+                                         "(uint16)\n",
+                              reg16);
+        }
+      } else if (value_size == 4) {
+        const char *reg32 = code_generator_get_subregister_name(reg, 32);
+        if (!reg32) {
+          code_generator_set_error(generator,
+                                   "Invalid 32-bit register for variable '%s'",
+                                   variable_name);
+          return;
+        }
+        if (signed_integer) {
+          code_generator_emit(generator, "    movsxd rax, %s      ; From register "
+                                         "(signed int32)\n",
+                              reg32);
+        } else {
+          code_generator_emit(generator, "    mov eax, %s      ; From register "
+                                         "(uint32)\n",
+                              reg32);
+        }
+      } else {
         code_generator_emit(generator, "    mov rax, %s      ; From register\n",
-                            reg_name);
+                            reg64);
       }
     } else {
       if (symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
@@ -776,10 +911,49 @@ void code_generator_store_variable(CodeGenerator *generator,
 
     if (symbol->data.variable.is_in_register) {
       x86Register reg = (x86Register)symbol->data.variable.register_id;
-      const char *reg_name = code_generator_get_register_name(reg);
-      if (reg_name) {
+      const char *reg64 = code_generator_get_subregister_name(reg, 64);
+      if (!reg64) {
+        code_generator_set_error(generator, "Invalid register for variable '%s'",
+                                 variable_name);
+        return;
+      }
+
+      if (value_size == 1) {
+        const char *reg8 = code_generator_get_subregister_name(reg, 8);
+        if (!reg8) {
+          code_generator_set_error(generator,
+                                   "Invalid 8-bit register for variable '%s'",
+                                   variable_name);
+          return;
+        }
+        code_generator_emit(generator, "    mov %s, al       ; To register "
+                                       "(int8/uint8)\n",
+                            reg8);
+      } else if (value_size == 2) {
+        const char *reg16 = code_generator_get_subregister_name(reg, 16);
+        if (!reg16) {
+          code_generator_set_error(generator,
+                                   "Invalid 16-bit register for variable '%s'",
+                                   variable_name);
+          return;
+        }
+        code_generator_emit(generator, "    mov %s, ax       ; To register "
+                                       "(int16/uint16)\n",
+                            reg16);
+      } else if (value_size == 4) {
+        const char *reg32 = code_generator_get_subregister_name(reg, 32);
+        if (!reg32) {
+          code_generator_set_error(generator,
+                                   "Invalid 32-bit register for variable '%s'",
+                                   variable_name);
+          return;
+        }
+        code_generator_emit(generator, "    mov %s, eax       ; To register "
+                                       "(int32/uint32)\n",
+                            reg32);
+      } else {
         code_generator_emit(generator, "    mov %s, %s       ; To register\n",
-                            reg_name, source_reg);
+                            reg64, source_reg);
       }
     } else {
       if (symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {

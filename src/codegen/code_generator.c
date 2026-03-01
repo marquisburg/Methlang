@@ -1,4 +1,5 @@
 #include "code_generator_internal.h"
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +33,8 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->control_flow_stack_size = 0;
   generator->control_flow_stack_capacity = 0;
   generator->generate_debug_info = 0;
+  generator->emit_asm_comments = 1;
+  generator->eliminate_unreachable_functions = 0;
   generator->has_error = 0;
   generator->error_message = NULL;
   generator->ir_program = NULL;
@@ -129,6 +132,135 @@ void code_generator_set_error(CodeGenerator *generator,
   va_end(args);
 }
 
+void code_generator_set_emit_asm_comments(CodeGenerator *generator, int enable) {
+  if (!generator) {
+    return;
+  }
+  generator->emit_asm_comments = enable ? 1 : 0;
+}
+
+void code_generator_set_eliminate_unreachable_functions(
+    CodeGenerator *generator, int enable) {
+  if (!generator) {
+    return;
+  }
+  generator->eliminate_unreachable_functions = enable ? 1 : 0;
+}
+
+static char *code_generator_strip_asm_comments(const char *text) {
+  if (!text) {
+    return NULL;
+  }
+
+  size_t length = strlen(text);
+  char *clean = malloc(length + 1);
+  if (!clean) {
+    return NULL;
+  }
+
+  size_t src = 0;
+  size_t dst = 0;
+  while (src < length) {
+    size_t line_start = src;
+    size_t line_end = src;
+    while (line_end < length && text[line_end] != '\n') {
+      line_end++;
+    }
+
+    size_t first_non_space = line_start;
+    while (first_non_space < line_end &&
+           (text[first_non_space] == ' ' || text[first_non_space] == '\t')) {
+      first_non_space++;
+    }
+
+    if (!(first_non_space < line_end && text[first_non_space] == ';')) {
+      int in_quotes = 0;
+      size_t comment_start = line_end;
+      int has_comment = 0;
+      for (size_t i = line_start; i < line_end; i++) {
+        if (text[i] == '"') {
+          in_quotes = !in_quotes;
+          continue;
+        }
+        if (!in_quotes && text[i] == ';') {
+          comment_start = i;
+          has_comment = 1;
+          break;
+        }
+      }
+
+      size_t copy_end = comment_start;
+      if (has_comment) {
+        while (copy_end > line_start &&
+               (text[copy_end - 1] == ' ' || text[copy_end - 1] == '\t')) {
+          copy_end--;
+        }
+      }
+
+      if (copy_end > line_start) {
+        size_t chunk = copy_end - line_start;
+        memcpy(clean + dst, text + line_start, chunk);
+        dst += chunk;
+      }
+    }
+
+    if (line_end < length && text[line_end] == '\n') {
+      clean[dst++] = '\n';
+      src = line_end + 1;
+    } else {
+      src = line_end;
+    }
+  }
+
+  clean[dst] = '\0';
+  return clean;
+}
+
+static int code_generator_append_text(CodeGenerator *generator, const char *text,
+                                      size_t text_len, int is_global_buffer) {
+  if (!generator || !text) {
+    return 0;
+  }
+
+  char **target_buffer = is_global_buffer ? &generator->global_variables_buffer
+                                          : &generator->output_buffer;
+  size_t *target_size =
+      is_global_buffer ? &generator->global_variables_size : &generator->buffer_size;
+  size_t *target_capacity = is_global_buffer ? &generator->global_variables_capacity
+                                             : &generator->buffer_capacity;
+
+  if (*target_size + text_len + 1 > *target_capacity) {
+    size_t new_capacity = (*target_capacity == 0) ? 1024 : (*target_capacity * 2);
+    while (new_capacity < *target_size + text_len + 1) {
+      new_capacity *= 2;
+    }
+
+    char *new_buffer = realloc(*target_buffer, new_capacity);
+    if (!new_buffer) {
+      code_generator_set_error(generator,
+                               "Out of memory while expanding output buffer");
+      return 0;
+    }
+
+    *target_buffer = new_buffer;
+    *target_capacity = new_capacity;
+  }
+
+  memcpy(*target_buffer + *target_size, text, text_len);
+  *target_size += text_len;
+  (*target_buffer)[*target_size] = '\0';
+
+  if (!is_global_buffer && generator->generate_debug_info) {
+    for (size_t i = 0; i < text_len; i++) {
+      if (text[i] == '\n') {
+        generator->current_assembly_line++;
+      }
+    }
+  }
+
+  return 1;
+}
+
 void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
   if (!generator || !format || generator->has_error) {
     return;
@@ -142,47 +274,41 @@ void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
   va_copy(args_copy, args);
   int required_size = vsnprintf(NULL, 0, format, args_copy);
   va_end(args_copy);
-
-  // Ensure buffer has enough space
-  if (generator->buffer_size + required_size + 1 > generator->buffer_capacity) {
-    size_t new_capacity = generator->buffer_capacity * 2;
-    while (new_capacity < generator->buffer_size + required_size + 1) {
-      new_capacity *= 2;
-    }
-
-    char *new_buffer = realloc(generator->output_buffer, new_capacity);
-    if (!new_buffer) {
-      code_generator_set_error(generator,
-                               "Out of memory while expanding output buffer");
-      va_end(args);
-      return;
-    }
-
-    generator->output_buffer = new_buffer;
-    generator->buffer_capacity = new_capacity;
+  if (required_size < 0) {
+    va_end(args);
+    code_generator_set_error(generator, "Failed to format assembly output");
+    return;
   }
 
-  // Append to buffer
-  int written = vsnprintf(generator->output_buffer + generator->buffer_size,
-                          generator->buffer_capacity - generator->buffer_size,
-                          format, args);
-
-  if (written > 0) {
-    generator->buffer_size += written;
-
-    // Count newlines to track assembly line numbers for debug info
-    if (generator->generate_debug_info) {
-      const char *text =
-          generator->output_buffer + generator->buffer_size - written;
-      for (int i = 0; i < written; i++) {
-        if (text[i] == '\n') {
-          generator->current_assembly_line++;
-        }
-      }
-    }
+  char *rendered = malloc((size_t)required_size + 1);
+  if (!rendered) {
+    va_end(args);
+    code_generator_set_error(generator,
+                             "Out of memory while formatting assembly output");
+    return;
   }
+
+  vsnprintf(rendered, (size_t)required_size + 1, format, args);
 
   va_end(args);
+
+  const char *to_append = rendered;
+  char *cleaned = NULL;
+  if (!generator->emit_asm_comments) {
+    cleaned = code_generator_strip_asm_comments(rendered);
+    if (!cleaned) {
+      free(rendered);
+      code_generator_set_error(generator,
+                               "Out of memory while stripping assembly comments");
+      return;
+    }
+    to_append = cleaned;
+  }
+
+  code_generator_append_text(generator, to_append, strlen(to_append), 0);
+
+  free(cleaned);
+  free(rendered);
 }
 
 char *code_generator_get_output(CodeGenerator *generator) {
@@ -360,39 +486,28 @@ void code_generator_emit_to_global_buffer(CodeGenerator *generator, const char *
   va_copy(args_copy, args);
   int required_size = vsnprintf(NULL, 0, format, args_copy);
   va_end(args_copy);
-
-  // Ensure buffer has enough space
-  if (generator->global_variables_size + required_size + 1 >
-      generator->global_variables_capacity) {
-    size_t new_capacity = generator->global_variables_capacity * 2;
-    while (new_capacity <
-           generator->global_variables_size + required_size + 1) {
-      new_capacity *= 2;
-    }
-
-    char *new_buffer =
-        realloc(generator->global_variables_buffer, new_capacity);
-    if (!new_buffer) {
-      code_generator_set_error(
-          generator, "Out of memory while expanding global buffer");
-      va_end(args);
-      return;
-    }
-
-    generator->global_variables_buffer = new_buffer;
-    generator->global_variables_capacity = new_capacity;
+  if (required_size < 0) {
+    va_end(args);
+    code_generator_set_error(generator, "Failed to format global output");
+    return;
   }
 
-  // Append to buffer
-  int written = vsnprintf(
-      generator->global_variables_buffer + generator->global_variables_size,
-      generator->global_variables_capacity - generator->global_variables_size,
-      format, args);
-
-  if (written > 0) {
-    generator->global_variables_size += written;
+  char *rendered = malloc((size_t)required_size + 1);
+  if (!rendered) {
+    va_end(args);
+    code_generator_set_error(generator,
+                             "Out of memory while formatting global output");
+    return;
   }
+  vsnprintf(rendered, (size_t)required_size + 1, format, args);
 
   va_end(args);
+
+  // Global data (db/dq payloads) is emitted incrementally in small chunks.
+  // Do not strip comments here; filtering at chunk granularity can corrupt
+  // literal ';' bytes inside quoted data (for example URLs).
+  code_generator_append_text(generator, rendered, strlen(rendered), 1);
+
+  free(rendered);
 }
 

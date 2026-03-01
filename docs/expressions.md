@@ -75,7 +75,7 @@ Negation `-x`. Logical NOT `!x` (returns 1 if x is 0, otherwise 0). Dereference 
 &x       // address-of
 ```
 
-**Null dereference:** Dereferencing a null pointer (`*p` when `p` is 0) produces undefined behavior. On typical systems it results in a crash (access violation). The compiler does not insert null checks. See [Types](types.md#pointer-types).
+**Null dereference:** In normal builds, the compiler emits runtime null checks for dynamic pointer dereference/indexing and traps with a fatal message on null. In `--release`, those generated checks are disabled; dereferencing a null pointer is undefined behavior and typically crashes. See [Types](types.md#pointer-types).
 
 **Address-of on non-lvalues:** Taking the address of a temporary or non-assignable expression is a compile error. For example, `&(x + 1)` and `&42` are invalid—the operand must be a variable, struct field, array element, or dereferenced pointer. The error message is "Address-of operator requires an assignable expression".
 
@@ -166,4 +166,4 @@ Comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) produce `int32` with val
 
 **Concatenation:** The `+` operator concatenates two `string` values. Both operands must be `string`; the result is a new GC-managed string whose `.chars` points to a freshly allocated buffer and whose `.length` is the sum of the operand lengths. Because the runtime allocates via `gc_alloc`, link `gc.c` and call `gc_init` (the entry point does this automatically) before using string concatenation or other heap-backed string helpers.
 
-**Indexing:** Use `s.chars[i]` to access the i-th byte of a string. The `.chars` field is a pointer; indexing advances by 1 byte (element size of `uint8`). Bounds are not checked; ensure `i < s.length` to avoid undefined behavior.
+**Indexing:** Use `s.chars[i]` to access the i-th byte of a string. The `.chars` field is a pointer; indexing advances by 1 byte (element size of `uint8`). Pointer indexing is not bounds-checked; ensure `i < s.length` to avoid undefined behavior.
