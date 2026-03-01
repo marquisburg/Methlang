@@ -45,6 +45,8 @@ Use `-nostartfiles` so MethASM's entry point (`mainCRTStartup`) is used instead 
   - C toolchain/linker (GCC/MinGW on Windows, GCC/Clang on Linux)
 - Runtime note:
   - Link `src/runtime/gc.c` when using `new` or string concatenation
+  - For GC use from worker threads, attach/detach threads with `gc_thread_attach`/`gc_thread_detach`
+  - Safepoint register spilling defaults to `xmm0..xmm15`; build compiler with `METHASM_SAFEPOINT_SPILL_XMM31` for `xmm0..xmm31` coverage
   - Networking examples may require extra system libs (for example `-lws2_32` on Windows)
 
 ## Docs

@@ -40,7 +40,7 @@ Collection is triggered in two ways: (1) **threshold-based**, when `gc_alloc` wo
 
 ## Roots
 
-The GC scans the stack from the current stack pointer up to the stack base captured at startup. It also uses **registered roots**: pointer slots that the runtime knows contain managed pointers.
+The GC scans each attached thread stack from a captured current stack pointer (safepoint) up to that thread's stack base. It also uses **registered roots**: pointer slots that the runtime knows contain managed pointers.
 
 - **Global variables** that hold pointers are automatically registered as roots.
 - **Local variables** are covered by stack scanning. They do not need `gc_register_root` because the stack scan finds them. The stack is scanned word-by-word; any local that holds a managed pointer is discovered automatically.
@@ -98,12 +98,14 @@ The GC runtime (`gc.h`) exposes these functions for advanced use:
 | `gc_alloc(size_t size)` | Allocate tracked memory |
 | `gc_collect(void *current_rsp)` | Run a collection cycle |
 | `gc_collect_now(void)` | Convenience: collect using current stack |
+| `gc_safepoint(void *current_rsp)` | Cooperative poll point for stop-the-world |
 | `gc_register_root(void **root_slot)` | Register a pointer slot as root |
 | `gc_unregister_root(void **root_slot)` | Unregister a root |
 | `gc_set_collection_threshold(size_t bytes)` | Set auto-collection threshold |
 | `gc_get_collection_threshold(void)` | Get current threshold |
 | `gc_get_allocation_count(void)` | Number of tracked allocations |
 | `gc_get_allocated_bytes(void)` | Total tracked bytes |
+| `gc_get_tlab_chunk_count(void)` | Diagnostic: retained TLAB chunks |
 | `gc_shutdown(void)` | Free all allocations, reset state |
 
 `gc_get_allocation_count` and `gc_get_allocated_bytes` are for diagnostics and tuning. Use them to identify unexpected allocation or to tune the collection threshold.
@@ -125,7 +127,22 @@ Resolve by adding `gc.o` to the link command.
 
 ## GC and Threads
 
-The current GC is **single-threaded**. Using `new` or any GC API from multiple threads is unsafe. Concurrent access to the allocator or collection from another thread can corrupt internal state. Until thread safety is added, use the GC only from the main thread. For multi-threaded programs, prefer `malloc` and explicit lifetime management.
+The runtime supports cooperative multi-threaded collection:
+
+- Threads that allocate with GC should call `gc_thread_attach()` when they start and `gc_thread_detach()` before exit.
+- Attached threads should reach `gc_safepoint()` periodically so stop-the-world collection can capture thread stacks.
+- Collection is still stop-the-world (not concurrent/incremental), but allocation and collection are synchronized internally.
+
+`gc_thread_detach()` now reclaims thread bookkeeping immediately. The detached thread record does not stay resident until `gc_shutdown`. Any TLAB chunks that still contain live objects remain tracked by the runtime and are reclaimed when fully dead (or at shutdown).
+
+### Safepoint Register Visibility
+
+Conservative correctness depends on roots being visible to the scanner at safepoints.
+
+- Baseline x86-64 mode spills GPRs and `xmm0..xmm15` around generated safepoint calls.
+- Optional wider spill mode supports AVX-512 register files: define `METHASM_SAFEPOINT_SPILL_XMM31` when building the compiler to spill `xmm0..xmm31`.
+
+If your deployment baseline is AVX2-era machines, `xmm0..xmm15` is sufficient.
 
 ## Performance Characteristics
 
