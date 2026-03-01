@@ -84,6 +84,8 @@ void parser_advance(Parser *parser) {
   // Clear peek_token to avoid double-free
   parser->peek_token.type = TOKEN_EOF;
   parser->peek_token.value = NULL;
+  parser->peek_token.lexeme.data = NULL;
+  parser->peek_token.lexeme.length = 0;
   parser->peek_token.line = 0;
   parser->peek_token.column = 0;
   parser->peek_token.is_interned = 0;
@@ -295,7 +297,10 @@ void parser_set_error_with_suggestion(Parser *parser, const char *message,
         parser->current_token.line, parser->current_token.column);
 
     size_t span_len = 1;
-    if (parser->current_token.value && parser->current_token.value[0] != '\0') {
+    if (parser->current_token.lexeme.length > 0) {
+      span_len = parser->current_token.lexeme.length;
+    } else if (parser->current_token.value &&
+               parser->current_token.value[0] != '\0') {
       span_len = strlen(parser->current_token.value);
     }
     SourceSpan span = source_span_from_location(location, span_len);

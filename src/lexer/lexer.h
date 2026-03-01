@@ -145,8 +145,14 @@ typedef enum {
 } TokenType;
 
 typedef struct {
+  const char *data;
+  size_t length;
+} StringView;
+
+typedef struct {
   TokenType type;
   char *value;
+  StringView lexeme;
   size_t line;
   size_t column;
   unsigned char is_interned;
