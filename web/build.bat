@@ -11,7 +11,7 @@ if not exist bin\methasm.exe (
 )
 
 echo Compiling server.masm...
-bin\methasm.exe web\server.masm -o web\server.s
+bin\methasm.exe --release web\server.masm -o web\server.s
 if %ERRORLEVEL% NEQ 0 (
     echo MethASM compilation failed.
     exit /b 1

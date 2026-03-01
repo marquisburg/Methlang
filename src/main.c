@@ -136,6 +136,13 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(argv[i], "-O") == 0 ||
                strcmp(argv[i], "--optimize") == 0) {
       options.optimize = 1;
+    } else if (strcmp(argv[i], "-r") == 0 ||
+               strcmp(argv[i], "--release") == 0) {
+      options.release = 1;
+      options.optimize = 1;
+      options.strip_asm_comments = 1;
+    } else if (strcmp(argv[i], "--strip-comments") == 0) {
+      options.strip_asm_comments = 1;
     } else if (strcmp(argv[i], "--prelude") == 0) {
       options.prelude = 1;
     } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -278,6 +285,11 @@ int compile_file(const char *input_filename, const char *output_filename,
     return 1;
   }
 
+  code_generator_set_emit_asm_comments(code_generator,
+                                       options->strip_asm_comments ? 0 : 1);
+  code_generator_set_eliminate_unreachable_functions(
+      code_generator, options->release ? 1 : 0);
+
   int result = 0;
 
   // Parse the source code
@@ -359,8 +371,10 @@ int compile_file(const char *input_filename, const char *output_filename,
   }
 
   // Lower to the compiler IR before backend code generation.
+  int emit_runtime_checks = options->release ? 0 : 1;
   ir_program =
-      ir_lower_program(program, type_checker, symbol_table, &ir_error_message);
+      ir_lower_program(program, type_checker, symbol_table, &ir_error_message,
+                       emit_runtime_checks);
   if (!ir_program) {
     fprintf(stderr, "IR lowering error: %s\n",
             ir_error_message ? ir_error_message : "Unknown error");
@@ -378,7 +392,7 @@ int compile_file(const char *input_filename, const char *output_filename,
 
   code_generator_set_ir_program(code_generator, ir_program);
 
-  if (options->debug_mode || options->optimize) {
+  if (options->debug_mode || (options->optimize && !options->release)) {
     char *ir_output = build_sidecar_filename(output_filename, ".ir");
     if (!ir_output) {
       fprintf(stderr,
@@ -535,6 +549,9 @@ void print_usage(const char *program_name) {
   printf("  --debug-format <fmt> Debug format: dwarf, stabs, or map (default: "
          "dwarf)\n");
   printf("  -O, --optimize      Enable optimizations\n");
+  printf("  -r, --release       Optimize for size (enables -O, strips comments, "
+         "and drops unreachable functions)\n");
+  printf("  --strip-comments    Omit emitted assembly comments\n");
   printf("  --prelude           Auto-import the standard prelude (std/io, "
          "std/net, etc.)\n");
   printf("  -h, --help          Show this help message\n");

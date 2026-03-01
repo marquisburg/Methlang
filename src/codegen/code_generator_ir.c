@@ -30,6 +30,690 @@ typedef struct {
   size_t capacity;
 } IRLocalTable;
 
+typedef struct {
+  char *name;
+  size_t use_count;
+  int address_taken;
+} IRSymbolStatsEntry;
+
+typedef struct {
+  IRSymbolStatsEntry *items;
+  size_t count;
+  size_t capacity;
+} IRSymbolStatsMap;
+
+typedef struct {
+  char *name;
+  size_t use_count;
+} IRTempUseEntry;
+
+typedef struct {
+  IRTempUseEntry *items;
+  size_t count;
+  size_t capacity;
+} IRTempUseMap;
+
+typedef struct {
+  const char *name;
+  x86Register reg;
+  int save_offset;
+} IRPromotedSymbol;
+
+static const x86Register IR_PROMOTION_REGISTERS[] = {
+    REG_R12, REG_R13, REG_R14, REG_R15, REG_RBX};
+
+static char *ir_codegen_strdup(const char *text) {
+  if (!text) {
+    return NULL;
+  }
+  size_t length = strlen(text) + 1;
+  char *copy = malloc(length);
+  if (!copy) {
+    return NULL;
+  }
+  memcpy(copy, text, length);
+  return copy;
+}
+
+static int ir_symbol_stats_map_find(const IRSymbolStatsMap *map,
+                                    const char *name) {
+  if (!map || !name) {
+    return -1;
+  }
+  for (size_t i = 0; i < map->count; i++) {
+    if (map->items[i].name && strcmp(map->items[i].name, name) == 0) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+static IRSymbolStatsEntry *ir_symbol_stats_map_get_or_add(IRSymbolStatsMap *map,
+                                                          const char *name) {
+  if (!map || !name) {
+    return NULL;
+  }
+
+  int existing = ir_symbol_stats_map_find(map, name);
+  if (existing >= 0) {
+    return &map->items[existing];
+  }
+
+  if (map->count >= map->capacity) {
+    size_t new_capacity = (map->capacity == 0) ? 16 : map->capacity * 2;
+    IRSymbolStatsEntry *new_items =
+        realloc(map->items, new_capacity * sizeof(IRSymbolStatsEntry));
+    if (!new_items) {
+      return NULL;
+    }
+    map->items = new_items;
+    map->capacity = new_capacity;
+  }
+
+  char *name_copy = ir_codegen_strdup(name);
+  if (!name_copy) {
+    return NULL;
+  }
+
+  IRSymbolStatsEntry *entry = &map->items[map->count++];
+  entry->name = name_copy;
+  entry->use_count = 0;
+  entry->address_taken = 0;
+  return entry;
+}
+
+static int ir_symbol_stats_map_add_use(IRSymbolStatsMap *map,
+                                       const char *name) {
+  IRSymbolStatsEntry *entry = ir_symbol_stats_map_get_or_add(map, name);
+  if (!entry) {
+    return 0;
+  }
+  entry->use_count++;
+  return 1;
+}
+
+static int ir_symbol_stats_map_mark_address_taken(IRSymbolStatsMap *map,
+                                                  const char *name) {
+  IRSymbolStatsEntry *entry = ir_symbol_stats_map_get_or_add(map, name);
+  if (!entry) {
+    return 0;
+  }
+  entry->address_taken = 1;
+  return 1;
+}
+
+static size_t ir_symbol_stats_map_get_use_count(const IRSymbolStatsMap *map,
+                                                const char *name) {
+  int index = ir_symbol_stats_map_find(map, name);
+  if (index < 0) {
+    return 0;
+  }
+  return map->items[index].use_count;
+}
+
+static int ir_symbol_stats_map_is_address_taken(const IRSymbolStatsMap *map,
+                                                const char *name) {
+  int index = ir_symbol_stats_map_find(map, name);
+  if (index < 0) {
+    return 0;
+  }
+  return map->items[index].address_taken;
+}
+
+static void ir_symbol_stats_map_destroy(IRSymbolStatsMap *map) {
+  if (!map) {
+    return;
+  }
+  for (size_t i = 0; i < map->count; i++) {
+    free(map->items[i].name);
+  }
+  free(map->items);
+  map->items = NULL;
+  map->count = 0;
+  map->capacity = 0;
+}
+
+static int ir_symbol_stats_map_record_operand(IRSymbolStatsMap *map,
+                                              const IROperand *operand) {
+  if (!map || !operand || operand->kind != IR_OPERAND_SYMBOL ||
+      !operand->name) {
+    return 1;
+  }
+  return ir_symbol_stats_map_add_use(map, operand->name);
+}
+
+static int ir_symbol_stats_map_record_instruction(IRSymbolStatsMap *map,
+                                                  const IRInstruction *instr) {
+  if (!map || !instr) {
+    return 0;
+  }
+
+  if (!ir_symbol_stats_map_record_operand(map, &instr->dest) ||
+      !ir_symbol_stats_map_record_operand(map, &instr->lhs) ||
+      !ir_symbol_stats_map_record_operand(map, &instr->rhs)) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < instr->argument_count; i++) {
+    if (!ir_symbol_stats_map_record_operand(map, &instr->arguments[i])) {
+      return 0;
+    }
+  }
+
+  if (instr->op == IR_OP_ADDRESS_OF && instr->lhs.kind == IR_OPERAND_SYMBOL &&
+      instr->lhs.name) {
+    if (!ir_symbol_stats_map_mark_address_taken(map, instr->lhs.name)) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+static int ir_temp_use_map_find(const IRTempUseMap *map, const char *name) {
+  if (!map || !name) {
+    return -1;
+  }
+  for (size_t i = 0; i < map->count; i++) {
+    if (map->items[i].name && strcmp(map->items[i].name, name) == 0) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+static int ir_temp_use_map_add(IRTempUseMap *map, const char *name) {
+  if (!map || !name) {
+    return 0;
+  }
+
+  int existing = ir_temp_use_map_find(map, name);
+  if (existing >= 0) {
+    map->items[existing].use_count++;
+    return 1;
+  }
+
+  if (map->count >= map->capacity) {
+    size_t new_capacity = (map->capacity == 0) ? 16 : map->capacity * 2;
+    IRTempUseEntry *new_items =
+        realloc(map->items, new_capacity * sizeof(IRTempUseEntry));
+    if (!new_items) {
+      return 0;
+    }
+    map->items = new_items;
+    map->capacity = new_capacity;
+  }
+
+  char *name_copy = ir_codegen_strdup(name);
+  if (!name_copy) {
+    return 0;
+  }
+
+  map->items[map->count].name = name_copy;
+  map->items[map->count].use_count = 1;
+  map->count++;
+  return 1;
+}
+
+static size_t ir_temp_use_map_get(const IRTempUseMap *map, const char *name) {
+  int index = ir_temp_use_map_find(map, name);
+  if (index < 0) {
+    return 0;
+  }
+  return map->items[index].use_count;
+}
+
+static void ir_temp_use_map_destroy(IRTempUseMap *map) {
+  if (!map) {
+    return;
+  }
+  for (size_t i = 0; i < map->count; i++) {
+    free(map->items[i].name);
+  }
+  free(map->items);
+  map->items = NULL;
+  map->count = 0;
+  map->capacity = 0;
+}
+
+static int ir_temp_use_map_record_operand(IRTempUseMap *map,
+                                          const IROperand *operand) {
+  if (!map || !operand || operand->kind != IR_OPERAND_TEMP || !operand->name) {
+    return 1;
+  }
+  return ir_temp_use_map_add(map, operand->name);
+}
+
+static int ir_temp_use_map_record_instruction(IRTempUseMap *map,
+                                              const IRInstruction *instr) {
+  if (!map || !instr) {
+    return 0;
+  }
+
+  if (instr->op == IR_OP_STORE) {
+    if (!ir_temp_use_map_record_operand(map, &instr->dest) ||
+        !ir_temp_use_map_record_operand(map, &instr->lhs) ||
+        !ir_temp_use_map_record_operand(map, &instr->rhs)) {
+      return 0;
+    }
+  } else {
+    if (!ir_temp_use_map_record_operand(map, &instr->lhs) ||
+        !ir_temp_use_map_record_operand(map, &instr->rhs)) {
+      return 0;
+    }
+  }
+
+  for (size_t i = 0; i < instr->argument_count; i++) {
+    if (!ir_temp_use_map_record_operand(map, &instr->arguments[i])) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+static int ir_is_integer_or_pointer_promotable(Type *type) {
+  if (!type || type->size == 0 || type->size > 8) {
+    return 0;
+  }
+
+  switch (type->kind) {
+  case TYPE_INT8:
+  case TYPE_INT16:
+  case TYPE_INT32:
+  case TYPE_INT64:
+  case TYPE_UINT8:
+  case TYPE_UINT16:
+  case TYPE_UINT32:
+  case TYPE_UINT64:
+  case TYPE_POINTER:
+  case TYPE_FUNCTION_POINTER:
+  case TYPE_ENUM:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+static int ir_promoted_symbol_find(IRPromotedSymbol *symbols, size_t count,
+                                   const char *name) {
+  if (!symbols || !name) {
+    return -1;
+  }
+  for (size_t i = 0; i < count; i++) {
+    if (symbols[i].name && strcmp(symbols[i].name, name) == 0) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+static int ir_immediate_fits_signed_32(long long value) {
+  return value >= (long long)INT_MIN && value <= (long long)INT_MAX;
+}
+
+static Symbol *code_generator_ir_lookup_register_symbol(CodeGenerator *generator,
+                                                        const IROperand *operand) {
+  if (!generator || !operand || operand->kind != IR_OPERAND_SYMBOL ||
+      !operand->name) {
+    return NULL;
+  }
+
+  Symbol *symbol = symbol_table_lookup(generator->symbol_table, operand->name);
+  if (!symbol ||
+      (symbol->kind != SYMBOL_VARIABLE && symbol->kind != SYMBOL_PARAMETER) ||
+      !symbol->data.variable.is_in_register) {
+    return NULL;
+  }
+
+  return symbol;
+}
+
+static int code_generator_ir_symbol_width_bits(const Symbol *symbol) {
+  int size = 8;
+  if (symbol && symbol->type && symbol->type->size > 0 && symbol->type->size <= 8) {
+    size = (int)symbol->type->size;
+  }
+
+  if (size <= 1) {
+    return 8;
+  }
+  if (size == 2) {
+    return 16;
+  }
+  if (size == 4) {
+    return 32;
+  }
+  return 64;
+}
+
+static const char *code_generator_ir_symbol_register_name(const Symbol *symbol,
+                                                          int width_bits) {
+  if (!symbol) {
+    return NULL;
+  }
+
+  x86Register reg = (x86Register)symbol->data.variable.register_id;
+  if (width_bits == 64) {
+    return code_generator_get_register_name(reg);
+  }
+  return code_generator_get_subregister_name(reg, width_bits);
+}
+
+static const char *code_generator_ir_binary_register_instruction(const char *op) {
+  if (!op) {
+    return NULL;
+  }
+  if (strcmp(op, "+") == 0) {
+    return "add";
+  }
+  if (strcmp(op, "-") == 0) {
+    return "sub";
+  }
+  if (strcmp(op, "&") == 0) {
+    return "and";
+  }
+  if (strcmp(op, "|") == 0) {
+    return "or";
+  }
+  if (strcmp(op, "^") == 0) {
+    return "xor";
+  }
+  return NULL;
+}
+
+static int code_generator_try_emit_ir_assign_symbol_to_symbol(
+    CodeGenerator *generator, const IRInstruction *instruction, int *emitted) {
+  if (emitted) {
+    *emitted = 0;
+  }
+  if (!generator || !instruction) {
+    return 0;
+  }
+
+  Symbol *dest_symbol =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->dest);
+  Symbol *lhs_symbol =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->lhs);
+  if (!dest_symbol || !lhs_symbol) {
+    return 1;
+  }
+
+  int dest_bits = code_generator_ir_symbol_width_bits(dest_symbol);
+  int lhs_bits = code_generator_ir_symbol_width_bits(lhs_symbol);
+  if (dest_bits != lhs_bits) {
+    return 1;
+  }
+
+  const char *dest_reg =
+      code_generator_ir_symbol_register_name(dest_symbol, dest_bits);
+  const char *lhs_reg =
+      code_generator_ir_symbol_register_name(lhs_symbol, lhs_bits);
+  if (!dest_reg || !lhs_reg) {
+    code_generator_set_error(generator,
+                             "Invalid register in IR symbol assign fast path");
+    return 0;
+  }
+
+  if (strcmp(dest_reg, lhs_reg) != 0) {
+    code_generator_emit(generator, "    mov %s, %s\n", dest_reg, lhs_reg);
+  }
+
+  if (emitted) {
+    *emitted = 1;
+  }
+  return 1;
+}
+
+static int code_generator_try_emit_ir_binary_register_fastpath(
+    CodeGenerator *generator, const IRInstruction *instruction, int *emitted) {
+  if (emitted) {
+    *emitted = 0;
+  }
+  if (!generator || !instruction || !instruction->text) {
+    return 0;
+  }
+  if (instruction->is_float) {
+    return 1;
+  }
+
+  const char *arith_instruction =
+      code_generator_ir_binary_register_instruction(instruction->text);
+  if (!arith_instruction) {
+    return 1;
+  }
+
+  Symbol *dest_symbol =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->dest);
+  Symbol *lhs_symbol =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->lhs);
+  if (!dest_symbol || !lhs_symbol) {
+    return 1;
+  }
+
+  int bits = code_generator_ir_symbol_width_bits(dest_symbol);
+  if (bits != code_generator_ir_symbol_width_bits(lhs_symbol)) {
+    return 1;
+  }
+
+  const char *dest_reg = code_generator_ir_symbol_register_name(dest_symbol, bits);
+  const char *lhs_reg = code_generator_ir_symbol_register_name(lhs_symbol, bits);
+  if (!dest_reg || !lhs_reg) {
+    code_generator_set_error(generator,
+                             "Invalid register in IR binary fast path");
+    return 0;
+  }
+
+  if (instruction->rhs.kind == IR_OPERAND_INT &&
+      ir_immediate_fits_signed_32(instruction->rhs.int_value) &&
+      instruction->lhs.kind == IR_OPERAND_SYMBOL &&
+      instruction->lhs.name && instruction->dest.kind == IR_OPERAND_SYMBOL &&
+      instruction->dest.name &&
+      strcmp(instruction->lhs.name, instruction->dest.name) == 0) {
+    code_generator_emit(generator, "    %s %s, %lld\n", arith_instruction,
+                        dest_reg, instruction->rhs.int_value);
+    if (emitted) {
+      *emitted = 1;
+    }
+    return 1;
+  }
+
+  Symbol *rhs_symbol =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->rhs);
+  if (!rhs_symbol || bits != code_generator_ir_symbol_width_bits(rhs_symbol)) {
+    return 1;
+  }
+
+  const char *rhs_reg = code_generator_ir_symbol_register_name(rhs_symbol, bits);
+  if (!rhs_reg) {
+    code_generator_set_error(generator,
+                             "Invalid RHS register in IR binary fast path");
+    return 0;
+  }
+
+  if (instruction->dest.kind != IR_OPERAND_SYMBOL || !instruction->dest.name ||
+      instruction->rhs.kind != IR_OPERAND_SYMBOL || !instruction->rhs.name) {
+    return 1;
+  }
+
+  int dest_is_lhs = strcmp(instruction->dest.name, instruction->lhs.name) == 0;
+  int dest_is_rhs = strcmp(instruction->dest.name, instruction->rhs.name) == 0;
+
+  if (!dest_is_lhs) {
+    if (dest_is_rhs) {
+      if (strcmp(instruction->text, "-") == 0) {
+        return 1;
+      }
+      const char *tmp_reg = lhs_reg;
+      lhs_reg = rhs_reg;
+      rhs_reg = tmp_reg;
+    } else {
+      code_generator_emit(generator, "    mov %s, %s\n", dest_reg, lhs_reg);
+    }
+  }
+  code_generator_emit(generator, "    %s %s, %s\n", arith_instruction, dest_reg,
+                      rhs_reg);
+
+  if (emitted) {
+    *emitted = 1;
+  }
+  return 1;
+}
+
+static int ir_binary_operator_is_comparison(const char *op) {
+  if (!op) {
+    return 0;
+  }
+  return strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+         strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+         strcmp(op, ">") == 0 || strcmp(op, ">=") == 0;
+}
+
+static const char *ir_false_jump_for_comparison(const char *op) {
+  if (!op) {
+    return NULL;
+  }
+  if (strcmp(op, "==") == 0) {
+    return "jne";
+  }
+  if (strcmp(op, "!=") == 0) {
+    return "je";
+  }
+  if (strcmp(op, "<") == 0) {
+    return "jge";
+  }
+  if (strcmp(op, "<=") == 0) {
+    return "jg";
+  }
+  if (strcmp(op, ">") == 0) {
+    return "jle";
+  }
+  if (strcmp(op, ">=") == 0) {
+    return "jl";
+  }
+  return NULL;
+}
+
+static const char *ir_invert_conditional_jump(const char *jump) {
+  if (!jump) {
+    return NULL;
+  }
+  if (strcmp(jump, "je") == 0) {
+    return "jne";
+  }
+  if (strcmp(jump, "jne") == 0) {
+    return "je";
+  }
+  if (strcmp(jump, "jl") == 0) {
+    return "jge";
+  }
+  if (strcmp(jump, "jge") == 0) {
+    return "jl";
+  }
+  if (strcmp(jump, "jle") == 0) {
+    return "jg";
+  }
+  if (strcmp(jump, "jg") == 0) {
+    return "jle";
+  }
+  return NULL;
+}
+
+static int code_generator_try_emit_ir_compare_branch_register_fastpath(
+    CodeGenerator *generator, const IRInstruction *compare_instruction,
+    const char *false_jump, const char *target_label, int *emitted) {
+  if (emitted) {
+    *emitted = 0;
+  }
+  if (!generator || !compare_instruction || !false_jump || !target_label) {
+    return 0;
+  }
+  if (compare_instruction->is_float) {
+    return 1;
+  }
+
+  Symbol *lhs_symbol = code_generator_ir_lookup_register_symbol(
+      generator, &compare_instruction->lhs);
+  if (!lhs_symbol) {
+    return 1;
+  }
+
+  int lhs_bits = code_generator_ir_symbol_width_bits(lhs_symbol);
+  const char *lhs_reg =
+      code_generator_ir_symbol_register_name(lhs_symbol, lhs_bits);
+  if (!lhs_reg) {
+    code_generator_set_error(
+        generator, "Invalid lhs register in IR compare fast path");
+    return 0;
+  }
+
+  if (compare_instruction->rhs.kind == IR_OPERAND_INT &&
+      ir_immediate_fits_signed_32(compare_instruction->rhs.int_value)) {
+    code_generator_emit(generator, "    cmp %s, %lld\n", lhs_reg,
+                        compare_instruction->rhs.int_value);
+    code_generator_emit(generator, "    %s %s\n", false_jump, target_label);
+    if (emitted) {
+      *emitted = 1;
+    }
+    return 1;
+  }
+
+  Symbol *rhs_symbol = code_generator_ir_lookup_register_symbol(
+      generator, &compare_instruction->rhs);
+  if (!rhs_symbol ||
+      code_generator_ir_symbol_width_bits(rhs_symbol) != lhs_bits) {
+    return 1;
+  }
+
+  const char *rhs_reg =
+      code_generator_ir_symbol_register_name(rhs_symbol, lhs_bits);
+  if (!rhs_reg) {
+    code_generator_set_error(
+        generator, "Invalid rhs register in IR compare fast path");
+    return 0;
+  }
+
+  code_generator_emit(generator, "    cmp %s, %s\n", lhs_reg, rhs_reg);
+  code_generator_emit(generator, "    %s %s\n", false_jump, target_label);
+  if (emitted) {
+    *emitted = 1;
+  }
+  return 1;
+}
+
+static int ir_function_requires_entry_safepoint(const IRFunction *function) {
+  if (!function) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (!instruction) {
+      continue;
+    }
+
+    if (instruction->op == IR_OP_CALL) {
+      // Null/bounds trap blocks lower to puts+exit calls. They are cold terminal
+      // paths and should not force every hot invocation through entry safepoint
+      // spill/restore.
+      if (instruction->text &&
+          (strcmp(instruction->text, "puts") == 0 ||
+           strcmp(instruction->text, "exit") == 0)) {
+        continue;
+      }
+      return 1;
+    }
+
+    if (instruction->op == IR_OP_CALL_INDIRECT ||
+        instruction->op == IR_OP_NEW ||
+        instruction->op == IR_OP_INLINE_ASM) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
 static int ir_local_table_add(IRLocalTable *table, const char *name,
                               const char *type_name, SourceLocation location,
                               int size, int alignment) {
@@ -211,6 +895,29 @@ static int code_generator_load_ir_operand(CodeGenerator *generator,
                              operand->kind);
     return 0;
   }
+}
+
+static int code_generator_load_ir_operand_into_register(
+    CodeGenerator *generator, const IROperand *operand,
+    IRTempTable *temp_table, x86Register target_register) {
+  if (!generator) {
+    return 0;
+  }
+
+  if (!code_generator_load_ir_operand(generator, operand, temp_table)) {
+    return 0;
+  }
+
+  if (target_register != REG_RAX) {
+    const char *target_name = code_generator_get_register_name(target_register);
+    if (!target_name) {
+      code_generator_set_error(generator, "Invalid target register in IR load");
+      return 0;
+    }
+    code_generator_emit(generator, "    mov %s, rax\n", target_name);
+  }
+
+  return 1;
 }
 
 static int code_generator_store_ir_destination(CodeGenerator *generator,
@@ -431,18 +1138,14 @@ static int code_generator_emit_ir_store(CodeGenerator *generator,
     return 0;
   }
 
+  if (!code_generator_load_ir_operand_into_register(
+          generator, &instruction->lhs, temp_table, REG_RCX)) {
+    return 0;
+  }
   if (!code_generator_load_ir_operand(generator, &instruction->dest,
                                       temp_table)) {
     return 0;
   }
-  code_generator_emit(generator, "    push rax\n");
-
-  if (!code_generator_load_ir_operand(generator, &instruction->lhs,
-                                      temp_table)) {
-    return 0;
-  }
-  code_generator_emit(generator, "    mov rcx, rax\n");
-  code_generator_emit(generator, "    pop rax\n");
   code_generator_emit_ir_store_to_address(generator, size);
   return 1;
 }
@@ -491,6 +1194,45 @@ static int code_generator_emit_ir_new(CodeGenerator *generator,
                                              temp_table);
 }
 
+static int code_generator_extract_positive_power_of_two(long long value,
+                                                        unsigned int *shift_out,
+                                                        unsigned long long *mask_out) {
+  if (!shift_out || !mask_out || value <= 0) {
+    return 0;
+  }
+
+  unsigned long long uvalue = (unsigned long long)value;
+  if ((uvalue & (uvalue - 1ULL)) != 0ULL) {
+    return 0;
+  }
+
+  unsigned int shift = 0;
+  unsigned long long cursor = uvalue;
+  while (cursor > 1ULL) {
+    cursor >>= 1ULL;
+    shift++;
+  }
+
+  *shift_out = shift;
+  *mask_out = uvalue - 1ULL;
+  return 1;
+}
+
+static void code_generator_emit_and_mask(CodeGenerator *generator,
+                                         const char *target_register,
+                                         unsigned long long mask) {
+  if (!generator || !target_register) {
+    return;
+  }
+
+  if (mask <= 0x7fffffffULL) {
+    code_generator_emit(generator, "    and %s, %llu\n", target_register, mask);
+  } else {
+    code_generator_emit(generator, "    mov r10, 0x%016llx\n", mask);
+    code_generator_emit(generator, "    and %s, r10\n", target_register);
+  }
+}
+
 static int
 code_generator_emit_ir_binary_fallback(CodeGenerator *generator,
                                        const IRInstruction *instruction,
@@ -499,20 +1241,71 @@ code_generator_emit_ir_binary_fallback(CodeGenerator *generator,
     return 0;
   }
 
+  const char *op = instruction->text;
+
+  {
+    int emitted_fastpath = 0;
+    if (!code_generator_try_emit_ir_binary_register_fastpath(
+            generator, instruction, &emitted_fastpath)) {
+      return 0;
+    }
+    if (emitted_fastpath) {
+      return 1;
+    }
+  }
+
+  if (!instruction->is_float &&
+      (strcmp(op, "/") == 0 || strcmp(op, "%") == 0) &&
+      instruction->rhs.kind == IR_OPERAND_INT) {
+    unsigned int shift = 0;
+    unsigned long long mask = 0;
+    if (code_generator_extract_positive_power_of_two(
+            instruction->rhs.int_value, &shift, &mask)) {
+      if (!code_generator_load_ir_operand(generator, &instruction->lhs,
+                                          temp_table)) {
+        return 0;
+      }
+
+      if (strcmp(op, "/") == 0) {
+        // Signed division by 2^k with truncation toward zero.
+        if (shift != 0) {
+          code_generator_emit(generator, "    mov rcx, rax\n");
+          code_generator_emit(generator, "    sar rcx, 63\n");
+          code_generator_emit_and_mask(generator, "rcx", mask);
+          code_generator_emit(generator, "    add rax, rcx\n");
+          code_generator_emit(generator, "    sar rax, %u\n", shift);
+        }
+      } else {
+        // Signed remainder by 2^k: r = x - (q << k), q = trunc(x / 2^k).
+        if (shift == 0) {
+          code_generator_emit(generator, "    mov rax, 0\n");
+        } else {
+          code_generator_emit(generator, "    mov r11, rax\n");
+          code_generator_emit(generator, "    mov rcx, rax\n");
+          code_generator_emit(generator, "    sar rcx, 63\n");
+          code_generator_emit_and_mask(generator, "rcx", mask);
+          code_generator_emit(generator, "    add rax, rcx\n");
+          code_generator_emit(generator, "    sar rax, %u\n", shift);
+          code_generator_emit(generator, "    shl rax, %u\n", shift);
+          code_generator_emit(generator, "    sub r11, rax\n");
+          code_generator_emit(generator, "    mov rax, r11\n");
+        }
+      }
+
+      return code_generator_store_ir_destination(generator, &instruction->dest,
+                                                 temp_table);
+    }
+  }
+
+  if (!code_generator_load_ir_operand_into_register(
+          generator, &instruction->rhs, temp_table, REG_R10)) {
+    return 0;
+  }
   if (!code_generator_load_ir_operand(generator, &instruction->lhs,
                                       temp_table)) {
     return 0;
   }
-  code_generator_emit(generator, "    push rax\n");
 
-  if (!code_generator_load_ir_operand(generator, &instruction->rhs,
-                                      temp_table)) {
-    return 0;
-  }
-  code_generator_emit(generator, "    mov r10, rax\n");
-  code_generator_emit(generator, "    pop rax\n");
-
-  const char *op = instruction->text;
   if (instruction->is_float) {
     code_generator_emit(generator, "    movq xmm0, rax\n");
     code_generator_emit(generator, "    movq xmm1, r10\n");
@@ -864,9 +1657,17 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
   code_generator_emit(generator, "    ; IR call: %s (%zu args)\n",
                       instruction->text, argument_count);
 
-  int shadow_space = (conv_spec->convention == CALLING_CONV_MS_X64)
-                         ? conv_spec->shadow_space_size
-                         : 0;
+  int omit_shadow_space = 0;
+  if (conv_spec->convention == CALLING_CONV_MS_X64 && function_symbol &&
+      function_symbol->kind == SYMBOL_FUNCTION && !function_symbol->is_extern &&
+      argument_count <= ms_param_slot_count) {
+    // Internal register-only calls do not need caller home slots.
+    omit_shadow_space = 1;
+  }
+  int shadow_space =
+      (conv_spec->convention == CALLING_CONV_MS_X64 && !omit_shadow_space)
+          ? conv_spec->shadow_space_size
+          : 0;
   int stack_arg_space = stack_argument_count * 8;
   int call_stack_total = shadow_space + stack_arg_space;
   if ((call_stack_total % 16) != 0) {
@@ -1051,6 +1852,214 @@ static int code_generator_emit_ir_cast(CodeGenerator *generator,
                                              temp_table);
 }
 
+static int code_generator_emit_ir_compare_branch_with_jump(
+    CodeGenerator *generator, const IRInstruction *compare_instruction,
+    const char *jump, const char *target_label, IRTempTable *temp_table) {
+  if (!generator || !compare_instruction || !jump || !target_label ||
+      !temp_table) {
+    return 0;
+  }
+
+  {
+    int emitted_fastpath = 0;
+    if (!code_generator_try_emit_ir_compare_branch_register_fastpath(
+            generator, compare_instruction, jump, target_label,
+            &emitted_fastpath)) {
+      return 0;
+    }
+    if (emitted_fastpath) {
+      return 1;
+    }
+  }
+
+  if (!code_generator_load_ir_operand_into_register(
+          generator, &compare_instruction->rhs, temp_table, REG_R10)) {
+    return 0;
+  }
+  if (!code_generator_load_ir_operand(generator, &compare_instruction->lhs,
+                                      temp_table)) {
+    return 0;
+  }
+  code_generator_emit(generator, "    cmp rax, r10\n");
+  code_generator_emit(generator, "    %s %s\n", jump, target_label);
+  return 1;
+}
+
+static int code_generator_emit_ir_compare_branch_zero(
+    CodeGenerator *generator, const IRInstruction *compare_instruction,
+    const IRInstruction *branch_instruction, IRTempTable *temp_table) {
+  if (!generator || !compare_instruction || !branch_instruction ||
+      !temp_table || !branch_instruction->text) {
+    return 0;
+  }
+
+  const char *false_jump =
+      ir_false_jump_for_comparison(compare_instruction->text);
+  if (!false_jump) {
+    return 0;
+  }
+
+  return code_generator_emit_ir_compare_branch_with_jump(
+      generator, compare_instruction, false_jump, branch_instruction->text,
+      temp_table);
+}
+
+static const char *code_generator_ir_memory_operand_for_size(int size_bytes);
+
+static int code_generator_emit_ir_branch_zero_jump_over_label(
+    CodeGenerator *generator, const IRInstruction *branch_instruction,
+    const IRInstruction *jump_instruction, IRTempTable *temp_table) {
+  if (!generator || !branch_instruction || !jump_instruction || !temp_table ||
+      !jump_instruction->text) {
+    return 0;
+  }
+
+  if (branch_instruction->lhs.kind == IR_OPERAND_INT) {
+    if (branch_instruction->lhs.int_value != 0) {
+      code_generator_emit(generator, "    jmp %s\n", jump_instruction->text);
+    }
+    return 1;
+  }
+
+  if (branch_instruction->lhs.kind == IR_OPERAND_SYMBOL &&
+      branch_instruction->lhs.name) {
+    Symbol *symbol = symbol_table_lookup(generator->symbol_table,
+                                         branch_instruction->lhs.name);
+    if (symbol &&
+        (symbol->kind == SYMBOL_VARIABLE || symbol->kind == SYMBOL_PARAMETER)) {
+      if (symbol->data.variable.is_in_register) {
+        const char *reg_name = code_generator_get_register_name(
+            (x86Register)symbol->data.variable.register_id);
+        if (!reg_name) {
+          code_generator_set_error(
+              generator,
+              "Invalid register in IR branch-nonzero fast path");
+          return 0;
+        }
+        code_generator_emit(generator, "    test %s, %s\n", reg_name, reg_name);
+        code_generator_emit(generator, "    jnz %s\n", jump_instruction->text);
+        return 1;
+      }
+
+      if (symbol->data.variable.memory_offset > 0) {
+        int size_bytes = 8;
+        if (symbol->type && symbol->type->size > 0 && symbol->type->size <= 8) {
+          size_bytes = (int)symbol->type->size;
+        }
+        const char *mem_op = code_generator_ir_memory_operand_for_size(size_bytes);
+        code_generator_emit(generator, "    cmp %s [rbp - %d], 0\n", mem_op,
+                            symbol->data.variable.memory_offset);
+        code_generator_emit(generator, "    jnz %s\n", jump_instruction->text);
+        return 1;
+      }
+    }
+  }
+
+  if (branch_instruction->lhs.kind == IR_OPERAND_TEMP &&
+      branch_instruction->lhs.name) {
+    int offset = ir_temp_table_get_offset(temp_table, branch_instruction->lhs.name);
+    if (offset > 0) {
+      code_generator_emit(generator, "    cmp qword [rbp - %d], 0\n", offset);
+      code_generator_emit(generator, "    jnz %s\n", jump_instruction->text);
+      return 1;
+    }
+  }
+
+  if (!code_generator_load_ir_operand(generator, &branch_instruction->lhs,
+                                      temp_table)) {
+    return 0;
+  }
+  code_generator_emit(generator, "    test rax, rax\n");
+  code_generator_emit(generator, "    jnz %s\n", jump_instruction->text);
+  return 1;
+}
+
+static const char *code_generator_ir_memory_operand_for_size(int size_bytes) {
+  if (size_bytes <= 1) {
+    return "byte";
+  }
+  if (size_bytes == 2) {
+    return "word";
+  }
+  if (size_bytes == 4) {
+    return "dword";
+  }
+  return "qword";
+}
+
+static int code_generator_try_emit_ir_branch_zero_fastpath(
+    CodeGenerator *generator, const IRInstruction *instruction,
+    IRTempTable *temp_table, int *emitted) {
+  if (emitted) {
+    *emitted = 0;
+  }
+  if (!generator || !instruction || !instruction->text || !temp_table) {
+    return 0;
+  }
+
+  if (instruction->lhs.kind == IR_OPERAND_INT) {
+    if (instruction->lhs.int_value == 0) {
+      code_generator_emit(generator, "    jmp %s\n", instruction->text);
+    }
+    if (emitted) {
+      *emitted = 1;
+    }
+    return 1;
+  }
+
+  if (instruction->lhs.kind == IR_OPERAND_SYMBOL && instruction->lhs.name) {
+    Symbol *symbol =
+        symbol_table_lookup(generator->symbol_table, instruction->lhs.name);
+    if (symbol &&
+        (symbol->kind == SYMBOL_VARIABLE || symbol->kind == SYMBOL_PARAMETER)) {
+      if (symbol->data.variable.is_in_register) {
+        const char *reg_name = code_generator_get_register_name(
+            (x86Register)symbol->data.variable.register_id);
+        if (!reg_name) {
+          code_generator_set_error(
+              generator, "Invalid register in IR branch-zero fast path");
+          return 0;
+        }
+        code_generator_emit(generator, "    test %s, %s\n", reg_name, reg_name);
+        code_generator_emit(generator, "    jz %s\n", instruction->text);
+        if (emitted) {
+          *emitted = 1;
+        }
+        return 1;
+      }
+
+      if (symbol->data.variable.memory_offset > 0) {
+        int size_bytes = 8;
+        if (symbol->type && symbol->type->size > 0 && symbol->type->size <= 8) {
+          size_bytes = (int)symbol->type->size;
+        }
+        const char *mem_op = code_generator_ir_memory_operand_for_size(size_bytes);
+        code_generator_emit(generator, "    cmp %s [rbp - %d], 0\n", mem_op,
+                            symbol->data.variable.memory_offset);
+        code_generator_emit(generator, "    jz %s\n", instruction->text);
+        if (emitted) {
+          *emitted = 1;
+        }
+        return 1;
+      }
+    }
+  }
+
+  if (instruction->lhs.kind == IR_OPERAND_TEMP && instruction->lhs.name) {
+    int offset = ir_temp_table_get_offset(temp_table, instruction->lhs.name);
+    if (offset > 0) {
+      code_generator_emit(generator, "    cmp qword [rbp - %d], 0\n", offset);
+      code_generator_emit(generator, "    jz %s\n", instruction->text);
+      if (emitted) {
+        *emitted = 1;
+      }
+      return 1;
+    }
+  }
+
+  return 1;
+}
+
 static int code_generator_emit_ir_instruction(CodeGenerator *generator,
                                               const IRInstruction *instruction,
                                               IRTempTable *temp_table) {
@@ -1074,6 +2083,16 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
     return 1;
 
   case IR_OP_BRANCH_ZERO:
+    {
+      int emitted_fastpath = 0;
+      if (!code_generator_try_emit_ir_branch_zero_fastpath(
+              generator, instruction, temp_table, &emitted_fastpath)) {
+        return 0;
+      }
+      if (emitted_fastpath) {
+        return 1;
+      }
+    }
     if (!code_generator_load_ir_operand(generator, &instruction->lhs,
                                         temp_table)) {
       return 0;
@@ -1084,23 +2103,30 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
     return 1;
 
   case IR_OP_BRANCH_EQ:
+    if (!code_generator_load_ir_operand_into_register(
+            generator, &instruction->rhs, temp_table, REG_R10)) {
+      return 0;
+    }
     if (!code_generator_load_ir_operand(generator, &instruction->lhs,
                                         temp_table)) {
       return 0;
     }
-    code_generator_emit(generator, "    push rax\n");
-    if (!code_generator_load_ir_operand(generator, &instruction->rhs,
-                                        temp_table)) {
-      return 0;
-    }
-    code_generator_emit(generator, "    mov r10, rax\n");
-    code_generator_emit(generator, "    pop rax\n");
     code_generator_emit(generator, "    cmp rax, r10\n");
     code_generator_emit(generator, "    je %s\n",
                         instruction->text ? instruction->text : "ir_missing");
     return 1;
 
   case IR_OP_ASSIGN:
+    {
+      int emitted_fastpath = 0;
+      if (!code_generator_try_emit_ir_assign_symbol_to_symbol(
+              generator, instruction, &emitted_fastpath)) {
+        return 0;
+      }
+      if (emitted_fastpath) {
+        return 1;
+      }
+    }
     if (!code_generator_load_ir_operand(generator, &instruction->lhs,
                                         temp_table)) {
       return 0;
@@ -1392,11 +2418,27 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   int stack_size = parameter_home_size;
   IRTempTable temp_table = {0};
   IRLocalTable local_table = {0};
+  IRSymbolStatsMap symbol_stats = {0};
+  IRPromotedSymbol promoted_symbols[sizeof(IR_PROMOTION_REGISTERS) /
+                                    sizeof(IR_PROMOTION_REGISTERS[0])] = {0};
+  size_t promoted_symbol_count = 0;
+  int promoted_save_bytes = 0;
+  int stack_offset_base = parameter_home_size;
 
   for (size_t i = 0; i < ir_function->instruction_count; i++) {
     IRInstruction *instruction = &ir_function->instructions[i];
     if (!instruction) {
       continue;
+    }
+
+    if (!ir_symbol_stats_map_record_instruction(&symbol_stats, instruction)) {
+      code_generator_set_error(generator,
+                               "Out of memory while tracking IR symbol usage");
+      ir_temp_table_destroy(&temp_table);
+      ir_local_table_destroy(&local_table);
+      ir_symbol_stats_map_destroy(&symbol_stats);
+      symbol_table_exit_scope(generator->symbol_table);
+      return 0;
     }
 
     if (instruction->op == IR_OP_DECLARE_LOCAL &&
@@ -1436,15 +2478,16 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
         if (!local_symbol ||
             !symbol_table_declare(generator->symbol_table, local_symbol)) {
           symbol_destroy(local_symbol);
-          code_generator_set_error(generator,
-                                   "Failed to declare local '%s' in IR backend",
-                                   instruction->dest.name);
-          ir_temp_table_destroy(&temp_table);
-          ir_local_table_destroy(&local_table);
-          symbol_table_exit_scope(generator->symbol_table);
-          return 0;
-        }
-      }
+           code_generator_set_error(generator,
+                                    "Failed to declare local '%s' in IR backend",
+                                    instruction->dest.name);
+           ir_temp_table_destroy(&temp_table);
+           ir_local_table_destroy(&local_table);
+           ir_symbol_stats_map_destroy(&symbol_stats);
+           symbol_table_exit_scope(generator->symbol_table);
+           return 0;
+         }
+       }
 
       if (!ir_local_table_add(&local_table, instruction->dest.name,
                               instruction->text, instruction->location,
@@ -1454,6 +2497,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
                                  instruction->dest.name);
         ir_temp_table_destroy(&temp_table);
         ir_local_table_destroy(&local_table);
+        ir_symbol_stats_map_destroy(&symbol_stats);
         symbol_table_exit_scope(generator->symbol_table);
         return 0;
       }
@@ -1461,6 +2505,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
               generator, &stack_size, local_size + 15, function_data->name)) {
         ir_temp_table_destroy(&temp_table);
         ir_local_table_destroy(&local_table);
+        ir_symbol_stats_map_destroy(&symbol_stats);
         symbol_table_exit_scope(generator->symbol_table);
         return 0;
       }
@@ -1473,6 +2518,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
                                  instruction->dest.name);
         ir_temp_table_destroy(&temp_table);
         ir_local_table_destroy(&local_table);
+        ir_symbol_stats_map_destroy(&symbol_stats);
         symbol_table_exit_scope(generator->symbol_table);
         return 0;
       }
@@ -1484,6 +2530,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
         function_data->name);
     ir_temp_table_destroy(&temp_table);
     ir_local_table_destroy(&local_table);
+    ir_symbol_stats_map_destroy(&symbol_stats);
     symbol_table_exit_scope(generator->symbol_table);
     return 0;
   }
@@ -1492,8 +2539,100 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
                                      function_data->name)) {
     ir_temp_table_destroy(&temp_table);
     ir_local_table_destroy(&local_table);
+    ir_symbol_stats_map_destroy(&symbol_stats);
     symbol_table_exit_scope(generator->symbol_table);
     return 0;
+  }
+
+  for (size_t reg_index = 0;
+       reg_index < (sizeof(IR_PROMOTION_REGISTERS) /
+                    sizeof(IR_PROMOTION_REGISTERS[0]));
+       reg_index++) {
+    const char *best_name = NULL;
+    size_t best_use_count = 0;
+
+    for (size_t i = 0; i < function_data->parameter_count; i++) {
+      const char *name = function_data->parameter_names[i];
+      const char *type_name = function_data->parameter_types[i];
+      if (!name || ir_promoted_symbol_find(promoted_symbols, promoted_symbol_count,
+                                           name) >= 0 ||
+          ir_symbol_stats_map_is_address_taken(&symbol_stats, name)) {
+        continue;
+      }
+
+      Type *param_type = NULL;
+      if (type_name) {
+        param_type =
+            type_checker_get_type_by_name(generator->type_checker, type_name);
+      }
+      if (!param_type || !ir_is_integer_or_pointer_promotable(param_type)) {
+        continue;
+      }
+
+      size_t use_count = ir_symbol_stats_map_get_use_count(&symbol_stats, name);
+      if (use_count > best_use_count) {
+        best_use_count = use_count;
+        best_name = name;
+      }
+    }
+
+    for (size_t i = 0; i < local_table.count; i++) {
+      const char *name = local_table.items[i].name;
+      if (!name || ir_promoted_symbol_find(promoted_symbols, promoted_symbol_count,
+                                           name) >= 0 ||
+          ir_symbol_stats_map_is_address_taken(&symbol_stats, name)) {
+        continue;
+      }
+
+      Symbol *local_symbol =
+          symbol_table_lookup_current_scope(generator->symbol_table, name);
+      if (!local_symbol || local_symbol->kind != SYMBOL_VARIABLE ||
+          !ir_is_integer_or_pointer_promotable(local_symbol->type)) {
+        continue;
+      }
+
+      size_t use_count = ir_symbol_stats_map_get_use_count(&symbol_stats, name);
+      if (use_count > best_use_count) {
+        best_use_count = use_count;
+        best_name = name;
+      }
+    }
+
+    // Avoid paying save/restore cost for trivially-used symbols.
+    if (!best_name || best_use_count < 3) {
+      break;
+    }
+
+    promoted_symbols[promoted_symbol_count].name = best_name;
+    promoted_symbols[promoted_symbol_count].reg =
+        IR_PROMOTION_REGISTERS[reg_index];
+    promoted_symbol_count++;
+  }
+
+  if (promoted_symbol_count > (size_t)(INT_MAX / 8)) {
+    code_generator_set_error(
+        generator, "Too many promoted symbols in function '%s'",
+        function_data->name);
+    ir_temp_table_destroy(&temp_table);
+    ir_local_table_destroy(&local_table);
+    ir_symbol_stats_map_destroy(&symbol_stats);
+    symbol_table_exit_scope(generator->symbol_table);
+    return 0;
+  }
+  promoted_save_bytes = (int)(promoted_symbol_count * 8);
+  if (promoted_save_bytes > 0) {
+    if (!code_generator_add_stack_size(generator, &stack_size, promoted_save_bytes,
+                                       function_data->name)) {
+      ir_temp_table_destroy(&temp_table);
+      ir_local_table_destroy(&local_table);
+      ir_symbol_stats_map_destroy(&symbol_stats);
+      symbol_table_exit_scope(generator->symbol_table);
+      return 0;
+    }
+    stack_offset_base += promoted_save_bytes;
+    for (size_t i = 0; i < promoted_symbol_count; i++) {
+      promoted_symbols[i].save_offset = parameter_home_size + (int)((i + 1) * 8);
+    }
   }
 
   if (generator->type_checker && generator->type_checker->error_reporter &&
@@ -1509,10 +2648,23 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   }
 
   code_generator_function_prologue(generator, function_data->name, stack_size);
-  generator->current_stack_offset = parameter_home_size;
+  generator->current_stack_offset = stack_offset_base;
   code_generator_register_function_parameters(generator, function_data,
                                               parameter_home_size);
-  {
+  for (size_t i = 0; i < promoted_symbol_count; i++) {
+    const char *reg_name = code_generator_get_register_name(promoted_symbols[i].reg);
+    if (!reg_name) {
+      code_generator_set_error(generator,
+                               "Invalid promoted register in function '%s'",
+                               function_data->name);
+      break;
+    }
+    code_generator_emit(generator, "    mov [rbp - %d], %s\n",
+                        promoted_symbols[i].save_offset, reg_name);
+  }
+
+  if (ir_function_requires_entry_safepoint(ir_function)) {
+    {
     CallingConventionSpec *conv_spec =
         generator->register_allocator
             ? generator->register_allocator->calling_convention
@@ -1753,9 +2905,42 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    pop rax\n");
     }
   }
+  }
+
+  for (size_t i = 0; i < promoted_symbol_count; i++) {
+    const char *name = promoted_symbols[i].name;
+    Symbol *symbol =
+        name ? symbol_table_lookup_current_scope(generator->symbol_table, name) : NULL;
+    if (!symbol ||
+        (symbol->kind != SYMBOL_VARIABLE && symbol->kind != SYMBOL_PARAMETER)) {
+      code_generator_set_error(
+          generator, "Failed to activate promoted symbol '%s' in IR backend",
+          name ? name : "<unknown>");
+      break;
+    }
+
+    int is_parameter = (symbol->kind == SYMBOL_PARAMETER);
+    if (symbol->kind == SYMBOL_PARAMETER) {
+      code_generator_load_variable(generator, name);
+      if (generator->has_error) {
+        break;
+      }
+    }
+
+    symbol->data.variable.register_id = promoted_symbols[i].reg;
+    symbol->data.variable.is_in_register = 1;
+
+    if (is_parameter) {
+      code_generator_store_variable(generator, name, "rax");
+      if (generator->has_error) {
+        break;
+      }
+    }
+  }
   if (generator->has_error) {
     ir_temp_table_destroy(&temp_table);
     ir_local_table_destroy(&local_table);
+    ir_symbol_stats_map_destroy(&symbol_stats);
     symbol_table_exit_scope(generator->symbol_table);
     return 0;
   }
@@ -1769,9 +2954,20 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
           generator, "Missing local symbol '%s' in IR backend", local->name);
       ir_temp_table_destroy(&temp_table);
       ir_local_table_destroy(&local_table);
+      ir_symbol_stats_map_destroy(&symbol_stats);
       symbol_table_exit_scope(generator->symbol_table);
       return 0;
     }
+
+    int promoted_index =
+        ir_promoted_symbol_find(promoted_symbols, promoted_symbol_count, local->name);
+    if (promoted_index >= 0) {
+      symbol->data.variable.register_id = promoted_symbols[promoted_index].reg;
+      symbol->data.variable.is_in_register = 1;
+      symbol->data.variable.memory_offset = 0;
+      continue;
+    }
+
     int offset = code_generator_allocate_stack_space(generator, local->size,
                                                      local->alignment);
     symbol->data.variable.is_in_register = 0;
@@ -1792,18 +2988,98 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
         code_generator_allocate_stack_space(generator, 8, 8);
   }
 
+  IRTempUseMap temp_use_map = {0};
   for (size_t i = 0; i < ir_function->instruction_count; i++) {
-    if (!code_generator_emit_ir_instruction(
-            generator, &ir_function->instructions[i], &temp_table)) {
+    if (!ir_temp_use_map_record_instruction(&temp_use_map,
+                                            &ir_function->instructions[i])) {
+      code_generator_set_error(generator,
+                               "Out of memory while tracking IR temp uses");
       break;
+    }
+  }
+  if (!generator->has_error) {
+    for (size_t i = 0; i < ir_function->instruction_count; i++) {
+      const IRInstruction *instruction = &ir_function->instructions[i];
+      if (i + 1 < ir_function->instruction_count) {
+        const IRInstruction *next = &ir_function->instructions[i + 1];
+        if (instruction->op == IR_OP_BINARY && !instruction->is_float &&
+            instruction->dest.kind == IR_OPERAND_TEMP &&
+            instruction->dest.name && ir_binary_operator_is_comparison(instruction->text) &&
+            next->op == IR_OP_BRANCH_ZERO &&
+            next->lhs.kind == IR_OPERAND_TEMP && next->lhs.name &&
+            strcmp(next->lhs.name, instruction->dest.name) == 0 &&
+            ir_temp_use_map_get(&temp_use_map, instruction->dest.name) == 1) {
+          if (i + 3 < ir_function->instruction_count &&
+              next->text &&
+              ir_function->instructions[i + 2].op == IR_OP_JUMP &&
+              ir_function->instructions[i + 2].text &&
+              ir_function->instructions[i + 3].op == IR_OP_LABEL &&
+              ir_function->instructions[i + 3].text &&
+              strcmp(next->text, ir_function->instructions[i + 3].text) == 0) {
+            const char *false_jump =
+                ir_false_jump_for_comparison(instruction->text);
+            const char *true_jump = ir_invert_conditional_jump(false_jump);
+            if (true_jump) {
+              if (!code_generator_emit_ir_compare_branch_with_jump(
+                      generator, instruction, true_jump,
+                      ir_function->instructions[i + 2].text, &temp_table)) {
+                break;
+              }
+              i += 2;
+              continue;
+            }
+          }
+
+          if (!code_generator_emit_ir_compare_branch_zero(
+                  generator, instruction, next, &temp_table)) {
+            break;
+          }
+          i++;
+          continue;
+        }
+
+        if (instruction->op == IR_OP_BRANCH_ZERO && instruction->text &&
+            i + 2 < ir_function->instruction_count && next->text &&
+            next->op == IR_OP_JUMP &&
+            ir_function->instructions[i + 2].op == IR_OP_LABEL &&
+            ir_function->instructions[i + 2].text &&
+            strcmp(instruction->text, ir_function->instructions[i + 2].text) ==
+                0) {
+          if (!code_generator_emit_ir_branch_zero_jump_over_label(
+                  generator, instruction, next, &temp_table)) {
+            break;
+          }
+          i++;
+          continue;
+        }
+      }
+
+      if (!code_generator_emit_ir_instruction(generator, instruction,
+                                              &temp_table)) {
+        break;
+      }
     }
   }
 
   code_generator_emit(generator, "L%s_exit:\n", function_data->name);
+  for (size_t i = promoted_symbol_count; i > 0; i--) {
+    size_t index = i - 1;
+    const char *reg_name = code_generator_get_register_name(promoted_symbols[index].reg);
+    if (!reg_name) {
+      code_generator_set_error(generator,
+                               "Invalid promoted register in function '%s'",
+                               function_data->name);
+      break;
+    }
+    code_generator_emit(generator, "    mov %s, [rbp - %d]\n", reg_name,
+                        promoted_symbols[index].save_offset);
+  }
   code_generator_function_epilogue(generator);
 
+  ir_temp_use_map_destroy(&temp_use_map);
   ir_temp_table_destroy(&temp_table);
   ir_local_table_destroy(&local_table);
+  ir_symbol_stats_map_destroy(&symbol_stats);
   symbol_table_exit_scope(generator->symbol_table);
 
   return generator->has_error ? 0 : 1;

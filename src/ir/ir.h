@@ -60,6 +60,9 @@ typedef struct {
 
 typedef struct {
   char *name;
+  char **parameter_names;
+  char **parameter_types;
+  size_t parameter_count;
   IRInstruction *instructions;
   size_t instruction_count;
   size_t instruction_capacity;
@@ -81,6 +84,9 @@ IROperand ir_operand_label(const char *name);
 void ir_operand_destroy(IROperand *operand);
 
 IRFunction *ir_function_create(const char *name);
+int ir_function_set_parameters(IRFunction *function, const char **parameter_names,
+                               const char **parameter_types,
+                               size_t parameter_count);
 void ir_function_destroy(IRFunction *function);
 int ir_function_append_instruction(IRFunction *function,
                                    const IRInstruction *instruction);
@@ -90,7 +96,8 @@ void ir_program_destroy(IRProgram *program);
 int ir_program_add_function(IRProgram *program, IRFunction *function);
 
 IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
-                            SymbolTable *symbol_table, char **error_message);
+                            SymbolTable *symbol_table, char **error_message,
+                            int emit_runtime_checks);
 int ir_program_dump(IRProgram *program, FILE *output);
 
 #endif // IR_H

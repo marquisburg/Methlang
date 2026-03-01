@@ -1,0 +1,7 @@
+function main() -> int32 {
+  var x: int32 = 1;
+  if (x) {
+    return 7;
+  }
+  return 3;
+}

@@ -18,6 +18,7 @@ typedef struct {
   char *error_message;
   TypeChecker *type_checker;
   SymbolTable *symbol_table;
+  int emit_runtime_checks;
 } IRLoweringContext;
 
 typedef struct {
@@ -81,6 +82,14 @@ static int ir_make_temp_operand(IRLoweringContext *context,
 static int ir_lower_statement_or_expression(IRLoweringContext *context,
                                             IRFunction *function,
                                             ASTNode *node);
+static int ir_emit_condition_false_branch(IRLoweringContext *context,
+                                          IRFunction *function,
+                                          ASTNode *expression,
+                                          const char *false_label);
+static int ir_emit_condition_true_branch(IRLoweringContext *context,
+                                         IRFunction *function,
+                                         ASTNode *expression,
+                                         const char *true_label);
 static int ir_lower_switch_statement(IRLoweringContext *context,
                                      IRFunction *function, ASTNode *statement);
 
@@ -553,6 +562,9 @@ static int ir_emit_null_check(IRLoweringContext *context, IRFunction *function,
   if (!context || !function || !value) {
     return 0;
   }
+  if (!context->emit_runtime_checks) {
+    return 1;
+  }
 
   char *trap_label = ir_new_label_name(context, "trap_null");
   char *ok_label = ir_new_label_name(context, "nonnull");
@@ -616,6 +628,9 @@ static int ir_emit_bounds_check(IRLoweringContext *context,
                                 const IROperand *index, size_t array_size) {
   if (!context || !function || !index) {
     return 0;
+  }
+  if (!context->emit_runtime_checks) {
+    return 1;
   }
 
   IROperand in_bounds = ir_operand_none();
@@ -877,6 +892,139 @@ static int ir_make_temp_operand(IRLoweringContext *context,
     return 0;
   }
 
+  return 1;
+}
+
+static int ir_emit_condition_false_branch(IRLoweringContext *context,
+                                          IRFunction *function,
+                                          ASTNode *expression,
+                                          const char *false_label) {
+  if (!context || !function || !expression || !false_label) {
+    return 0;
+  }
+
+  if (expression->type == AST_BINARY_EXPRESSION) {
+    BinaryExpression *binary = (BinaryExpression *)expression->data;
+    if (binary && binary->operator && binary->left && binary->right) {
+      if (strcmp(binary->operator, "&&") == 0) {
+        return ir_emit_condition_false_branch(context, function, binary->left,
+                                              false_label) &&
+               ir_emit_condition_false_branch(context, function, binary->right,
+                                              false_label);
+      }
+
+      if (strcmp(binary->operator, "||") == 0) {
+        char *done_label = ir_new_label_name(context, "cond_done");
+        if (!done_label) {
+          free(done_label);
+          ir_set_error(context, "Out of memory while allocating condition labels");
+          return 0;
+        }
+
+        if (!ir_emit_condition_true_branch(context, function, binary->left,
+                                           done_label) ||
+            !ir_emit_condition_false_branch(context, function, binary->right,
+                                            false_label) ||
+            !ir_emit_label_instruction(context, function, done_label,
+                                       expression->location)) {
+          free(done_label);
+          return 0;
+        }
+
+        free(done_label);
+        return 1;
+      }
+    }
+  }
+
+  IROperand condition = ir_operand_none();
+  if (!ir_lower_expression(context, function, expression, &condition)) {
+    return 0;
+  }
+
+  IRInstruction branch = {0};
+  branch.op = IR_OP_BRANCH_ZERO;
+  branch.location = expression->location;
+  branch.lhs = condition;
+  branch.text = (char *)false_label;
+  if (!ir_emit(context, function, &branch)) {
+    ir_operand_destroy(&condition);
+    return 0;
+  }
+  ir_operand_destroy(&condition);
+  return 1;
+}
+
+static int ir_emit_condition_true_branch(IRLoweringContext *context,
+                                         IRFunction *function,
+                                         ASTNode *expression,
+                                         const char *true_label) {
+  if (!context || !function || !expression || !true_label) {
+    return 0;
+  }
+
+  if (expression->type == AST_BINARY_EXPRESSION) {
+    BinaryExpression *binary = (BinaryExpression *)expression->data;
+    if (binary && binary->operator && binary->left && binary->right) {
+      if (strcmp(binary->operator, "||") == 0) {
+        return ir_emit_condition_true_branch(context, function, binary->left,
+                                             true_label) &&
+               ir_emit_condition_true_branch(context, function, binary->right,
+                                             true_label);
+      }
+
+      if (strcmp(binary->operator, "&&") == 0) {
+        char *done_label = ir_new_label_name(context, "cond_done");
+        if (!done_label) {
+          ir_set_error(context, "Out of memory while allocating condition labels");
+          return 0;
+        }
+
+        if (!ir_emit_condition_false_branch(context, function, binary->left,
+                                            done_label) ||
+            !ir_emit_condition_true_branch(context, function, binary->right,
+                                           true_label) ||
+            !ir_emit_label_instruction(context, function, done_label,
+                                       expression->location)) {
+          free(done_label);
+          return 0;
+        }
+
+        free(done_label);
+        return 1;
+      }
+    }
+  }
+
+  IROperand condition = ir_operand_none();
+  if (!ir_lower_expression(context, function, expression, &condition)) {
+    return 0;
+  }
+
+  char *skip_label = ir_new_label_name(context, "cond_false");
+  if (!skip_label) {
+    ir_operand_destroy(&condition);
+    ir_set_error(context, "Out of memory while allocating condition labels");
+    return 0;
+  }
+
+  IRInstruction branch = {0};
+  branch.op = IR_OP_BRANCH_ZERO;
+  branch.location = expression->location;
+  branch.lhs = condition;
+  branch.text = skip_label;
+  if (!ir_emit(context, function, &branch) ||
+      !ir_emit_jump_instruction(context, function, true_label,
+                                expression->location) ||
+      !ir_emit_label_instruction(context, function, skip_label,
+                                 expression->location)) {
+    ir_operand_destroy(&condition);
+    free(skip_label);
+    return 0;
+  }
+
+  ir_operand_destroy(&condition);
+  free(skip_label);
   return 1;
 }
 
@@ -2133,25 +2281,12 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
         return 0;
       }
 
-      IROperand condition = ir_operand_none();
-      if (!ir_lower_expression(context, function, current_cond, &condition)) {
+      if (!ir_emit_condition_false_branch(context, function, current_cond,
+                                          next_label)) {
         free(next_label);
         free(end_label);
         return 0;
       }
-
-      IRInstruction branch = {0};
-      branch.op = IR_OP_BRANCH_ZERO;
-      branch.location = current_cond->location;
-      branch.lhs = condition;
-      branch.text = next_label;
-      if (!ir_emit(context, function, &branch)) {
-        ir_operand_destroy(&condition);
-        free(next_label);
-        free(end_label);
-        return 0;
-      }
-      ir_operand_destroy(&condition);
 
       if (!ir_lower_statement_with_defers(context, function, current_body,
                                           defers)) {
@@ -2221,26 +2356,12 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
       return 0;
     }
 
-    IROperand condition = ir_operand_none();
-    if (!ir_lower_expression(context, function, while_data->condition,
-                             &condition)) {
+    if (!ir_emit_condition_false_branch(context, function,
+                                        while_data->condition, loop_end)) {
       free(loop_start);
       free(loop_end);
       return 0;
     }
-
-    IRInstruction branch = {0};
-    branch.op = IR_OP_BRANCH_ZERO;
-    branch.location = statement->location;
-    branch.lhs = condition;
-    branch.text = loop_end;
-    if (!ir_emit(context, function, &branch)) {
-      ir_operand_destroy(&condition);
-      free(loop_start);
-      free(loop_end);
-      return 0;
-    }
-    ir_operand_destroy(&condition);
 
     if (!ir_push_control_frame(context, loop_end, loop_start)) {
       free(loop_start);
@@ -2306,27 +2427,13 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     }
 
     if (for_data->condition) {
-      IROperand condition = ir_operand_none();
-      if (!ir_lower_expression(context, function, for_data->condition,
-                               &condition)) {
+      if (!ir_emit_condition_false_branch(context, function,
+                                          for_data->condition, end_label)) {
         free(condition_label);
         free(step_label);
         free(end_label);
         return 0;
       }
-      IRInstruction branch = {0};
-      branch.op = IR_OP_BRANCH_ZERO;
-      branch.location = statement->location;
-      branch.lhs = condition;
-      branch.text = end_label;
-      if (!ir_emit(context, function, &branch)) {
-        ir_operand_destroy(&condition);
-        free(condition_label);
-        free(step_label);
-        free(end_label);
-        return 0;
-      }
-      ir_operand_destroy(&condition);
     }
 
     if (!ir_push_control_frame(context, end_label, step_label)) {
@@ -2455,6 +2562,15 @@ static IRFunction *ir_lower_function(IRLoweringContext *context,
     ir_set_error(context, "Out of memory while creating IR function");
     return NULL;
   }
+  if (!ir_function_set_parameters(function,
+                                  (const char **)function_data->parameter_names,
+                                  (const char **)function_data->parameter_types,
+                                  function_data->parameter_count)) {
+    ir_set_error(context,
+                 "Out of memory while recording IR function parameters");
+    ir_function_destroy(function);
+    return NULL;
+  }
 
   char *entry_label = ir_new_label_name(context, "entry");
   if (!entry_label) {
@@ -2500,7 +2616,8 @@ static IRFunction *ir_lower_function(IRLoweringContext *context,
 }
 
 IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
-                            SymbolTable *symbol_table, char **error_message) {
+                            SymbolTable *symbol_table, char **error_message,
+                            int emit_runtime_checks) {
   if (error_message) {
     *error_message = NULL;
   }
@@ -2524,6 +2641,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
   IRLoweringContext context = {0};
   context.type_checker = type_checker;
   context.symbol_table = symbol_table;
+  context.emit_runtime_checks = emit_runtime_checks ? 1 : 0;
 
   Program *program_data = (Program *)program->data;
   if (!program_data) {

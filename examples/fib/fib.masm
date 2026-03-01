@@ -1,0 +1,76 @@
+// MethASM Fibonacci benchmark
+//
+// Computes fib(0) through fib(35) and prints them.
+// Benchmarks fib(35) with 1,000,000 iterations.
+//
+// Build: build.bat
+// Run: fib.exe
+
+import "std/io";
+
+extern function GetTickCount64() -> uint64 = "GetTickCount64";
+
+// Iterative Fibonacci: returns fib(n) for n >= 0
+function fib(n: int32) -> int64 {
+  if (n <= 1) {
+    return n;
+  }
+  var a: int64 = 0;
+  var b: int64 = 1;
+  var i: int32 = 2;
+  while (i <= n) {
+    var next: int64 = a + b;
+    a = b;
+    b = next;
+    i = i + 1;
+  }
+  return b;
+}
+
+function main() -> int32 {
+  var header: string = "Fibonacci 0..35:";
+  println(cstr(header));
+
+  var n: int32 = 0;
+  while (n <= 35) {
+    var val: int64 = fib(n);
+    print_int(val);
+    if (n < 35) {
+      print(cstr(" "));
+    }
+    n = n + 1;
+  }
+  newline();
+
+  // Benchmark: fib(35) x 10,000,000 (enough for GetTickCount64 ~15ms resolution)
+  var iter: int32 = 10000000;
+  var bench_header: string = "Benchmark: fib(35) x 10,000,000";
+  println(cstr(bench_header));
+
+  var t0: uint64 = GetTickCount64();
+  var j: int32 = 0;
+  var dummy: int64 = 0;
+  while (j < iter) {
+    dummy = fib(35);
+    j = j + 1;
+  }
+  var t1: uint64 = GetTickCount64();
+  var elapsed_ms: uint64 = t1 - t0;
+
+  var result_str: string = "fib(35) = ";
+  print(cstr(result_str));
+  println_int(dummy);
+
+  var time_str: string = "Time: ";
+  print(cstr(time_str));
+  print_int(elapsed_ms);
+  println(cstr(" ms"));
+
+  var per_call: uint64 = elapsed_ms * 1000000 / iter;
+  var ns_str: string = "Per call: ~";
+  print(cstr(ns_str));
+  print_int(per_call);
+  println(cstr(" ns"));
+
+  return 0;
+}

@@ -38,7 +38,7 @@ The null pointer is written `0`. Pointers and `0` are comparable for equality.
 
 **Pointer arithmetic:** The expression `ptr + n` is not supported. Use indexing instead: `ptr[i]` computes the address of the i-th element and advances by the size of the pointed-to type (C semantics). For `int32* p`, the expression `p[1]` accesses the next int32 (4 bytes). For byte-level access, use `uint8*` or `cstring`; then `ptr[i]` advances by 1 byte.
 
-**Null dereference:** Dereferencing a null pointer (`*p` when `p` is 0) produces undefined behavior. On typical systems it results in a crash (access violation). The compiler does not insert null checks.
+**Null dereference:** In normal builds, the compiler emits runtime null checks for dynamic pointer dereference/indexing and traps with a fatal message on null. In `--release`, these generated checks are disabled; null dereference is undefined behavior and typically crashes.
 
 ## Function Pointer Types
 
@@ -100,7 +100,7 @@ var arr: int32[10];
 var buf: uint8[256];
 ```
 
-**Out-of-bounds indexing:** The compiler rejects constant out-of-bounds indexes for fixed-size arrays (for example `arr[10]` on `int32[10]`). There is no runtime bounds checking, and non-constant indices are not proven safe at compile time. Indexing with an out-of-range value still produces undefined behavior.
+**Out-of-bounds indexing:** The compiler rejects constant out-of-bounds indexes for fixed-size arrays (for example `arr[10]` on `int32[10]`). For dynamic indices on fixed-size arrays, normal builds emit runtime bounds checks. In `--release`, those generated bounds checks are disabled. Pointer indexing is never bounds-checked because pointee extent is unknown.
 
 **Use before initialization:** Local scalar and pointer variables must be assigned before first read. A use like `var x: int32; return x;` is a compile error.
 

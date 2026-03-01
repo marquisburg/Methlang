@@ -19,9 +19,9 @@ Prelude is opt-in (`--prelude`) and not loaded by default.
 
 No pointer arithmetic with `ptr + n`. Use indexing `ptr[i]` instead, which scales by element size.
 
-Null pointer dereference is diagnosed for constant nulls such as `*0`, and runtime null checks are emitted for dynamic dereference and pointer-based indexing. Pointers originating from C or inline assembly can still be invalid in ways the compiler cannot prove.
+Null pointer dereference is diagnosed for constant nulls such as `*0`. Runtime null checks are emitted for dynamic dereference and pointer-based indexing in normal builds, but are disabled in `--release`. Pointers originating from C or inline assembly can still be invalid in ways the compiler cannot prove.
 
-Fixed-size array indexing is checked at compile time for constant indices and guarded at runtime for dynamic indices. Pointer indexing is still unchecked for bounds because the compiler does not know the pointee extent.
+Fixed-size array indexing is checked at compile time for constant indices and guarded at runtime for dynamic indices in normal builds; those runtime guards are disabled in `--release`. Pointer indexing is still unchecked for bounds because the compiler does not know the pointee extent.
 
 No compound assignment (`+=`, `-=`, `*=`, `/=`). Use `x = x + 1` instead of `x += 1`.
 

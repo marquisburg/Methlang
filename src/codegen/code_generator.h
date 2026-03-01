@@ -34,6 +34,8 @@ typedef struct {
   size_t control_flow_stack_size;
   size_t control_flow_stack_capacity;
   int generate_debug_info;
+  int emit_asm_comments;
+  int eliminate_unreachable_functions;
   int has_error;
   char *error_message;
   IRProgram *ir_program;
@@ -60,6 +62,9 @@ void code_generator_generate_statement(CodeGenerator *generator,
                                        ASTNode *statement);
 void code_generator_generate_expression(CodeGenerator *generator,
                                         ASTNode *expression);
+void code_generator_set_emit_asm_comments(CodeGenerator *generator, int enable);
+void code_generator_set_eliminate_unreachable_functions(CodeGenerator *generator,
+                                                        int enable);
 void code_generator_emit(CodeGenerator *generator, const char *format, ...);
 char *code_generator_get_output(CodeGenerator *generator);
 
@@ -133,6 +138,8 @@ Type *code_generator_infer_expression_type(CodeGenerator *generator,
                                            ASTNode *expression);
 int code_generator_is_floating_point_type(Type *type);
 const char *code_generator_get_register_name(x86Register reg);
+const char *code_generator_get_subregister_name(x86Register reg,
+                                                int width_bits);
 
 // Expression and assignment helpers
 void code_generator_generate_binary_operation(CodeGenerator *generator,

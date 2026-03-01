@@ -1,15 +1,17 @@
 # MethASM
 
-MethASM is a compiled, typed, assembly-like language for x86-64.
-It is designed to stay low-level while adding stronger semantics than raw asm.
-Source files use the `.masm` extension and compile to NASM-compatible assembly.
-The compiler includes lexing, parsing, semantic/type analysis, IR lowering, and codegen.
-The language supports structs, arrays, pointers, function pointers, generics, modules, explicit casting, and C interop.
-Control flow includes `if`, `while`, `for`, `switch`, `defer`, and `errdefer`.
-Programs can use a conservative runtime GC for `new` and GC-backed string concatenation.
-Standard library modules cover I/O, conversion, networking, process, threading, and more.
-Current output is x86-64 assembly for NASM object formats.
-This repository contains the compiler, runtime, standard library, tests, and web demo.
+MethASM is a typed, low-level language that compiles `.masm` source files to x86-64 NASM assembly.
+
+It is designed for systems-style control with stronger semantics than raw assembly: structured control flow, static type checking, modules, generics, and C interop.
+
+## Highlights
+
+- Compiles to x86-64 NASM assembly (`win64`, `elf64` object formats)
+- Strong typing with pointers, arrays, structs, enums, and function pointers
+- Control flow: `if`, `while`, `for`, `switch`, `defer`, `errdefer`
+- C interop via `extern` and `cstring`
+- Optional conservative GC runtime for `new` and GC-backed string concatenation
+- Standard library modules for I/O, conversion, networking, process, threading, and more
 
 ## Hello World
 
@@ -22,39 +24,100 @@ function main() -> int32 {
 }
 ```
 
-Build/run (Windows example):
+## Quick Start (Windows)
+
+1. Build the compiler:
+
+```powershell
+.\build.bat
+```
+
+1. Compile source to assembly:
 
 ```powershell
 .\bin\methasm.exe hello.masm -o hello.s
+```
+
+For production builds, use `--release`:
+
+```powershell
+.\bin\methasm.exe --release hello.masm -o hello.s
+```
+
+`--release` enables `-O`, strips assembly comments, removes unreachable functions, and lowers without generated runtime null/bounds trap checks.
+
+1. Assemble and link:
+
+```powershell
 nasm -f win64 hello.s -o hello.o
 gcc -nostartfiles hello.o src\runtime\gc.c -o hello.exe -lkernel32
 .\hello.exe
 ```
 
-Use `-nostartfiles` so MethASM's entry point (`mainCRTStartup`) is used instead of the C runtime's.
+Use `-nostartfiles` so MethASM's entry point (`mainCRTStartup`) is used instead of the C runtime entry.
 
-## Targets and Toolchain
+## Quick Start (Linux)
 
-- Targets:
-  - `win64` object format (`nasm -f win64`) for Windows x64
-  - `elf64` object format (`nasm -f elf64`) for Linux x64
-- Compiler output: x86-64 Intel/NASM-style assembly
-- Required tools:
-  - MethASM compiler (`bin/methasm.exe` or locally built binary)
-  - NASM assembler
-  - C toolchain/linker (GCC/MinGW on Windows, GCC/Clang on Linux)
-- Runtime note:
-  - Link `src/runtime/gc.c` when using `new` or string concatenation
-  - For GC use from worker threads, attach/detach threads with `gc_thread_attach`/`gc_thread_detach`
-  - Safepoint register spilling defaults to `xmm0..xmm15`; build compiler with `METHASM_SAFEPOINT_SPILL_XMM31` for `xmm0..xmm31` coverage
-  - Networking examples may require extra system libs (for example `-lws2_32` on Windows)
+```bash
+make
+./bin/methasm hello.masm -o hello.s
+nasm -f elf64 hello.s -o hello.o
+gcc -nostartfiles hello.o src/runtime/gc.c -o hello
+./hello
+```
 
-## Docs
+## Toolchain
 
-- Language reference index: [docs/LANGUAGE.md](docs/LANGUAGE.md)
-- Garbage collector guide: [docs/garbage-collector.md](docs/garbage-collector.md)
-- Compilation details: [docs/compilation.md](docs/compilation.md)
-- Standard library overview: [docs/standard-library.md](docs/standard-library.md)
+- MethASM compiler (`bin/methasm.exe` on Windows, `bin/methasm` on Linux)
+- NASM assembler
+- System C toolchain/linker (`gcc`/`clang`)
+
+## Runtime and Linking Notes
+
+- Link `src/runtime/gc.c` when using `new` or string concatenation.
+- Networking examples may require extra libraries (for example `-lws2_32` on Windows).
+- For GC use from worker threads, use `gc_thread_attach` and `gc_thread_detach`.
+
+## Compiler Snapshot
+
+Pipeline:
+
+1. Lexing
+2. Parsing
+3. Import resolution
+4. Monomorphization
+5. Type checking
+6. IR lowering
+7. Optimization (optional)
+8. Code generation
+
+Current internal token model includes:
+
+- Token `value` (null-terminated C string for parser/semantic compatibility)
+- Token `lexeme` string view (`data + length`) for precise extents
+- Global interning for identifier-like names used across lexer/AST/symbol/type metadata
+
+See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](docs/lexical-structure.md) for details.
+
+## Repository Layout
+
+- `src/` compiler source (lexer, parser, semantic analysis, IR, codegen, runtime support)
+- `stdlib/` standard library modules and helper C shims
+- `tests/` compiler/runtime test suite
+- `web/` web server demo
+- `docs/` language and tooling documentation
+
+## Documentation
+
+- Language reference: [docs/LANGUAGE.md](docs/LANGUAGE.md)
+- Compilation: [docs/compilation.md](docs/compilation.md)
+- Lexical structure: [docs/lexical-structure.md](docs/lexical-structure.md)
+- Types: [docs/types.md](docs/types.md)
+- Expressions: [docs/expressions.md](docs/expressions.md)
+- Control flow: [docs/control-flow.md](docs/control-flow.md)
+- C interop: [docs/c-interop.md](docs/c-interop.md)
+- Garbage collector: [docs/garbage-collector.md](docs/garbage-collector.md)
+- Standard library: [docs/standard-library.md](docs/standard-library.md)
 
 ## Quick Dev Commands
 

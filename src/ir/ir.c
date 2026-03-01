@@ -128,6 +128,30 @@ static void ir_instruction_destroy(IRInstruction *instruction) {
   instruction->argument_count = 0;
 }
 
+static void ir_function_clear_parameters(IRFunction *function) {
+  if (!function) {
+    return;
+  }
+
+  if (function->parameter_names) {
+    for (size_t i = 0; i < function->parameter_count; i++) {
+      free(function->parameter_names[i]);
+    }
+    free(function->parameter_names);
+  }
+
+  if (function->parameter_types) {
+    for (size_t i = 0; i < function->parameter_count; i++) {
+      free(function->parameter_types[i]);
+    }
+    free(function->parameter_types);
+  }
+
+  function->parameter_names = NULL;
+  function->parameter_types = NULL;
+  function->parameter_count = 0;
+}
+
 IRFunction *ir_function_create(const char *name) {
   IRFunction *function = malloc(sizeof(IRFunction));
   if (!function) {
@@ -135,10 +159,67 @@ IRFunction *ir_function_create(const char *name) {
   }
 
   function->name = ir_strdup(name ? name : "<anonymous>");
+  function->parameter_names = NULL;
+  function->parameter_types = NULL;
+  function->parameter_count = 0;
   function->instructions = NULL;
   function->instruction_count = 0;
   function->instruction_capacity = 0;
   return function;
+}
+
+int ir_function_set_parameters(IRFunction *function, const char **parameter_names,
+                               const char **parameter_types,
+                               size_t parameter_count) {
+  if (!function) {
+    return 0;
+  }
+
+  ir_function_clear_parameters(function);
+
+  if (parameter_count == 0) {
+    return 1;
+  }
+
+  char **name_copies = calloc(parameter_count, sizeof(char *));
+  char **type_copies = calloc(parameter_count, sizeof(char *));
+  if (!name_copies || !type_copies) {
+    free(name_copies);
+    free(type_copies);
+    return 0;
+  }
+
+  for (size_t i = 0; i < parameter_count; i++) {
+    if (!parameter_names || !parameter_names[i]) {
+      goto fail;
+    }
+
+    name_copies[i] = ir_strdup(parameter_names[i]);
+    if (!name_copies[i]) {
+      goto fail;
+    }
+
+    if (parameter_types && parameter_types[i]) {
+      type_copies[i] = ir_strdup(parameter_types[i]);
+      if (!type_copies[i]) {
+        goto fail;
+      }
+    }
+  }
+
+  function->parameter_names = name_copies;
+  function->parameter_types = type_copies;
+  function->parameter_count = parameter_count;
+  return 1;
+
+fail:
+  for (size_t i = 0; i < parameter_count; i++) {
+    free(name_copies[i]);
+    free(type_copies[i]);
+  }
+  free(name_copies);
+  free(type_copies);
+  return 0;
 }
 
 void ir_function_destroy(IRFunction *function) {
@@ -147,6 +228,7 @@ void ir_function_destroy(IRFunction *function) {
   }
 
   free(function->name);
+  ir_function_clear_parameters(function);
   for (size_t i = 0; i < function->instruction_count; i++) {
     ir_instruction_destroy(&function->instructions[i]);
   }
