@@ -1,8 +1,159 @@
 #include "lexer.h"
+#include "../string_intern.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+
+typedef struct StringInternEntry {
+  char *value;
+  size_t length;
+  struct StringInternEntry *next;
+  struct StringInternEntry *ptr_next;
+} StringInternEntry;
+
+#define STRING_INTERN_BUCKET_COUNT 4096u
+
+static StringInternEntry **g_string_intern_buckets = NULL;
+static StringInternEntry **g_string_intern_ptr_buckets = NULL;
+
+static void token_set_lexeme(Token *token, const char *data, size_t length) {
+  if (!token) {
+    return;
+  }
+  token->lexeme.data = data;
+  token->lexeme.length = length;
+}
+
+static int string_intern_init(void) {
+  if (g_string_intern_buckets && g_string_intern_ptr_buckets) {
+    return 1;
+  }
+
+  g_string_intern_buckets =
+      calloc(STRING_INTERN_BUCKET_COUNT, sizeof(StringInternEntry *));
+  g_string_intern_ptr_buckets =
+      calloc(STRING_INTERN_BUCKET_COUNT, sizeof(StringInternEntry *));
+  if (!g_string_intern_buckets || !g_string_intern_ptr_buckets) {
+    free(g_string_intern_buckets);
+    free(g_string_intern_ptr_buckets);
+    g_string_intern_buckets = NULL;
+    g_string_intern_ptr_buckets = NULL;
+    return 0;
+  }
+
+  return 1;
+}
+
+static size_t string_intern_hash_bytes(const char *value, size_t length) {
+  size_t hash = (size_t)1469598103934665603ULL;
+  for (size_t i = 0; i < length; i++) {
+    hash ^= (unsigned char)value[i];
+    hash *= (size_t)1099511628211ULL;
+  }
+  return hash;
+}
+
+static size_t string_intern_hash_ptr(const void *ptr) {
+  uintptr_t value = (uintptr_t)ptr;
+  value ^= value >> 33;
+  value *= (uintptr_t)0xff51afd7ed558ccdULL;
+  value ^= value >> 33;
+  return (size_t)value;
+}
+
+const char *string_intern_n(const char *value, size_t length) {
+  if (!value) {
+    return NULL;
+  }
+
+  if (!string_intern_init()) {
+    return NULL;
+  }
+
+  size_t hash = string_intern_hash_bytes(value, length);
+  size_t bucket = hash % STRING_INTERN_BUCKET_COUNT;
+  StringInternEntry *entry = g_string_intern_buckets[bucket];
+  while (entry) {
+    if (entry->length == length && memcmp(entry->value, value, length) == 0) {
+      return entry->value;
+    }
+    entry = entry->next;
+  }
+
+  char *copy = malloc(length + 1);
+  if (!copy) {
+    return NULL;
+  }
+  memcpy(copy, value, length);
+  copy[length] = '\0';
+
+  entry = malloc(sizeof(StringInternEntry));
+  if (!entry) {
+    free(copy);
+    return NULL;
+  }
+
+  entry->value = copy;
+  entry->length = length;
+  entry->next = g_string_intern_buckets[bucket];
+  g_string_intern_buckets[bucket] = entry;
+
+  size_t ptr_bucket =
+      string_intern_hash_ptr(copy) % STRING_INTERN_BUCKET_COUNT;
+  entry->ptr_next = g_string_intern_ptr_buckets[ptr_bucket];
+  g_string_intern_ptr_buckets[ptr_bucket] = entry;
+
+  return entry->value;
+}
+
+const char *string_intern(const char *value) {
+  if (!value) {
+    return NULL;
+  }
+  return string_intern_n(value, strlen(value));
+}
+
+int string_is_interned(const char *value) {
+  if (!value || !g_string_intern_ptr_buckets) {
+    return 0;
+  }
+
+  size_t ptr_bucket =
+      string_intern_hash_ptr(value) % STRING_INTERN_BUCKET_COUNT;
+  StringInternEntry *entry = g_string_intern_ptr_buckets[ptr_bucket];
+  while (entry) {
+    if (entry->value == value) {
+      return 1;
+    }
+    entry = entry->ptr_next;
+  }
+
+  return 0;
+}
+
+void string_intern_clear(void) {
+  if (!g_string_intern_buckets) {
+    return;
+  }
+
+  for (size_t i = 0; i < STRING_INTERN_BUCKET_COUNT; i++) {
+    StringInternEntry *entry = g_string_intern_buckets[i];
+    while (entry) {
+      StringInternEntry *next = entry->next;
+      free(entry->value);
+      free(entry);
+      entry = next;
+    }
+    g_string_intern_buckets[i] = NULL;
+  }
+
+  free(g_string_intern_buckets);
+  free(g_string_intern_ptr_buckets);
+  g_string_intern_buckets = NULL;
+  g_string_intern_ptr_buckets = NULL;
+}
 
 Lexer *lexer_create(const char *source) {
   Lexer *lexer = malloc(sizeof(Lexer));
@@ -30,7 +181,7 @@ void lexer_destroy(Lexer *lexer) {
 }
 
 Token lexer_next_token(Lexer *lexer) {
-  Token token = {TOKEN_EOF, NULL, lexer->line, lexer->column};
+  Token token = {TOKEN_EOF, NULL, {NULL, 0}, lexer->line, lexer->column, 0};
 
   // Skip whitespace
   while (lexer->position < lexer->length &&
@@ -38,6 +189,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->source[lexer->position] == '\n') {
       token.type = TOKEN_NEWLINE;
       token.value = NULL;
+      token_set_lexeme(&token, &lexer->source[lexer->position], 1);
       lexer->position++;
       lexer->line++;
       lexer->column = 1;
@@ -89,6 +241,7 @@ Token lexer_next_token(Lexer *lexer) {
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_EQUALS_EQUALS;
       token.value = strdup("==");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
       return token;
@@ -100,23 +253,26 @@ Token lexer_next_token(Lexer *lexer) {
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_NOT_EQUALS;
       token.value = strdup("!=");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
       return token;
     }
-    token.type = TOKEN_ERROR;
+    token.type = TOKEN_NOT;
     break;
   case '<':
     if (lexer->position + 1 < lexer->length) {
       if (lexer->source[lexer->position + 1] == '=') {
         token.type = TOKEN_LESS_EQUALS;
         token.value = strdup("<=");
+        token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
         return token;
       } else if (lexer->source[lexer->position + 1] == '<') {
         token.type = TOKEN_LSHIFT;
         token.value = strdup("<<");
+        token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
         return token;
@@ -129,12 +285,14 @@ Token lexer_next_token(Lexer *lexer) {
       if (lexer->source[lexer->position + 1] == '=') {
         token.type = TOKEN_GREATER_EQUALS;
         token.value = strdup(">=");
+        token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
         return token;
       } else if (lexer->source[lexer->position + 1] == '>') {
         token.type = TOKEN_RSHIFT;
         token.value = strdup(">>");
+        token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
         return token;
@@ -171,6 +329,7 @@ Token lexer_next_token(Lexer *lexer) {
         lexer->source[lexer->position + 1] == '&') {
       token.type = TOKEN_AND_AND;
       token.value = strdup("&&");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
       return token;
@@ -182,6 +341,7 @@ Token lexer_next_token(Lexer *lexer) {
         lexer->source[lexer->position + 1] == '|') {
       token.type = TOKEN_OR_OR;
       token.value = strdup("||");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
       return token;
@@ -198,6 +358,9 @@ Token lexer_next_token(Lexer *lexer) {
     // Note: comments (//) are already handled above before this switch
     token.type = TOKEN_DIVIDE;
     break;
+  case '%':
+    token.type = TOKEN_PERCENT;
+    break;
   case '.':
     token.type = TOKEN_DOT;
     break;
@@ -209,6 +372,7 @@ Token lexer_next_token(Lexer *lexer) {
     token.value = malloc(2);
     token.value[0] = current;
     token.value[1] = '\0';
+    token_set_lexeme(&token, &lexer->source[lexer->position], 1);
     lexer->position++;
     lexer->column++;
     return token;
@@ -220,6 +384,7 @@ Token lexer_next_token(Lexer *lexer) {
     token.type = TOKEN_ARROW;
     token.value = malloc(3);
     strcpy(token.value, "->");
+    token_set_lexeme(&token, &lexer->source[lexer->position], 2);
     lexer->position += 2;
     lexer->column += 2;
     return token;
@@ -230,6 +395,7 @@ Token lexer_next_token(Lexer *lexer) {
     token.value = malloc(2);
     token.value[0] = current;
     token.value[1] = '\0';
+    token_set_lexeme(&token, &lexer->source[lexer->position], 1);
     lexer->position++;
     lexer->column++;
     return token;
@@ -237,6 +403,7 @@ Token lexer_next_token(Lexer *lexer) {
 
   // Character literals
   if (current == '\'') {
+    size_t literal_start = lexer->position;
     lexer->position++; // skip opening quote
     lexer->column++;
     if (lexer->position >= lexer->length) {
@@ -317,6 +484,8 @@ Token lexer_next_token(Lexer *lexer) {
       return token;
     }
     snprintf(token.value, 16, "%d", value);
+    token_set_lexeme(&token, &lexer->source[literal_start],
+                     lexer->position - literal_start);
     return token;
   }
 
@@ -383,6 +552,7 @@ Token lexer_next_token(Lexer *lexer) {
     token.value = malloc(length + 1);
     strncpy(token.value, &lexer->source[start], length);
     token.value[length] = '\0';
+    token_set_lexeme(&token, &lexer->source[start], length);
     return token;
   }
 
@@ -397,9 +567,15 @@ Token lexer_next_token(Lexer *lexer) {
     }
 
     size_t length = lexer->position - start;
-    token.value = malloc(length + 1);
-    strncpy(token.value, &lexer->source[start], length);
-    token.value[length] = '\0';
+    token.value = (char *)string_intern_n(&lexer->source[start], length);
+    if (!token.value) {
+      token.type = TOKEN_ERROR;
+      token.value = strdup("Memory allocation failed");
+      lexer_set_error(lexer, token.value);
+      return token;
+    }
+    token.is_interned = 1;
+    token_set_lexeme(&token, &lexer->source[start], length);
 
     // Check for keywords
     if (strcmp(token.value, "import") == 0)
@@ -450,6 +626,8 @@ Token lexer_next_token(Lexer *lexer) {
       token.type = TOKEN_THIS;
     else if (strcmp(token.value, "new") == 0)
       token.type = TOKEN_NEW;
+    else if (strcmp(token.value, "fn") == 0)
+      token.type = TOKEN_FN;
 
     // Type keywords
     else if (strcmp(token.value, "int8") == 0)
@@ -654,6 +832,7 @@ Token lexer_next_token(Lexer *lexer) {
     buffer[buffer_pos] = '\0';
     token.type = TOKEN_STRING;
     token.value = buffer;
+    token_set_lexeme(&token, token.value, buffer_pos);
 
     lexer->position++; // Skip closing quote
     lexer->column++;
@@ -666,9 +845,11 @@ Token lexer_next_token(Lexer *lexer) {
   if (token.value) {
     snprintf(token.value, 32, "Unknown character: %c", current);
     lexer_set_error(lexer, token.value);
+    token_set_lexeme(&token, &lexer->source[lexer->position], 1);
   } else {
     token.value = strdup("Unknown character");
     lexer_set_error(lexer, "Unknown character");
+    token_set_lexeme(&token, token.value, strlen(token.value));
   }
   lexer->position++;
   lexer->column++;
@@ -691,10 +872,40 @@ Token lexer_peek_token(Lexer *lexer) {
 }
 
 void token_destroy(Token *token) {
-  if (token && token->value) {
-    free(token->value);
-    token->value = NULL;
+  if (!token) {
+    return;
   }
+
+  if (token->value) {
+    if (!token->is_interned) {
+      free(token->value);
+    }
+    token->value = NULL;
+    token->is_interned = 0;
+  }
+  token->lexeme.data = NULL;
+  token->lexeme.length = 0;
+}
+
+Token token_clone(const Token *token) {
+  Token clone = {TOKEN_EOF, NULL, {NULL, 0}, 0, 0, 0};
+  if (!token) {
+    return clone;
+  }
+
+  clone = *token;
+  if (token->value && !token->is_interned) {
+    clone.value = strdup(token->value);
+    if (!clone.value) {
+      clone.type = TOKEN_ERROR;
+      clone.is_interned = 0;
+      clone.lexeme.data = NULL;
+      clone.lexeme.length = 0;
+    } else if (token->lexeme.data == token->value) {
+      clone.lexeme.data = clone.value;
+    }
+  }
+  return clone;
 }
 
 Token *lexer_tokenize(Lexer *lexer, size_t *token_count) {
@@ -717,9 +928,7 @@ Token *lexer_tokenize(Lexer *lexer, size_t *token_count) {
   do {
     token = lexer_next_token(lexer);
     count++;
-    if (token.value) {
-      free(token.value);
-    }
+    token_destroy(&token);
   } while (token.type != TOKEN_EOF);
 
   // Reset lexer position

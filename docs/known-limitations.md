@@ -16,10 +16,6 @@ Struct-by-value passing to functions can have ABI quirks; prefer pointers for la
 
 Prelude is opt-in (`--prelude`) and not loaded by default.
 
-Unary logical NOT (`!`) is not supported. Use comparisons or `== 0` / `!= 0` patterns.
-
-
-No explicit cast syntax. The compiler may suggest `(type)value` in error messages, but the parser does not support it. Use implicit conversions or restructure the code.
 
 No pointer arithmetic with `ptr + n`. Use indexing `ptr[i]` instead, which scales by element size.
 
@@ -36,8 +32,6 @@ Deferred calls capture variables by reference, not by value. In loops, copy the 
 `errdefer` is function-only and convention-based. It is valid only inside functions, and any non-zero explicit return value is treated as an error.
 
 Unreachable code analysis is currently block-local and conservative; some dead paths in complex control-flow may not be diagnosed yet.
-
-No function pointers. Functions cannot be passed as arguments or stored in variables. For callbacks, use C externs.
 
 String concatenation via `+` is now supported, but it allocates via the GC runtime (`gc_alloc`). Link `gc.c` and initialize the runtime before using `string + string`.
 

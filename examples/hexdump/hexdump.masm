@@ -1,0 +1,140 @@
+// MethASM Hex Dump Utility
+//
+// Displays file contents in canonical hex dump format:
+//   offset   hex bytes (16 per line)   ASCII
+//
+// Usage: hexdump.exe <filename>
+//
+// Demonstrates: argc/argv, file I/O, buffered reads, hex formatting, defer.
+// Build: build.bat
+// Run: hexdump.exe somefile.bin
+
+import "std/io";
+
+// Convert nibble (0-15) to hex char
+function nibble_to_hex(n: int32) -> int32 {
+  if (n < 10) { return n + 48; }
+  return n + 87;
+}
+
+// Write one byte as two hex chars to buf at offset, advance
+function byte_to_hex(buf: cstring, offset: int32, b: uint8) -> int32 {
+  var v: int32 = b;
+  var hi: int32 = v / 16;
+  var lo: int32 = v - (v / 16) * 16;
+  buf[offset] = nibble_to_hex(hi);
+  buf[offset + 1] = nibble_to_hex(lo);
+  return offset + 2;
+}
+
+// Format 16 bytes as hex string into buf, return length
+function format_hex_line(buf: cstring, data: cstring, count: int32) -> int32 {
+  var i: int32 = 0;
+  var pos: int32 = 0;
+  while (i < 16) {
+    if (i < count) {
+      pos = byte_to_hex(buf, pos, data[i]);
+    } else {
+      buf[pos] = 32;
+      buf[pos + 1] = 32;
+      pos = pos + 2;
+    }
+    if (i < 15) {
+      buf[pos] = 32;
+      pos = pos + 1;
+    }
+    i = i + 1;
+  }
+  return pos;
+}
+
+// Format 16 bytes as ASCII (printable or '.')
+function format_ascii_line(buf: cstring, data: cstring, count: int32) -> int32 {
+  var i: int32 = 0;
+  while (i < 16) {
+    if (i < count) {
+      var c: int32 = data[i];
+      if (c >= 32 && c <= 126) {
+        buf[i] = c;
+      } else {
+        buf[i] = 46;
+      }
+    } else {
+      buf[i] = 32;
+    }
+    i = i + 1;
+  }
+  return 16;
+}
+
+// Format offset as 8 hex digits (right-to-left, LS nibble first)
+function format_offset(buf: cstring, off: int64) -> int32 {
+  var i: int32 = 7;
+  var val: int64 = off;
+  while (i >= 0) {
+    var nib: int64 = val - (val / 16) * 16;
+    val = val / 16;
+    buf[i] = nibble_to_hex(nib);
+    i = i - 1;
+  }
+  return 8;
+}
+
+var err_usage: string = "Usage: hexdump <filename>";
+var err_open: string = "Error: cannot open file";
+var mode_r: string = "rb";
+
+function main(argc: int32, argv: cstring*) -> int32 {
+  if (argc < 2) {
+    println(cstr(err_usage));
+    return 1;
+  }
+
+  var filename: cstring = argv[1];
+  var fp: cstring = fopen(filename, cstr(mode_r));
+  if (fp == 0) {
+    println(cstr(err_open));
+    return 1;
+  }
+  defer fclose(fp);
+
+  var buf: uint8[4096];
+  var offset: int64 = 0;
+  var total_read: int64 = 0;
+
+  while (1) {
+    var n: int64 = fread(&buf[0], 1, 16, fp);
+    if (n <= 0) { break; }
+
+    var line: uint8[80];
+    var pos: int32 = 0;
+
+    pos = format_offset(&line[0], offset);
+    line[pos] = 32;
+    pos = pos + 1;
+    line[pos] = 32;
+    pos = pos + 1;
+
+    var hex_len: int32 = format_hex_line(&line[pos], &buf[0], n);
+    pos = pos + hex_len;
+    line[pos] = 32;
+    pos = pos + 1;
+    line[pos] = 124;
+    pos = pos + 1;
+
+    var ascii_len: int32 = format_ascii_line(&line[pos], &buf[0], n);
+    pos = pos + ascii_len;
+    line[pos] = 124;
+    pos = pos + 1;
+    line[pos] = 10;
+    pos = pos + 1;
+    line[pos] = 0;
+
+    print(&line[0]);
+
+    offset = offset + n;
+    total_read = total_read + n;
+  }
+
+  return 0;
+}

@@ -1,2 +1,8 @@
 bin/
 obj/
+
+# Build artifacts
+*.exe
+*.o
+*.obj
+*.s

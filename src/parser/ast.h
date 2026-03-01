@@ -15,6 +15,7 @@ typedef enum {
   AST_METHOD_DECLARATION,
   AST_ASSIGNMENT,
   AST_FUNCTION_CALL,
+  AST_FUNC_PTR_CALL,
   AST_RETURN_STATEMENT,
   AST_IF_STATEMENT,
   AST_WHILE_STATEMENT,
@@ -33,7 +34,8 @@ typedef enum {
   AST_UNARY_EXPRESSION,
   AST_MEMBER_ACCESS,
   AST_INDEX_EXPRESSION,
-  AST_NEW_EXPRESSION
+  AST_NEW_EXPRESSION,
+  AST_CAST_EXPRESSION
 } ASTNodeType;
 
 typedef struct {
@@ -121,7 +123,14 @@ typedef struct {
   ASTNode *object; // Non-null for method calls (obj.method(args))
   char **type_args;
   size_t type_arg_count;
+  int is_indirect_call; // 1 if callee is a variable with function pointer type
 } CallExpression;
+
+typedef struct {
+  ASTNode *function;
+  ASTNode **arguments;
+  size_t argument_count;
+} FuncPtrCall;
 
 typedef struct {
   char *variable_name;
@@ -148,6 +157,11 @@ typedef struct {
 typedef struct {
   char *type_name; // The target struct or type name
 } NewExpression;
+
+typedef struct {
+  char *type_name;  // Target type string
+  ASTNode *operand; // Expression being cast
+} CastExpression;
 
 typedef struct {
   ASTNode *left;
@@ -243,6 +257,9 @@ ASTNode *ast_create_enum_declaration(const char *name, EnumVariant *variants,
 ASTNode *ast_create_call_expression(const char *function_name,
                                     ASTNode **arguments, size_t argument_count,
                                     SourceLocation location);
+ASTNode *ast_create_func_ptr_call(ASTNode *function, ASTNode **arguments,
+                                  size_t argument_count,
+                                  SourceLocation location);
 ASTNode *ast_create_assignment(const char *variable_name, ASTNode *value,
                                SourceLocation location);
 ASTNode *ast_create_inline_asm(const char *assembly_code,
@@ -267,6 +284,8 @@ ASTNode *ast_create_new_expression(const char *type_name,
                                    SourceLocation location);
 ASTNode *ast_create_field_assignment(ASTNode *target, ASTNode *value,
                                      SourceLocation location);
+ASTNode *ast_create_cast_expression(const char *type_name, ASTNode *operand,
+                                    SourceLocation location);
 ASTNode *ast_create_for_statement(ASTNode *initializer, ASTNode *condition,
                                   ASTNode *increment, ASTNode *body,
                                   SourceLocation location);
@@ -277,7 +296,8 @@ ASTNode *ast_create_switch_statement(ASTNode *expression, ASTNode **cases,
                                      SourceLocation location);
 ASTNode *ast_create_break_statement(SourceLocation location);
 ASTNode *ast_create_continue_statement(SourceLocation location);
-ASTNode *ast_create_defer_statement(ASTNode *statement, SourceLocation location);
+ASTNode *ast_create_defer_statement(ASTNode *statement,
+                                    SourceLocation location);
 ASTNode *ast_create_errdefer_statement(ASTNode *statement,
                                        SourceLocation location);
 

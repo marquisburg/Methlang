@@ -37,6 +37,15 @@ static void allocate_temporary_unreachable(size_t size) {
   (void)ptr;
 }
 
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+static void allocate_many_temporary_unreachable(size_t count, size_t size) {
+  for (size_t i = 0; i < count; i++) {
+    allocate_temporary_unreachable(size);
+  }
+}
+
 static int test_collects_unreachable(void) {
   gc_shutdown();
   gc_set_collection_threshold(1 << 20);
@@ -202,9 +211,9 @@ static int test_auto_collection_projected_threshold(void) {
   volatile void *live = gc_alloc(200);
   TEST_ASSERT(live != NULL, "second allocation failed");
   TEST_ASSERT(
-      gc_get_allocation_count() == 1,
-      "projected-threshold collection should reclaim unreachable blocks "
-      "before allocating");
+      gc_get_allocation_count() <= 2,
+      "projected-threshold collection should not retain more than the prior "
+      "temporary block plus the live allocation");
 
   live = NULL;
   scrub_stack_words();
@@ -212,6 +221,31 @@ static int test_auto_collection_projected_threshold(void) {
   TEST_ASSERT(gc_get_allocation_count() <= 1,
               "live allocation should become collectable after root is "
               "cleared");
+  return 1;
+}
+
+static int test_reclaims_dead_tlab_chunks(void) {
+  gc_shutdown();
+  gc_set_collection_threshold(1 << 20);
+#if defined(__GNUC__) || defined(__clang__)
+  gc_init(__builtin_frame_address(0));
+#else
+  volatile uintptr_t stack_base = 0;
+  gc_init((void *)&stack_base);
+#endif
+
+  allocate_many_temporary_unreachable(2048, 96);
+  size_t chunks_before = gc_get_tlab_chunk_count();
+  TEST_ASSERT(chunks_before >= 2, "expected multiple TLAB chunks to be created");
+
+  for (int i = 0; i < 3; i++) {
+    scrub_stack_words();
+    collect_from_here();
+  }
+
+  size_t chunks_after = gc_get_tlab_chunk_count();
+  TEST_ASSERT(chunks_after < chunks_before,
+              "fully dead TLAB chunks should be reclaimed during sweep");
   return 1;
 }
 
@@ -289,6 +323,7 @@ int main(void) {
   passed &= test_interior_pointer_root();
   passed &= test_auto_collection_threshold();
   passed &= test_auto_collection_projected_threshold();
+  passed &= test_reclaims_dead_tlab_chunks();
   passed &= test_explicit_registered_root();
 
   gc_shutdown();

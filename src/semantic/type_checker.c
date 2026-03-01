@@ -4,10 +4,18 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+typedef struct TrackedBufferExtent {
+  char *name;
+  long long byte_count;
+  long long known_alignment;
+  int scope_depth;
+  struct TrackedBufferExtent *next;
+} TrackedBufferExtent;
 
 static Type *type_checker_parse_array_type(TypeChecker *checker,
                                            const char *name) {
@@ -146,6 +154,23 @@ static int type_checker_types_equal(const Type *lhs, const Type *rhs) {
       return strcmp(lhs->name, rhs->name) == 0;
     }
     return lhs->name == rhs->name;
+  case TYPE_FUNCTION_POINTER:
+    // Function pointer types with same signature are equal
+    if (lhs->fn_param_count != rhs->fn_param_count) {
+      return 0;
+    }
+    // Check return type
+    if (!type_checker_types_equal(lhs->fn_return_type, rhs->fn_return_type)) {
+      return 0;
+    }
+    // Check parameter types
+    for (size_t i = 0; i < lhs->fn_param_count; i++) {
+      if (!type_checker_types_equal(lhs->fn_param_types[i],
+                                    rhs->fn_param_types[i])) {
+        return 0;
+      }
+    }
+    return 1;
   default:
     return 1;
   }
@@ -250,6 +275,435 @@ static int type_checker_eval_integer_constant(ASTNode *expression,
   }
 }
 
+static void type_checker_buffer_extent_clear(TypeChecker *checker) {
+  if (!checker) {
+    return;
+  }
+
+  TrackedBufferExtent *node = checker->tracked_buffer_extents;
+  while (node) {
+    TrackedBufferExtent *next = node->next;
+    free(node->name);
+    free(node);
+    node = next;
+  }
+  checker->tracked_buffer_extents = NULL;
+}
+
+static void type_checker_buffer_extent_exit_scope(TypeChecker *checker,
+                                                  int scope_depth) {
+  if (!checker) {
+    return;
+  }
+
+  TrackedBufferExtent **node_ptr = &checker->tracked_buffer_extents;
+  while (*node_ptr) {
+    TrackedBufferExtent *node = *node_ptr;
+    if (node->scope_depth == scope_depth) {
+      *node_ptr = node->next;
+      free(node->name);
+      free(node);
+      continue;
+    }
+    node_ptr = &node->next;
+  }
+}
+
+static TrackedBufferExtent *
+type_checker_buffer_extent_find(TypeChecker *checker, const char *name) {
+  if (!checker || !name) {
+    return NULL;
+  }
+
+  TrackedBufferExtent *node = checker->tracked_buffer_extents;
+  while (node) {
+    if (node->name && strcmp(node->name, name) == 0) {
+      return node;
+    }
+    node = node->next;
+  }
+  return NULL;
+}
+
+static int type_checker_buffer_extent_declare(TypeChecker *checker,
+                                              const char *name,
+                                              long long byte_count,
+                                              long long known_alignment) {
+  if (!checker || !name) {
+    return 0;
+  }
+
+  TrackedBufferExtent *node = malloc(sizeof(TrackedBufferExtent));
+  if (!node) {
+    return 0;
+  }
+
+  node->name = strdup(name);
+  if (!node->name) {
+    free(node);
+    return 0;
+  }
+
+  node->byte_count = byte_count;
+  node->known_alignment = known_alignment;
+  node->scope_depth = checker->tracked_scope_depth;
+  node->next = checker->tracked_buffer_extents;
+  checker->tracked_buffer_extents = node;
+  return 1;
+}
+
+static int type_checker_buffer_extent_set(TypeChecker *checker, const char *name,
+                                          long long byte_count,
+                                          long long known_alignment) {
+  if (!checker || !name) {
+    return 0;
+  }
+
+  TrackedBufferExtent *node = type_checker_buffer_extent_find(checker, name);
+  if (!node) {
+    return type_checker_buffer_extent_declare(checker, name, byte_count,
+                                              known_alignment);
+  }
+
+  node->byte_count = byte_count;
+  node->known_alignment = known_alignment;
+  return 1;
+}
+
+static long long type_checker_default_heap_alignment(void) {
+  // Current backend target is 64-bit; model malloc/calloc as at least 8-byte
+  // aligned so we can reason about common scalar casts.
+  return 8;
+}
+
+static long long
+type_checker_extract_allocation_call_alignment(CallExpression *call) {
+  if (!call || !call->function_name) {
+    return -1;
+  }
+  if (strcmp(call->function_name, "malloc") == 0 ||
+      strcmp(call->function_name, "calloc") == 0) {
+    return type_checker_default_heap_alignment();
+  }
+  return -1;
+}
+
+static long long type_checker_known_alignment_after_offset(long long base_align,
+                                                           long long offset) {
+  if (base_align <= 0) {
+    return -1;
+  }
+  if (offset == 0) {
+    return base_align;
+  }
+  if (offset == LLONG_MIN) {
+    return 1;
+  }
+
+  long long magnitude = offset < 0 ? -offset : offset;
+  long long result = base_align;
+  while (result > 1 && (magnitude % result) != 0) {
+    result /= 2;
+  }
+  return result > 0 ? result : 1;
+}
+
+static const char *type_checker_extract_identifier_name(ASTNode *expression) {
+  if (!expression) {
+    return NULL;
+  }
+
+  if (expression->type == AST_CAST_EXPRESSION) {
+    CastExpression *cast_expr = (CastExpression *)expression->data;
+    if (!cast_expr) {
+      return NULL;
+    }
+    return type_checker_extract_identifier_name(cast_expr->operand);
+  }
+
+  if (expression->type != AST_IDENTIFIER) {
+    return NULL;
+  }
+
+  Identifier *id = (Identifier *)expression->data;
+  if (!id || !id->name) {
+    return NULL;
+  }
+  return id->name;
+}
+
+static long long
+type_checker_extract_allocation_call_extent(CallExpression *call) {
+  if (!call || !call->function_name) {
+    return -1;
+  }
+
+  if (strcmp(call->function_name, "malloc") == 0) {
+    if (call->argument_count != 1) {
+      return -1;
+    }
+    long long size = 0;
+    if (!type_checker_eval_integer_constant(call->arguments[0], &size) ||
+        size < 0) {
+      return -1;
+    }
+    return size;
+  }
+
+  if (strcmp(call->function_name, "calloc") == 0) {
+    if (call->argument_count != 2) {
+      return -1;
+    }
+    long long count = 0;
+    long long size = 0;
+    if (!type_checker_eval_integer_constant(call->arguments[0], &count) ||
+        !type_checker_eval_integer_constant(call->arguments[1], &size) ||
+        count < 0 || size < 0) {
+      return -1;
+    }
+    if (count > 0 && size > (LLONG_MAX / count)) {
+      return -1;
+    }
+    return count * size;
+  }
+
+  return -1;
+}
+
+static long long type_checker_extract_known_buffer_extent(TypeChecker *checker,
+                                                          ASTNode *expression) {
+  if (!expression) {
+    return -1;
+  }
+
+  if (expression->type == AST_CAST_EXPRESSION) {
+    CastExpression *cast_expr = (CastExpression *)expression->data;
+    if (!cast_expr) {
+      return -1;
+    }
+    return type_checker_extract_known_buffer_extent(checker, cast_expr->operand);
+  }
+
+  if (expression->type == AST_FUNCTION_CALL) {
+    CallExpression *call = (CallExpression *)expression->data;
+    return type_checker_extract_allocation_call_extent(call);
+  }
+
+  if (expression->type == AST_BINARY_EXPRESSION) {
+    BinaryExpression *binary_expr = (BinaryExpression *)expression->data;
+    if (!binary_expr || !binary_expr->operator || !binary_expr->left ||
+        !binary_expr->right) {
+      return -1;
+    }
+    if (strcmp(binary_expr->operator, "+") == 0) {
+      long long offset = 0;
+      long long base_extent = -1;
+      if (type_checker_eval_integer_constant(binary_expr->right, &offset)) {
+        base_extent =
+            type_checker_extract_known_buffer_extent(checker, binary_expr->left);
+      } else if (type_checker_eval_integer_constant(binary_expr->left, &offset)) {
+        base_extent =
+            type_checker_extract_known_buffer_extent(checker, binary_expr->right);
+      } else {
+        return -1;
+      }
+      if (base_extent < 0 || offset < 0) {
+        return -1;
+      }
+      if (offset >= base_extent) {
+        return 0;
+      }
+      return base_extent - offset;
+    }
+  }
+
+  const char *name = type_checker_extract_identifier_name(expression);
+  if (!name) {
+    return -1;
+  }
+
+  TrackedBufferExtent *node = type_checker_buffer_extent_find(checker, name);
+  if (!node) {
+    return -1;
+  }
+
+  return node->byte_count;
+}
+
+static long long
+type_checker_extract_known_pointer_alignment(TypeChecker *checker,
+                                             ASTNode *expression) {
+  if (!expression) {
+    return -1;
+  }
+
+  if (expression->type == AST_CAST_EXPRESSION) {
+    CastExpression *cast_expr = (CastExpression *)expression->data;
+    if (!cast_expr) {
+      return -1;
+    }
+    return type_checker_extract_known_pointer_alignment(checker,
+                                                        cast_expr->operand);
+  }
+
+  if (expression->type == AST_FUNCTION_CALL) {
+    CallExpression *call = (CallExpression *)expression->data;
+    return type_checker_extract_allocation_call_alignment(call);
+  }
+
+  if (expression->type == AST_BINARY_EXPRESSION) {
+    BinaryExpression *binary_expr = (BinaryExpression *)expression->data;
+    if (!binary_expr || !binary_expr->operator || !binary_expr->left ||
+        !binary_expr->right) {
+      return -1;
+    }
+
+    if (strcmp(binary_expr->operator, "+") == 0 ||
+        strcmp(binary_expr->operator, "-") == 0) {
+      long long offset = 0;
+      long long base_align = -1;
+
+      if (type_checker_eval_integer_constant(binary_expr->right, &offset)) {
+        base_align = type_checker_extract_known_pointer_alignment(
+            checker, binary_expr->left);
+      } else if (strcmp(binary_expr->operator, "+") == 0 &&
+                 type_checker_eval_integer_constant(binary_expr->left,
+                                                   &offset)) {
+        base_align = type_checker_extract_known_pointer_alignment(
+            checker, binary_expr->right);
+      } else {
+        return -1;
+      }
+
+      if (base_align <= 0) {
+        return -1;
+      }
+      return type_checker_known_alignment_after_offset(base_align, offset);
+    }
+  }
+
+  const char *name = type_checker_extract_identifier_name(expression);
+  if (!name) {
+    return -1;
+  }
+
+  TrackedBufferExtent *node = type_checker_buffer_extent_find(checker, name);
+  if (!node) {
+    return -1;
+  }
+
+  return node->known_alignment;
+}
+
+static void type_checker_warn_potential_misaligned_cast(TypeChecker *checker,
+                                                        ASTNode *expression,
+                                                        CastExpression *cast_expr,
+                                                        Type *target_type) {
+  if (!checker || !checker->error_reporter || !expression || !cast_expr ||
+      !target_type || target_type->kind != TYPE_POINTER ||
+      !target_type->base_type) {
+    return;
+  }
+
+  size_t required_alignment = target_type->base_type->alignment;
+  if (required_alignment <= 1) {
+    return;
+  }
+
+  long long known_alignment =
+      type_checker_extract_known_pointer_alignment(checker, cast_expr->operand);
+  if (known_alignment <= 0) {
+    return;
+  }
+
+  if (known_alignment < (long long)required_alignment) {
+    char message[512];
+    snprintf(
+        message, sizeof(message),
+        "Cast to %s may violate required %zu-byte alignment (known alignment %lld)",
+        target_type->name ? target_type->name : "pointer", required_alignment,
+        known_alignment);
+    error_reporter_add_warning(checker->error_reporter, ERROR_SEMANTIC,
+                               expression->location, message);
+  }
+}
+
+static void type_checker_warn_recv_buffer_bounds(TypeChecker *checker,
+                                                 CallExpression *call) {
+  if (!checker || !checker->error_reporter || !call || !call->function_name) {
+    return;
+  }
+  if (strcmp(call->function_name, "recv") != 0 || call->argument_count < 3) {
+    return;
+  }
+
+  const char *buffer_name = type_checker_extract_identifier_name(call->arguments[1]);
+  if (!buffer_name) {
+    return;
+  }
+
+  TrackedBufferExtent *fact =
+      type_checker_buffer_extent_find(checker, buffer_name);
+  if (!fact || fact->byte_count < 0) {
+    return;
+  }
+
+  long long recv_len = 0;
+  if (!type_checker_eval_integer_constant(call->arguments[2], &recv_len)) {
+    return;
+  }
+
+  char message[512];
+  if (recv_len > fact->byte_count) {
+    snprintf(message, sizeof(message),
+             "recv length %lld exceeds tracked allocation %lld bytes for '%s'",
+             recv_len, fact->byte_count, buffer_name);
+    error_reporter_add_warning(checker->error_reporter, ERROR_SEMANTIC,
+                               call->arguments[2]->location, message);
+  }
+}
+
+static void type_checker_warn_memcpy_buffer_bounds(TypeChecker *checker,
+                                                   CallExpression *call) {
+  if (!checker || !checker->error_reporter || !call || !call->function_name) {
+    return;
+  }
+  int is_memcpy = strcmp(call->function_name, "memcpy") == 0;
+  int is_memmove = strcmp(call->function_name, "memmove") == 0;
+  if ((!is_memcpy && !is_memmove) || call->argument_count < 3) {
+    return;
+  }
+
+  long long copy_len = 0;
+  if (!type_checker_eval_integer_constant(call->arguments[2], &copy_len) ||
+      copy_len < 0) {
+    return;
+  }
+
+  long long dst_extent =
+      type_checker_extract_known_buffer_extent(checker, call->arguments[0]);
+  long long src_extent =
+      type_checker_extract_known_buffer_extent(checker, call->arguments[1]);
+  const char *fn_name = call->function_name;
+
+  char message[512];
+  if (dst_extent >= 0 && copy_len > dst_extent) {
+    snprintf(message, sizeof(message),
+             "%s length %lld exceeds known destination extent %lld bytes",
+             fn_name, copy_len, dst_extent);
+    error_reporter_add_warning(checker->error_reporter, ERROR_SEMANTIC,
+                               call->arguments[2]->location, message);
+  }
+
+  if (src_extent >= 0 && copy_len > src_extent) {
+    snprintf(message, sizeof(message),
+             "%s length %lld exceeds known source extent %lld bytes", fn_name,
+             copy_len, src_extent);
+    error_reporter_add_warning(checker->error_reporter, ERROR_SEMANTIC,
+                               call->arguments[2]->location, message);
+  }
+}
+
 static int type_checker_ast_contains_node_type(ASTNode *node,
                                                ASTNodeType target_type) {
   if (!node) {
@@ -302,6 +756,7 @@ static void type_checker_init_tracker_reset(TypeChecker *checker) {
   checker->tracked_var_count = 0;
   checker->tracked_scope_count = 0;
   checker->tracked_scope_depth = 0;
+  type_checker_buffer_extent_clear(checker);
 }
 
 static int type_checker_init_tracker_ensure_var_capacity(TypeChecker *checker) {
@@ -371,6 +826,7 @@ static void type_checker_init_tracker_exit_scope(TypeChecker *checker) {
   if (!checker || checker->tracked_scope_count == 0) {
     return;
   }
+  int exiting_depth = checker->tracked_scope_depth;
   size_t marker =
       checker->tracked_scope_markers[checker->tracked_scope_count - 1];
   checker->tracked_scope_count--;
@@ -382,6 +838,7 @@ static void type_checker_init_tracker_exit_scope(TypeChecker *checker) {
     checker->tracked_var_scope_depth[idx] = 0;
     checker->tracked_var_count--;
   }
+  type_checker_buffer_extent_exit_scope(checker, exiting_depth);
   if (checker->tracked_scope_depth > 0) {
     checker->tracked_scope_depth--;
   }
@@ -588,6 +1045,7 @@ type_checker_create_with_error_reporter(SymbolTable *symbol_table,
   checker->tracked_scope_count = 0;
   checker->tracked_scope_capacity = 0;
   checker->tracked_scope_depth = 0;
+  checker->tracked_buffer_extents = NULL;
 
   // Initialize built-in type pointers to NULL
   checker->builtin_int8 = NULL;
@@ -634,6 +1092,7 @@ void type_checker_destroy(TypeChecker *checker) {
     free(checker->tracked_var_initialized);
     free(checker->tracked_var_scope_depth);
     free(checker->tracked_scope_markers);
+    type_checker_buffer_extent_clear(checker);
 
     free(checker->error_message);
     free(checker);
@@ -672,8 +1131,8 @@ static int type_checker_register_function_signature(TypeChecker *checker,
     if (!param_types)
       return 0;
     for (size_t i = 0; i < func_decl->parameter_count; i++) {
-      param_types[i] = type_checker_get_type_by_name(
-          checker, func_decl->parameter_types[i]);
+      param_types[i] =
+          type_checker_get_type_by_name(checker, func_decl->parameter_types[i]);
       if (!param_types[i]) {
         free(param_types);
         return 0;
@@ -854,6 +1313,33 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     }
 
     if (strcmp(unop->operator, "&") == 0) {
+      // Check if operand is an identifier that refers to a function
+      if (unop->operand->type == AST_IDENTIFIER) {
+        Identifier *id = (Identifier *)unop->operand->data;
+        if (id && id->name) {
+          Symbol *sym = symbol_table_lookup(checker->symbol_table, id->name);
+          if (sym && sym->kind == SYMBOL_FUNCTION) {
+            // Taking address of a function - create function pointer type
+            Type **param_types = sym->data.function.parameter_types;
+            size_t param_count = sym->data.function.parameter_count;
+            Type *return_type = sym->data.function.return_type;
+            if (!return_type) {
+              return_type = checker->builtin_void;
+            }
+            Type *fp_type = type_create_function_pointer(
+                param_types, param_count, return_type);
+            if (!fp_type) {
+              type_checker_set_error_at_location(
+                  checker, expression->location,
+                  "Failed to create function pointer type");
+              return NULL;
+            }
+            return fp_type;
+          }
+        }
+      }
+
+      // Not a function reference - treat as regular address-of
       if (!type_checker_is_lvalue_expression(unop->operand)) {
         type_checker_set_error_at_location(
             checker, unop->operand->location,
@@ -930,6 +1416,18 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       return operand_type;
     }
 
+    if (strcmp(unop->operator, "!") == 0) {
+      if (!type_checker_is_numeric_type(operand_type) &&
+          operand_type->kind != TYPE_POINTER) {
+        type_checker_report_type_mismatch(checker, unop->operand->location,
+                                          "numeric or pointer type",
+                                          operand_type->name);
+        return NULL;
+      }
+      // Logical NOT always produces an int32 (0 or 1)
+      return checker->builtin_int32;
+    }
+
     type_checker_set_error_at_location(checker, expression->location,
                                        "Unsupported unary operator '%s'",
                                        unop->operator);
@@ -944,6 +1442,40 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       type_checker_report_undefined_symbol(checker, expression->location,
                                            call->function_name, "function");
       return NULL;
+    }
+
+    /* Variable with function pointer type can be called like a function */
+    if (func_symbol->kind == SYMBOL_VARIABLE && func_symbol->type &&
+        func_symbol->type->kind == TYPE_FUNCTION_POINTER) {
+      call->is_indirect_call = 1;
+      Type *fp_type = func_symbol->type;
+      if (call->argument_count != fp_type->fn_param_count) {
+        char error_msg[512];
+        snprintf(error_msg, sizeof(error_msg),
+                 "Function pointer expects %llu arguments, got %llu",
+                 (unsigned long long)fp_type->fn_param_count,
+                 (unsigned long long)call->argument_count);
+        type_checker_set_error_at_location(checker, expression->location,
+                                           error_msg);
+        return NULL;
+      }
+      for (size_t i = 0; i < call->argument_count; i++) {
+        Type *arg_type = type_checker_infer_type(checker, call->arguments[i]);
+        if (!arg_type)
+          return NULL;
+        Type *param_type = fp_type->fn_param_types[i];
+        int is_null =
+            (param_type && param_type->kind == TYPE_POINTER &&
+             type_checker_is_null_pointer_constant(call->arguments[i]));
+        if (!is_null &&
+            !type_checker_is_assignable(checker, param_type, arg_type)) {
+          type_checker_report_type_mismatch(checker,
+                                            call->arguments[i]->location,
+                                            param_type->name, arg_type->name);
+          return NULL;
+        }
+      }
+      return fp_type->fn_return_type;
     }
 
     if (func_symbol->kind != SYMBOL_FUNCTION) {
@@ -1004,7 +1536,89 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       }
     }
 
+    type_checker_warn_recv_buffer_bounds(checker, call);
+    type_checker_warn_memcpy_buffer_bounds(checker, call);
+
     return func_symbol->data.function.return_type;
+  }
+
+  case AST_FUNC_PTR_CALL: {
+    FuncPtrCall *fp_call = (FuncPtrCall *)expression->data;
+    if (!fp_call || !fp_call->function) {
+      type_checker_set_error_at_location(checker, expression->location,
+                                         "Invalid function pointer call");
+      return NULL;
+    }
+
+    Type *func_type = type_checker_infer_type(checker, fp_call->function);
+    if (!func_type) {
+      return NULL;
+    }
+
+    /* If expression is identifier resolving to a function, synthesize function
+     * pointer type */
+    if (func_type->kind != TYPE_FUNCTION_POINTER &&
+        fp_call->function->type == AST_IDENTIFIER) {
+      Identifier *id = (Identifier *)fp_call->function->data;
+      Symbol *sym = symbol_table_lookup(checker->symbol_table, id->name);
+      if (sym && sym->kind == SYMBOL_FUNCTION) {
+        Type **param_types = sym->data.function.parameter_types;
+        size_t param_count = sym->data.function.parameter_count;
+        Type *return_type = sym->data.function.return_type;
+        if (!return_type)
+          return_type = checker->builtin_void;
+        func_type =
+            type_create_function_pointer(param_types, param_count, return_type);
+        if (!func_type) {
+          type_checker_set_error_at_location(
+              checker, expression->location,
+              "Failed to create function pointer type");
+          return NULL;
+        }
+      }
+    }
+
+    if (func_type->kind != TYPE_FUNCTION_POINTER) {
+      type_checker_set_error_at_location(
+          checker, expression->location,
+          "Cannot call non-function-pointer expression");
+      return NULL;
+    }
+
+    // Check argument count
+    if (fp_call->argument_count != func_type->fn_param_count) {
+      char error_msg[512];
+      snprintf(error_msg, sizeof(error_msg),
+               "Function pointer expects %llu arguments, got %llu",
+               (unsigned long long)func_type->fn_param_count,
+               (unsigned long long)fp_call->argument_count);
+      type_checker_set_error_at_location(checker, expression->location,
+                                         error_msg);
+      return NULL;
+    }
+
+    // Check each argument type
+    for (size_t i = 0; i < fp_call->argument_count; i++) {
+      Type *arg_type = type_checker_infer_type(checker, fp_call->arguments[i]);
+      if (!arg_type) {
+        return NULL;
+      }
+
+      Type *param_type = func_type->fn_param_types[i];
+      int is_null_pointer_arg =
+          (param_type && param_type->kind == TYPE_POINTER &&
+           type_checker_is_null_pointer_constant(fp_call->arguments[i]));
+      if (!is_null_pointer_arg &&
+          !type_checker_is_assignable(checker, param_type, arg_type)) {
+        type_checker_report_type_mismatch(checker,
+                                          fp_call->arguments[i]->location,
+                                          param_type->name, arg_type->name);
+        return NULL;
+      }
+    }
+
+    // Return the function pointer's return type
+    return func_type->fn_return_type;
   }
 
   case AST_MEMBER_ACCESS: {
@@ -1148,6 +1762,43 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     return pointer_type;
   }
 
+  case AST_CAST_EXPRESSION: {
+    CastExpression *cast_expr = (CastExpression *)expression->data;
+    if (!cast_expr || !cast_expr->type_name || !cast_expr->operand) {
+      type_checker_set_error_at_location(checker, expression->location,
+                                         "Invalid cast expression");
+      return NULL;
+    }
+
+    Type *target_type =
+        type_checker_get_type_by_name(checker, cast_expr->type_name);
+    if (!target_type) {
+      type_checker_set_error_at_location(checker, expression->location,
+                                         "Unknown target type for cast");
+      return NULL;
+    }
+
+    Type *operand_type = type_checker_infer_type(checker, cast_expr->operand);
+    if (!operand_type) {
+      return NULL; // Error already reported
+    }
+
+    if (!type_checker_is_cast_valid(operand_type, target_type)) {
+      char error_msg[512];
+      snprintf(error_msg, sizeof(error_msg),
+               "Cannot cast from type '%s' to type '%s'", operand_type->name,
+               target_type->name);
+      type_checker_set_error_at_location(checker, expression->location,
+                                         error_msg);
+      return NULL;
+    }
+
+    type_checker_warn_potential_misaligned_cast(checker, expression, cast_expr,
+                                                target_type);
+
+    return target_type;
+  }
+
   default:
     return NULL;
   }
@@ -1268,6 +1919,94 @@ Type *type_checker_get_builtin_type(TypeChecker *checker, TypeKind kind) {
   }
 }
 
+static Type *type_checker_parse_function_pointer_type(TypeChecker *checker,
+                                                      const char *name) {
+  if (!checker || !name) {
+    return NULL;
+  }
+
+  // Check if it's a function pointer type: fn(param1,param2)->returntype
+  if (strlen(name) < 4 || strncmp(name, "fn(", 3) != 0) {
+    return NULL;
+  }
+
+  // Find the -> that separates params from return type
+  const char *arrow = strstr(name, ")->");
+  if (!arrow) {
+    return NULL;
+  }
+
+  // Parse parameter types
+  const char *params_start = name + 3; // skip "fn("
+  const char *params_end = arrow;
+  size_t params_len = params_end - params_start;
+
+  Type **param_types = NULL;
+  size_t param_count = 0;
+
+  if (params_len > 0) {
+    // Parse comma-separated parameter types
+    char *params_copy = malloc(params_len + 1);
+    if (!params_copy) {
+      return NULL;
+    }
+    memcpy(params_copy, params_start, params_len);
+    params_copy[params_len] = '\0';
+
+    // Count parameters by counting commas
+    param_count = 1;
+    for (size_t i = 0; i < params_len; i++) {
+      if (params_copy[i] == ',') {
+        param_count++;
+      }
+    }
+
+    param_types = calloc(param_count, sizeof(Type *));
+    if (!param_types) {
+      free(params_copy);
+      return NULL;
+    }
+
+    // Parse each parameter type
+    char *param_start = params_copy;
+    size_t param_idx = 0;
+    for (size_t i = 0; i <= params_len; i++) {
+      if (params_copy[i] == ',' || params_copy[i] == '\0') {
+        params_copy[i] = '\0';
+        Type *param_type = type_checker_get_type_by_name(checker, param_start);
+        if (!param_type) {
+          free(params_copy);
+          free(param_types);
+          return NULL;
+        }
+        if (param_idx < param_count) {
+          param_types[param_idx++] = param_type;
+        }
+        param_start = params_copy + i + 1;
+      }
+    }
+
+    free(params_copy);
+  }
+
+  // Parse return type
+  const char *return_type_start = arrow + 3; // skip ")->"
+  Type *return_type = type_checker_get_type_by_name(checker, return_type_start);
+  if (!return_type) {
+    // Default to void if return type not found
+    return_type = checker->builtin_void;
+  }
+
+  Type *fp_type =
+      type_create_function_pointer(param_types, param_count, return_type);
+  if (!fp_type) {
+    free(param_types);
+    return NULL;
+  }
+
+  return fp_type;
+}
+
 Type *type_checker_get_type_by_name(TypeChecker *checker, const char *name) {
   if (!checker || !name)
     return NULL;
@@ -1299,6 +2038,14 @@ Type *type_checker_get_type_by_name(TypeChecker *checker, const char *name) {
     return checker->builtin_cstring;
   if (strcmp(name, "void") == 0)
     return checker->builtin_void;
+
+  // Check for function pointer types: fn(param1,param2)->returntype
+  if (strncmp(name, "fn(", 3) == 0) {
+    Type *fp_type = type_checker_parse_function_pointer_type(checker, name);
+    if (fp_type) {
+      return fp_type;
+    }
+  }
 
   if (strchr(name, '[') && strchr(name, ']')) {
     Type *array_type = type_checker_parse_array_type(checker, name);
@@ -1468,12 +2215,73 @@ Type *type_checker_infer_variable_type(TypeChecker *checker,
 
 // Type compatibility and conversion functions implementation
 
+int type_checker_is_cast_valid(Type *from, Type *to) {
+  if (!from || !to)
+    return 0;
+
+  if (type_checker_types_equal(from, to))
+    return 1;
+
+  // Numeric ↔ numeric
+  if (type_checker_is_numeric_type(from) && type_checker_is_numeric_type(to))
+    return 1;
+
+  // Pointer ↔ pointer
+  if (from->kind == TYPE_POINTER && to->kind == TYPE_POINTER)
+    return 1;
+
+  // Integer ↔ pointer
+  if ((type_checker_is_integer_type(from) && to->kind == TYPE_POINTER) ||
+      (from->kind == TYPE_POINTER && type_checker_is_integer_type(to))) {
+    return 1;
+  }
+
+  // Pointer ↔ function pointer
+  if ((from->kind == TYPE_POINTER && to->kind == TYPE_FUNCTION_POINTER) ||
+      (from->kind == TYPE_FUNCTION_POINTER && to->kind == TYPE_POINTER)) {
+    return 1;
+  }
+
+  // Integer ↔ function pointer
+  if ((type_checker_is_integer_type(from) &&
+       to->kind == TYPE_FUNCTION_POINTER) ||
+      (from->kind == TYPE_FUNCTION_POINTER &&
+       type_checker_is_integer_type(to))) {
+    return 1;
+  }
+
+  // Function pointer ↔ function pointer
+  if (from->kind == TYPE_FUNCTION_POINTER &&
+      to->kind == TYPE_FUNCTION_POINTER) {
+    return 1;
+  }
+
+  return 0;
+}
+
+// Type compatibility and conversion functions implementation
+
 int type_checker_is_assignable(TypeChecker *checker, Type *dest_type,
                                Type *src_type) {
   if (!checker || !dest_type || !src_type)
     return 0;
 
   if (type_checker_types_equal(dest_type, src_type)) {
+    return 1;
+  }
+
+  /* Allow int8* (e.g. from &array[0] for int8[]) to cstring (uint8*) for C interop */
+  if (dest_type->kind == TYPE_POINTER && src_type->kind == TYPE_POINTER &&
+      dest_type->name && strcmp(dest_type->name, "cstring") == 0 &&
+      src_type->base_type && src_type->base_type->name &&
+      strcmp(src_type->base_type->name, "int8") == 0) {
+    return 1;
+  }
+
+  /* Allow array to pointer decay (T[N] to T*) for function arguments */
+  if (dest_type->kind == TYPE_POINTER && src_type->kind == TYPE_ARRAY &&
+      dest_type->base_type && src_type->base_type &&
+      type_checker_types_equal(dest_type->base_type, src_type->base_type)) {
     return 1;
   }
 
@@ -1979,6 +2787,23 @@ int type_checker_process_declaration(TypeChecker *checker,
             return 0;
           }
         }
+
+        if (var_type && var_type->kind == TYPE_POINTER) {
+          long long known_extent = type_checker_extract_known_buffer_extent(
+              checker, var_decl->initializer);
+          long long known_alignment =
+              type_checker_extract_known_pointer_alignment(
+                  checker, var_decl->initializer);
+          if (!type_checker_buffer_extent_declare(checker, var_decl->name,
+                                                  known_extent,
+                                                  known_alignment)) {
+            type_checker_set_error_at_location(
+                checker, declaration->location,
+                "Out of memory while tracking buffer extent for '%s'",
+                var_decl->name);
+            return 0;
+          }
+        }
       }
     }
 
@@ -2251,6 +3076,18 @@ int type_checker_process_declaration(TypeChecker *checker,
           symbol_table_exit_scope(checker->symbol_table);
           return 0;
         }
+        Type *param_type = active_param_types ? active_param_types[i] : NULL;
+        if (param_type && param_type->kind == TYPE_POINTER) {
+          if (!type_checker_buffer_extent_declare(
+                  checker, func_decl->parameter_names[i], -1, -1)) {
+            type_checker_set_error_at_location(
+                checker, declaration->location,
+                "Out of memory while tracking pointer parameter extent");
+            type_checker_init_tracker_reset(checker);
+            symbol_table_exit_scope(checker->symbol_table);
+            return 0;
+          }
+        }
       }
     }
 
@@ -2519,6 +3356,20 @@ int type_checker_process_declaration(TypeChecker *checker,
         var_symbol->scope->type != SCOPE_GLOBAL) {
       type_checker_init_tracker_set_initialized(checker,
                                                 assignment->variable_name);
+      if (var_symbol->type && var_symbol->type->kind == TYPE_POINTER) {
+        long long known_extent =
+            type_checker_extract_known_buffer_extent(checker, assignment->value);
+        long long known_alignment = type_checker_extract_known_pointer_alignment(
+            checker, assignment->value);
+        if (!type_checker_buffer_extent_set(checker, assignment->variable_name,
+                                            known_extent, known_alignment)) {
+          type_checker_set_error_at_location(
+              checker, assignment->value->location,
+              "Out of memory while tracking buffer extent for '%s'",
+              assignment->variable_name);
+          return 0;
+        }
+      }
     }
 
     return 1;
@@ -3296,6 +4147,39 @@ Type *type_checker_check_binary_expression(TypeChecker *checker,
     if (left_type == checker->builtin_string &&
         right_type == checker->builtin_string) {
       return checker->builtin_string;
+    }
+  }
+
+  // Pointer arithmetic: allow pointer +/- integer and pointer - pointer.
+  if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0) {
+    int left_is_pointer = left_type->kind == TYPE_POINTER;
+    int right_is_pointer = right_type->kind == TYPE_POINTER;
+    int left_is_integer = type_checker_is_integer_type(left_type);
+    int right_is_integer = type_checker_is_integer_type(right_type);
+
+    if (left_is_pointer || right_is_pointer) {
+      if (strcmp(op, "+") == 0) {
+        if (left_is_pointer && right_is_integer) {
+          return left_type;
+        }
+        if (right_is_pointer && left_is_integer) {
+          return right_type;
+        }
+      } else { // "-"
+        if (left_is_pointer && right_is_integer) {
+          return left_type;
+        }
+        if (left_is_pointer && right_is_pointer &&
+            type_checker_types_equal(left_type, right_type)) {
+          return checker->builtin_int64;
+        }
+      }
+
+      type_checker_set_error_at_location(
+          checker, location,
+          "Pointer arithmetic requires pointer +/- integer or pointer - "
+          "pointer of same type");
+      return NULL;
     }
   }
 

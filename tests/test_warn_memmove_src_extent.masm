@@ -1,0 +1,18 @@
+extern function malloc(size: int32) -> cstring = "malloc";
+extern function free(ptr: cstring) = "free";
+extern function memmove(dst: cstring, src: cstring, len: int32) -> cstring = "memmove";
+
+function main() -> int32 {
+  var dst: cstring = malloc(256);
+  var src: cstring = malloc(128);
+  if (dst == 0 || src == 0) {
+    if (dst != 0) { free(dst); }
+    if (src != 0) { free(src); }
+    return 1;
+  }
+
+  memmove(dst, src, 200);
+  free(src);
+  free(dst);
+  return 0;
+}

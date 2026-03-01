@@ -48,6 +48,16 @@ void *gc_alloc(size_t size);
 void gc_collect(void *current_rsp);
 
 /**
+ * @brief Cooperative safepoint poll for mutator threads.
+ *
+ * Generated code should call this at safe poll points (for example, function
+ * entry) so GC can stop the world and capture each thread stack.
+ *
+ * @param current_rsp Approximate current stack pointer of caller frame.
+ */
+void gc_safepoint(void *current_rsp);
+
+/**
  * @brief Register a pointer slot as a GC root.
  *
  * The slot should point to a variable that stores a managed pointer.
@@ -88,6 +98,13 @@ size_t gc_get_allocation_count(void);
  * @brief Get the total bytes currently allocated and tracked by GC.
  */
 size_t gc_get_allocated_bytes(void);
+
+/**
+ * @brief Get the number of currently retained TLAB chunks across threads.
+ *
+ * Primarily useful for runtime diagnostics and tests.
+ */
+size_t gc_get_tlab_chunk_count(void);
 
 /**
  * @brief Free all tracked allocations and reset collector state.

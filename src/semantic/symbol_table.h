@@ -16,6 +16,7 @@ typedef enum {
   TYPE_FLOAT32,
   TYPE_FLOAT64,
   TYPE_STRING,
+  TYPE_FUNCTION_POINTER,
   TYPE_POINTER,
   TYPE_ARRAY,
   TYPE_STRUCT,
@@ -30,6 +31,9 @@ typedef struct Type {
   size_t alignment;
   struct Type *base_type; // For pointers and arrays
   size_t array_size;      // For arrays
+  struct Type **fn_param_types; // For function pointers
+  size_t fn_param_count;        // For function pointers
+  struct Type *fn_return_type;  // For function pointers
 
   // Struct-specific fields
   char **field_names;        // For structs - field names
@@ -106,6 +110,8 @@ Scope *symbol_table_get_current_scope(SymbolTable *table);
 Symbol *symbol_create(const char *name, SymbolKind kind, Type *type);
 void symbol_destroy(Symbol *symbol);
 Type *type_create(TypeKind kind, const char *name);
+Type *type_create_function_pointer(Type **param_types, size_t param_count,
+                                   Type *return_type);
 void type_destroy(Type *type);
 
 // Struct type creation and manipulation functions

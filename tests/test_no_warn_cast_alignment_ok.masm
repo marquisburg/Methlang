@@ -1,0 +1,18 @@
+extern function malloc(size: int32) -> uint8* = "malloc";
+extern function free(ptr: uint8*) = "free";
+
+function main() -> int32 {
+  var p: uint8* = malloc(8);
+  if (p == 0) {
+    return 1;
+  }
+
+  var q: int64* = (int64*)p;
+  if (q == 0) {
+    free(p);
+    return 2;
+  }
+
+  free(p);
+  return 0;
+}

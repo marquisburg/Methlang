@@ -35,6 +35,10 @@ typedef enum {
   TOKEN_ASM,
   TOKEN_THIS,
   TOKEN_NEW,
+  TOKEN_TRAIT,
+  TOKEN_IMPL,
+  TOKEN_WHERE,
+  TOKEN_FN,
 
   // Type keywords
   TOKEN_INT8,
@@ -79,6 +83,8 @@ typedef enum {
   TOKEN_AND_AND,
   TOKEN_OR_OR,
   TOKEN_DIVIDE,
+  TOKEN_PERCENT,
+  TOKEN_NOT,
   TOKEN_DOT,
   TOKEN_NEWLINE,
 
@@ -139,10 +145,17 @@ typedef enum {
 } TokenType;
 
 typedef struct {
+  const char *data;
+  size_t length;
+} StringView;
+
+typedef struct {
   TokenType type;
   char *value;
+  StringView lexeme;
   size_t line;
   size_t column;
+  unsigned char is_interned;
 } Token;
 
 typedef struct {
@@ -162,6 +175,7 @@ Token lexer_next_token(Lexer *lexer);
 Token lexer_peek_token(Lexer *lexer);
 Token *lexer_tokenize(Lexer *lexer, size_t *token_count);
 void token_destroy(Token *token);
+Token token_clone(const Token *token);
 void tokens_destroy(Token *tokens, size_t count);
 
 // Error reporting functions

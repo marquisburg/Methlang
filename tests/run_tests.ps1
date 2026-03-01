@@ -363,6 +363,8 @@ $cases = @(
 
   @{ Name = "stress_integrated"; Path = "tests/test_stress_integrated.masm"; ShouldSucceed = $true },
   @{ Name = "bitwise"; Path = "tests/test_bitwise.masm"; ShouldSucceed = $true },
+  @{ Name = "modulo"; Path = "tests/test_modulo.masm"; ShouldSucceed = $true },
+  @{ Name = "logical_not"; Path = "tests/test_logical_not.masm"; ShouldSucceed = $true },
   @{ Name = "string_concat"; Path = "tests/test_string_concat.masm"; ShouldSucceed = $true },
   @{ Name = "defer_single"; Path = "tests/test_defer_single.masm"; ShouldSucceed = $true },
   @{ Name = "defer_lifo"; Path = "tests/test_defer_lifo.masm"; ShouldSucceed = $true },
@@ -403,10 +405,10 @@ $cases = @(
     )
   },
   @{
-    Name          = "errdefer_skipped_on_success"
-    Path          = "tests/test_errdefer_skipped_on_success.masm"
-    ShouldSucceed = $true
-    AsmMustMatch  = @(
+    Name            = "errdefer_skipped_on_success"
+    Path            = "tests/test_errdefer_skipped_on_success.masm"
+    ShouldSucceed   = $true
+    AsmMustMatch    = @(
       "(?s)global main\s*(\r\n|\n)\s*(\r\n|\n)main:.*?ir_errdefer_ok_\d+:.*?; IR call: ok \(0 args\)"
     )
     AsmMustNotMatch = @(
@@ -425,6 +427,7 @@ $cases = @(
   @{ Name = "web_server_import"; Path = "web/server.masm"; ShouldSucceed = $true },
 
   # New errdefer tests
+  @{ Name = "test_cast_expression"; Path = "tests/test_cast_expression.masm"; ShouldSucceed = $true },
   @{ Name = "errdefer_interleaved_with_defer"; Path = "tests/test_errdefer_interleaved_with_defer.masm"; ShouldSucceed = $true },
   @{ Name = "errdefer_block_exit"; Path = "tests/test_errdefer_block_exit.masm"; ShouldSucceed = $true },
   @{ Name = "errdefer_nested_if_else"; Path = "tests/test_errdefer_nested_if_else.masm"; ShouldSucceed = $true },
@@ -433,10 +436,10 @@ $cases = @(
   @{ Name = "defer_block_statement"; Path = "tests/test_defer_block_statement.masm"; ShouldSucceed = $true },
   @{ Name = "errdefer_assignment_statement"; Path = "tests/test_errdefer_assignment_statement.masm"; ShouldSucceed = $true },
   @{
-    Name          = "errdefer_implicit_fallthrough"
-    Path          = "tests/test_errdefer_implicit_fallthrough.masm"
-    ShouldSucceed = $true
-    AsmMustMatch  = @(
+    Name            = "errdefer_implicit_fallthrough"
+    Path            = "tests/test_errdefer_implicit_fallthrough.masm"
+    ShouldSucceed   = $true
+    AsmMustMatch    = @(
       "\bcall ok\b"
     )
     AsmMustNotMatch = @(
@@ -449,6 +452,66 @@ $cases = @(
     Path            = "tests/test_warn_gc_escape_extern.masm"
     ShouldSucceed   = $true
     OutputMustMatch = @("Managed pointer passed to extern function 'sink' may escape GC visibility")
+  },
+  @{
+    Name            = "warn_recv_buffer_extent"
+    Path            = "tests/test_warn_recv_buffer_extent.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("recv length 8192 exceeds tracked allocation 4096 bytes for 'buf'")
+  },
+  @{
+    Name             = "no_warn_recv_within_extent"
+    Path             = "tests/test_no_warn_recv_within_extent.masm"
+    ShouldSucceed    = $true
+    OutputMustNotMatch = @("recv length .* exceeds tracked allocation")
+  },
+  @{
+    Name            = "warn_memcpy_src_extent"
+    Path            = "tests/test_warn_memcpy_src_extent.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("memcpy length 200 exceeds known source extent 128 bytes")
+  },
+  @{
+    Name            = "warn_memcpy_dst_extent"
+    Path            = "tests/test_warn_memcpy_dst_extent.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("memcpy length 200 exceeds known destination extent 128 bytes")
+  },
+  @{
+    Name              = "no_warn_memcpy_within_extent"
+    Path              = "tests/test_no_warn_memcpy_within_extent.masm"
+    ShouldSucceed     = $true
+    OutputMustNotMatch = @("memcpy length .* exceeds known (destination|source) extent")
+  },
+  @{
+    Name            = "warn_memmove_src_extent"
+    Path            = "tests/test_warn_memmove_src_extent.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("memmove length 200 exceeds known source extent 128 bytes")
+  },
+  @{
+    Name            = "warn_memmove_dst_extent_offset"
+    Path            = "tests/test_warn_memmove_dst_extent_offset.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("memmove length 220 exceeds known destination extent 192 bytes")
+  },
+  @{
+    Name              = "no_warn_memmove_within_extent_offset"
+    Path              = "tests/test_no_warn_memmove_within_extent_offset.masm"
+    ShouldSucceed     = $true
+    OutputMustNotMatch = @("memmove length .* exceeds known (destination|source) extent")
+  },
+  @{
+    Name            = "warn_cast_alignment_violation"
+    Path            = "tests/test_warn_cast_alignment_violation.masm"
+    ShouldSucceed   = $true
+    OutputMustMatch = @("Cast to int64\* may violate required 8-byte alignment")
+  },
+  @{
+    Name              = "no_warn_cast_alignment_ok"
+    Path              = "tests/test_no_warn_cast_alignment_ok.masm"
+    ShouldSucceed     = $true
+    OutputMustNotMatch = @("Cast to int64\* may violate required 8-byte alignment")
   },
 
   @{ Name = "err_unknown_char"; Path = "tests/err_unknown_char.masm"; ShouldSucceed = $false; Pattern = "Lexical error|error" },
@@ -627,6 +690,92 @@ foreach ($case in $cases) {
     $failed++
     Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
   }
+}
+
+# Function pointer test: compile, assemble, link, and run
+$total++
+try {
+  $fpAsm = Join-Path $tmpDir "test_function_pointer.s"
+  $fpObj = Join-Path $tmpDir "test_function_pointer.o"
+  $fpGc = Join-Path $tmpDir "test_function_pointer_gc.o"
+  $fpExe = Join-Path $tmpDir "test_function_pointer.exe"
+
+  $fpOut = & $CompilerPath tests\test_function_pointer.masm -o $fpAsm 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Function pointer compile failed: $fpOut"
+  }
+
+  & nasm -f win64 $fpAsm -o $fpObj 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Function pointer NASM assembly failed"
+  }
+
+  & gcc -c src\runtime\gc.c -o $fpGc -Isrc 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Function pointer gc.c compile failed"
+  }
+
+  & gcc -nostartfiles $fpObj $fpGc -o $fpExe -lkernel32 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Function pointer link failed (use -nostartfiles like web server)"
+  }
+
+  $fpResult = & $fpExe 2>&1
+  if ($LASTEXITCODE -ne 1) {
+    throw "Function pointer test exited with $LASTEXITCODE (expected 1)"
+  }
+
+  Write-CaseResult -Name "function_pointer" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "function_pointer" -Passed $false -Reason $_.Exception.Message
+}
+
+# main(argc, argv) test: requires masm_entry.o and shell32 on Windows
+$total++
+try {
+  $avAsm = Join-Path $tmpDir "test_main_argc_argv.s"
+  $avObj = Join-Path $tmpDir "test_main_argc_argv.o"
+  $avGc = Join-Path $tmpDir "test_main_argc_argv_gc.o"
+  $avEntry = Join-Path $tmpDir "test_main_argc_argv_entry.o"
+  $avExe = Join-Path $tmpDir "test_main_argc_argv.exe"
+
+  $avOut = & $CompilerPath tests\test_main_argc_argv.masm -o $avAsm 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) compile failed: $avOut"
+  }
+
+  & nasm -f win64 $avAsm -o $avObj 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) NASM assembly failed"
+  }
+
+  & gcc -c src\runtime\gc.c -o $avGc -Isrc 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) gc.c compile failed"
+  }
+
+  & gcc -c src\runtime\masm_entry.c -o $avEntry -Isrc 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) masm_entry.c compile failed"
+  }
+
+  & gcc -nostartfiles $avObj $avGc $avEntry -o $avExe -lkernel32 -lshell32 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) link failed (need -lshell32 for CommandLineToArgvW)"
+  }
+
+  $avResult = & $avExe 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) test exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "main_argc_argv" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "main_argc_argv" -Passed $false -Reason $_.Exception.Message
 }
 
 if (-not $SkipRuntime) {

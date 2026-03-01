@@ -99,3 +99,14 @@ export extern function __acrt_iob_func(index: int32) -> cstring = "__acrt_iob_fu
 export function get_stdin() -> cstring  { return __acrt_iob_func(0); }
 export function get_stdout() -> cstring { return __acrt_iob_func(1); }
 export function get_stderr() -> cstring { return __acrt_iob_func(2); }
+
+// Write message to stderr (no newline)
+export function print_err(msg: cstring) {
+  fputs(msg, get_stderr());
+}
+
+// Write message to stderr followed by newline
+export function println_err(msg: cstring) {
+  fputs(msg, get_stderr());
+  fputs(cstr("\n"), get_stderr());
+}

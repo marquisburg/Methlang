@@ -1,0 +1,114 @@
+// MethASM Number Guessing Game
+//
+// The computer picks a random number 1-100. You guess until you get it right.
+// Demonstrates: std/io, std/conv, std/process, control flow, loops, extern.
+//
+// Build: build.bat
+// Run: guessing_game.exe
+//
+// Uses Windows ReadFile for stdin — CRT getchar() returns EOF with -nostartfiles.
+
+import "std/io";
+import "std/conv";
+import "std/process";
+
+extern function time(t: cstring) -> int64 = "time";
+extern function GetStdHandle(which: int32) -> int64 = "GetStdHandle";
+extern function ReadFile(h: int64, buf: cstring, len: int32, read: cstring, overlapped: cstring) -> int32 = "ReadFile";
+
+// STD_INPUT_HANDLE = -10
+// Read one byte from console, return -1 on EOF/error
+function read_char_win() -> int32 {
+  var h: int64 = GetStdHandle(-10);
+  if (h == -1 || h == 0) { return -1; }
+  var ch: uint8[1];
+  var num_read: uint8[4];
+  var ok: int32 = ReadFile(h, &ch[0], 1, &num_read[0], 0);
+  if (ok == 0) { return -1; }
+  if (num_read[0] == 0 && num_read[1] == 0 && num_read[2] == 0 && num_read[3] == 0) { return -1; }
+  return ch[0];
+}
+
+// Read a line from stdin into buf (max 31 chars + null), return length
+// Consumes trailing \n after \r so Windows CRLF doesn't leave empty line in buffer
+function read_line(buf: cstring, max_len: int32) -> int32 {
+  var i: int32 = 0;
+  while (i < max_len) {
+    var c: int32 = read_char_win();
+    if (c == 10 || c == 13 || c < 0) {
+      if (c == 13) {
+        var next: int32 = read_char_win();
+        if (next != 10 && next >= 0) {
+          // Not \n, can't unget - discard (Windows is always \r\n)
+        }
+      }
+      buf[i] = 0;
+      return i;
+    }
+    buf[i] = c;
+    i = i + 1;
+  }
+  buf[max_len] = 0;
+  return max_len;
+}
+
+// Get random number in range [1, 100] using modulo-like logic: r - (r/100)*100
+function rand_range_1_100() -> int32 {
+  var r: int32 = rand();
+  if (r < 0) {
+    r = 0 - r;
+  }
+  var n: int32 = r - (r / 100) * 100;
+  var result: int32 = n + 1;
+  return result;
+}
+
+function main() -> int32 {
+  var welcome: string = "=== MethASM Number Guessing Game ===";
+  var prompt: string = "Guess (1-100): ";
+  var too_low: string = "Too low! Try again.";
+  var too_high: string = "Too high! Try again.";
+  var correct: string = "Correct! You got it!";
+  var invalid: string = "Invalid input. Enter a number 1-100.";
+  var guesses_label: string = "Guesses: ";
+  var newline: string = "\n";
+
+  srand((int32)time(0));
+  var target: int32 = rand_range_1_100();
+  var guesses: int32 = 0;
+
+  println(cstr(welcome));
+  println(cstr(newline));
+
+  while (1) {
+    print(cstr(prompt));
+
+    var buf: uint8[32];
+    var len: int32 = read_line(&buf[0], 31);
+    if (len == 0) {
+      println(cstr(invalid));
+      continue;
+    }
+
+    var guess: int32 = atoi(&buf[0]);
+    guesses = guesses + 1;
+
+    if (guess < 1 || guess > 100) {
+      println(cstr(invalid));
+      continue;
+    }
+
+    if (guess < target) {
+      println(cstr(too_low));
+    } else if (guess > target) {
+      println(cstr(too_high));
+    } else {
+      println(cstr(correct));
+      print(cstr(guesses_label));
+      println_int(guesses);
+      return 0;
+    }
+  }
+
+  return 0;
+}

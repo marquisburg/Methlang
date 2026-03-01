@@ -1,7 +1,8 @@
 // MethASM Demonstration Server
 //
-// Single-threaded TCP server on port 5000. Accepts connections, reads HTTP
-// requests, and responds with comprehensive MethASM feature demonstrations.
+// Multi-threaded TCP server on port 5000. Accepts connections, spawns a worker
+// thread per connection. Workers read HTTP requests and respond with
+// comprehensive MethASM feature demonstrations.
 //
 // Endpoints:
 //   GET /           -> Enhanced homepage with feature showcase
@@ -26,8 +27,12 @@
 import "std/io";
 import "std/net";
 import "std/conv";
+import "std/thread";
 
 extern function gc_init() = "gc_init";
+
+// Mutex for forum file I/O (threads.txt, posts_N.txt)
+var file_mutex: int64 = 0;
 
 // Use Windows API for console output — CRT stdout is uninitialized with -nostartfiles
 extern function AllocConsole() -> int32 = "AllocConsole";
@@ -287,8 +292,8 @@ function build_forum_thread_url(buf: cstring, thread_id: int32) {
   buf[14 + dc] = 0;
 }
 
-// Count lines in threads.txt. Returns 0 if file missing or empty.
-function count_threads() -> int32 {
+// Count lines in threads.txt (no lock). Caller must hold file_mutex.
+function count_threads_impl() -> int32 {
   var fp: cstring = fopen(cstr(fn_threads), cstr(mode_r));
   if (fp == 0) { return 0; }
   var count: int32 = 0;
@@ -297,6 +302,14 @@ function count_threads() -> int32 {
     count = count + 1;
   }
   fclose(fp);
+  return count;
+}
+
+// Count lines in threads.txt. Returns 0 if file missing or empty. Thread-safe.
+function count_threads() -> int32 {
+  if (mutex_lock_infinite(file_mutex) != 1) { return 0; }
+  var count: int32 = count_threads_impl();
+  mutex_unlock(file_mutex);
   return count;
 }
 
@@ -314,6 +327,7 @@ function serve_forum_index(client: int64, show_err_empty: int32) {
   var out: string = FORUM_HEADER + FORUM_INDEX_START + FORUM_CSS + FORUM_INDEX_BODY;
   send_all(client, out.chars, out.length);
 
+  if (mutex_lock_infinite(file_mutex) != 1) { return; }
   var fp: cstring = fopen(cstr(fn_threads), cstr(mode_r));
   if (fp != 0) {
     var line_buf: uint8[512];
@@ -339,6 +353,7 @@ function serve_forum_index(client: int64, show_err_empty: int32) {
     }
     fclose(fp);
   }
+  mutex_unlock(file_mutex);
 
   send_all(client, FORUM_INDEX_END.chars, FORUM_INDEX_END.length);
   if (show_err_empty != 0) {
@@ -352,6 +367,7 @@ function serve_forum_thread(client: int64, thread_id: int32) {
   var out: string = FORUM_HEADER + FORUM_THREAD_START + FORUM_CSS + FORUM_THREAD_HEAD_END;
   send_all(client, out.chars, out.length);
 
+  if (mutex_lock_infinite(file_mutex) != 1) { return; }
   var title_buf: uint8[256];
   title_buf[0] = 85;
   title_buf[1] = 110;
@@ -414,6 +430,7 @@ function serve_forum_thread(client: int64, thread_id: int32) {
     }
     fclose(fp);
   }
+  mutex_unlock(file_mutex);
   if (had_posts == 0) {
     send_all(client, FORUM_NO_POSTS.chars, FORUM_NO_POSTS.length);
   }
@@ -437,7 +454,8 @@ function handle_post_new_thread(client: int64, buf: cstring, n: int32) {
   var got: int32 = extract_form_value(buf, body_start, body_len, cstr(key_title), 5, &title_buf[0], 256);
   if (dbg_on != 0) { dbg(cstr(dbg_title), got); }
   if (got > 0) {
-    var count: int32 = count_threads();
+    if (mutex_lock_infinite(file_mutex) != 1) { serve_forum_index(client, got == 0); return; }
+    var count: int32 = count_threads_impl();
     var fp: cstring = fopen(cstr(fn_threads), cstr(mode_a));
     if (dbg_on != 0) {
       if (fp != 0) { dbg_msg(cstr(dbg_fopen_ok)); } else { dbg_msg(cstr(dbg_fopen_fail)); }
@@ -446,12 +464,14 @@ function handle_post_new_thread(client: int64, buf: cstring, n: int32) {
       fputs(&title_buf[0], fp);
       fputs(cstr(nl), fp);
       fclose(fp);
+      mutex_unlock(file_mutex);
       var new_id: int32 = count + 1;
       var loc_buf: uint8[32];
       build_forum_thread_url(&loc_buf[0], new_id);
       send_redirect(client, &loc_buf[0]);
       return;
     }
+    mutex_unlock(file_mutex);
   }
   serve_forum_index(client, got == 0);
 }
@@ -468,6 +488,12 @@ function handle_post_reply(client: int64, buf: cstring, n: int32, thread_id: int
   var got: int32 = extract_form_value(buf, body_start, body_len, cstr(key_body), 4, &post_buf[0], 2048);
   if (dbg_on != 0) { dbg(cstr(dbg_title), got); }
   if (got > 0) {
+    if (mutex_lock_infinite(file_mutex) != 1) {
+      var loc_buf: uint8[32];
+      build_forum_thread_url(&loc_buf[0], thread_id);
+      send_redirect(client, &loc_buf[0]);
+      return;
+    }
     var posts_fn: uint8[32];
     build_posts_filename(&posts_fn[0], thread_id);
     var fp: cstring = fopen(&posts_fn[0], cstr(mode_a));
@@ -479,10 +505,133 @@ function handle_post_reply(client: int64, buf: cstring, n: int32, thread_id: int
       fputs(cstr(nl), fp);
       fclose(fp);
     }
+    mutex_unlock(file_mutex);
   }
   var loc_buf: uint8[32];
   build_forum_thread_url(&loc_buf[0], thread_id);
   send_redirect(client, &loc_buf[0]);
+}
+
+// Route and handle a single HTTP request. buf contains the full request, n = length.
+function handle_request(client: int64, buf: cstring, n: int32) {
+  if (is_get(buf, n) == 1) {
+    if (is_health(buf, n) == 1) {
+      send_all(client, HTTP_HEALTH_HEADER.chars, HTTP_HEALTH_HEADER.length);
+      send_all(client, HTTP_HEALTH_BODY.chars, 2);
+    } else if (is_root(buf, n) == 1) {
+      if (send_all(client, HTTP_PAGE_HEADER.chars, HTTP_PAGE_HEADER.length) == HTTP_PAGE_HEADER.length) {
+        send_all(client, PAGE_CONTENT.chars, PAGE_CONTENT.length);
+      }
+    } else if (is_demo(buf, n) == 1) {
+      if (send_all(client, HTTP_DEMO_HEADER.chars, HTTP_DEMO_HEADER.length) == HTTP_DEMO_HEADER.length) {
+        send_all(client, DEMO_CONTENT.chars, DEMO_CONTENT.length);
+      }
+    } else if (is_benchmarks(buf, n) == 1) {
+      if (send_all(client, HTTP_BENCHMARKS_HEADER.chars, HTTP_BENCHMARKS_HEADER.length) == HTTP_BENCHMARKS_HEADER.length) {
+        send_all(client, BENCHMARKS_CONTENT.chars, BENCHMARKS_CONTENT.length);
+      }
+    } else if (is_docs(buf, n) == 1) {
+      if (send_all(client, HTTP_DOCS_HEADER.chars, HTTP_DOCS_HEADER.length) == HTTP_DOCS_HEADER.length) {
+        send_all(client, DOCS_CONTENT.chars, DOCS_CONTENT.length);
+      }
+    } else if (is_forum(buf, n, 4) == 1) {
+      var tid: int32 = get_thread_id(buf, n, 4);
+      if (tid > 0) {
+        var max_tid: int32 = count_threads();
+        if (tid <= max_tid) {
+          serve_forum_thread(client, tid);
+        } else {
+          send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
+          send_all(client, HTTP_404_BODY.chars, 9);
+        }
+      } else {
+        serve_forum_index(client, 0);
+      }
+    } else {
+      send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
+      send_all(client, HTTP_404_BODY.chars, 9);
+    }
+  } else if (is_post(buf, n) == 1) {
+    if (is_forum(buf, n, 5) == 1) {
+      var tid: int32 = get_thread_id(buf, n, 5);
+      if (tid > 0) {
+        var max_tid: int32 = count_threads();
+        if (tid <= max_tid) {
+          handle_post_reply(client, buf, n, tid);
+        } else {
+          send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
+          send_all(client, HTTP_404_BODY.chars, 9);
+        }
+      } else {
+        handle_post_new_thread(client, buf, n);
+      }
+    } else {
+      send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
+      send_all(client, HTTP_404_BODY.chars, 9);
+    }
+  } else {
+    send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
+    send_all(client, HTTP_404_BODY.chars, 9);
+  }
+}
+
+// Worker thread entry: receives client socket via param, handles request, cleans up.
+function handle_connection(client: int64) {
+  thread_gc_attach();
+  var recv_buf: cstring = malloc(4096);
+  if (recv_buf == 0) {
+    closesocket(client);
+    shutdown(client, SD_BOTH());
+    thread_gc_detach();
+    return;
+  }
+  var n: int32 = recv(client, recv_buf, 4096, 0);
+  if (n > 0 && is_post(recv_buf, n) == 1) {
+    var body_start: int32 = find_body_start(recv_buf, n);
+    var content_len: int32 = parse_content_length(recv_buf, body_start);
+    var need: int32 = body_start + content_len;
+    if (content_len > 0 && need <= 4096 && n < need) {
+      while (n < need) {
+        var got: int32 = recv(client, &recv_buf[n], need - n, 0);
+        if (got <= 0) { break; }
+        n = n + got;
+      }
+    }
+  }
+  if (n > 0) {
+    handle_request(client, recv_buf, n);
+  }
+  free(recv_buf);
+  closesocket(client);
+  shutdown(client, SD_BOTH());
+  thread_gc_detach();
+}
+
+// Win32 thread proc: extracts client from param, calls handle_connection.
+function thread_entry(param: cstring) -> uint32 {
+  var p: int64* = (int64*)param;
+  var client: int64 = *p;
+  free(param);
+  handle_connection(client);
+  return 0;
+}
+
+// Spawn a worker thread to handle the client connection.
+function spawn_client_thread(client: int64) {
+  var ctx: cstring = malloc(8);
+  if (ctx == 0) {
+    closesocket(client);
+    return;
+  }
+  var p: int64* = (int64*)ctx;
+  *p = client;
+  var h: int64 = CreateThread(0, 0, &thread_entry, ctx, 0, 0);
+  if (h == 0) {
+    closesocket(client);
+    free(ctx);
+    return;
+  }
+  thread_detach(h);
 }
 
 function main() -> int32 {
@@ -534,6 +683,13 @@ function main() -> int32 {
     return 1;
   }
 
+  file_mutex = mutex_create();
+  if (file_mutex == 0) {
+    closesocket(sock);
+    net_cleanup();
+    return 1;
+  }
+
   con_writeln(msg_ready);
 
   var client_addr: uint8[16];
@@ -542,7 +698,6 @@ function main() -> int32 {
   addrlen_buf[1] = 0;
   addrlen_buf[2] = 0;
   addrlen_buf[3] = 0;
-  var recv_buf: uint8[4096];
 
   while (1) {
     addrlen_buf[0] = 16;
@@ -553,92 +708,7 @@ function main() -> int32 {
     if (client == INVALID_SOCKET()) {
       continue;
     }
-    
-    defer closesocket(client);
-    defer shutdown(client, SD_BOTH());
-
-    var n: int32 = recv(client, &recv_buf[0], 4096, 0);
-    if (n > 0) {
-      if (is_post(&recv_buf[0], n) == 1) {
-        var body_start: int32 = find_body_start(&recv_buf[0], n);
-        if (dbg_on != 0) { dbg(cstr(dbg_post), n); }
-        if (dbg_on != 0) { dbg(cstr(dbg_bs), body_start); }
-        var content_len: int32 = parse_content_length(&recv_buf[0], body_start);
-        if (dbg_on != 0) { dbg(cstr(dbg_cl), content_len); }
-        var need: int32 = body_start + content_len;
-        if (dbg_on != 0) { dbg(cstr(dbg_need), need); }
-        if (content_len > 0 && need <= 4096 && n < need) {
-          while (n < need) {
-            var got: int32 = recv(client, &recv_buf[n], need - n, 0);
-            if (dbg_on != 0) { dbg(cstr(dbg_got), got); }
-            if (got <= 0) { break; }
-            n = n + got;
-          }
-        }
-        if (dbg_on != 0) { dbg(cstr(dbg_n), n); }
-      }
-      if (n > 0) {
-      if (is_get(&recv_buf[0], n) == 1) {
-        if (is_health(&recv_buf[0], n) == 1) {
-          send_all(client, HTTP_HEALTH_HEADER.chars, HTTP_HEALTH_HEADER.length);
-          send_all(client, HTTP_HEALTH_BODY.chars, 2);
-        } else if (is_root(&recv_buf[0], n) == 1) {
-          if (send_all(client, HTTP_PAGE_HEADER.chars, HTTP_PAGE_HEADER.length) == HTTP_PAGE_HEADER.length) {
-            send_all(client, PAGE_CONTENT.chars, PAGE_CONTENT.length);
-          }
-        } else if (is_demo(&recv_buf[0], n) == 1) {
-          if (send_all(client, HTTP_DEMO_HEADER.chars, HTTP_DEMO_HEADER.length) == HTTP_DEMO_HEADER.length) {
-            send_all(client, DEMO_CONTENT.chars, DEMO_CONTENT.length);
-          }
-        } else if (is_benchmarks(&recv_buf[0], n) == 1) {
-          if (send_all(client, HTTP_BENCHMARKS_HEADER.chars, HTTP_BENCHMARKS_HEADER.length) == HTTP_BENCHMARKS_HEADER.length) {
-            send_all(client, BENCHMARKS_CONTENT.chars, BENCHMARKS_CONTENT.length);
-          }
-        } else if (is_docs(&recv_buf[0], n) == 1) {
-          if (send_all(client, HTTP_DOCS_HEADER.chars, HTTP_DOCS_HEADER.length) == HTTP_DOCS_HEADER.length) {
-            send_all(client, DOCS_CONTENT.chars, DOCS_CONTENT.length);
-          }
-        } else if (is_forum(&recv_buf[0], n, 4) == 1) {
-          var tid: int32 = get_thread_id(&recv_buf[0], n, 4);
-          if (tid > 0) {
-            var max_tid: int32 = count_threads();
-            if (tid <= max_tid) {
-              serve_forum_thread(client, tid);
-            } else {
-              send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
-              send_all(client, HTTP_404_BODY.chars, 9);
-            }
-          } else {
-            serve_forum_index(client, 0);
-          }
-        } else {
-          send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
-          send_all(client, HTTP_404_BODY.chars, 9);
-        }
-      } else if (is_post(&recv_buf[0], n) == 1) {
-        if (is_forum(&recv_buf[0], n, 5) == 1) {
-          var tid: int32 = get_thread_id(&recv_buf[0], n, 5);
-          if (tid > 0) {
-            var max_tid: int32 = count_threads();
-            if (tid <= max_tid) {
-              handle_post_reply(client, &recv_buf[0], n, tid);
-            } else {
-              send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
-              send_all(client, HTTP_404_BODY.chars, 9);
-            }
-          } else {
-            handle_post_new_thread(client, &recv_buf[0], n);
-          }
-        } else {
-          send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
-          send_all(client, HTTP_404_BODY.chars, 9);
-        }
-      } else {
-        send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
-        send_all(client, HTTP_404_BODY.chars, 9);
-      }
-      }
-    }
+    spawn_client_thread(client);
   }
 
   closesocket(sock);

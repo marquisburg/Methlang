@@ -10,9 +10,8 @@ export function WAIT_TIMEOUT() -> uint32 { return 258; }
 export function WAIT_FAILED() -> uint32 { return 0xFFFFFFFF; }
 
 // Thread creation and synchronization
-// Note: Due to current language limitations (no function pointer type),
-// callers typically use a tiny C bridge to provide thread entry callbacks.
-export extern function CreateThread(lpThreadAttributes: cstring, dwStackSize: uint64, lpStartAddress: cstring, lpParameter: cstring, dwCreationFlags: uint32, lpThreadId: uint32*) -> int64 = "CreateThread";
+// lpStartAddress: Win32 thread proc fn(LPVOID) -> DWORD
+export extern function CreateThread(lpThreadAttributes: cstring, dwStackSize: uint64, lpStartAddress: fn(cstring) -> uint32, lpParameter: cstring, dwCreationFlags: uint32, lpThreadId: uint32*) -> int64 = "CreateThread";
 export extern function CloseHandle(hObject: int64) -> int32 = "CloseHandle";
 export extern function WaitForSingleObject(hHandle: int64, dwMilliseconds: uint32) -> uint32 = "WaitForSingleObject";
 export extern function GetCurrentThreadId() -> uint32 = "GetCurrentThreadId";

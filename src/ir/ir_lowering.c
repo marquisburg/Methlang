@@ -44,14 +44,13 @@ static void ir_set_error(IRLoweringContext *context, const char *format, ...);
 static char *ir_new_label_name(IRLoweringContext *context, const char *prefix);
 static int ir_emit(IRLoweringContext *context, IRFunction *function,
                    const IRInstruction *instruction);
-static int ir_emit_runtime_trap(IRLoweringContext *context, IRFunction *function,
-                                SourceLocation location,
+static int ir_emit_runtime_trap(IRLoweringContext *context,
+                                IRFunction *function, SourceLocation location,
                                 const char *message);
 static int ir_emit_null_check(IRLoweringContext *context, IRFunction *function,
-                              SourceLocation location,
-                              const IROperand *value);
-static int ir_emit_bounds_check(IRLoweringContext *context, IRFunction *function,
-                                SourceLocation location,
+                              SourceLocation location, const IROperand *value);
+static int ir_emit_bounds_check(IRLoweringContext *context,
+                                IRFunction *function, SourceLocation location,
                                 const IROperand *index, size_t array_size);
 static int ir_push_control_frame(IRLoweringContext *context,
                                  const char *break_label,
@@ -64,24 +63,26 @@ static int ir_emit_deferred_calls_filtered(IRLoweringContext *context,
 static int ir_lower_deferred_statement(IRLoweringContext *context,
                                        IRFunction *function,
                                        ASTNode *statement);
-static int ir_emit_deferred_calls(IRLoweringContext *context, IRFunction *function,
+static int ir_emit_deferred_calls(IRLoweringContext *context,
+                                  IRFunction *function,
                                   const IRDeferStack *stack);
 static int ir_emit_return_with_defers(IRLoweringContext *context,
                                       IRFunction *function,
-                                      IRDeferScope *defers,
-                                      IROperand *value,
+                                      IRDeferScope *defers, IROperand *value,
                                       SourceLocation location);
-static int ir_emit_jump_instruction(IRLoweringContext *context, IRFunction *function,
-                                    const char *label, SourceLocation location);
-static int ir_emit_label_instruction(IRLoweringContext *context, IRFunction *function,
-                                     const char *label, SourceLocation location);
+static int ir_emit_jump_instruction(IRLoweringContext *context,
+                                    IRFunction *function, const char *label,
+                                    SourceLocation location);
+static int ir_emit_label_instruction(IRLoweringContext *context,
+                                     IRFunction *function, const char *label,
+                                     SourceLocation location);
 static int ir_make_temp_operand(IRLoweringContext *context,
                                 IROperand *out_operand);
 static int ir_lower_statement_or_expression(IRLoweringContext *context,
                                             IRFunction *function,
                                             ASTNode *node);
-static int ir_lower_switch_statement(IRLoweringContext *context, IRFunction *function,
-                                     ASTNode *statement);
+static int ir_lower_switch_statement(IRLoweringContext *context,
+                                     IRFunction *function, ASTNode *statement);
 
 static char *ir_strdup_local(const char *text) {
   if (!text) {
@@ -96,8 +97,9 @@ static char *ir_strdup_local(const char *text) {
   return copy;
 }
 
-static int ir_emit_jump_instruction(IRLoweringContext *context, IRFunction *function,
-                                    const char *label, SourceLocation location) {
+static int ir_emit_jump_instruction(IRLoweringContext *context,
+                                    IRFunction *function, const char *label,
+                                    SourceLocation location) {
   if (!context || !function || !label) {
     return 0;
   }
@@ -108,8 +110,9 @@ static int ir_emit_jump_instruction(IRLoweringContext *context, IRFunction *func
   return ir_emit(context, function, &instruction);
 }
 
-static int ir_emit_label_instruction(IRLoweringContext *context, IRFunction *function,
-                                     const char *label, SourceLocation location) {
+static int ir_emit_label_instruction(IRLoweringContext *context,
+                                     IRFunction *function, const char *label,
+                                     SourceLocation location) {
   if (!context || !function || !label) {
     return 0;
   }
@@ -152,9 +155,10 @@ static int ir_lower_statement_or_expression(IRLoweringContext *context,
   }
 }
 
-static int ir_lower_switch_statement(IRLoweringContext *context, IRFunction *function,
-                                     ASTNode *statement) {
-  if (!context || !function || !statement || statement->type != AST_SWITCH_STATEMENT) {
+static int ir_lower_switch_statement(IRLoweringContext *context,
+                                     IRFunction *function, ASTNode *statement) {
+  if (!context || !function || !statement ||
+      statement->type != AST_SWITCH_STATEMENT) {
     return 0;
   }
 
@@ -172,7 +176,8 @@ static int ir_lower_switch_statement(IRLoweringContext *context, IRFunction *fun
 
   // Evaluate the switch expression once.
   IROperand switch_value = ir_operand_none();
-  if (!ir_lower_expression(context, function, switch_data->expression, &switch_value)) {
+  if (!ir_lower_expression(context, function, switch_data->expression,
+                           &switch_value)) {
     free(end_label);
     return 0;
   }
@@ -184,7 +189,8 @@ static int ir_lower_switch_statement(IRLoweringContext *context, IRFunction *fun
     if (!case_labels) {
       ir_operand_destroy(&switch_value);
       free(end_label);
-      ir_set_error(context, "Out of memory while allocating switch case labels");
+      ir_set_error(context,
+                   "Out of memory while allocating switch case labels");
       return 0;
     }
     for (size_t i = 0; i < switch_data->case_count; i++) {
@@ -196,7 +202,8 @@ static int ir_lower_switch_statement(IRLoweringContext *context, IRFunction *fun
         free(case_labels);
         ir_operand_destroy(&switch_value);
         free(end_label);
-        ir_set_error(context, "Out of memory while allocating switch case labels");
+        ir_set_error(context,
+                     "Out of memory while allocating switch case labels");
         return 0;
       }
     }
@@ -260,7 +267,8 @@ static int ir_lower_switch_statement(IRLoweringContext *context, IRFunction *fun
   }
 
   // No match.
-  if (!ir_emit_jump_instruction(context, function, default_label, statement->location)) {
+  if (!ir_emit_jump_instruction(context, function, default_label,
+                                statement->location)) {
     for (size_t j = 0; j < switch_data->case_count; j++) {
       free(case_labels[j]);
     }
@@ -288,7 +296,8 @@ static int ir_lower_switch_statement(IRLoweringContext *context, IRFunction *fun
       continue;
     }
 
-    if (!ir_emit_label_instruction(context, function, case_labels[i], case_node->location)) {
+    if (!ir_emit_label_instruction(context, function, case_labels[i],
+                                   case_node->location)) {
       ir_pop_control_frame(context);
       for (size_t j = 0; j < switch_data->case_count; j++) {
         free(case_labels[j]);
@@ -299,7 +308,8 @@ static int ir_lower_switch_statement(IRLoweringContext *context, IRFunction *fun
       return 0;
     }
 
-    if (clause->body && !ir_lower_statement_with_defers(context, function, clause->body, NULL)) {
+    if (clause->body && !ir_lower_statement_with_defers(context, function,
+                                                        clause->body, NULL)) {
       ir_pop_control_frame(context);
       for (size_t j = 0; j < switch_data->case_count; j++) {
         free(case_labels[j]);
@@ -315,7 +325,8 @@ static int ir_lower_switch_statement(IRLoweringContext *context, IRFunction *fun
 
   ir_pop_control_frame(context);
 
-  if (!ir_emit_label_instruction(context, function, end_label, statement->location)) {
+  if (!ir_emit_label_instruction(context, function, end_label,
+                                 statement->location)) {
     for (size_t j = 0; j < switch_data->case_count; j++) {
       free(case_labels[j]);
     }
@@ -334,7 +345,8 @@ static int ir_lower_switch_statement(IRLoweringContext *context, IRFunction *fun
   return 1;
 }
 
-static int ir_emit_deferred_calls(IRLoweringContext *context, IRFunction *function,
+static int ir_emit_deferred_calls(IRLoweringContext *context,
+                                  IRFunction *function,
                                   const IRDeferStack *stack) {
   return ir_emit_deferred_calls_filtered(context, function, stack, 1);
 }
@@ -345,9 +357,11 @@ static int ir_emit_deferred_calls_non_err(IRLoweringContext *context,
   return ir_emit_deferred_calls_filtered(context, function, stack, 0);
 }
 
-static int ir_emit_deferred_scopes(IRLoweringContext *context, IRFunction *function,
+static int ir_emit_deferred_scopes(IRLoweringContext *context,
+                                   IRFunction *function,
                                    const IRDeferScope *scope) {
-  for (const IRDeferScope *current = scope; current; current = current->parent) {
+  for (const IRDeferScope *current = scope; current;
+       current = current->parent) {
     if (!ir_emit_deferred_calls(context, function, &current->stack)) {
       return 0;
     }
@@ -358,7 +372,8 @@ static int ir_emit_deferred_scopes(IRLoweringContext *context, IRFunction *funct
 static int ir_emit_deferred_scopes_non_err(IRLoweringContext *context,
                                            IRFunction *function,
                                            const IRDeferScope *scope) {
-  for (const IRDeferScope *current = scope; current; current = current->parent) {
+  for (const IRDeferScope *current = scope; current;
+       current = current->parent) {
     if (!ir_emit_deferred_calls_non_err(context, function, &current->stack)) {
       return 0;
     }
@@ -368,8 +383,7 @@ static int ir_emit_deferred_scopes_non_err(IRLoweringContext *context,
 
 static int ir_emit_return_with_defers(IRLoweringContext *context,
                                       IRFunction *function,
-                                      IRDeferScope *defers,
-                                      IROperand *value,
+                                      IRDeferScope *defers, IROperand *value,
                                       SourceLocation location) {
   if (!context || !function || !value) {
     return 0;
@@ -385,7 +399,8 @@ static int ir_emit_return_with_defers(IRLoweringContext *context,
     set_error.op = IR_OP_ASSIGN;
     set_error.location = location;
     set_error.dest = is_error;
-    set_error.lhs = (value->kind == IR_OPERAND_NONE) ? ir_operand_int(0) : *value;
+    set_error.lhs =
+        (value->kind == IR_OPERAND_NONE) ? ir_operand_int(0) : *value;
     if (!ir_emit(context, function, &set_error)) {
       ir_operand_destroy(&is_error);
       return 0;
@@ -416,7 +431,8 @@ static int ir_emit_return_with_defers(IRLoweringContext *context,
 
     if (!ir_emit_deferred_scopes(context, function, defers) ||
         !ir_emit_jump_instruction(context, function, end_label, location) ||
-        !ir_emit_label_instruction(context, function, success_label, location) ||
+        !ir_emit_label_instruction(context, function, success_label,
+                                   location) ||
         !ir_emit_deferred_scopes_non_err(context, function, defers) ||
         !ir_emit_label_instruction(context, function, end_label, location)) {
       free(success_label);
@@ -485,8 +501,8 @@ static int ir_emit(IRLoweringContext *context, IRFunction *function,
   return 1;
 }
 
-static int ir_emit_runtime_trap(IRLoweringContext *context, IRFunction *function,
-                                SourceLocation location,
+static int ir_emit_runtime_trap(IRLoweringContext *context,
+                                IRFunction *function, SourceLocation location,
                                 const char *message) {
   if (!context || !function || !message) {
     return 0;
@@ -533,8 +549,7 @@ static int ir_emit_runtime_trap(IRLoweringContext *context, IRFunction *function
 }
 
 static int ir_emit_null_check(IRLoweringContext *context, IRFunction *function,
-                              SourceLocation location,
-                              const IROperand *value) {
+                              SourceLocation location, const IROperand *value) {
   if (!context || !function || !value) {
     return 0;
   }
@@ -596,8 +611,8 @@ static int ir_emit_null_check(IRLoweringContext *context, IRFunction *function,
   return 1;
 }
 
-static int ir_emit_bounds_check(IRLoweringContext *context, IRFunction *function,
-                                SourceLocation location,
+static int ir_emit_bounds_check(IRLoweringContext *context,
+                                IRFunction *function, SourceLocation location,
                                 const IROperand *index, size_t array_size) {
   if (!context || !function || !index) {
     return 0;
@@ -752,7 +767,8 @@ static int ir_defer_stack_push(IRLoweringContext *context, IRDeferStack *stack,
   }
   if (stack->count >= stack->capacity) {
     size_t new_capacity = stack->capacity == 0 ? 8 : stack->capacity * 2;
-    void *grown = realloc(stack->entries, new_capacity * sizeof(*stack->entries));
+    void *grown =
+        realloc(stack->entries, new_capacity * sizeof(*stack->entries));
     if (!grown) {
       return 0;
     }
@@ -778,16 +794,16 @@ static int ir_emit_deferred_calls_filtered(IRLoweringContext *context,
     if (!include_err && is_err) {
       continue;
     }
-    if (!defer_node ||
-        (defer_node->type != AST_DEFER_STATEMENT &&
-         defer_node->type != AST_ERRDEFER_STATEMENT)) {
+    if (!defer_node || (defer_node->type != AST_DEFER_STATEMENT &&
+                        defer_node->type != AST_ERRDEFER_STATEMENT)) {
       continue;
     }
     DeferStatement *defer_stmt = (DeferStatement *)defer_node->data;
     if (!defer_stmt || !defer_stmt->statement) {
       continue;
     }
-    if (!ir_lower_deferred_statement(context, function, defer_stmt->statement)) {
+    if (!ir_lower_deferred_statement(context, function,
+                                     defer_stmt->statement)) {
       return 0;
     }
   }
@@ -878,6 +894,8 @@ static int ir_lower_call_expression(IRLoweringContext *context,
     return 0;
   }
 
+  int is_func_ptr_var = call->is_indirect_call;
+
   IROperand destination = ir_operand_none();
   if (!ir_make_temp_operand(context, &destination)) {
     return 0;
@@ -906,12 +924,29 @@ static int ir_lower_call_expression(IRLoweringContext *context,
   }
 
   IRInstruction instruction = {0};
-  instruction.op = IR_OP_CALL;
   instruction.location = expression->location;
   instruction.dest = destination;
-  instruction.text = call->function_name;
   instruction.arguments = arguments;
   instruction.argument_count = call->argument_count;
+
+  if (is_func_ptr_var) {
+    instruction.op = IR_OP_CALL_INDIRECT;
+    instruction.lhs = ir_operand_symbol(call->function_name);
+    if (instruction.lhs.kind != IR_OPERAND_SYMBOL || !instruction.lhs.name) {
+      ir_operand_destroy(&instruction.lhs);
+      for (size_t i = 0; i < call->argument_count; i++) {
+        ir_operand_destroy(&arguments[i]);
+      }
+      free(arguments);
+      ir_operand_destroy(&destination);
+      ir_set_error(context,
+                   "Out of memory while lowering function pointer call");
+      return 0;
+    }
+  } else {
+    instruction.op = IR_OP_CALL;
+    instruction.text = call->function_name;
+  }
 
   if (!ir_emit(context, function, &instruction)) {
     for (size_t i = 0; i < call->argument_count; i++) {
@@ -1330,7 +1365,8 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       }
     }
 
-    if (strcmp(binary->operator, "&&") == 0 || strcmp(binary->operator, "||") == 0) {
+    if (strcmp(binary->operator, "&&") == 0 ||
+        strcmp(binary->operator, "||") == 0) {
       int is_and = strcmp(binary->operator, "&&") == 0;
       IROperand destination = ir_operand_none();
       IROperand left = ir_operand_none();
@@ -1353,7 +1389,8 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       false_label = ir_new_label_name(context, "sc_false");
       end_label = ir_new_label_name(context, "sc_end");
       if (!rhs_label || !true_label || !false_label || !end_label) {
-        ir_set_error(context, "Out of memory while creating short-circuit labels");
+        ir_set_error(context,
+                     "Out of memory while creating short-circuit labels");
         free(rhs_label);
         free(true_label);
         free(false_label);
@@ -1750,8 +1787,121 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     return 1;
   }
 
+  case AST_CAST_EXPRESSION: {
+    CastExpression *cast_expr = (CastExpression *)expression->data;
+    if (!cast_expr || !cast_expr->type_name || !cast_expr->operand) {
+      ir_set_error(context, "Invalid cast expression");
+      return 0;
+    }
+
+    IROperand operand = ir_operand_none();
+    if (!ir_lower_expression(context, function, cast_expr->operand, &operand)) {
+      return 0;
+    }
+
+    IROperand destination = ir_operand_none();
+    if (!ir_make_temp_operand(context, &destination)) {
+      ir_operand_destroy(&operand);
+      return 0;
+    }
+
+    IRInstruction instruction = {0};
+    instruction.op = IR_OP_CAST;
+    instruction.location = expression->location;
+    instruction.dest = destination;
+    instruction.lhs = operand;
+    instruction.text = cast_expr->type_name;
+    instruction.is_float =
+        ir_expression_is_floating(context, cast_expr->operand);
+
+    if (!ir_emit(context, function, &instruction)) {
+      ir_operand_destroy(&destination);
+      ir_operand_destroy(&operand);
+      return 0;
+    }
+
+    ir_operand_destroy(&operand);
+    *out_value = destination;
+    return 1;
+  }
+
   case AST_FUNCTION_CALL:
     return ir_lower_call_expression(context, function, expression, out_value);
+
+  case AST_FUNC_PTR_CALL: {
+    FuncPtrCall *fp_call = (FuncPtrCall *)expression->data;
+    if (!fp_call || !fp_call->function) {
+      ir_set_error(context, "Invalid function pointer call");
+      return 0;
+    }
+
+    IROperand destination = ir_operand_none();
+    if (!ir_make_temp_operand(context, &destination)) {
+      return 0;
+    }
+
+    // Lower the function pointer expression
+    IROperand func_ptr = ir_operand_none();
+    if (!ir_lower_expression(context, function, fp_call->function, &func_ptr)) {
+      ir_operand_destroy(&destination);
+      return 0;
+    }
+
+    // Lower arguments
+    IROperand *arguments = NULL;
+    if (fp_call->argument_count > 0) {
+      arguments = calloc(fp_call->argument_count, sizeof(IROperand));
+      if (!arguments) {
+        ir_operand_destroy(&func_ptr);
+        ir_operand_destroy(&destination);
+        ir_set_error(
+            context,
+            "Out of memory while lowering function pointer call arguments");
+        return 0;
+      }
+    }
+
+    for (size_t i = 0; i < fp_call->argument_count; i++) {
+      if (!ir_lower_expression(context, function, fp_call->arguments[i],
+                               &arguments[i])) {
+        for (size_t j = 0; j < i; j++) {
+          ir_operand_destroy(&arguments[j]);
+        }
+        free(arguments);
+        ir_operand_destroy(&func_ptr);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+    }
+
+    IRInstruction instruction = {0};
+    instruction.op = IR_OP_CALL_INDIRECT;
+    instruction.location = expression->location;
+    instruction.dest = destination;
+    // For indirect calls, we use lhs to hold the function pointer operand
+    instruction.lhs = func_ptr;
+    instruction.arguments = arguments;
+    instruction.argument_count = fp_call->argument_count;
+
+    if (!ir_emit(context, function, &instruction)) {
+      for (size_t i = 0; i < fp_call->argument_count; i++) {
+        ir_operand_destroy(&arguments[i]);
+      }
+      free(arguments);
+      ir_operand_destroy(&func_ptr);
+      ir_operand_destroy(&destination);
+      return 0;
+    }
+
+    for (size_t i = 0; i < fp_call->argument_count; i++) {
+      ir_operand_destroy(&arguments[i]);
+    }
+    free(arguments);
+    ir_operand_destroy(&func_ptr);
+
+    *out_value = destination;
+    return 1;
+  }
 
   default:
     ir_set_error(context, "Unsupported expression type in pure IR lowering");
@@ -1786,15 +1936,15 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     IRDeferScope block_scope = {0};
     block_scope.parent = defers;
     for (size_t i = 0; i < program->declaration_count; i++) {
-      if (!ir_lower_statement_with_defers(context, function,
-                                          program->declarations[i],
-                                          &block_scope)) {
+      if (!ir_lower_statement_with_defers(
+              context, function, program->declarations[i], &block_scope)) {
         free(block_scope.stack.entries);
         return 0;
       }
     }
 
-    int ok = ir_emit_deferred_calls_non_err(context, function, &block_scope.stack);
+    int ok =
+        ir_emit_deferred_calls_non_err(context, function, &block_scope.stack);
     free(block_scope.stack.entries);
     return ok;
   }
@@ -2332,7 +2482,8 @@ static IRFunction *ir_lower_function(IRLoweringContext *context,
 
   // Ensure fall-off path runs defers too by emitting a return if none exists.
   if (function->instruction_count == 0 ||
-      function->instructions[function->instruction_count - 1].op != IR_OP_RETURN) {
+      function->instructions[function->instruction_count - 1].op !=
+          IR_OP_RETURN) {
     IROperand implicit_value = ir_operand_none();
     if (!ir_emit_return_with_defers(context, function, &defers, &implicit_value,
                                     declaration->location)) {

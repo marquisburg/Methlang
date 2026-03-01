@@ -60,6 +60,20 @@ function main() -> int32 {
 }
 ```
 
+## With Explicit Casts
+
+```masm
+function main() -> int32 {
+  var f: float64 = 3.14;
+  var i: int32 = (int32)f;
+  
+  var p: int32* = (int32*)0;
+  var address: int64 = (int64)p;
+  
+  return i;
+}
+```
+
 ## With GC and Structs
 
 Uses `new` for heap allocation. Link `gc.c` when building. See [Garbage Collector](garbage-collector.md).

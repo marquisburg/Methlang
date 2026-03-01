@@ -40,6 +40,57 @@ The null pointer is written `0`. Pointers and `0` are comparable for equality.
 
 **Null dereference:** Dereferencing a null pointer (`*p` when `p` is 0) produces undefined behavior. On typical systems it results in a crash (access violation). The compiler does not insert null checks.
 
+## Function Pointer Types
+
+Function pointers are first-class values that can be stored, passed as arguments, and called indirectly. They enable callbacks and function references.
+
+### Function Pointer Type Syntax
+
+Function pointer types use the `fn` keyword with parameter types and return type:
+
+```masm
+var fp: fn(int32, int32) -> int32;  // pointer to function taking (int32, int32) returning int32
+var void_fn: fn() -> void;           // pointer to function taking nothing returning nothing
+```
+
+### Taking Function Addresses
+
+Use the address-of operator `&` to create a function pointer:
+
+```masm
+function add(a: int32, b: int32) -> int32 {
+  return a + b;
+}
+
+var fp: fn(int32, int32) -> int32;
+fp = &add;  // & takes the address of a function
+```
+
+### Calling Through Function Pointers
+
+Call a function pointer like a regular function:
+
+```masm
+var result: int32 = fp(3, 4);  // calls the function pointed to by fp
+```
+
+### Function Pointer Use Cases
+
+Function pointers are useful for callbacks, strategy patterns, and C interop:
+
+```masm
+// Callback pattern
+function apply(op: fn(int32, int32) -> int32, a: int32, b: int32) -> int32 {
+  return op(a, b);
+}
+
+function main() -> int32 {
+  return apply(&add, 5, 3);  // passes add as callback
+}
+```
+
+**Type equality:** Two function pointer types are equal if they have the same parameter types and return type. `fn(int32) -> int32` is compatible with `fn(int32) -> int32` but not with `fn(int32, int32) -> int32`.
+
 ## Array Types
 
 Fixed-size arrays use `[N]` where N is a constant. Arrays are value types; the elements are laid out contiguously. Indexing is zero-based.
@@ -103,7 +154,7 @@ var b: Direction = East;
 
 **Underlying type:** Enums use `int64` as the underlying representation. This affects struct layout and C interop: a struct field of enum type is 8 bytes, aligned to 8.
 
-**Casting integers to enums:** There is no explicit cast syntax in MethASM. Implicit narrowing allows assigning an integer to an enum variable when the types are compatible (e.g. `var d: Direction = 2`). For values read from C APIs or switch results, assign directly when the integer type narrows to the enum. When conversion is not implicit, use a helper or ensure the value is in the expected range before assignment.
+**Casting integers to enums:** Implicit narrowing allows assigning an integer to an enum variable when the types are compatible (e.g. `var d: Direction = 2`). For values read from C APIs or switch results, assign directly when the integer type narrows to the enum or use an explicit cast (e.g. `(Direction)val`) to force the conversion.
 
 Enums can be compared with integers and used in `switch` cases. They can be exported for use in other modules (see [Declarations](declarations.md)).
 
@@ -133,4 +184,14 @@ The compiler performs **monomorphization** before type checking: each unique ins
 
 Widening conversions (e.g. `int32` to `int64`, `float32` to `float64`) are implicit. Narrowing conversions (e.g. `int32` to `int16`, `int64` to `int8`) are allowed implicitly for integer-to-integer and float-to-float. There is no implicit conversion between integers and floats, or between pointers and integers, except that `0` is valid as a null pointer initializer and in pointer comparisons.
 
-**Explicit casts:** MethASM does not provide an explicit cast syntax (e.g. `(int32)x` or `(uint8*)p`). The type checker suggests cast syntax in some error messages, but the parser does not support it. Use implicit conversions where possible. For pointer reinterpretation (e.g. treating `int32*` as `uint8*` for byte access), use `cstring` or `uint8*` as the parameter type and pass the pointer; `cstring` and `uint8*` are interchangeable, and both can accept other pointer types when the conversion is implicit. When conversion is not supported, restructure the code or use a wrapper function.
+**Explicit casts:** MethASM provides an explicit cast syntax `(Type)expr`. This can be used to convert between numeric types, pointer types, and between integers and pointers. It is especially useful for pointer reinterpretation (e.g. treating `int32*` as `uint8*` for byte access) or converting floats to integers:
+
+```masm
+var p: int32*;
+var bytes: uint8* = (uint8*)p;
+
+var f: float64 = 3.14;
+var i: int32 = (int32)f;
+```
+
+See [Expressions](expressions.md) for more details on cast conversions and evaluation behavior.
