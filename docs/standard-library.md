@@ -14,7 +14,7 @@ The compiler and most stdlib modules work on Linux and Windows. The compiler emi
 
 ## std/io
 
-Console and file I/O. `puts` writes a null-terminated string and appends a newline; `putchar` writes a single character; `getchar` reads one. `print` and `println` write a cstring (println adds a newline). `print_int` and `println_int` write an integer in decimal. `cstr(s: string) -> cstring` converts a MethASM string to a C string for passing to C functions. File operations: `fopen`, `fclose`, `fread`, `fwrite`, `fputs`, `fgets`, `fflush`. File handles are `cstring` (opaque `FILE*`). Stream accessors: `get_stdin`, `get_stdout`, `get_stderr`.
+Console and file I/O. `puts` writes a null-terminated string and appends a newline; `putchar` writes a single character; `getchar` reads one. `print` and `println` write a cstring (println adds a newline). `print_err` and `println_err` write to stderr (for error messages). `print_int` and `println_int` write an integer in decimal. `cstr(s: string) -> cstring` converts a MethASM string to a C string for passing to C functions. File operations: `fopen`, `fclose`, `fread`, `fwrite`, `fputs`, `fgets`, `fflush`. File handles are `cstring` (opaque `FILE*`). Stream accessors: `get_stdin`, `get_stdout`, `get_stderr`.
 
 ## std/mem
 
@@ -31,6 +31,18 @@ Conversions and character classification. C runtime: `atoi`, `atol`. Digit helpe
 ## std/process
 
 Process control. `exit` terminates the program with an exit code. `rand`, `srand` for pseudo-random numbers.
+
+## std/system
+
+Process spawning. `system(cmd: cstring) -> int32` runs a shell command via the C runtime. Use for invoking methasm, nasm, gcc, git, curl, etc. On Windows invokes cmd.exe; on Linux invokes sh -c.
+
+## std/dir
+
+Directory and file operations. Requires linking `stdlib/dir_helpers.c`. `dir_exists(path: cstring) -> int32` returns 1 if the path is an existing directory. `dir_create(path: cstring) -> int32` creates a directory (returns 0 on success). `file_exists(path: cstring) -> int32` returns 1 if the path is an existing regular file. `getcwd(buf: cstring, size: int32) -> int32` fills `buf` with the current working directory (returns 0 on success). Cross-platform (Windows and Linux).
+
+## std/http
+
+HTTP fetch (MVP). `http_fetch_to_file(url: cstring, output_path: cstring) -> int32` downloads a URL to a file using curl. Requires curl in PATH. Returns curl's exit code (0 = success).
 
 ## std/net
 

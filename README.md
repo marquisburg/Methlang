@@ -4,7 +4,7 @@ MethASM is a compiled, typed, assembly-like language for x86-64.
 It is designed to stay low-level while adding stronger semantics than raw asm.
 Source files use the `.masm` extension and compile to NASM-compatible assembly.
 The compiler includes lexing, parsing, semantic/type analysis, IR lowering, and codegen.
-The language supports structs, arrays, pointers, generics, modules, and C interop.
+The language supports structs, arrays, pointers, generics, modules, explicit casting, and C interop.
 Control flow includes `if`, `while`, `for`, `switch`, `defer`, and `errdefer`.
 Programs can use a conservative runtime GC for `new` and GC-backed string concatenation.
 Standard library modules cover I/O, conversion, networking, process, threading, and more.
@@ -52,6 +52,7 @@ Use `-nostartfiles` so MethASM's entry point (`mainCRTStartup`) is used instead 
 - Language reference index: [docs/LANGUAGE.md](docs/LANGUAGE.md)
 - Garbage collector guide: [docs/garbage-collector.md](docs/garbage-collector.md)
 - Compilation details: [docs/compilation.md](docs/compilation.md)
+- Package manager guide: [docs/package-manager.md](docs/package-manager.md)
 - Standard library overview: [docs/standard-library.md](docs/standard-library.md)
 
 ## Quick Dev Commands

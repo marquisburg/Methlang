@@ -280,6 +280,8 @@ static const char *ir_opcode_name(IROpcode op) {
     return "return";
   case IR_OP_INLINE_ASM:
     return "inline_asm";
+  case IR_OP_CAST:
+    return "cast";
   default:
     return "unknown";
   }
@@ -416,6 +418,11 @@ int ir_program_dump(IRProgram *program, FILE *output) {
       case IR_OP_INLINE_ASM:
         fprintf(output, "%s \"%s\"\n", ir_opcode_name(instruction->op),
                 instruction->text ? instruction->text : "");
+        break;
+      case IR_OP_CAST:
+        fprintf(output, "%s %s = (%s)%s%s\n", ir_opcode_name(instruction->op),
+                dest, instruction->text ? instruction->text : "<type>", lhs,
+                instruction->is_float ? " (float)" : "");
         break;
       case IR_OP_NOP:
       default:

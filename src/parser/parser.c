@@ -299,9 +299,8 @@ void parser_set_error_with_suggestion(Parser *parser, const char *message,
     SourceSpan span = source_span_from_location(location, span_len);
 
     if (suggestion) {
-      error_reporter_add_error_with_span_and_suggestion(parser->error_reporter,
-                                                        ERROR_SYNTAX, span,
-                                                        message, suggestion);
+      error_reporter_add_error_with_span_and_suggestion(
+          parser->error_reporter, ERROR_SYNTAX, span, message, suggestion);
     } else {
       // Try to generate a helpful suggestion
       const char *auto_suggestion = NULL;
@@ -311,10 +310,9 @@ void parser_set_error_with_suggestion(Parser *parser, const char *message,
       }
 
       if (auto_suggestion) {
-        error_reporter_add_error_with_span_and_suggestion(parser->error_reporter,
-                                                          ERROR_SYNTAX, span,
-                                                          message,
-                                                          auto_suggestion);
+        error_reporter_add_error_with_span_and_suggestion(
+            parser->error_reporter, ERROR_SYNTAX, span, message,
+            auto_suggestion);
       } else {
         error_reporter_add_error_with_span(parser->error_reporter, ERROR_SYNTAX,
                                            span, message);
@@ -774,8 +772,7 @@ int parser_is_type_keyword(TokenType type) {
   return (type >= TOKEN_INT8 && type <= TOKEN_STRING_TYPE);
 }
 
-static char **parser_parse_type_param_list(Parser *parser,
-                                           size_t *out_count) {
+static char **parser_parse_type_param_list(Parser *parser, size_t *out_count) {
   *out_count = 0;
   if (parser->current_token.type != TOKEN_LESS_THAN)
     return NULL;
@@ -788,7 +785,8 @@ static char **parser_parse_type_param_list(Parser *parser,
          parser->current_token.type != TOKEN_EOF) {
     if (!parser_is_identifier_like(parser->current_token.type)) {
       parser_set_error(parser, "Expected type parameter name");
-      for (size_t i = 0; i < count; i++) free(params[i]);
+      for (size_t i = 0; i < count; i++)
+        free(params[i]);
       free(params);
       return NULL;
     }
@@ -801,14 +799,16 @@ static char **parser_parse_type_param_list(Parser *parser,
       parser_advance(parser);
     } else if (parser->current_token.type != TOKEN_GREATER_THAN) {
       parser_set_error(parser, "Expected ',' or '>' in type parameter list");
-      for (size_t i = 0; i < count; i++) free(params[i]);
+      for (size_t i = 0; i < count; i++)
+        free(params[i]);
       free(params);
       return NULL;
     }
   }
 
   if (!parser_expect(parser, TOKEN_GREATER_THAN)) {
-    for (size_t i = 0; i < count; i++) free(params[i]);
+    for (size_t i = 0; i < count; i++)
+      free(params[i]);
     free(params);
     return NULL;
   }
@@ -827,7 +827,8 @@ static char *parser_parse_type_annotation(Parser *parser) {
   if (parser->current_token.type == TOKEN_FN) {
     parser_advance(parser); /* consume 'fn' */
     if (!parser_expect(parser, TOKEN_LPAREN)) {
-      parser_set_error(parser, "Expected '(' after 'fn' in function pointer type");
+      parser_set_error(parser,
+                       "Expected '(' after 'fn' in function pointer type");
       return NULL;
     }
     char *params_buf = malloc(1024);
@@ -841,7 +842,8 @@ static char *parser_parse_type_annotation(Parser *parser) {
            parser->current_token.type != TOKEN_EOF && !parser->has_error) {
       if (!first) {
         if (parser->current_token.type != TOKEN_COMMA) {
-          parser_set_error(parser, "Expected ',' or ')' in function pointer parameter list");
+          parser_set_error(
+              parser, "Expected ',' or ')' in function pointer parameter list");
           free(params_buf);
           return NULL;
         }
@@ -859,7 +861,8 @@ static char *parser_parse_type_annotation(Parser *parser) {
       char *param = parser_parse_type_annotation(parser);
       if (!param) {
         if (!parser->has_error)
-          parser_set_error(parser, "Expected type in function pointer parameter list");
+          parser_set_error(parser,
+                           "Expected type in function pointer parameter list");
         free(params_buf);
         return NULL;
       }
@@ -882,18 +885,21 @@ static char *parser_parse_type_annotation(Parser *parser) {
       return NULL;
     }
     if (!parser_expect(parser, TOKEN_ARROW)) {
-      parser_set_error(parser, "Expected '->' after ')' in function pointer type");
+      parser_set_error(parser,
+                       "Expected '->' after ')' in function pointer type");
       free(params_buf);
       return NULL;
     }
     char *ret = parser_parse_type_annotation(parser);
     if (!ret) {
       if (!parser->has_error)
-        parser_set_error(parser, "Expected return type after '->' in function pointer type");
+        parser_set_error(
+            parser, "Expected return type after '->' in function pointer type");
       free(params_buf);
       return NULL;
     }
-    size_t fn_len = 4 + params_len + 3 + strlen(ret) + 1; /* "fn(" + params + ")->" + ret + NUL */
+    size_t fn_len = 4 + params_len + 3 + strlen(ret) +
+                    1; /* "fn(" + params + ")->" + ret + NUL */
     type_name = malloc(fn_len);
     if (!type_name) {
       free(params_buf);
@@ -903,7 +909,8 @@ static char *parser_parse_type_annotation(Parser *parser) {
     snprintf(type_name, fn_len, "fn(%s)->%s", params_buf, ret);
     free(params_buf);
     free(ret);
-    /* Continue to allow * and [] suffixes (e.g. fn()->int32* is nonsensical but we handle it) */
+    /* Continue to allow * and [] suffixes (e.g. fn()->int32* is nonsensical but
+     * we handle it) */
   } else if (!parser_is_type_keyword(parser->current_token.type) &&
              !parser_is_identifier_like(parser->current_token.type)) {
     return NULL;
@@ -1134,12 +1141,137 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
   }
 }
 
+ASTNode *parser_parse_cast_expression(Parser *parser) {
+  if (!parser || parser->current_token.type != TOKEN_LPAREN)
+    return NULL;
+
+  // Only try if the next token could start a type name
+  if (!parser_is_type_keyword(parser->peek_token.type) &&
+      !parser_is_identifier_like(parser->peek_token.type) &&
+      parser->peek_token.type != TOKEN_FN) {
+    return NULL;
+  }
+
+  size_t saved_pos = parser->lexer->position;
+  size_t saved_line = parser->lexer->line;
+  size_t saved_col = parser->lexer->column;
+  Token saved_current = {
+      parser->current_token.type,
+      parser->current_token.value ? strdup(parser->current_token.value) : NULL,
+      parser->current_token.line, parser->current_token.column};
+  Token saved_peek = {
+      parser->peek_token.type,
+      parser->peek_token.value ? strdup(parser->peek_token.value) : NULL,
+      parser->peek_token.line, parser->peek_token.column};
+  int saved_has_error = parser->has_error;
+  int saved_had_error = parser->had_error;
+  size_t saved_error_count = parser->error_count;
+  char *saved_error_msg =
+      parser->error_message ? strdup(parser->error_message) : NULL;
+  ErrorReporter *saved_error_reporter = parser->error_reporter;
+  parser->error_message = NULL;
+  parser->error_reporter =
+      NULL; // Disable error reporting during speculative parsing
+
+  SourceLocation location = {parser->current_token.line,
+                             parser->current_token.column};
+
+  parser_advance(parser); // consume '('
+
+  char *type_name = parser_parse_type_annotation(parser);
+  if (!type_name || parser->has_error ||
+      parser->current_token.type != TOKEN_RPAREN) {
+    if (type_name)
+      free(type_name);
+
+    // Restore state
+    parser->lexer->position = saved_pos;
+    parser->lexer->line = saved_line;
+    parser->lexer->column = saved_col;
+
+    free(parser->current_token.value);
+    parser->current_token = saved_current;
+    free(parser->peek_token.value);
+    parser->peek_token = saved_peek;
+
+    parser->has_error = saved_has_error;
+    parser->had_error = saved_had_error;
+    parser->error_count = saved_error_count;
+    parser->error_reporter = saved_error_reporter;
+    if (parser->error_message)
+      free(parser->error_message);
+    parser->error_message = saved_error_msg;
+
+    return NULL;
+  }
+
+  parser->error_reporter = saved_error_reporter; // Restore error reporter
+
+  parser_advance(parser); // consume ')'
+
+  // Check if it's a grouped expression instead
+  int is_binary = parser_is_binary_operator(parser->current_token.type);
+  if (parser->current_token.type == TOKEN_RPAREN ||
+      parser->current_token.type == TOKEN_COMMA ||
+      parser->current_token.type == TOKEN_SEMICOLON ||
+      parser->current_token.type == TOKEN_EOF ||
+      (is_binary && !parser_is_unary_operator(parser->current_token.type))) {
+
+    free(type_name);
+
+    parser->lexer->position = saved_pos;
+    parser->lexer->line = saved_line;
+    parser->lexer->column = saved_col;
+
+    free(parser->current_token.value);
+    parser->current_token = saved_current;
+    free(parser->peek_token.value);
+    parser->peek_token = saved_peek;
+
+    parser->has_error = saved_has_error;
+    parser->had_error = saved_had_error;
+    parser->error_count = saved_error_count;
+    parser->error_reporter = saved_error_reporter;
+    if (parser->error_message)
+      free(parser->error_message);
+    parser->error_message = saved_error_msg;
+
+    return NULL;
+  }
+
+  // Valid cast found, discard saved state
+  free(saved_current.value);
+  free(saved_peek.value);
+  free(saved_error_msg);
+  parser->has_error = 0;
+  if (parser->error_message)
+    free(parser->error_message);
+  parser->error_message = NULL;
+
+  ASTNode *operand = parser_parse_unary_expression(parser);
+  if (!operand) {
+    free(type_name);
+    return NULL;
+  }
+
+  ASTNode *cast_expr = ast_create_cast_expression(type_name, operand, location);
+  free(type_name);
+  return cast_expr;
+}
+
 ASTNode *parser_parse_unary_expression(Parser *parser) {
   if (!parser)
     return NULL;
 
   SourceLocation location = {parser->current_token.line,
                              parser->current_token.column};
+
+  if (parser->current_token.type == TOKEN_LPAREN) {
+    ASTNode *cast = parser_parse_cast_expression(parser);
+    if (cast) {
+      return cast;
+    }
+  }
 
   if (parser_is_unary_operator(parser->current_token.type)) {
     char *operator = strdup(parser->current_token.value);
@@ -1169,12 +1301,14 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
   size_t saved_pos = parser->lexer->position;
   size_t saved_line = parser->lexer->line;
   size_t saved_col = parser->lexer->column;
-  Token saved_current = {parser->current_token.type,
-                         parser->current_token.value ? strdup(parser->current_token.value) : NULL,
-                         parser->current_token.line, parser->current_token.column};
-  Token saved_peek = {parser->peek_token.type,
-                      parser->peek_token.value ? strdup(parser->peek_token.value) : NULL,
-                      parser->peek_token.line, parser->peek_token.column};
+  Token saved_current = {
+      parser->current_token.type,
+      parser->current_token.value ? strdup(parser->current_token.value) : NULL,
+      parser->current_token.line, parser->current_token.column};
+  Token saved_peek = {
+      parser->peek_token.type,
+      parser->peek_token.value ? strdup(parser->peek_token.value) : NULL,
+      parser->peek_token.line, parser->peek_token.column};
   int saved_has_error = parser->has_error;
   int saved_had_error = parser->had_error;
   size_t saved_error_count = parser->error_count;
@@ -1190,12 +1324,19 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
   while (parser->current_token.type != TOKEN_GREATER_THAN &&
          parser->current_token.type != TOKEN_EOF) {
     if (type_arg_count > 0) {
-      if (parser->current_token.type != TOKEN_COMMA) { success = 0; break; }
+      if (parser->current_token.type != TOKEN_COMMA) {
+        success = 0;
+        break;
+      }
       parser_advance(parser);
     }
 
     char *arg = parser_parse_type_annotation(parser);
-    if (!arg || parser->has_error) { free(arg); success = 0; break; }
+    if (!arg || parser->has_error) {
+      free(arg);
+      success = 0;
+      break;
+    }
 
     type_args = realloc(type_args, (type_arg_count + 1) * sizeof(char *));
     type_args[type_arg_count++] = arg;
@@ -1216,7 +1357,8 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
     }
   }
 
-  for (size_t i = 0; i < type_arg_count; i++) free(type_args[i]);
+  for (size_t i = 0; i < type_arg_count; i++)
+    free(type_args[i]);
   free(type_args);
 
   parser->lexer->position = saved_pos;
@@ -1263,7 +1405,8 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
         if (parser->current_token.type != TOKEN_RPAREN) {
           do {
             ASTNode *arg = parser_parse_expression(parser);
-            if (!arg) break;
+            if (!arg)
+              break;
             arguments = realloc(arguments, (arg_count + 1) * sizeof(ASTNode *));
             arguments[arg_count++] = arg;
             if (parser->current_token.type == TOKEN_COMMA) {
@@ -1278,9 +1421,11 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
         }
 
         if (!parser_expect(parser, TOKEN_RPAREN)) {
-          for (size_t i = 0; i < arg_count; i++) ast_destroy_node(arguments[i]);
+          for (size_t i = 0; i < arg_count; i++)
+            ast_destroy_node(arguments[i]);
           free(arguments);
-          for (size_t i = 0; i < call_type_arg_count; i++) free(call_type_args[i]);
+          for (size_t i = 0; i < call_type_arg_count; i++)
+            free(call_type_args[i]);
           free(call_type_args);
           ast_destroy_node(expr);
           return NULL;
@@ -1290,13 +1435,15 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
         char *func_name = strdup(id_data->name);
         ast_destroy_node(expr);
 
-        expr = ast_create_call_expression(func_name, arguments, arg_count, location);
+        expr = ast_create_call_expression(func_name, arguments, arg_count,
+                                          location);
         if (expr && expr->data) {
           CallExpression *ce = (CallExpression *)expr->data;
           ce->type_args = call_type_args;
           ce->type_arg_count = call_type_arg_count;
         } else {
-          for (size_t i = 0; i < call_type_arg_count; i++) free(call_type_args[i]);
+          for (size_t i = 0; i < call_type_arg_count; i++)
+            free(call_type_args[i]);
           free(call_type_args);
         }
         free(func_name);
@@ -1355,7 +1502,8 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
                                       location);
         free(method_name);
       } else if (expr->type == AST_IDENTIFIER) {
-        // Regular function call (or function pointer variable - type checker validates)
+        // Regular function call (or function pointer variable - type checker
+        // validates)
         Identifier *id_data = (Identifier *)expr->data;
         char *func_name = strdup(id_data->name);
         ast_destroy_node(expr);
@@ -1685,7 +1833,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
   char **func_type_params = NULL;
   size_t func_type_param_count = 0;
   if (parser->current_token.type == TOKEN_LESS_THAN) {
-    func_type_params = parser_parse_type_param_list(parser, &func_type_param_count);
+    func_type_params =
+        parser_parse_type_param_list(parser, &func_type_param_count);
     if (!func_type_params && parser->has_error) {
       free(func_name);
       return NULL;
@@ -1694,7 +1843,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
 
   // Expect '('
   if (!parser_expect(parser, TOKEN_LPAREN)) {
-    for (size_t i = 0; i < func_type_param_count; i++) free(func_type_params[i]);
+    for (size_t i = 0; i < func_type_param_count; i++)
+      free(func_type_params[i]);
     free(func_type_params);
     free(func_name);
     return NULL;
@@ -1906,7 +2056,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
       fd->type_params[i] = strdup(func_type_params[i]);
     }
   }
-  for (size_t i = 0; i < func_type_param_count; i++) free(func_type_params[i]);
+  for (size_t i = 0; i < func_type_param_count; i++)
+    free(func_type_params[i]);
   free(func_type_params);
 
   // Clean up temporary strings
@@ -2049,7 +2200,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
 
   // Expect '{'
   if (!parser_expect(parser, TOKEN_LBRACE)) {
-    for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+    for (size_t i = 0; i < type_param_count; i++)
+      free(type_params[i]);
     free(type_params);
     free(struct_name);
     return NULL;
@@ -2195,7 +2347,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
       sd->type_params[i] = strdup(type_params[i]);
     }
   }
-  for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+  for (size_t i = 0; i < type_param_count; i++)
+    free(type_params[i]);
   free(type_params);
 
   // Keep a stable copy for debug output before freeing temporary buffers.

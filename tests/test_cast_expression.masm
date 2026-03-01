@@ -1,0 +1,37 @@
+extern function puts(s: cstring) -> int32;
+
+function cast_helper() -> int64* {
+    return (int64*)0;
+}
+
+function main() -> int64 {
+    // float to int
+    var f : float64 = 3.14;
+    var i : int64 = (int64)f;
+    if (i != 3) {
+        return 1;
+    }
+
+    // int to float
+    var i2 : int64 = 5;
+    var f2 : float64 = (float64)i2;
+    if (f2 != 5.0) {
+        return 2;
+    }
+
+    // int to ptr
+    var p : int64* = (int64*)0;
+    
+    // integer narrowing
+    var large : int64 = 257; // 256 + 1
+    var small : int8 = (int8)large;
+    if (small != 1) {
+        return 3;
+    }
+
+    // pointer to pointer
+    var p1 : int64* = cast_helper();
+    var p2 : uint8* = (uint8*)p1;
+
+    return 0;
+}

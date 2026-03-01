@@ -1,0 +1,907 @@
+// masm-pkg - Local-only MethASM package manager
+// Commands: add, remove, list, install, build
+//
+// Dependency model:
+// - Project roots list direct deps in masm.deps as: name=path
+// - Each package may define masm.pkg:
+//     name=<package_name>
+//     version=<semver-or-string>
+//     dep=<relative-or-absolute-local-path>
+//
+// No network, git, or registry support.
+
+import "std/io";
+import "std/conv";
+import "std/system";
+import "std/dir";
+import "fetch";
+
+extern function rename(old_path: cstring, new_path: cstring) -> int32 = "rename";
+extern function remove(path: cstring) -> int32 = "remove";
+
+var USAGE: string = "masm-pkg <add|remove|list|install|build> [args]";
+var CACHE_DIR: string = ".masm/packages";
+var DEPS_FILE: string = "masm.deps";
+var LOCK_FILE: string = "masm.lock";
+var PKG_FILE: string = "masm.pkg";
+
+var MAX_PACKAGES: int32 = 256;
+
+var RESOLVED_NAME: int8[32768];
+var RESOLVED_VERSION: int8[16384];
+var RESOLVED_PATH: int8[65536];
+var RESOLVED_COUNT: int32 = 0;
+
+function copy_str(dst: cstring, src: cstring, max_len: int32) {
+  var i: int32 = 0;
+  while (i < max_len - 1 && src[i] != 0) {
+    dst[i] = src[i];
+    i = i + 1;
+  }
+  dst[i] = 0;
+}
+
+function str_len_i32(s: cstring) -> int32 {
+  var n: int64 = strlen(s);
+  var n32: int32 = n;
+  return n32;
+}
+
+function is_path_absolute(path: cstring) -> int32 {
+  if (path == 0 || path[0] == 0) {
+    return 0;
+  }
+  if (path[0] == 47 || path[0] == 92) {
+    return 1;
+  }
+  if (is_alpha(path[0]) == 1 && path[1] == 58) {
+    return 1;
+  }
+  return 0;
+}
+
+function path_join(base: cstring, child: cstring, out: cstring, out_max: int32) -> int32 {
+  if (base == 0 || child == 0 || out == 0 || out_max <= 1) {
+    return -1;
+  }
+  var pos: int32 = 0;
+  var i: int32 = 0;
+  while (base[i] != 0 && pos < out_max - 1) {
+    out[pos] = base[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  if (pos <= 0 || pos >= out_max - 1) {
+    out[0] = 0;
+    return -1;
+  }
+  var last: int32 = out[pos - 1];
+  if (last != 47 && last != 92) {
+    out[pos] = 92;
+    pos = pos + 1;
+    if (pos >= out_max - 1) {
+      out[0] = 0;
+      return -1;
+    }
+  }
+  i = 0;
+  while (child[i] != 0 && pos < out_max - 1) {
+    out[pos] = child[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  out[pos] = 0;
+  return 0;
+}
+
+function path_dirname(path: cstring, out: cstring, out_max: int32) -> int32 {
+  if (path == 0 || out == 0 || out_max <= 1) {
+    return -1;
+  }
+  var len: int32 = str_len_i32(path);
+  if (len <= 0) {
+    out[0] = 46;
+    out[1] = 0;
+    return 0;
+  }
+  var i: int32 = len - 1;
+  while (i >= 0) {
+    if (path[i] == 47 || path[i] == 92) {
+      break;
+    }
+    i = i - 1;
+  }
+  if (i <= 0) {
+    out[0] = 46;
+    out[1] = 0;
+    return 0;
+  }
+  if (i >= out_max) {
+    return -1;
+  }
+  var j: int32 = 0;
+  while (j < i && j < out_max - 1) {
+    out[j] = path[j];
+    j = j + 1;
+  }
+  out[j] = 0;
+  return 0;
+}
+
+function is_dep_name_char(c: int32) -> int32 {
+  if (is_alnum(c) == 1) {
+    return 1;
+  }
+  if (c == 95 || c == 45) {
+    return 1;
+  }
+  return 0;
+}
+
+function is_valid_dep_name(name: cstring) -> int32 {
+  if (name == 0 || name[0] == 0) {
+    return 0;
+  }
+  var i: int32 = 0;
+  while (name[i] != 0) {
+    if (is_dep_name_char(name[i]) == 0) {
+      return 0;
+    }
+    i = i + 1;
+  }
+  return 1;
+}
+
+// Parse "name=value" style lines; trims surrounding whitespace on key/value.
+function parse_key_value_line(line: cstring, line_len: int32, out_key: cstring, out_key_max: int32, out_value: cstring, out_value_max: int32) -> int32 {
+  if (line == 0 || out_key == 0 || out_value == 0 || out_key_max <= 1 || out_value_max <= 1) {
+    return -1;
+  }
+  var i: int32 = 0;
+  while (i < line_len && line[i] != 0) {
+    if (is_space(line[i]) == 1) {
+      i = i + 1;
+    } else {
+      break;
+    }
+  }
+  if (i >= line_len || line[i] == 0 || line[i] == 10 || line[i] == 13) {
+    return 0;
+  }
+  if (line[i] == 35) {
+    return 0;
+  }
+  var key_start: int32 = i;
+  while (i < line_len && line[i] != 0 && line[i] != 61 && line[i] != 10 && line[i] != 13) {
+    i = i + 1;
+  }
+  if (i >= line_len || line[i] != 61) {
+    return 0;
+  }
+  var key_end: int32 = i;
+  while (key_end > key_start && is_space(line[key_end - 1]) == 1) {
+    key_end = key_end - 1;
+  }
+
+  i = i + 1;
+  while (i < line_len && line[i] != 0 && line[i] != 10 && line[i] != 13 && is_space(line[i]) == 1) {
+    i = i + 1;
+  }
+  var value_start: int32 = i;
+  while (i < line_len && line[i] != 0 && line[i] != 10 && line[i] != 13) {
+    i = i + 1;
+  }
+  var value_end: int32 = i;
+  while (value_end > value_start && is_space(line[value_end - 1]) == 1) {
+    value_end = value_end - 1;
+  }
+
+  var key_len: int32 = key_end - key_start;
+  var value_len: int32 = value_end - value_start;
+  if (key_len <= 0 || key_len >= out_key_max) {
+    return -1;
+  }
+  if (value_len >= out_value_max) {
+    return -1;
+  }
+
+  var j: int32 = 0;
+  while (j < key_len) {
+    out_key[j] = line[key_start + j];
+    j = j + 1;
+  }
+  out_key[j] = 0;
+
+  j = 0;
+  while (j < value_len) {
+    out_value[j] = line[value_start + j];
+    j = j + 1;
+  }
+  out_value[j] = 0;
+  return 1;
+}
+
+function parse_dep_line(line: cstring, line_len: int32, out_name: cstring, out_value: cstring) -> int32 {
+  return parse_key_value_line(line, line_len, out_name, 128, out_value, 256);
+}
+
+function print_usage() {
+  println(cstr(USAGE));
+}
+
+function reset_resolved() {
+  RESOLVED_COUNT = 0;
+}
+
+function slot_copy(storage: cstring, slot_size: int32, index: int32, src: cstring, src_max: int32) {
+  var base: int32 = index * slot_size;
+  var i: int32 = 0;
+  while (i < slot_size - 1 && i < src_max - 1 && src[i] != 0) {
+    storage[base + i] = src[i];
+    i = i + 1;
+  }
+  storage[base + i] = 0;
+}
+
+function slot_streq(storage: cstring, slot_size: int32, index: int32, value: cstring) -> int32 {
+  var base: int32 = index * slot_size;
+  var i: int32 = 0;
+  while (storage[base + i] != 0) {
+    if (storage[base + i] != value[i]) {
+      return 0;
+    }
+    i = i + 1;
+  }
+  if (value[i] != 0) {
+    return 0;
+  }
+  return 1;
+}
+
+function slot_to_buf(storage: cstring, slot_size: int32, index: int32, out: cstring, out_max: int32) {
+  var base: int32 = index * slot_size;
+  var i: int32 = 0;
+  while (i < out_max - 1 && storage[base + i] != 0) {
+    out[i] = storage[base + i];
+    i = i + 1;
+  }
+  out[i] = 0;
+}
+
+function find_resolved_by_name(name: cstring) -> int32 {
+  var i: int32 = 0;
+  while (i < RESOLVED_COUNT) {
+    if (slot_streq(&RESOLVED_NAME[0], 128, i, name) == 1) {
+      return i;
+    }
+    i = i + 1;
+  }
+  return -1;
+}
+
+function add_resolved(name: cstring, version: cstring, path: cstring) -> int32 {
+  var idx: int32 = find_resolved_by_name(name);
+  if (idx >= 0) {
+    if (slot_streq(&RESOLVED_VERSION[0], 64, idx, version) == 1 && slot_streq(&RESOLVED_PATH[0], 256, idx, path) == 1) {
+      return 0; // Already resolved same package
+    }
+    var old_version: int8[64];
+    var old_path: int8[256];
+    slot_to_buf(&RESOLVED_VERSION[0], 64, idx, &old_version[0], 64);
+    slot_to_buf(&RESOLVED_PATH[0], 256, idx, &old_path[0], 256);
+    println_err(cstr("Error: dependency conflict for package: "));
+    println_err(name);
+    println_err(cstr("Already resolved as:"));
+    println_err(&old_version[0]);
+    println_err(&old_path[0]);
+    println_err(cstr("Conflicts with:"));
+    println_err(version);
+    println_err(path);
+    return -1;
+  }
+  if (RESOLVED_COUNT >= MAX_PACKAGES) {
+    println_err(cstr("Error: dependency graph too large."));
+    return -1;
+  }
+  slot_copy(&RESOLVED_NAME[0], 128, RESOLVED_COUNT, name, 128);
+  slot_copy(&RESOLVED_VERSION[0], 64, RESOLVED_COUNT, version, 64);
+  slot_copy(&RESOLVED_PATH[0], 256, RESOLVED_COUNT, path, 256);
+  RESOLVED_COUNT = RESOLVED_COUNT + 1;
+  return 1;
+}
+
+function load_package_identity(pkg_path: cstring, fallback_name: cstring, out_name: cstring, out_version: cstring) -> int32 {
+  var manifest_path: int8[320];
+  if (path_join(pkg_path, cstr(PKG_FILE), &manifest_path[0], 320) != 0) {
+    return -1;
+  }
+  copy_str(out_version, cstr("0.0.0-local"), 64);
+  out_name[0] = 0;
+
+  if (file_exists(&manifest_path[0]) == 0) {
+    if (fallback_name != 0 && fallback_name[0] != 0) {
+      copy_str(out_name, fallback_name, 128);
+      return 0;
+    }
+    println_err(cstr("Error: missing masm.pkg and no fallback package name for path:"));
+    println_err(pkg_path);
+    return -1;
+  }
+
+  var fp: cstring = fopen(&manifest_path[0], cstr("r"));
+  if (fp == 0) {
+    println_err(cstr("Error: could not read package manifest:"));
+    println_err(&manifest_path[0]);
+    return -1;
+  }
+  var line_buf: int8[512];
+  var key_buf: int8[64];
+  var value_buf: int8[256];
+  while (fgets(&line_buf[0], 512, fp) != 0) {
+    var len: int64 = strlen(&line_buf[0]);
+    if (len > 511) {
+      len = 511;
+    }
+    var parsed: int32 = parse_key_value_line(&line_buf[0], len, &key_buf[0], 64, &value_buf[0], 256);
+    if (parsed == 1) {
+      if (streq(&key_buf[0], cstr("name")) == 1) {
+        copy_str(out_name, &value_buf[0], 128);
+      } else if (streq(&key_buf[0], cstr("version")) == 1) {
+        copy_str(out_version, &value_buf[0], 64);
+      }
+    }
+  }
+  fclose(fp);
+
+  if (out_name[0] == 0 && fallback_name != 0 && fallback_name[0] != 0) {
+    copy_str(out_name, fallback_name, 128);
+  }
+  if (out_name[0] == 0) {
+    println_err(cstr("Error: package manifest missing name:"));
+    println_err(&manifest_path[0]);
+    return -1;
+  }
+  if (is_valid_dep_name(out_name) == 0) {
+    println_err(cstr("Error: invalid package name in manifest:"));
+    println_err(out_name);
+    return -1;
+  }
+  return 0;
+}
+
+function resolve_package(pkg_path: cstring, fallback_name: cstring) -> int32 {
+  if (dir_exists(pkg_path) == 0) {
+    println_err(cstr("Error: package path not found:"));
+    println_err(pkg_path);
+    return -1;
+  }
+
+  var pkg_name: int8[128];
+  var pkg_version: int8[64];
+  if (load_package_identity(pkg_path, fallback_name, &pkg_name[0], &pkg_version[0]) != 0) {
+    return -1;
+  }
+
+  var add_status: int32 = add_resolved(&pkg_name[0], &pkg_version[0], pkg_path);
+  if (add_status < 0) {
+    return -1;
+  }
+  if (add_status == 0) {
+    return 0;
+  }
+
+  var manifest_path: int8[320];
+  if (path_join(pkg_path, cstr(PKG_FILE), &manifest_path[0], 320) != 0) {
+    return -1;
+  }
+  if (file_exists(&manifest_path[0]) == 0) {
+    return 0;
+  }
+
+  var fp: cstring = fopen(&manifest_path[0], cstr("r"));
+  if (fp == 0) {
+    println_err(cstr("Error: could not read package manifest:"));
+    println_err(&manifest_path[0]);
+    return -1;
+  }
+
+  var line_buf: int8[512];
+  var key_buf: int8[64];
+  var value_buf: int8[256];
+  while (fgets(&line_buf[0], 512, fp) != 0) {
+    var len: int64 = strlen(&line_buf[0]);
+    if (len > 511) {
+      len = 511;
+    }
+    var parsed: int32 = parse_key_value_line(&line_buf[0], len, &key_buf[0], 64, &value_buf[0], 256);
+    if (parsed == 1 && streq(&key_buf[0], cstr("dep")) == 1) {
+      var dep_path: int8[320];
+      if (is_path_absolute(&value_buf[0]) == 1) {
+        copy_str(&dep_path[0], &value_buf[0], 320);
+      } else {
+        if (path_join(pkg_path, &value_buf[0], &dep_path[0], 320) != 0) {
+          fclose(fp);
+          println_err(cstr("Error: dependency path too long in manifest:"));
+          println_err(&manifest_path[0]);
+          return -1;
+        }
+      }
+      if (resolve_package(&dep_path[0], cstr("")) != 0) {
+        fclose(fp);
+        println_err(cstr("Error: while resolving transitive dependency from package:"));
+        println_err(&pkg_name[0]);
+        return -1;
+      }
+    } else if (parsed < 0) {
+      fclose(fp);
+      println_err(cstr("Error: invalid line in package manifest:"));
+      println_err(&manifest_path[0]);
+      return -1;
+    }
+  }
+  fclose(fp);
+  return 0;
+}
+
+function dep_name_exists(name: cstring) -> int32 {
+  if (file_exists(cstr(DEPS_FILE)) == 0) {
+    return 0;
+  }
+  var fp: cstring = fopen(cstr(DEPS_FILE), cstr("r"));
+  if (fp == 0) {
+    return 0;
+  }
+  var line_buf: int8[512];
+  var name_buf: int8[128];
+  var value_buf: int8[256];
+  while (fgets(&line_buf[0], 512, fp) != 0) {
+    var len: int64 = strlen(&line_buf[0]);
+    if (len > 511) {
+      len = 511;
+    }
+    if (parse_dep_line(&line_buf[0], len, &name_buf[0], &value_buf[0]) == 1) {
+      if (streq(&name_buf[0], name) == 1) {
+        fclose(fp);
+        return 1;
+      }
+    }
+  }
+  fclose(fp);
+  return 0;
+}
+
+function resolve_all_dependencies() -> int32 {
+  reset_resolved();
+  if (file_exists(cstr(DEPS_FILE)) == 0) {
+    return 0;
+  }
+  var fp: cstring = fopen(cstr(DEPS_FILE), cstr("r"));
+  if (fp == 0) {
+    println_err(cstr("Error: Could not read masm.deps"));
+    return -1;
+  }
+  var line_buf: int8[512];
+  var name_buf: int8[128];
+  var value_buf: int8[256];
+  while (fgets(&line_buf[0], 512, fp) != 0) {
+    var len: int64 = strlen(&line_buf[0]);
+    if (len > 511) {
+      len = 511;
+    }
+    var parsed: int32 = parse_dep_line(&line_buf[0], len, &name_buf[0], &value_buf[0]);
+    if (parsed == 0) {
+      continue;
+    }
+    if (parsed < 0) {
+      fclose(fp);
+      println_err(cstr("Error: Invalid line in masm.deps"));
+      return -1;
+    }
+    if (resolve_package(&value_buf[0], &name_buf[0]) != 0) {
+      fclose(fp);
+      return -1;
+    }
+  }
+  fclose(fp);
+  return 0;
+}
+
+function write_lock_file() -> int32 {
+  var fp: cstring = fopen(cstr(LOCK_FILE), cstr("w"));
+  if (fp == 0) {
+    println_err(cstr("Error: Could not write masm.lock"));
+    return -1;
+  }
+  fputs(cstr("# masm-pkg lockfile (local-only)\n"), fp);
+  fputs(cstr("# name=version|path\n"), fp);
+  var i: int32 = 0;
+  while (i < RESOLVED_COUNT) {
+    var name_buf: int8[128];
+    var ver_buf: int8[64];
+    var path_buf: int8[256];
+    slot_to_buf(&RESOLVED_NAME[0], 128, i, &name_buf[0], 128);
+    slot_to_buf(&RESOLVED_VERSION[0], 64, i, &ver_buf[0], 64);
+    slot_to_buf(&RESOLVED_PATH[0], 256, i, &path_buf[0], 256);
+    fputs(&name_buf[0], fp);
+    fputs(cstr("="), fp);
+    fputs(&ver_buf[0], fp);
+    fputs(cstr("|"), fp);
+    fputs(&path_buf[0], fp);
+    fputs(cstr("\n"), fp);
+    i = i + 1;
+  }
+  fclose(fp);
+  return 0;
+}
+
+function ensure_cache_dirs() -> int32 {
+  dir_create(cstr(".masm"));
+  dir_create(cstr(CACHE_DIR));
+  return 0;
+}
+
+function cmd_install(argc: int32, argv: cstring*) -> int32 {
+  if (resolve_all_dependencies() != 0) {
+    return 1;
+  }
+  if (RESOLVED_COUNT == 0) {
+    println(cstr("No dependencies in masm.deps"));
+    return 0;
+  }
+  ensure_cache_dirs();
+  println(cstr("Installing dependencies..."));
+  var i: int32 = 0;
+  while (i < RESOLVED_COUNT) {
+    var name_buf: int8[128];
+    var path_buf: int8[256];
+    slot_to_buf(&RESOLVED_NAME[0], 128, i, &name_buf[0], 128);
+    slot_to_buf(&RESOLVED_PATH[0], 256, i, &path_buf[0], 256);
+    var result: int32 = install_local_package(&name_buf[0], &path_buf[0], cstr(CACHE_DIR));
+    if (result == -1) {
+      println_err(cstr("Error: Path not found for package: "));
+      println_err(&name_buf[0]);
+      println_err(&path_buf[0]);
+      return 1;
+    }
+    if (result != 0) {
+      println_err(cstr("Error: Failed to copy package: "));
+      println_err(&name_buf[0]);
+      return 1;
+    }
+    i = i + 1;
+  }
+  if (write_lock_file() != 0) {
+    return 1;
+  }
+  println(cstr("Done."));
+  return 0;
+}
+
+function cmd_list(argc: int32, argv: cstring*) -> int32 {
+  if (resolve_all_dependencies() != 0) {
+    return 1;
+  }
+  if (RESOLVED_COUNT == 0) {
+    println(cstr("No dependencies"));
+    return 0;
+  }
+  var cache_prefix: cstring = cstr(".masm/packages/");
+  var i: int32 = 0;
+  while (i < RESOLVED_COUNT) {
+    var name_buf: int8[128];
+    var ver_buf: int8[64];
+    var path_buf: int8[256];
+    slot_to_buf(&RESOLVED_NAME[0], 128, i, &name_buf[0], 128);
+    slot_to_buf(&RESOLVED_VERSION[0], 64, i, &ver_buf[0], 64);
+    slot_to_buf(&RESOLVED_PATH[0], 256, i, &path_buf[0], 256);
+    print(&name_buf[0]);
+    print(cstr("@"));
+    print(&ver_buf[0]);
+    print(cstr("  "));
+    print(&path_buf[0]);
+    print(cstr("  "));
+    var pkg_path: int8[320];
+    if (path_join(cache_prefix, &name_buf[0], &pkg_path[0], 320) == 0 && dir_exists(&pkg_path[0]) == 1) {
+      println(cstr("[installed]"));
+    } else {
+      println(cstr("[not installed]"));
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+function cmd_add(argc: int32, argv: cstring*) -> int32 {
+  if (argc < 4) {
+    println_err(cstr("Usage: masm-pkg add <name> <path>"));
+    return 1;
+  }
+  var name: cstring = argv[2];
+  var path: cstring = argv[3];
+  if (is_valid_dep_name(name) == 0) {
+    println_err(cstr("Error: Invalid package name. Use [A-Za-z0-9_-]."));
+    return 1;
+  }
+  if (dir_exists(path) == 0) {
+    println_err(cstr("Error: Package path does not exist or is not a directory."));
+    println_err(path);
+    return 1;
+  }
+  if (dep_name_exists(name) == 1) {
+    println_err(cstr("Error: Package already exists in masm.deps: "));
+    println_err(name);
+    return 1;
+  }
+
+  var fp: cstring = fopen(cstr(DEPS_FILE), cstr("a"));
+  if (fp == 0) {
+    fp = fopen(cstr(DEPS_FILE), cstr("w"));
+    if (fp == 0) {
+      println_err(cstr("Error: Could not create masm.deps"));
+      return 1;
+    }
+  }
+  fputs(name, fp);
+  fputs(cstr("="), fp);
+  fputs(path, fp);
+  fputs(cstr("\n"), fp);
+  fclose(fp);
+  println(cstr("Added "));
+  println(name);
+  return 0;
+}
+
+function cmd_remove(argc: int32, argv: cstring*) -> int32 {
+  if (argc < 3) {
+    println_err(cstr("Usage: masm-pkg remove <name>"));
+    return 1;
+  }
+  if (file_exists(cstr(DEPS_FILE)) == 0) {
+    println_err(cstr("Error: masm.deps not found"));
+    return 1;
+  }
+  var name_to_remove: cstring = argv[2];
+  var in_fp: cstring = fopen(cstr(DEPS_FILE), cstr("r"));
+  if (in_fp == 0) {
+    println_err(cstr("Error: Could not read masm.deps"));
+    return 1;
+  }
+  var out_fp: cstring = fopen(cstr("masm.deps.tmp"), cstr("w"));
+  if (out_fp == 0) {
+    fclose(in_fp);
+    println_err(cstr("Error: Could not write temporary deps file"));
+    return 1;
+  }
+  var found: int32 = 0;
+  var line_buf: int8[512];
+  var name_buf: int8[128];
+  var value_buf: int8[256];
+  while (fgets(&line_buf[0], 512, in_fp) != 0) {
+    var len: int64 = strlen(&line_buf[0]);
+    if (len > 511) {
+      len = 511;
+    }
+    var parsed: int32 = parse_dep_line(&line_buf[0], len, &name_buf[0], &value_buf[0]);
+    if (parsed == 1) {
+      if (streq(&name_buf[0], name_to_remove) == 1) {
+        found = 1;
+      } else {
+        fputs(&name_buf[0], out_fp);
+        fputs(cstr("="), out_fp);
+        fputs(&value_buf[0], out_fp);
+        fputs(cstr("\n"), out_fp);
+      }
+    } else {
+      fputs(&line_buf[0], out_fp);
+    }
+  }
+  fclose(in_fp);
+  fclose(out_fp);
+  if (found == 0) {
+    remove(cstr("masm.deps.tmp"));
+    println_err(cstr("Error: Package not found: "));
+    println_err(name_to_remove);
+    return 1;
+  }
+  remove(cstr(DEPS_FILE));
+  if (rename(cstr("masm.deps.tmp"), cstr(DEPS_FILE)) != 0) {
+    println_err(cstr("Error: Could not replace masm.deps"));
+    return 1;
+  }
+  println(cstr("Removed "));
+  println(name_to_remove);
+  return 0;
+}
+
+function cmd_build(argc: int32, argv: cstring*) -> int32 {
+  if (file_exists(cstr("main.masm")) == 0) {
+    println_err(cstr("Error: main.masm not found. Run from project root."));
+    return 1;
+  }
+  if (resolve_all_dependencies() != 0) {
+    return 1;
+  }
+  ensure_cache_dirs();
+  var i: int32 = 0;
+  while (i < RESOLVED_COUNT) {
+    var name_buf: int8[128];
+    var path_buf: int8[256];
+    slot_to_buf(&RESOLVED_NAME[0], 128, i, &name_buf[0], 128);
+    slot_to_buf(&RESOLVED_PATH[0], 256, i, &path_buf[0], 256);
+    var result_install: int32 = install_local_package(&name_buf[0], &path_buf[0], cstr(CACHE_DIR));
+    if (result_install != 0) {
+      println_err(cstr("Error: failed to install dependency before build:"));
+      println_err(&name_buf[0]);
+      return 1;
+    }
+    i = i + 1;
+  }
+  write_lock_file();
+
+  var methasm_cmd: cstring = cstr("methasm");
+  if (file_exists(cstr("bin\\methasm.exe")) == 1) {
+    methasm_cmd = cstr("bin\\methasm.exe");
+  } else {
+    var methasm_alt: string = "..\\bin\\methasm.exe";
+    if (file_exists(cstr(methasm_alt)) == 1) {
+      methasm_cmd = cstr(methasm_alt);
+    } else {
+      var methasm_alt2: string = "..\\..\\bin\\methasm.exe";
+      if (file_exists(cstr(methasm_alt2)) == 1) {
+        methasm_cmd = cstr(methasm_alt2);
+      }
+    }
+  }
+
+  var stdlib_path: cstring = cstr("stdlib");
+  if (file_exists(cstr("stdlib\\std\\io.masm")) == 0) {
+    if (file_exists(cstr("..\\stdlib\\std\\io.masm")) == 1) {
+      stdlib_path = cstr("..\\stdlib");
+    } else if (file_exists(cstr("..\\..\\stdlib\\std\\io.masm")) == 1) {
+      stdlib_path = cstr("..\\..\\stdlib");
+    }
+  }
+
+  var cmd_buf: int8[1024];
+  var pos: int32 = 0;
+  i = 0;
+  while (methasm_cmd[i] != 0 && pos < 1022) {
+    cmd_buf[pos] = methasm_cmd[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  var base_cmd: cstring = cstr(" \"main.masm\" -o \"main.s\" --stdlib \"");
+  i = 0;
+  while (base_cmd[i] != 0 && pos < 1022) {
+    cmd_buf[pos] = base_cmd[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  i = 0;
+  while (stdlib_path[i] != 0 && pos < 1022) {
+    cmd_buf[pos] = stdlib_path[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  if (pos < 1022) {
+    cmd_buf[pos] = 34;
+    pos = pos + 1;
+  }
+  var include_cmd: cstring = cstr(" -I \".masm\\packages\"");
+  i = 0;
+  while (include_cmd[i] != 0 && pos < 1022) {
+    cmd_buf[pos] = include_cmd[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  cmd_buf[pos] = 0;
+
+  var result: int32 = system(&cmd_buf[0]);
+  if (result != 0) {
+    println_err(cstr("Error: methasm compilation failed"));
+    return 1;
+  }
+  result = system(cstr("nasm -f win64 \"main.s\" -o \"main.o\""));
+  if (result != 0) {
+    println_err(cstr("Error: nasm assembly failed"));
+    return 1;
+  }
+
+  var gc_path: cstring = cstr("src\\runtime\\gc.c");
+  if (file_exists(gc_path) == 0) {
+    if (file_exists(cstr("..\\src\\runtime\\gc.c")) == 1) {
+      gc_path = cstr("..\\src\\runtime\\gc.c");
+    } else if (file_exists(cstr("..\\..\\src\\runtime\\gc.c")) == 1) {
+      gc_path = cstr("..\\..\\src\\runtime\\gc.c");
+    }
+  }
+  if (file_exists(gc_path) == 0) {
+    println_err(cstr("Error: gc runtime not found. Expected src/runtime/gc.c"));
+    return 1;
+  }
+
+  var entry_path: cstring = cstr("src\\runtime\\masm_entry.c");
+  if (file_exists(entry_path) == 0) {
+    if (file_exists(cstr("..\\src\\runtime\\masm_entry.c")) == 1) {
+      entry_path = cstr("..\\src\\runtime\\masm_entry.c");
+    } else if (file_exists(cstr("..\\..\\src\\runtime\\masm_entry.c")) == 1) {
+      entry_path = cstr("..\\..\\src\\runtime\\masm_entry.c");
+    }
+  }
+  if (file_exists(entry_path) == 0) {
+    println_err(cstr("Error: masm_entry runtime not found. Expected src/runtime/masm_entry.c"));
+    return 1;
+  }
+
+  pos = 0;
+  var gcc_prefix: cstring = cstr("gcc -nostartfiles \"main.o\" \"");
+  i = 0;
+  while (gcc_prefix[i] != 0 && pos < 1022) {
+    cmd_buf[pos] = gcc_prefix[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  i = 0;
+  while (gc_path[i] != 0 && pos < 1022) {
+    cmd_buf[pos] = gc_path[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  if (pos < 1022) {
+    cmd_buf[pos] = 34;
+    pos = pos + 1;
+  }
+  var gcc_mid: cstring = cstr(" \"");
+  i = 0;
+  while (gcc_mid[i] != 0 && pos < 1022) {
+    cmd_buf[pos] = gcc_mid[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  i = 0;
+  while (entry_path[i] != 0 && pos < 1022) {
+    cmd_buf[pos] = entry_path[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  var gcc_suffix: cstring = cstr("\" -o \"main.exe\" -lkernel32 -lshell32");
+  i = 0;
+  while (gcc_suffix[i] != 0 && pos < 1022) {
+    cmd_buf[pos] = gcc_suffix[i];
+    pos = pos + 1;
+    i = i + 1;
+  }
+  cmd_buf[pos] = 0;
+  result = system(&cmd_buf[0]);
+  if (result != 0) {
+    println_err(cstr("Error: gcc link failed"));
+    return 1;
+  }
+  println(cstr("Build complete: main.exe"));
+  return 0;
+}
+
+function main(argc: int32, argv: cstring*) -> int32 {
+  if (argc < 2) {
+    print_usage();
+    return 1;
+  }
+  var cmd: cstring = argv[1];
+  if (streq(cmd, cstr("install")) == 1) {
+    return cmd_install(argc, argv);
+  }
+  if (streq(cmd, cstr("add")) == 1) {
+    return cmd_add(argc, argv);
+  }
+  if (streq(cmd, cstr("remove")) == 1) {
+    return cmd_remove(argc, argv);
+  }
+  if (streq(cmd, cstr("build")) == 1) {
+    return cmd_build(argc, argv);
+  }
+  if (streq(cmd, cstr("list")) == 1) {
+    return cmd_list(argc, argv);
+  }
+  print_usage();
+  return 1;
+}

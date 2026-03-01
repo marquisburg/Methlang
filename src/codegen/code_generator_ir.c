@@ -349,7 +349,8 @@ static int code_generator_emit_ir_address_of(CodeGenerator *generator,
     const char *func_name =
         code_generator_get_link_symbol_name(generator, instruction->lhs.name);
     if (!func_name) {
-      code_generator_set_error(generator, "Invalid function symbol in IR addr_of");
+      code_generator_set_error(generator,
+                               "Invalid function symbol in IR addr_of");
       return 0;
     }
     if (symbol->is_extern &&
@@ -980,6 +981,76 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
   return !generator->has_error;
 }
 
+static int code_generator_emit_ir_cast(CodeGenerator *generator,
+                                       const IRInstruction *instruction,
+                                       IRTempTable *temp_table) {
+  if (!generator || !instruction || !instruction->text) {
+    return 0;
+  }
+
+  Type *target_type = NULL;
+  if (generator->type_checker) {
+    target_type = type_checker_get_type_by_name(generator->type_checker,
+                                                instruction->text);
+  }
+
+  if (!code_generator_load_ir_operand(generator, &instruction->lhs,
+                                      temp_table)) {
+    return 0;
+  }
+
+  int source_is_float = instruction->is_float;
+  int target_is_float =
+      target_type ? code_generator_is_floating_point_type(target_type) : 0;
+
+  int target_is_unsigned = 0;
+  if (target_type) {
+    if (target_type->kind == TYPE_UINT8 || target_type->kind == TYPE_UINT16 ||
+        target_type->kind == TYPE_UINT32 || target_type->kind == TYPE_UINT64) {
+      target_is_unsigned = 1;
+    }
+  }
+
+  int target_size = target_type ? (int)target_type->size : 8;
+  if (target_size <= 0)
+    target_size = 8;
+  if (target_type && (target_type->kind == TYPE_POINTER ||
+                      target_type->kind == TYPE_FUNCTION_POINTER)) {
+    target_size = 8;
+  }
+
+  if (source_is_float && !target_is_float) {
+    code_generator_emit(generator, "    movq xmm0, rax\n");
+    code_generator_emit(generator, "    cvttsd2si rax, xmm0\n");
+  } else if (!source_is_float && target_is_float) {
+    code_generator_emit(generator, "    cvtsi2sd xmm0, rax\n");
+    code_generator_emit(generator, "    movq rax, xmm0\n");
+  } else if (!source_is_float && !target_is_float) {
+    if (target_size == 1) {
+      if (target_is_unsigned) {
+        code_generator_emit(generator, "    movzx rax, al\n");
+      } else {
+        code_generator_emit(generator, "    movsx rax, al\n");
+      }
+    } else if (target_size == 2) {
+      if (target_is_unsigned) {
+        code_generator_emit(generator, "    movzx rax, ax\n");
+      } else {
+        code_generator_emit(generator, "    movsx rax, ax\n");
+      }
+    } else if (target_size == 4) {
+      if (target_is_unsigned) {
+        code_generator_emit(generator, "    mov eax, eax\n");
+      } else {
+        code_generator_emit(generator, "    movsxd rax, eax\n");
+      }
+    }
+  }
+
+  return code_generator_store_ir_destination(generator, &instruction->dest,
+                                             temp_table);
+}
+
 static int code_generator_emit_ir_instruction(CodeGenerator *generator,
                                               const IRInstruction *instruction,
                                               IRTempTable *temp_table) {
@@ -1111,8 +1182,8 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
     }
     int stack_argument_count = 0;
     for (size_t i = 0; i < argument_count; i++) {
-      is_float[i] = code_generator_ir_call_argument_is_float(
-          generator, NULL, instruction, i);
+      is_float[i] = code_generator_ir_call_argument_is_float(generator, NULL,
+                                                             instruction, i);
       if (conv_spec->convention == CALLING_CONV_MS_X64) {
         if (i >= ms_param_slot_count) {
           goes_on_stack[i] = 1;
@@ -1138,8 +1209,8 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
     code_generator_emit(generator, "    ; Indirect function call\n");
 
     int shadow_space = (conv_spec->convention == CALLING_CONV_MS_X64)
-                          ? conv_spec->shadow_space_size
-                          : 0;
+                           ? conv_spec->shadow_space_size
+                           : 0;
     int stack_arg_space = stack_argument_count * 8;
     int call_stack_total = shadow_space + stack_arg_space;
     if ((call_stack_total % 16) != 0) {
@@ -1227,6 +1298,9 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
 
   case IR_OP_NEW:
     return code_generator_emit_ir_new(generator, instruction, temp_table);
+
+  case IR_OP_CAST:
+    return code_generator_emit_ir_cast(generator, instruction, temp_table);
 
   case IR_OP_RETURN:
     if (instruction->lhs.kind != IR_OPERAND_NONE) {
@@ -1438,6 +1512,247 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   generator->current_stack_offset = parameter_home_size;
   code_generator_register_function_parameters(generator, function_data,
                                               parameter_home_size);
+  {
+    CallingConventionSpec *conv_spec =
+        generator->register_allocator
+            ? generator->register_allocator->calling_convention
+            : NULL;
+    const char *first_param_reg = "rdi";
+    if (conv_spec && conv_spec->int_param_count > 0) {
+      const char *candidate =
+          code_generator_get_register_name(conv_spec->int_param_registers[0]);
+      if (candidate) {
+        first_param_reg = candidate;
+      }
+    }
+    if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
+      code_generator_emit(generator,
+                          "    ; Spill GPRs so GC sees register-held roots\n");
+      code_generator_emit(generator, "    push rax\n");
+      code_generator_emit(generator, "    push rbx\n");
+      code_generator_emit(generator, "    push rcx\n");
+      code_generator_emit(generator, "    push rdx\n");
+      code_generator_emit(generator, "    push rsi\n");
+      code_generator_emit(generator, "    push rdi\n");
+      code_generator_emit(generator, "    push r8\n");
+      code_generator_emit(generator, "    push r9\n");
+      code_generator_emit(generator, "    push r10\n");
+      code_generator_emit(generator, "    push r11\n");
+      code_generator_emit(generator, "    push r12\n");
+      code_generator_emit(generator, "    push r13\n");
+      code_generator_emit(generator, "    push r14\n");
+      code_generator_emit(generator, "    push r15\n");
+      code_generator_emit(generator,
+                          "    ; Spill XMM registers for conservative root scan\n");
+#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+      code_generator_emit(generator, "    sub rsp, 512\n");
+#else
+      code_generator_emit(generator, "    sub rsp, 256\n");
+#endif
+      code_generator_emit(generator, "    movdqu [rsp + 0], xmm0\n");
+      code_generator_emit(generator, "    movdqu [rsp + 16], xmm1\n");
+      code_generator_emit(generator, "    movdqu [rsp + 32], xmm2\n");
+      code_generator_emit(generator, "    movdqu [rsp + 48], xmm3\n");
+      code_generator_emit(generator, "    movdqu [rsp + 64], xmm4\n");
+      code_generator_emit(generator, "    movdqu [rsp + 80], xmm5\n");
+      code_generator_emit(generator, "    movdqu [rsp + 96], xmm6\n");
+      code_generator_emit(generator, "    movdqu [rsp + 112], xmm7\n");
+      code_generator_emit(generator, "    movdqu [rsp + 128], xmm8\n");
+      code_generator_emit(generator, "    movdqu [rsp + 144], xmm9\n");
+      code_generator_emit(generator, "    movdqu [rsp + 160], xmm10\n");
+      code_generator_emit(generator, "    movdqu [rsp + 176], xmm11\n");
+      code_generator_emit(generator, "    movdqu [rsp + 192], xmm12\n");
+      code_generator_emit(generator, "    movdqu [rsp + 208], xmm13\n");
+      code_generator_emit(generator, "    movdqu [rsp + 224], xmm14\n");
+      code_generator_emit(generator, "    movdqu [rsp + 240], xmm15\n");
+#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+      code_generator_emit(generator, "    movdqu [rsp + 256], xmm16\n");
+      code_generator_emit(generator, "    movdqu [rsp + 272], xmm17\n");
+      code_generator_emit(generator, "    movdqu [rsp + 288], xmm18\n");
+      code_generator_emit(generator, "    movdqu [rsp + 304], xmm19\n");
+      code_generator_emit(generator, "    movdqu [rsp + 320], xmm20\n");
+      code_generator_emit(generator, "    movdqu [rsp + 336], xmm21\n");
+      code_generator_emit(generator, "    movdqu [rsp + 352], xmm22\n");
+      code_generator_emit(generator, "    movdqu [rsp + 368], xmm23\n");
+      code_generator_emit(generator, "    movdqu [rsp + 384], xmm24\n");
+      code_generator_emit(generator, "    movdqu [rsp + 400], xmm25\n");
+      code_generator_emit(generator, "    movdqu [rsp + 416], xmm26\n");
+      code_generator_emit(generator, "    movdqu [rsp + 432], xmm27\n");
+      code_generator_emit(generator, "    movdqu [rsp + 448], xmm28\n");
+      code_generator_emit(generator, "    movdqu [rsp + 464], xmm29\n");
+      code_generator_emit(generator, "    movdqu [rsp + 480], xmm30\n");
+      code_generator_emit(generator, "    movdqu [rsp + 496], xmm31\n");
+#endif
+      code_generator_emit(generator, "    sub rsp, 32\n");
+      code_generator_emit(generator, "    mov %s, rsp\n", first_param_reg);
+      code_generator_emit(generator, "    extern gc_safepoint\n");
+      code_generator_emit(generator, "    call gc_safepoint\n");
+      code_generator_emit(generator, "    add rsp, 32\n");
+      code_generator_emit(generator, "    movdqu xmm0, [rsp + 0]\n");
+      code_generator_emit(generator, "    movdqu xmm1, [rsp + 16]\n");
+      code_generator_emit(generator, "    movdqu xmm2, [rsp + 32]\n");
+      code_generator_emit(generator, "    movdqu xmm3, [rsp + 48]\n");
+      code_generator_emit(generator, "    movdqu xmm4, [rsp + 64]\n");
+      code_generator_emit(generator, "    movdqu xmm5, [rsp + 80]\n");
+      code_generator_emit(generator, "    movdqu xmm6, [rsp + 96]\n");
+      code_generator_emit(generator, "    movdqu xmm7, [rsp + 112]\n");
+      code_generator_emit(generator, "    movdqu xmm8, [rsp + 128]\n");
+      code_generator_emit(generator, "    movdqu xmm9, [rsp + 144]\n");
+      code_generator_emit(generator, "    movdqu xmm10, [rsp + 160]\n");
+      code_generator_emit(generator, "    movdqu xmm11, [rsp + 176]\n");
+      code_generator_emit(generator, "    movdqu xmm12, [rsp + 192]\n");
+      code_generator_emit(generator, "    movdqu xmm13, [rsp + 208]\n");
+      code_generator_emit(generator, "    movdqu xmm14, [rsp + 224]\n");
+      code_generator_emit(generator, "    movdqu xmm15, [rsp + 240]\n");
+#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+      code_generator_emit(generator, "    movdqu xmm16, [rsp + 256]\n");
+      code_generator_emit(generator, "    movdqu xmm17, [rsp + 272]\n");
+      code_generator_emit(generator, "    movdqu xmm18, [rsp + 288]\n");
+      code_generator_emit(generator, "    movdqu xmm19, [rsp + 304]\n");
+      code_generator_emit(generator, "    movdqu xmm20, [rsp + 320]\n");
+      code_generator_emit(generator, "    movdqu xmm21, [rsp + 336]\n");
+      code_generator_emit(generator, "    movdqu xmm22, [rsp + 352]\n");
+      code_generator_emit(generator, "    movdqu xmm23, [rsp + 368]\n");
+      code_generator_emit(generator, "    movdqu xmm24, [rsp + 384]\n");
+      code_generator_emit(generator, "    movdqu xmm25, [rsp + 400]\n");
+      code_generator_emit(generator, "    movdqu xmm26, [rsp + 416]\n");
+      code_generator_emit(generator, "    movdqu xmm27, [rsp + 432]\n");
+      code_generator_emit(generator, "    movdqu xmm28, [rsp + 448]\n");
+      code_generator_emit(generator, "    movdqu xmm29, [rsp + 464]\n");
+      code_generator_emit(generator, "    movdqu xmm30, [rsp + 480]\n");
+      code_generator_emit(generator, "    movdqu xmm31, [rsp + 496]\n");
+      code_generator_emit(generator, "    add rsp, 512\n");
+#else
+      code_generator_emit(generator, "    add rsp, 256\n");
+#endif
+      code_generator_emit(generator, "    pop r15\n");
+      code_generator_emit(generator, "    pop r14\n");
+      code_generator_emit(generator, "    pop r13\n");
+      code_generator_emit(generator, "    pop r12\n");
+      code_generator_emit(generator, "    pop r11\n");
+      code_generator_emit(generator, "    pop r10\n");
+      code_generator_emit(generator, "    pop r9\n");
+      code_generator_emit(generator, "    pop r8\n");
+      code_generator_emit(generator, "    pop rdi\n");
+      code_generator_emit(generator, "    pop rsi\n");
+      code_generator_emit(generator, "    pop rdx\n");
+      code_generator_emit(generator, "    pop rcx\n");
+      code_generator_emit(generator, "    pop rbx\n");
+      code_generator_emit(generator, "    pop rax\n");
+    } else {
+      code_generator_emit(generator,
+                          "    ; Spill GPRs so GC sees register-held roots\n");
+      code_generator_emit(generator, "    push rax\n");
+      code_generator_emit(generator, "    push rbx\n");
+      code_generator_emit(generator, "    push rcx\n");
+      code_generator_emit(generator, "    push rdx\n");
+      code_generator_emit(generator, "    push rsi\n");
+      code_generator_emit(generator, "    push rdi\n");
+      code_generator_emit(generator, "    push r8\n");
+      code_generator_emit(generator, "    push r9\n");
+      code_generator_emit(generator, "    push r10\n");
+      code_generator_emit(generator, "    push r11\n");
+      code_generator_emit(generator, "    push r12\n");
+      code_generator_emit(generator, "    push r13\n");
+      code_generator_emit(generator, "    push r14\n");
+      code_generator_emit(generator, "    push r15\n");
+      code_generator_emit(generator,
+                          "    ; Spill XMM registers for conservative root scan\n");
+#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+      code_generator_emit(generator, "    sub rsp, 512\n");
+#else
+      code_generator_emit(generator, "    sub rsp, 256\n");
+#endif
+      code_generator_emit(generator, "    movdqu [rsp + 0], xmm0\n");
+      code_generator_emit(generator, "    movdqu [rsp + 16], xmm1\n");
+      code_generator_emit(generator, "    movdqu [rsp + 32], xmm2\n");
+      code_generator_emit(generator, "    movdqu [rsp + 48], xmm3\n");
+      code_generator_emit(generator, "    movdqu [rsp + 64], xmm4\n");
+      code_generator_emit(generator, "    movdqu [rsp + 80], xmm5\n");
+      code_generator_emit(generator, "    movdqu [rsp + 96], xmm6\n");
+      code_generator_emit(generator, "    movdqu [rsp + 112], xmm7\n");
+      code_generator_emit(generator, "    movdqu [rsp + 128], xmm8\n");
+      code_generator_emit(generator, "    movdqu [rsp + 144], xmm9\n");
+      code_generator_emit(generator, "    movdqu [rsp + 160], xmm10\n");
+      code_generator_emit(generator, "    movdqu [rsp + 176], xmm11\n");
+      code_generator_emit(generator, "    movdqu [rsp + 192], xmm12\n");
+      code_generator_emit(generator, "    movdqu [rsp + 208], xmm13\n");
+      code_generator_emit(generator, "    movdqu [rsp + 224], xmm14\n");
+      code_generator_emit(generator, "    movdqu [rsp + 240], xmm15\n");
+#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+      code_generator_emit(generator, "    movdqu [rsp + 256], xmm16\n");
+      code_generator_emit(generator, "    movdqu [rsp + 272], xmm17\n");
+      code_generator_emit(generator, "    movdqu [rsp + 288], xmm18\n");
+      code_generator_emit(generator, "    movdqu [rsp + 304], xmm19\n");
+      code_generator_emit(generator, "    movdqu [rsp + 320], xmm20\n");
+      code_generator_emit(generator, "    movdqu [rsp + 336], xmm21\n");
+      code_generator_emit(generator, "    movdqu [rsp + 352], xmm22\n");
+      code_generator_emit(generator, "    movdqu [rsp + 368], xmm23\n");
+      code_generator_emit(generator, "    movdqu [rsp + 384], xmm24\n");
+      code_generator_emit(generator, "    movdqu [rsp + 400], xmm25\n");
+      code_generator_emit(generator, "    movdqu [rsp + 416], xmm26\n");
+      code_generator_emit(generator, "    movdqu [rsp + 432], xmm27\n");
+      code_generator_emit(generator, "    movdqu [rsp + 448], xmm28\n");
+      code_generator_emit(generator, "    movdqu [rsp + 464], xmm29\n");
+      code_generator_emit(generator, "    movdqu [rsp + 480], xmm30\n");
+      code_generator_emit(generator, "    movdqu [rsp + 496], xmm31\n");
+#endif
+      code_generator_emit(generator, "    mov %s, rsp\n", first_param_reg);
+      code_generator_emit(generator, "    extern gc_safepoint\n");
+      code_generator_emit(generator, "    call gc_safepoint\n");
+      code_generator_emit(generator, "    movdqu xmm0, [rsp + 0]\n");
+      code_generator_emit(generator, "    movdqu xmm1, [rsp + 16]\n");
+      code_generator_emit(generator, "    movdqu xmm2, [rsp + 32]\n");
+      code_generator_emit(generator, "    movdqu xmm3, [rsp + 48]\n");
+      code_generator_emit(generator, "    movdqu xmm4, [rsp + 64]\n");
+      code_generator_emit(generator, "    movdqu xmm5, [rsp + 80]\n");
+      code_generator_emit(generator, "    movdqu xmm6, [rsp + 96]\n");
+      code_generator_emit(generator, "    movdqu xmm7, [rsp + 112]\n");
+      code_generator_emit(generator, "    movdqu xmm8, [rsp + 128]\n");
+      code_generator_emit(generator, "    movdqu xmm9, [rsp + 144]\n");
+      code_generator_emit(generator, "    movdqu xmm10, [rsp + 160]\n");
+      code_generator_emit(generator, "    movdqu xmm11, [rsp + 176]\n");
+      code_generator_emit(generator, "    movdqu xmm12, [rsp + 192]\n");
+      code_generator_emit(generator, "    movdqu xmm13, [rsp + 208]\n");
+      code_generator_emit(generator, "    movdqu xmm14, [rsp + 224]\n");
+      code_generator_emit(generator, "    movdqu xmm15, [rsp + 240]\n");
+#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+      code_generator_emit(generator, "    movdqu xmm16, [rsp + 256]\n");
+      code_generator_emit(generator, "    movdqu xmm17, [rsp + 272]\n");
+      code_generator_emit(generator, "    movdqu xmm18, [rsp + 288]\n");
+      code_generator_emit(generator, "    movdqu xmm19, [rsp + 304]\n");
+      code_generator_emit(generator, "    movdqu xmm20, [rsp + 320]\n");
+      code_generator_emit(generator, "    movdqu xmm21, [rsp + 336]\n");
+      code_generator_emit(generator, "    movdqu xmm22, [rsp + 352]\n");
+      code_generator_emit(generator, "    movdqu xmm23, [rsp + 368]\n");
+      code_generator_emit(generator, "    movdqu xmm24, [rsp + 384]\n");
+      code_generator_emit(generator, "    movdqu xmm25, [rsp + 400]\n");
+      code_generator_emit(generator, "    movdqu xmm26, [rsp + 416]\n");
+      code_generator_emit(generator, "    movdqu xmm27, [rsp + 432]\n");
+      code_generator_emit(generator, "    movdqu xmm28, [rsp + 448]\n");
+      code_generator_emit(generator, "    movdqu xmm29, [rsp + 464]\n");
+      code_generator_emit(generator, "    movdqu xmm30, [rsp + 480]\n");
+      code_generator_emit(generator, "    movdqu xmm31, [rsp + 496]\n");
+      code_generator_emit(generator, "    add rsp, 512\n");
+#else
+      code_generator_emit(generator, "    add rsp, 256\n");
+#endif
+      code_generator_emit(generator, "    pop r15\n");
+      code_generator_emit(generator, "    pop r14\n");
+      code_generator_emit(generator, "    pop r13\n");
+      code_generator_emit(generator, "    pop r12\n");
+      code_generator_emit(generator, "    pop r11\n");
+      code_generator_emit(generator, "    pop r10\n");
+      code_generator_emit(generator, "    pop r9\n");
+      code_generator_emit(generator, "    pop r8\n");
+      code_generator_emit(generator, "    pop rdi\n");
+      code_generator_emit(generator, "    pop rsi\n");
+      code_generator_emit(generator, "    pop rdx\n");
+      code_generator_emit(generator, "    pop rcx\n");
+      code_generator_emit(generator, "    pop rbx\n");
+      code_generator_emit(generator, "    pop rax\n");
+    }
+  }
   if (generator->has_error) {
     ir_temp_table_destroy(&temp_table);
     ir_local_table_destroy(&local_table);

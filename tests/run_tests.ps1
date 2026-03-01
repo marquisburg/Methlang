@@ -405,10 +405,10 @@ $cases = @(
     )
   },
   @{
-    Name          = "errdefer_skipped_on_success"
-    Path          = "tests/test_errdefer_skipped_on_success.masm"
-    ShouldSucceed = $true
-    AsmMustMatch  = @(
+    Name            = "errdefer_skipped_on_success"
+    Path            = "tests/test_errdefer_skipped_on_success.masm"
+    ShouldSucceed   = $true
+    AsmMustMatch    = @(
       "(?s)global main\s*(\r\n|\n)\s*(\r\n|\n)main:.*?ir_errdefer_ok_\d+:.*?; IR call: ok \(0 args\)"
     )
     AsmMustNotMatch = @(
@@ -427,6 +427,7 @@ $cases = @(
   @{ Name = "web_server_import"; Path = "web/server.masm"; ShouldSucceed = $true },
 
   # New errdefer tests
+  @{ Name = "test_cast_expression"; Path = "tests/test_cast_expression.masm"; ShouldSucceed = $true },
   @{ Name = "errdefer_interleaved_with_defer"; Path = "tests/test_errdefer_interleaved_with_defer.masm"; ShouldSucceed = $true },
   @{ Name = "errdefer_block_exit"; Path = "tests/test_errdefer_block_exit.masm"; ShouldSucceed = $true },
   @{ Name = "errdefer_nested_if_else"; Path = "tests/test_errdefer_nested_if_else.masm"; ShouldSucceed = $true },
@@ -435,10 +436,10 @@ $cases = @(
   @{ Name = "defer_block_statement"; Path = "tests/test_defer_block_statement.masm"; ShouldSucceed = $true },
   @{ Name = "errdefer_assignment_statement"; Path = "tests/test_errdefer_assignment_statement.masm"; ShouldSucceed = $true },
   @{
-    Name          = "errdefer_implicit_fallthrough"
-    Path          = "tests/test_errdefer_implicit_fallthrough.masm"
-    ShouldSucceed = $true
-    AsmMustMatch  = @(
+    Name            = "errdefer_implicit_fallthrough"
+    Path            = "tests/test_errdefer_implicit_fallthrough.masm"
+    ShouldSucceed   = $true
+    AsmMustMatch    = @(
       "\bcall ok\b"
     )
     AsmMustNotMatch = @(
@@ -669,6 +670,52 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "function_pointer" -Passed $false -Reason $_.Exception.Message
+}
+
+# main(argc, argv) test: requires masm_entry.o and shell32 on Windows
+$total++
+try {
+  $avAsm = Join-Path $tmpDir "test_main_argc_argv.s"
+  $avObj = Join-Path $tmpDir "test_main_argc_argv.o"
+  $avGc = Join-Path $tmpDir "test_main_argc_argv_gc.o"
+  $avEntry = Join-Path $tmpDir "test_main_argc_argv_entry.o"
+  $avExe = Join-Path $tmpDir "test_main_argc_argv.exe"
+
+  $avOut = & $CompilerPath tests\test_main_argc_argv.masm -o $avAsm 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) compile failed: $avOut"
+  }
+
+  & nasm -f win64 $avAsm -o $avObj 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) NASM assembly failed"
+  }
+
+  & gcc -c src\runtime\gc.c -o $avGc -Isrc 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) gc.c compile failed"
+  }
+
+  & gcc -c src\runtime\masm_entry.c -o $avEntry -Isrc 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) masm_entry.c compile failed"
+  }
+
+  & gcc -nostartfiles $avObj $avGc $avEntry -o $avExe -lkernel32 -lshell32 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) link failed (need -lshell32 for CommandLineToArgvW)"
+  }
+
+  $avResult = & $avExe 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) test exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "main_argc_argv" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "main_argc_argv" -Passed $false -Reason $_.Exception.Message
 }
 
 if (-not $SkipRuntime) {

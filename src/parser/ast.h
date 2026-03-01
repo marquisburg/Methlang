@@ -34,7 +34,8 @@ typedef enum {
   AST_UNARY_EXPRESSION,
   AST_MEMBER_ACCESS,
   AST_INDEX_EXPRESSION,
-  AST_NEW_EXPRESSION
+  AST_NEW_EXPRESSION,
+  AST_CAST_EXPRESSION
 } ASTNodeType;
 
 typedef struct {
@@ -158,6 +159,11 @@ typedef struct {
 } NewExpression;
 
 typedef struct {
+  char *type_name;  // Target type string
+  ASTNode *operand; // Expression being cast
+} CastExpression;
+
+typedef struct {
   ASTNode *left;
   ASTNode *right;
   char *operator;
@@ -278,6 +284,8 @@ ASTNode *ast_create_new_expression(const char *type_name,
                                    SourceLocation location);
 ASTNode *ast_create_field_assignment(ASTNode *target, ASTNode *value,
                                      SourceLocation location);
+ASTNode *ast_create_cast_expression(const char *type_name, ASTNode *operand,
+                                    SourceLocation location);
 ASTNode *ast_create_for_statement(ASTNode *initializer, ASTNode *condition,
                                   ASTNode *increment, ASTNode *body,
                                   SourceLocation location);
@@ -288,7 +296,8 @@ ASTNode *ast_create_switch_statement(ASTNode *expression, ASTNode **cases,
                                      SourceLocation location);
 ASTNode *ast_create_break_statement(SourceLocation location);
 ASTNode *ast_create_continue_statement(SourceLocation location);
-ASTNode *ast_create_defer_statement(ASTNode *statement, SourceLocation location);
+ASTNode *ast_create_defer_statement(ASTNode *statement,
+                                    SourceLocation location);
 ASTNode *ast_create_errdefer_statement(ASTNode *statement,
                                        SourceLocation location);
 

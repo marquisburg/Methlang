@@ -4,8 +4,8 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -157,7 +157,8 @@ static int type_checker_types_equal(const Type *lhs, const Type *rhs) {
     }
     // Check parameter types
     for (size_t i = 0; i < lhs->fn_param_count; i++) {
-      if (!type_checker_types_equal(lhs->fn_param_types[i], rhs->fn_param_types[i])) {
+      if (!type_checker_types_equal(lhs->fn_param_types[i],
+                                    rhs->fn_param_types[i])) {
         return 0;
       }
     }
@@ -688,8 +689,8 @@ static int type_checker_register_function_signature(TypeChecker *checker,
     if (!param_types)
       return 0;
     for (size_t i = 0; i < func_decl->parameter_count; i++) {
-      param_types[i] = type_checker_get_type_by_name(
-          checker, func_decl->parameter_types[i]);
+      param_types[i] =
+          type_checker_get_type_by_name(checker, func_decl->parameter_types[i]);
       if (!param_types[i]) {
         free(param_types);
         return 0;
@@ -883,10 +884,12 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
             if (!return_type) {
               return_type = checker->builtin_void;
             }
-            Type *fp_type = type_create_function_pointer(param_types, param_count, return_type);
+            Type *fp_type = type_create_function_pointer(
+                param_types, param_count, return_type);
             if (!fp_type) {
-              type_checker_set_error_at_location(checker, expression->location,
-                                                 "Failed to create function pointer type");
+              type_checker_set_error_at_location(
+                  checker, expression->location,
+                  "Failed to create function pointer type");
               return NULL;
             }
             return fp_type;
@@ -1000,8 +1003,8 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     }
 
     /* Variable with function pointer type can be called like a function */
-    if (func_symbol->kind == SYMBOL_VARIABLE &&
-        func_symbol->type && func_symbol->type->kind == TYPE_FUNCTION_POINTER) {
+    if (func_symbol->kind == SYMBOL_VARIABLE && func_symbol->type &&
+        func_symbol->type->kind == TYPE_FUNCTION_POINTER) {
       call->is_indirect_call = 1;
       Type *fp_type = func_symbol->type;
       if (call->argument_count != fp_type->fn_param_count) {
@@ -1019,11 +1022,13 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
         if (!arg_type)
           return NULL;
         Type *param_type = fp_type->fn_param_types[i];
-        int is_null = (param_type && param_type->kind == TYPE_POINTER &&
-                       type_checker_is_null_pointer_constant(call->arguments[i]));
+        int is_null =
+            (param_type && param_type->kind == TYPE_POINTER &&
+             type_checker_is_null_pointer_constant(call->arguments[i]));
         if (!is_null &&
             !type_checker_is_assignable(checker, param_type, arg_type)) {
-          type_checker_report_type_mismatch(checker, call->arguments[i]->location,
+          type_checker_report_type_mismatch(checker,
+                                            call->arguments[i]->location,
                                             param_type->name, arg_type->name);
           return NULL;
         }
@@ -1096,7 +1101,7 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     FuncPtrCall *fp_call = (FuncPtrCall *)expression->data;
     if (!fp_call || !fp_call->function) {
       type_checker_set_error_at_location(checker, expression->location,
-                                       "Invalid function pointer call");
+                                         "Invalid function pointer call");
       return NULL;
     }
 
@@ -1105,7 +1110,8 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       return NULL;
     }
 
-    /* If expression is identifier resolving to a function, synthesize function pointer type */
+    /* If expression is identifier resolving to a function, synthesize function
+     * pointer type */
     if (func_type->kind != TYPE_FUNCTION_POINTER &&
         fp_call->function->type == AST_IDENTIFIER) {
       Identifier *id = (Identifier *)fp_call->function->data;
@@ -1116,19 +1122,21 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
         Type *return_type = sym->data.function.return_type;
         if (!return_type)
           return_type = checker->builtin_void;
-        func_type = type_create_function_pointer(param_types, param_count,
-                                                 return_type);
+        func_type =
+            type_create_function_pointer(param_types, param_count, return_type);
         if (!func_type) {
-          type_checker_set_error_at_location(checker, expression->location,
-                                             "Failed to create function pointer type");
+          type_checker_set_error_at_location(
+              checker, expression->location,
+              "Failed to create function pointer type");
           return NULL;
         }
       }
     }
 
     if (func_type->kind != TYPE_FUNCTION_POINTER) {
-      type_checker_set_error_at_location(checker, expression->location,
-                                       "Cannot call non-function-pointer expression");
+      type_checker_set_error_at_location(
+          checker, expression->location,
+          "Cannot call non-function-pointer expression");
       return NULL;
     }
 
@@ -1139,7 +1147,8 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
                "Function pointer expects %llu arguments, got %llu",
                (unsigned long long)func_type->fn_param_count,
                (unsigned long long)fp_call->argument_count);
-      type_checker_set_error_at_location(checker, expression->location, error_msg);
+      type_checker_set_error_at_location(checker, expression->location,
+                                         error_msg);
       return NULL;
     }
 
@@ -1156,8 +1165,9 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
            type_checker_is_null_pointer_constant(fp_call->arguments[i]));
       if (!is_null_pointer_arg &&
           !type_checker_is_assignable(checker, param_type, arg_type)) {
-        type_checker_report_type_mismatch(checker, fp_call->arguments[i]->location,
-                                        param_type->name, arg_type->name);
+        type_checker_report_type_mismatch(checker,
+                                          fp_call->arguments[i]->location,
+                                          param_type->name, arg_type->name);
         return NULL;
       }
     }
@@ -1307,6 +1317,40 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     return pointer_type;
   }
 
+  case AST_CAST_EXPRESSION: {
+    CastExpression *cast_expr = (CastExpression *)expression->data;
+    if (!cast_expr || !cast_expr->type_name || !cast_expr->operand) {
+      type_checker_set_error_at_location(checker, expression->location,
+                                         "Invalid cast expression");
+      return NULL;
+    }
+
+    Type *target_type =
+        type_checker_get_type_by_name(checker, cast_expr->type_name);
+    if (!target_type) {
+      type_checker_set_error_at_location(checker, expression->location,
+                                         "Unknown target type for cast");
+      return NULL;
+    }
+
+    Type *operand_type = type_checker_infer_type(checker, cast_expr->operand);
+    if (!operand_type) {
+      return NULL; // Error already reported
+    }
+
+    if (!type_checker_is_cast_valid(operand_type, target_type)) {
+      char error_msg[512];
+      snprintf(error_msg, sizeof(error_msg),
+               "Cannot cast from type '%s' to type '%s'", operand_type->name,
+               target_type->name);
+      type_checker_set_error_at_location(checker, expression->location,
+                                         error_msg);
+      return NULL;
+    }
+
+    return target_type;
+  }
+
   default:
     return NULL;
   }
@@ -1428,7 +1472,7 @@ Type *type_checker_get_builtin_type(TypeChecker *checker, TypeKind kind) {
 }
 
 static Type *type_checker_parse_function_pointer_type(TypeChecker *checker,
-                                                     const char *name) {
+                                                      const char *name) {
   if (!checker || !name) {
     return NULL;
   }
@@ -1505,7 +1549,8 @@ static Type *type_checker_parse_function_pointer_type(TypeChecker *checker,
     return_type = checker->builtin_void;
   }
 
-  Type *fp_type = type_create_function_pointer(param_types, param_count, return_type);
+  Type *fp_type =
+      type_create_function_pointer(param_types, param_count, return_type);
   if (!fp_type) {
     free(param_types);
     return NULL;
@@ -1722,12 +1767,73 @@ Type *type_checker_infer_variable_type(TypeChecker *checker,
 
 // Type compatibility and conversion functions implementation
 
+int type_checker_is_cast_valid(Type *from, Type *to) {
+  if (!from || !to)
+    return 0;
+
+  if (type_checker_types_equal(from, to))
+    return 1;
+
+  // Numeric ↔ numeric
+  if (type_checker_is_numeric_type(from) && type_checker_is_numeric_type(to))
+    return 1;
+
+  // Pointer ↔ pointer
+  if (from->kind == TYPE_POINTER && to->kind == TYPE_POINTER)
+    return 1;
+
+  // Integer ↔ pointer
+  if ((type_checker_is_integer_type(from) && to->kind == TYPE_POINTER) ||
+      (from->kind == TYPE_POINTER && type_checker_is_integer_type(to))) {
+    return 1;
+  }
+
+  // Pointer ↔ function pointer
+  if ((from->kind == TYPE_POINTER && to->kind == TYPE_FUNCTION_POINTER) ||
+      (from->kind == TYPE_FUNCTION_POINTER && to->kind == TYPE_POINTER)) {
+    return 1;
+  }
+
+  // Integer ↔ function pointer
+  if ((type_checker_is_integer_type(from) &&
+       to->kind == TYPE_FUNCTION_POINTER) ||
+      (from->kind == TYPE_FUNCTION_POINTER &&
+       type_checker_is_integer_type(to))) {
+    return 1;
+  }
+
+  // Function pointer ↔ function pointer
+  if (from->kind == TYPE_FUNCTION_POINTER &&
+      to->kind == TYPE_FUNCTION_POINTER) {
+    return 1;
+  }
+
+  return 0;
+}
+
+// Type compatibility and conversion functions implementation
+
 int type_checker_is_assignable(TypeChecker *checker, Type *dest_type,
                                Type *src_type) {
   if (!checker || !dest_type || !src_type)
     return 0;
 
   if (type_checker_types_equal(dest_type, src_type)) {
+    return 1;
+  }
+
+  /* Allow int8* (e.g. from &array[0] for int8[]) to cstring (uint8*) for C interop */
+  if (dest_type->kind == TYPE_POINTER && src_type->kind == TYPE_POINTER &&
+      dest_type->name && strcmp(dest_type->name, "cstring") == 0 &&
+      src_type->base_type && src_type->base_type->name &&
+      strcmp(src_type->base_type->name, "int8") == 0) {
+    return 1;
+  }
+
+  /* Allow array to pointer decay (T[N] to T*) for function arguments */
+  if (dest_type->kind == TYPE_POINTER && src_type->kind == TYPE_ARRAY &&
+      dest_type->base_type && src_type->base_type &&
+      type_checker_types_equal(dest_type->base_type, src_type->base_type)) {
     return 1;
   }
 

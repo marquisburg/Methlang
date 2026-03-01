@@ -33,6 +33,7 @@ ASTNode *parser_parse_primary_expression(Parser *parser);
 ASTNode *parser_parse_unary_expression(Parser *parser);
 ASTNode *parser_parse_binary_expression(Parser *parser, int min_precedence);
 ASTNode *parser_parse_postfix_expression(Parser *parser);
+ASTNode *parser_parse_cast_expression(Parser *parser);
 
 // Specific parsing functions
 ASTNode *parser_parse_import_declaration(Parser *parser);

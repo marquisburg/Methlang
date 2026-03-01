@@ -4,79 +4,105 @@
 section .text
 ; Code section
 
-; First pass: processing 2 declarations
-; Declaration 0 type: 4 (AST_INLINE_ASM = 20)
-; Declaration 1 type: 5 (AST_INLINE_ASM = 20)
+; First pass: processing 3 declarations
+; Declaration 0 type: 4 (AST_INLINE_ASM = 21)
+; Declaration 1 type: 4 (AST_INLINE_ASM = 21)
+; Declaration 2 type: 4 (AST_INLINE_ASM = 21)
 
 section .text
+
+global cycle_b_value
+
+cycle_b_value:
+    push rbp        ; Save old base pointer
+    mov rbp, rsp  ; Set new base pointer
+    sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
+    ; Registering 0 function parameters
+ir_entry_0:
+    mov rax, 20
+    mov [rbp - 8], rax
+    mov rax, [rbp - 8]
+    test rax, rax
+    jz ir_errdefer_ok_1
+    jmp ir_errdefer_end_2
+ir_errdefer_ok_1:
+ir_errdefer_end_2:
+    mov rax, 20
+    jmp Lcycle_b_value_exit
+Lcycle_b_value_exit:
+    ; Function epilogue
+    mov rsp, rbp  ; Restore stack pointer
+    pop rbp         ; Restore old base pointer
+    ret               ; Return to caller
+
+global cycle_a_value
+
+cycle_a_value:
+    push rbp        ; Save old base pointer
+    mov rbp, rsp  ; Set new base pointer
+    sub rsp, 32    ; Allocate 32 bytes on stack (aligned)
+    ; Registering 0 function parameters
+ir_entry_3:
+    mov rax, 10
+    mov [rbp - 8], rax
+    mov rax, [rbp - 8]
+    test rax, rax
+    jz ir_errdefer_ok_4
+    jmp ir_errdefer_end_5
+ir_errdefer_ok_4:
+ir_errdefer_end_5:
+    mov rax, 10
+    jmp Lcycle_a_value_exit
+Lcycle_a_value_exit:
+    ; Function epilogue
+    mov rsp, rbp  ; Restore stack pointer
+    pop rbp         ; Restore old base pointer
+    ret               ; Return to caller
 
 global main
 
 main:
     push rbp        ; Save old base pointer
     mov rbp, rsp  ; Set new base pointer
-    sub rsp, 272    ; Allocate 272 bytes on stack (aligned)
+    sub rsp, 96    ; Allocate 96 bytes on stack (aligned)
     ; Registering 0 function parameters
-ir_entry_0:
-    lea rax, [rbp - 16]
+ir_entry_6:
+    ; IR call: cycle_a_value (0 args)
+    sub rsp, 32
+    call cycle_a_value
+    add rsp, 32
+    ; Integer/pointer return value in rax
+    ; 32-bit return value already in eax
+    mov [rbp - 8], rax
+    ; IR call: cycle_b_value (0 args)
+    sub rsp, 32
+    call cycle_b_value
+    add rsp, 32
+    ; Integer/pointer return value in rax
+    ; 32-bit return value already in eax
+    mov [rbp - 16], rax
+    mov rax, [rbp - 8]
+    push rax
+    mov rax, [rbp - 16]
+    mov r10, rax
+    pop rax
+    add rax, r10
     mov [rbp - 24], rax
     mov rax, [rbp - 24]
-    push rax
-    mov rax, 8
-    mov r10, rax
-    pop rax
-    add rax, r10
     mov [rbp - 32], rax
     mov rax, [rbp - 32]
-    push rax
-    mov rax, 3
-    mov rcx, rax
-    pop rax
-    mov dword [rax], ecx
-    lea rax, [rbp - 16]
-    mov [rbp - 48], rax
-    mov rax, [rbp - 48]
-    push rax
-    mov rax, 12
-    mov r10, rax
-    pop rax
-    add rax, r10
-    mov [rbp - 56], rax
-    mov rax, [rbp - 56]
-    push rax
-    mov rax, 10
-    mov rcx, rax
-    pop rax
-    mov dword [rax], ecx
-    lea rax, [rbp - 16]
-    mov [rbp - 72], rax
-    mov rax, [rbp - 72]
-    push rax
-    mov rax, 8
-    mov r10, rax
-    pop rax
-    add rax, r10
-    mov [rbp - 80], rax
-    mov rax, [rbp - 80]
-    mov eax, dword [rax]
-    mov [rbp - 88], rax
-    mov rax, [rbp - 88]
-    mov [rbp - 96], rax
-    mov rax, [rbp - 96]
     test rax, rax
-    jz ir_errdefer_ok_1
-    jmp ir_errdefer_end_2
-ir_errdefer_ok_1:
-ir_errdefer_end_2:
-    mov rax, [rbp - 88]
+    jz ir_errdefer_ok_7
+    jmp ir_errdefer_end_8
+ir_errdefer_ok_7:
+ir_errdefer_end_8:
+    mov rax, [rbp - 24]
     jmp Lmain_exit
 Lmain_exit:
     ; Function epilogue
     mov rsp, rbp  ; Restore stack pointer
     pop rbp         ; Restore old base pointer
     ret               ; Return to caller
-    ; Struct declaration: List__int32
-    ; Struct List__int32: size=16, alignment=8
 
 ; Default program entry point
 global mainCRTStartup

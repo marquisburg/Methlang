@@ -78,6 +78,7 @@ Type *type_checker_infer_variable_type(TypeChecker *checker,
 int type_checker_is_assignable(TypeChecker *checker, Type *dest_type,
                                Type *src_type);
 int type_checker_is_implicitly_convertible(Type *from_type, Type *to_type);
+int type_checker_is_cast_valid(Type *from, Type *to);
 int type_checker_validate_function_call(TypeChecker *checker,
                                         CallExpression *call,
                                         Symbol *func_symbol);

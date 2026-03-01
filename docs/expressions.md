@@ -7,7 +7,7 @@ Expressions produce values. They appear in initializers, assignments, function a
 | Precedence | Operators | Example |
 |------------|-----------|---------|
 | 1 | Member access `.`, `->` | `obj.field`, `ptr->x` |
-| 2 | Unary `-`, `*`, `&` | `-x`, `*p`, `&v` |
+| 2 | Unary `-`, `!`, `*`, `&` | `-x`, `!y`, `*p`, `&v` |
 | 3 | Multiplicative `*`, `/` | `a * b`, `a / b` |
 | 4 | Additive `+`, `-` | `a + b`, `a - b` |
 | 5 | Relational `<`, `<=`, `>`, `>=` | `a < b` |
@@ -67,10 +67,11 @@ a >= b
 
 ## Unary Operators
 
-Negation `-x`. Dereference `*p` (loads the value at the pointer). Address-of `&x` (produces a pointer to x). Address-of requires an assignable expression (lvalue).
+Negation `-x`. Logical NOT `!x` (returns 1 if x is 0, otherwise 0). Dereference `*p` (loads the value at the pointer). Address-of `&x` (produces a pointer to x). Address-of requires an assignable expression (lvalue).
 
 ```masm
 -x       // negation
+!x       // logical NOT
 *p       // dereference
 &x       // address-of
 ```
@@ -135,6 +136,26 @@ var p: MyStruct* = new MyStruct;
 **Function arguments** are evaluated left to right. The first argument is fully evaluated before the second, and so on.
 
 **Binary operands** (e.g. `a + b`, `x == y`) are evaluated in an implementation-defined order. Do not rely on the order of evaluation for side effects; use separate statements if the order matters.
+
+## Cast Expressions
+
+Explicit type casting is supported using the `(Type)expression` syntax. This allows explicit conversions between different numeric types, pointer types, and between integers and pointers.
+
+```masm
+var f: float64 = 3.14;
+var i: int64 = (int64)f;
+
+var ptr: int32* = (int32*)0;
+var addr: int64 = (int64)ptr;
+```
+
+Valid cast conversions include:
+- Any numeric type (integer or float) to any other numeric type.
+- Any pointer type to any other pointer type.
+- Any integer type to any pointer type, and vice versa.
+- Function pointers to other function pointers, or to/from regular pointers and integers.
+
+Casting across different sizes might result in zero-extension, sign-extension, or truncation, depending on the target type and the sign of the source type. Floating-point to integer conversions truncate towards zero.
 
 ## Boolean Context
 

@@ -41,7 +41,8 @@ typedef enum {
   IR_OP_CALL_INDIRECT,
   IR_OP_NEW,
   IR_OP_RETURN,
-  IR_OP_INLINE_ASM
+  IR_OP_INLINE_ASM,
+  IR_OP_CAST
 } IROpcode;
 
 typedef struct {
