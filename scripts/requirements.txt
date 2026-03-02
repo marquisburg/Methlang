@@ -1,3 +1,0 @@
-# Dependencies for scripts/github_release.py
-# Install: pip install -r scripts/requirements.txt
-requests>=2.28.0
