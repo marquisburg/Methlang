@@ -8,7 +8,7 @@
  * @brief Initialize the garbage collector.
  *
  * Captures the base of the stack to anchor the root scanning phase.
- * Handled automatically in the entry point built by MethASM.
+ * Handled automatically in the entry point built by Methlang.
  *
  * @param stack_base Pointer to the bottom (highest address) of the stack.
  */

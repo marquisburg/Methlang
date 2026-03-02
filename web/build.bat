@@ -1,19 +1,19 @@
 @echo off
-REM Build MethASM web server (pure MethASM + gc runtime + Winsock)
+REM Build Methlang web server (pure Methlang + gc runtime + Winsock)
 set WEB=%~dp0
 set ROOT=%WEB%..
 cd /d "%ROOT%"
 
-if not exist bin\methasm.exe (
-    echo Building MethASM compiler...
+if not exist bin\methlang.exe (
+    echo Building Methlang compiler...
     call build.bat
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
-echo Compiling server.masm...
-bin\methasm.exe --release web\server.masm -o web\server.s
+echo Compiling server.meth...
+bin\methlang.exe --release web\server.meth -o web\server.s
 if %ERRORLEVEL% NEQ 0 (
-    echo MethASM compilation failed.
+    echo Methlang compilation failed.
     exit /b 1
 )
 

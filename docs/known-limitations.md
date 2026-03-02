@@ -1,6 +1,6 @@
 # Known Limitations
 
-This document lists current limitations of the MethASM language and compiler.
+This document lists current limitations of the Methlang language and compiler.
 
 No block comments. Only line comments (`//`) are supported.
 

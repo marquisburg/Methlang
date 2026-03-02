@@ -1,19 +1,19 @@
 @echo off
-REM Build MethASM Number Guessing Game
+REM Build Methlang Number Guessing Game
 set APP=%~dp0
 set ROOT=%APP%..\..
 cd /d "%ROOT%"
 
-if not exist bin\methasm.exe (
-    echo Building MethASM compiler...
+if not exist bin\methlang.exe (
+    echo Building Methlang compiler...
     call build.bat
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
-echo Compiling guessing_game.masm...
-bin\methasm.exe examples\guessing-game\guessing_game.masm -o examples\guessing-game\guessing_game.s --stdlib stdlib
+echo Compiling guessing_game.meth...
+bin\methlang.exe examples\guessing-game\guessing_game.meth -o examples\guessing-game\guessing_game.s --stdlib stdlib
 if %ERRORLEVEL% NEQ 0 (
-    echo MethASM compilation failed.
+    echo Methlang compilation failed.
     exit /b 1
 )
 

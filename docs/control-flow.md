@@ -1,12 +1,12 @@
 # Control Flow
 
-MethASM provides structured control flow: conditionals, loops, and switches. All control structures use braces for the body.
+Methlang provides structured control flow: conditionals, loops, and switches. All control structures use braces for the body.
 
 ## Assignment
 
 Assignment uses `=`. The left side must be an lvalue (variable, struct field, array element, or dereferenced pointer). Assignment is a statement; it does not produce a value for use in larger expressions.
 
-```masm
+```meth
 x = 42;
 ptr->field = value;
 arr[i] = x;
@@ -20,7 +20,7 @@ arr[i] = x;
 
 The `if` statement evaluates a condition. If true, the then branch runs. The optional `else` branch runs when the condition is false. The condition must be a **numeric type** (integer or floating-point); zero is false, non-zero is true. Pointers are not valid as conditions—use an explicit comparison: `if (ptr != 0)` to check for non-null, not `if (ptr)`.
 
-```masm
+```meth
 if (x > 0) {
   // ...
 } else if (x < 0) {
@@ -36,7 +36,7 @@ if (x > 0) {
 
 The `while` loop evaluates the condition. If true, the body runs and the condition is evaluated again. The loop exits when the condition is false.
 
-```masm
+```meth
 while (condition) {
   // ...
 }
@@ -44,7 +44,7 @@ while (condition) {
 
 Common patterns:
 
-```masm
+```meth
 // Iterate over an array
 var i: int32 = 0;
 while (i < len) {
@@ -64,7 +64,7 @@ An infinite loop is written `while (1)`; the condition is always true.
 
 The `for` loop has an initializer, condition, and increment. The initializer runs once. The condition is evaluated before each iteration; if false, the loop exits. The increment runs after each iteration. The initializer can declare a variable. Condition and increment are optional—`for (;;)` is a valid infinite loop.
 
-```masm
+```meth
 for (var i: int32 = 0; i < 10; i = i + 1) {
   // ...
 }
@@ -78,11 +78,11 @@ for (var i: int32 = 0; i < 10; i = i + 1) {
 
 The `switch` statement evaluates an expression and compares it to each `case` value. Case values must be compile-time constant integer expressions (including enum variants). When a case matches, its body runs. Use `break` to exit the switch. Use `continue` inside a loop that contains the switch to continue the loop. Only one `default` clause is allowed.
 
-**Fall-through:** Unlike some languages, MethASM does not enforce `break`. If you omit it, execution falls through to the next case (C-style behavior). To avoid accidental bugs, always end each case with `break` explicitly unless you intend fall-through.
+**Fall-through:** Unlike some languages, Methlang does not enforce `break`. If you omit it, execution falls through to the next case (C-style behavior). To avoid accidental bugs, always end each case with `break` explicitly unless you intend fall-through.
 
 **No case matches, no default:** If no case matches and there is no `default` clause, execution continues silently after the switch. No error is raised.
 
-```masm
+```meth
 switch (expr) {
   case 1:
     // ...
@@ -101,7 +101,7 @@ switch (expr) {
 
 **Important:** `break` and `continue` always target the **innermost** enclosing loop or switch. Inside nested loops, `break` exits only the inner loop. Inside a `switch` that is inside a loop, `break` exits the switch, not the loop—use `continue` to skip to the next loop iteration.
 
-```masm
+```meth
 while (1) {
   switch (cmd) {
     case 0:
@@ -121,7 +121,7 @@ while (1) {
 
 `return` exits the current function. A function with a return type must provide a value: `return value`. A void function uses `return` with no value.
 
-```masm
+```meth
 return;
 return value;
 ```
@@ -130,7 +130,7 @@ return value;
 
 Logical operators `&&` and `||` support short-circuit evaluation. For pointer checks like `ptr != 0 && ptr->field > 0`, a single condition is safe:
 
-```masm
+```meth
 if (ptr != 0 && ptr->field > 0) {
   // ...
 }
@@ -144,14 +144,14 @@ if (ptr != 0 && ptr->field > 0) {
 
 Defer statements use the `defer` or `errdefer` keyword followed by a statement:
 
-```masm
+```meth
 defer cleanup();          // Always runs on scope exit
 errdefer rollback();      // Runs on non-zero return
 ```
 
 The current compiler accepts function calls, assignments, and blocks:
 
-```masm
+```meth
 defer puts("cleanup");
 defer count = count + 1;
 defer {
@@ -214,7 +214,7 @@ The same success/error split is used for explicit `return` and for implicit fall
 
 Deferred statements execute in reverse order of declaration. This is crucial for resource management where cleanup must happen in reverse of acquisition:
 
-```masm
+```meth
 func example() {
   defer puts("first");    // Executes third
   defer puts("second");   // Executes second  
@@ -226,7 +226,7 @@ func example() {
 ```
 
 **Mixed defer and errdefer:**
-```masm
+```meth
 func mixed_example() {
   defer puts("always 1");
   errdefer puts("error only");
@@ -246,7 +246,7 @@ func mixed_example() {
 
 **Block scope:** defer/errdefer execute when the block exits, including if/else branches, loop bodies, and switch cases:
 
-```masm
+```meth
 func demo() {
   defer puts("function exit");
   
@@ -267,7 +267,7 @@ func demo() {
 
 **Loops:** Each iteration gets its own defer scope. Deferred statements run at the end of each iteration. **Beware:** variables used in deferred statements are captured by reference (see pitfall above)—use a temporary if you need the value at defer time.
 
-```masm
+```meth
 func loop_example() {
   defer puts("function cleanup");
   
@@ -290,7 +290,7 @@ func loop_example() {
 
 **Switch statements:** Each case that creates a block gets its own defer scope:
 
-```masm
+```meth
 func switch_demo(value: int32) {
   defer puts("function cleanup");
   
@@ -317,7 +317,7 @@ Because `switch` allows fall-through, cleanup order becomes harder to reason abo
 
 **Break and Continue:** These statements trigger deferred statement emission before jumping:
 
-```masm
+```meth
 func control_flow_demo() {
   defer puts("function cleanup");
   
@@ -338,7 +338,7 @@ func control_flow_demo() {
 ### Error Handling Patterns
 
 **Resource cleanup with error recovery:**
-```masm
+```meth
 func process_file(filename: string) {
   var file: File* = fopen(filename, "r");
   if (file == 0) {
@@ -363,7 +363,7 @@ func process_file(filename: string) {
 ```
 
 **Nested error handling:**
-```masm
+```meth
 func nested_operations() {
   defer puts("outer cleanup");
   
@@ -398,7 +398,7 @@ func nested_operations() {
 
 **Top-level defer:** defer/errdefer can only be used inside functions:
 
-```masm
+```meth
 // ERROR: defer outside function
 defer puts("this fails");
 
@@ -409,7 +409,7 @@ func valid_function() {
 
 **Supported deferred statements:** `defer` and `errdefer` currently support function calls, assignments, and blocks:
 
-```masm
+```meth
 func example() {
   defer close_file(file);    // OK
   errdefer update_value(x);  // OK
@@ -423,7 +423,7 @@ func example() {
 
 **Variable capture:** Deferred statements capture variables by reference, not value (see the warning callout above). In a loop, `defer print_int(i)` reads `i` when the defer runs, so you get the value at scope exit—not at defer declaration time. Use a temporary so each iteration has its own variable:
 
-```masm
+```meth
 while (i < 3) {
   var current: int32 = i;
   defer print_int(current);  // current holds the value from start of iteration
@@ -436,7 +436,7 @@ while (i < 3) {
 ### Resource Management Patterns
 
 **File handling with multiple resources:**
-```masm
+```meth
 func copy_file(src: string, dst: string) {
   var src_file: File* = fopen(src, "r");
   if (src_file == 0) {
@@ -471,7 +471,7 @@ func copy_file(src: string, dst: string) {
 ```
 
 **Socket management in servers:**
-```masm
+```meth
 func handle_client_connection(client_socket: int32) {
   defer close_socket(client_socket);
   
@@ -503,7 +503,7 @@ func handle_client_connection(client_socket: int32) {
 ```
 
 **Memory allocation chains:**
-```masm
+```meth
 func complex_allocation_chain() {
   var resource1: Resource* = allocate_resource();
   if (resource1 == 0) {

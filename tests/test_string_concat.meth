@@ -1,0 +1,12 @@
+import "std/io.meth";
+
+export function main() : int32 {    var hello : string = "Hello, ";
+    var world : string = "World!";
+    
+    var result : string = hello + world;
+    
+    // print(result);
+    // print("\n");
+    
+    return 0;
+}

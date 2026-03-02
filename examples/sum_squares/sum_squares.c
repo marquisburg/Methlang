@@ -1,5 +1,5 @@
 /*
- * C Sum-of-Squares benchmark - counterpart to sum_squares.masm
+ * C Sum-of-Squares benchmark - counterpart to sum_squares.meth
  *
  * Computes 1² + 2² + ... + n² for n=100000.
  * Benchmarks 50 full passes.

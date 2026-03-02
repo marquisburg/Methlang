@@ -1,0 +1,29 @@
+// Methlang standard library: Memory
+//
+// Raw memory management and buffer operations.
+// For GC-managed heap objects, use the `new` keyword instead.
+
+// ─── C runtime memory functions ─────────────────────────────────────────────
+export extern function malloc(size: int64) -> cstring = "malloc";
+export extern function calloc(count: int64, size: int64) -> cstring = "calloc";
+export extern function realloc(ptr: cstring, size: int64) -> cstring = "realloc";
+export extern function free(ptr: cstring) = "free";
+export extern function memset(ptr: cstring, value: int32, size: int64) -> cstring = "memset";
+export extern function memcpy(dest: cstring, src: cstring, size: int64) -> cstring = "memcpy";
+export extern function memmove(dest: cstring, src: cstring, size: int64) -> cstring = "memmove";
+export extern function memcmp(a: cstring, b: cstring, size: int64) -> int32 = "memcmp";
+
+// ─── Buffer helpers ─────────────────────────────────────────────────────────
+
+// Allocate a zero-initialized buffer of `n` bytes.
+export function alloc_zeroed(n: int64) -> cstring {
+  return calloc(1, n);
+}
+
+// Copy `len` bytes from src into a freshly allocated buffer.
+export function buf_dup(src: cstring, len: int64) -> cstring {
+  var dst: cstring = malloc(len);
+  if (dst == 0) { return 0; }
+  memcpy(dst, src, len);
+  return dst;
+}

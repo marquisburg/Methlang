@@ -1,19 +1,19 @@
 @echo off
-REM Build MethASM brainfuck interpreter
+REM Build Methlang brainfuck interpreter
 set BF=%~dp0
 set ROOT=%BF%..
 cd /d "%ROOT%"
 
-if not exist bin\methasm.exe (
-    echo Building MethASM compiler...
+if not exist bin\methlang.exe (
+    echo Building Methlang compiler...
     call build.bat
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
-echo Compiling bfinterpreter.masm...
-bin\methasm.exe brainfuck-interpreter\bfinterpreter.masm -o brainfuck-interpreter\bfinterpreter.s --stdlib stdlib
+echo Compiling bfinterpreter.meth...
+bin\methlang.exe brainfuck-interpreter\bfinterpreter.meth -o brainfuck-interpreter\bfinterpreter.s --stdlib stdlib
 if %ERRORLEVEL% NEQ 0 (
-    echo MethASM compilation failed.
+    echo Methlang compilation failed.
     exit /b 1
 )
 

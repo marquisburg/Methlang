@@ -1,6 +1,6 @@
 # Garbage Collector
 
-MethASM provides an optional conservative mark-and-sweep garbage collector for heap allocation. Programs that use the `new` expression must link the GC runtime (`gc.c`). Programs that use only stack allocation and C `malloc` do not need it.
+Methlang provides an optional conservative mark-and-sweep garbage collector for heap allocation. Programs that use the `new` expression must link the GC runtime (`gc.c`). Programs that use only stack allocation and C `malloc` do not need it.
 
 ## When to Use GC
 
@@ -15,7 +15,7 @@ Use C `malloc` (from `std/mem`) when you need unmanaged memory: buffers for I/O,
 When your program uses `new`, compile and link the GC runtime:
 
 ```bash
-methasm main.masm -o main.s
+Methlang main.meth -o main.s
 nasm -f win64 main.s -o main.o
 gcc -c src/runtime/gc.c -o gc.o -Isrc
 gcc main.o gc.o -o main
@@ -47,9 +47,9 @@ The GC scans each attached thread stack from a captured current stack pointer (s
 - **Pointers stored inside structs on the heap** are traced automatically during the mark phase. When an allocation is marked, its payload is scanned for pointer-sized values; any value that falls within heap bounds is treated as a pointer and the target allocation is marked. So a struct field that holds a pointer to another GC object is followed without explicit registration.
 - For pointers stored in **non-stack, non-heap** locations (e.g. C globals, static variables in C code), use `gc_register_root` and `gc_unregister_root` so the GC can find them.
 
-**Example (registering a root from MethASM):** When C code stores a managed pointer in a variable the GC cannot otherwise see, declare the extern and pass the address of that variable. The parameter is a double pointer because the GC needs the address of the slot containing the pointer, not the pointer itself, so it can read an updated value if the variable is reassigned.
+**Example (registering a root from Methlang):** When C code stores a managed pointer in a variable the GC cannot otherwise see, declare the extern and pass the address of that variable. The parameter is a double pointer because the GC needs the address of the slot containing the pointer, not the pointer itself, so it can read an updated value if the variable is reassigned.
 
-```masm
+```meth
 struct Data { x: int32; y: int32; }
 
 var c_storage: Data* = 0;  // C code will store a managed pointer here
@@ -114,7 +114,7 @@ The GC runtime (`gc.h`) exposes these functions for advanced use:
 
 ## Programs Without GC
 
-Programs that do not use `new` or string concatenation do not need to link `gc.c`. The Windows forum server (`web/server.masm`) now calls `gc_init` and relies on `string + string`, so it must link the GC runtime (`gc.o`); simple CLI utilities that stick to stack and `malloc` can still be built without it.
+Programs that do not use `new` or string concatenation do not need to link `gc.c`. The Windows forum server (`web/server.meth`) now calls `gc_init` and relies on `string + string`, so it must link the GC runtime (`gc.o`); simple CLI utilities that stick to stack and `malloc` can still be built without it.
 
 If you use `new` but forget to link `gc.c`, the linker will report undefined references:
 
@@ -140,7 +140,7 @@ The runtime supports cooperative multi-threaded collection:
 Conservative correctness depends on roots being visible to the scanner at safepoints.
 
 - Baseline x86-64 mode spills GPRs and `xmm0..xmm15` around generated safepoint calls.
-- Optional wider spill mode supports AVX-512 register files: define `METHASM_SAFEPOINT_SPILL_XMM31` when building the compiler to spill `xmm0..xmm31`.
+- Optional wider spill mode supports AVX-512 register files: define `Methlang_SAFEPOINT_SPILL_XMM31` when building the compiler to spill `xmm0..xmm31`.
 
 If your deployment baseline is AVX2-era machines, `xmm0..xmm15` is sufficient.
 

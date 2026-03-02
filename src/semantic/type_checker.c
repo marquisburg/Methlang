@@ -2525,7 +2525,7 @@ int type_checker_process_enum_declaration(TypeChecker *checker,
     return 0;
   }
 
-  // Create enum type (aliased to INT64 for simplicity in MethASM)
+  // Create enum type (aliased to INT64 for simplicity in Methlang)
   Type *new_enum_type = type_create(TYPE_ENUM, enum_decl->name);
   if (!new_enum_type) {
     type_checker_set_error_at_location(checker, enum_decl_node->location,

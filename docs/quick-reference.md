@@ -4,7 +4,7 @@ Short examples for common use cases.
 
 ## Minimal Program
 
-```masm
+```meth
 function main() -> int32 {
   return 0;
 }
@@ -12,11 +12,11 @@ function main() -> int32 {
 
 ## With Imports
 
-```masm
+```meth
 import "std/io";
 
 function main() -> int32 {
-  println("Hello, MethASM!");
+  println("Hello, Methlang!");
   return 0;
 }
 ```
@@ -25,8 +25,8 @@ See [Imports](imports.md) for path resolution and `import_str`.
 
 ## With Prelude
 
-```masm
-// Compile with: methasm --prelude main.masm -o main.s
+```meth
+// Compile with: Methlang --prelude main.meth -o main.s
 function main() -> int32 {
   println("Hello");
   return 0;
@@ -35,7 +35,7 @@ function main() -> int32 {
 
 ## With Extern
 
-```masm
+```meth
 extern function puts(msg: cstring) -> int32 = "puts";
 
 function main() -> int32 {
@@ -46,7 +46,7 @@ function main() -> int32 {
 
 ## With Enum and Switch
 
-```masm
+```meth
 enum Status { Ok = 0, Error = 1 }
 
 function main() -> int32 {
@@ -62,7 +62,7 @@ function main() -> int32 {
 
 ## With Explicit Casts
 
-```masm
+```meth
 function main() -> int32 {
   var f: float64 = 3.14;
   var i: int32 = (int32)f;
@@ -78,7 +78,7 @@ function main() -> int32 {
 
 Uses `new` for heap allocation. Link `gc.c` when building. See [Garbage Collector](garbage-collector.md).
 
-```masm
+```meth
 struct Point {
   x: int32;
   y: int32;
@@ -96,7 +96,7 @@ function main() -> int32 {
 
 Generic functions and structs with compile-time monomorphization. See [Declarations](declarations.md#generic-functions) and [Types](types.md#generic-type-parameters).
 
-```masm
+```meth
 struct Pair<A, B> {
   first: A;
   second: B;

@@ -2,7 +2,7 @@
 
 ## Overview
 
-MethASM's documentation mentions explicit cast syntax but the parser does not support it. This plan adds full support for `(Type)expr` cast expressions, covering:
+Methlang's documentation mentions explicit cast syntax but the parser does not support it. This plan adds full support for `(Type)expr` cast expressions, covering:
 
 1. AST node definition
 2. Parser disambiguation (cast vs. grouped expression)
@@ -184,7 +184,7 @@ Add `case AST_CAST_EXPRESSION:` to `register_allocator_analyze_live_intervals()`
 
 ### Step 12: Tests
 
-Add `tests/test_cast_expression.masm` covering:
+Add `tests/test_cast_expression.meth` covering:
 - Integer narrowing: `(int8)someInt32`
 - Integer widening: `(int64)someInt32`
 - Signed/unsigned: `(uint32)someInt32`
@@ -210,7 +210,7 @@ Add `tests/test_cast_expression.masm` covering:
 
 ## Overview
 
-MethASM's documentation mentions explicit cast syntax but the parser does not support it. This plan adds full support for `(Type)expr` cast expressions, covering:
+Methlang's documentation mentions explicit cast syntax but the parser does not support it. This plan adds full support for `(Type)expr` cast expressions, covering:
 
 1. AST node definition
 2. Parser disambiguation (cast vs. grouped expression)
@@ -392,7 +392,7 @@ Add `case AST_CAST_EXPRESSION:` to `register_allocator_analyze_live_intervals()`
 
 ### Step 12: Tests
 
-Add `tests/test_cast_expression.masm` covering:
+Add `tests/test_cast_expression.meth` covering:
 - Integer narrowing: `(int8)someInt32`
 - Integer widening: `(int64)someInt32`
 - Signed/unsigned: `(uint32)someInt32`

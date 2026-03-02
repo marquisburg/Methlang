@@ -2696,7 +2696,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    push r15\n");
       code_generator_emit(generator,
                           "    ; Spill XMM registers for conservative root scan\n");
-#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    sub rsp, 512\n");
 #else
       code_generator_emit(generator, "    sub rsp, 256\n");
@@ -2717,7 +2717,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    movdqu [rsp + 208], xmm13\n");
       code_generator_emit(generator, "    movdqu [rsp + 224], xmm14\n");
       code_generator_emit(generator, "    movdqu [rsp + 240], xmm15\n");
-#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    movdqu [rsp + 256], xmm16\n");
       code_generator_emit(generator, "    movdqu [rsp + 272], xmm17\n");
       code_generator_emit(generator, "    movdqu [rsp + 288], xmm18\n");
@@ -2756,7 +2756,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    movdqu xmm13, [rsp + 208]\n");
       code_generator_emit(generator, "    movdqu xmm14, [rsp + 224]\n");
       code_generator_emit(generator, "    movdqu xmm15, [rsp + 240]\n");
-#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    movdqu xmm16, [rsp + 256]\n");
       code_generator_emit(generator, "    movdqu xmm17, [rsp + 272]\n");
       code_generator_emit(generator, "    movdqu xmm18, [rsp + 288]\n");
@@ -2810,7 +2810,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    push r15\n");
       code_generator_emit(generator,
                           "    ; Spill XMM registers for conservative root scan\n");
-#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    sub rsp, 512\n");
 #else
       code_generator_emit(generator, "    sub rsp, 256\n");
@@ -2831,7 +2831,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    movdqu [rsp + 208], xmm13\n");
       code_generator_emit(generator, "    movdqu [rsp + 224], xmm14\n");
       code_generator_emit(generator, "    movdqu [rsp + 240], xmm15\n");
-#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    movdqu [rsp + 256], xmm16\n");
       code_generator_emit(generator, "    movdqu [rsp + 272], xmm17\n");
       code_generator_emit(generator, "    movdqu [rsp + 288], xmm18\n");
@@ -2868,7 +2868,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    movdqu xmm13, [rsp + 208]\n");
       code_generator_emit(generator, "    movdqu xmm14, [rsp + 224]\n");
       code_generator_emit(generator, "    movdqu xmm15, [rsp + 240]\n");
-#if defined(METHASM_SAFEPOINT_SPILL_XMM31)
+#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    movdqu xmm16, [rsp + 256]\n");
       code_generator_emit(generator, "    movdqu xmm17, [rsp + 272]\n");
       code_generator_emit(generator, "    movdqu xmm18, [rsp + 288]\n");

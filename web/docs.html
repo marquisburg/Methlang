@@ -3,8 +3,8 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width,initial-scale=1'>
-<meta name='description' content='Complete MethASM language documentation, tutorials, and guides.'>
-<title>MethASM — Documentation</title>
+<meta name='description' content='Complete Methlang language documentation, tutorials, and guides.'>
+<title>Methlang — Documentation</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -483,13 +483,13 @@
         <h1 class="section-title">Quick Start</h1>
         
         <div class="quickstart-card">
-          <h2 class="quickstart-title">Get Started with MethASM in 5 Minutes</h2>
+          <h2 class="quickstart-title">Get Started with Methlang in 5 Minutes</h2>
           <div class="step-list">
             <div class="step-item">
-              <p><strong>Install the compiler:</strong> Download the latest MethASM release for your platform (Windows x64 currently supported).</p>
+              <p><strong>Install the compiler:</strong> Download the latest Methlang release for your platform (Windows x64 currently supported).</p>
             </div>
             <div class="step-item">
-              <p><strong>Write your first program:</strong> Create a file called <code>hello.masm</code> with the code shown below.</p>
+              <p><strong>Write your first program:</strong> Create a file called <code>hello.meth</code> with the code shown below.</p>
             </div>
             <div class="step-item">
               <p><strong>Compile and run:</strong> Use the build pipeline to create an executable.</p>
@@ -505,7 +505,7 @@
       <section id="installation" class="content-section">
         <h2 class="subsection-title">Installation</h2>
         
-        <p>MethASM currently supports Windows x64. Linux support is in development.</p>
+        <p>Methlang currently supports Windows x64. Linux support is in development.</p>
 
         <h3 class="sub-subsection-title">Prerequisites</h3>
         <ul>
@@ -525,8 +525,8 @@
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
           </div>
-          <pre><code>git clone https://github.com/your-repo/methasm.git
-cd methasm
+          <pre><code>git clone https://github.com/your-repo/Methlang.git
+cd Methlang
 build.bat</code></pre>
         </div>
       </section>
@@ -535,11 +535,11 @@ build.bat</code></pre>
       <section id="hello-world" class="content-section">
         <h2 class="subsection-title">Hello World</h2>
         
-        <p>Here's the classic "Hello, World!" program in MethASM:</p>
+        <p>Here's the classic "Hello, World!" program in Methlang:</p>
 
         <div class="code-block">
           <div class="code-header">
-            <div class="code-title">hello.masm</div>
+            <div class="code-title">hello.meth</div>
             <div class="code-actions">
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
@@ -561,7 +561,7 @@ build.bat</code></pre>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
           </div>
-          <pre><code>methasm hello.masm -o hello.s
+          <pre><code>Methlang hello.meth -o hello.s
 nasm -f win64 hello.s -o hello.o
 gcc hello.o -o hello.exe
 hello.exe</code></pre>
@@ -572,7 +572,7 @@ hello.exe</code></pre>
       <section id="types" class="content-section">
         <h2 class="subsection-title">Types</h2>
         
-        <p>MethASM is statically typed with explicit type declarations. All variables and function parameters must have a declared type.</p>
+        <p>Methlang is statically typed with explicit type declarations. All variables and function parameters must have a declared type.</p>
 
         <h3 class="sub-subsection-title">Primitive Types</h3>
         <div class="table-container">
@@ -624,7 +624,7 @@ hello.exe</code></pre>
           </div>
           <pre><code><span class="k">var</span> age: <span class="t">int32</span> = <span class="n">25</span>;
 <span class="k">var</span> temperature: <span class="t">float64</span> = <span class="n">98.6</span>;
-<span class="k">var</span> name: <span class="t">string</span> = <span class="s">"MethASM"</span>;
+<span class="k">var</span> name: <span class="t">string</span> = <span class="s">"Methlang"</span>;
 <span class="k">var</span> count: <span class="t">uint64</span> = <span class="n">1000000</span>;</code></pre>
         </div>
       </section>
@@ -633,7 +633,7 @@ hello.exe</code></pre>
       <section id="variables" class="content-section">
         <h2 class="subsection-title">Variables</h2>
         
-        <p>Variables in MethASM are declared with the <code>var</code> keyword and must be explicitly typed.</p>
+        <p>Variables in Methlang are declared with the <code>var</code> keyword and must be explicitly typed.</p>
 
         <h3 class="sub-subsection-title">Variable Declaration</h3>
         <div class="code-block">
@@ -666,7 +666,7 @@ result = <span class="n">100</span>;
       <section id="functions" class="content-section">
         <h2 class="subsection-title">Functions</h2>
         
-        <p>Functions are the primary building blocks in MethASM. They have explicit parameter types and return types.</p>
+        <p>Functions are the primary building blocks in Methlang. They have explicit parameter types and return types.</p>
 
         <h3 class="sub-subsection-title">Function Definition</h3>
         <div class="code-block">
@@ -700,7 +700,7 @@ result = <span class="n">100</span>;
       <section id="control-flow" class="content-section">
         <h2 class="subsection-title">Control Flow</h2>
         
-        <p>MethASM provides structured control flow statements including conditionals, loops, and switches.</p>
+        <p>Methlang provides structured control flow statements including conditionals, loops, and switches.</p>
 
         <h3 class="sub-subsection-title">If Statements</h3>
         <div class="code-block">
@@ -963,7 +963,7 @@ result = <span class="n">100</span>;
       <section id="modules" class="content-section">
         <h2 class="subsection-title">Modules</h2>
         
-        <p>MethASM provides a module system for organizing code and managing dependencies. Modules allow you to split large programs into manageable, reusable components.</p>
+        <p>Methlang provides a module system for organizing code and managing dependencies. Modules allow you to split large programs into manageable, reusable components.</p>
 
         <h3 class="sub-subsection-title">Import System</h3>
         <p>Use the <code>import</code> statement to include modules in your program.</p>
@@ -994,7 +994,7 @@ result = <span class="n">100</span>;
           <div class="alert-title">ℹ️ Import Search Order</div>
           <p>The compiler resolves imports in this order:</p>
           <ol>
-            <li><strong>Relative to current file:</strong> <code>"utils/helpers"</code> looks for <code>utils/helpers.masm</code></li>
+            <li><strong>Relative to current file:</strong> <code>"utils/helpers"</code> looks for <code>utils/helpers.meth</code></li>
             <li><strong>Include directories:</strong> Paths added with <code>-I</code> flag</li>
             <li><strong>Standard library:</strong> <code>std/</code> prefix searches in stdlib root</li>
           </ol>
@@ -1008,7 +1008,7 @@ result = <span class="n">100</span>;
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
           </div>
-          <pre><code><span class="c">// File: utils/string_helpers.masm</span>
+          <pre><code><span class="c">// File: utils/string_helpers.meth</span>
 
 <span class="c">// Export functions for use by other modules</span>
 <span class="k">export function</span> <span class="f">string_length</span>(s: <span class="t">string</span>) -> <span class="t">int32</span> {
@@ -1050,12 +1050,12 @@ result = <span class="n">100</span>;
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
           </div>
-          <pre><code><span class="c">// File: main.masm</span>
+          <pre><code><span class="c">// File: main.meth</span>
 
 <span class="k">import</span> <span class="s">"utils/string_helpers"</span>;
 
 <span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
-  <span class="k">var</span> message: <span class="t">string</span> = <span class="s">"Hello, MethASM!"</span>;
+  <span class="k">var</span> message: <span class="t">string</span> = <span class="s">"Hello, Methlang!"</span>;
   <span class="k">var</span> length: <span class="t">int32</span> = <span class="f">string_length</span>(message);
   
   <span class="f">println</span>(<span class="s">"Message length: "</span>);
@@ -1086,7 +1086,7 @@ result = <span class="n">100</span>;
       <section id="memory-management" class="content-section">
         <h2 class="subsection-title">Memory Management</h2>
         
-        <p>MethASM offers both manual memory management and optional garbage collection.</p>
+        <p>Methlang offers both manual memory management and optional garbage collection.</p>
 
         <h3 class="sub-subsection-title">Stack Allocation</h3>
         <p>Most variables are allocated on the stack and automatically cleaned up when they go out of scope.</p>
@@ -1151,7 +1151,7 @@ result = <span class="n">100</span>;
       <section id="c-interop" class="content-section">
         <h2 class="subsection-title">C Interoperability</h2>
         
-        <p>MethASM provides seamless C interoperability through extern declarations.</p>
+        <p>Methlang provides seamless C interoperability through extern declarations.</p>
 
         <h3 class="sub-subsection-title">Declaring External Functions</h3>
         <div class="code-block">
@@ -1182,12 +1182,12 @@ result = <span class="n">100</span>;
       <section id="compilation" class="content-section">
         <h2 class="subsection-title">Compilation</h2>
         
-        <p>MethASM compiles to x86-64 NASM assembly, which is then assembled and linked to create executables.</p>
+        <p>Methlang compiles to x86-64 NASM assembly, which is then assembled and linked to create executables.</p>
 
         <h3 class="sub-subsection-title">Build Pipeline</h3>
         <div class="step-list">
           <div class="step-item">
-            <p><strong>Compile to assembly:</strong> <code>methasm input.masm -o output.s</code></p>
+            <p><strong>Compile to assembly:</strong> <code>Methlang input.meth -o output.s</code></p>
           </div>
           <div class="step-item">
             <p><strong>Assemble to object:</strong> <code>nasm -f win64 output.s -o output.o</code></p>
@@ -1236,7 +1236,7 @@ result = <span class="n">100</span>;
       <section id="standard-library" class="content-section">
         <h2 class="subsection-title">Standard Library</h2>
         
-        <p>MethASM includes a comprehensive standard library organized into modules.</p>
+        <p>Methlang includes a comprehensive standard library organized into modules.</p>
 
         <h3 class="sub-subsection-title">Core Modules</h3>
         <div class="table-container">
@@ -1308,7 +1308,7 @@ result = <span class="n">100</span>;
       <section id="compiler-options" class="content-section">
         <h2 class="subsection-title">Compiler Options</h2>
         
-        <p>The MethASM compiler provides various options for controlling compilation behavior and output.</p>
+        <p>The Methlang compiler provides various options for controlling compilation behavior and output.</p>
 
         <h3 class="sub-subsection-title">Command Line Options</h3>
         <div class="table-container">
@@ -1384,16 +1384,16 @@ result = <span class="n">100</span>;
             </div>
           </div>
           <pre><code><span class="c">// Basic compilation</span>
-methasm main.masm -o main.s
+Methlang main.meth -o main.s
 
 <span class="c">// With optimizations and debug symbols</span>
-methasm main.masm -O -g -o main.s
+Methlang main.meth -O -g -o main.s
 
 <span class="c">// With custom include paths</span>
-methasm main.masm -I ./include -I ../libs -o main.s
+Methlang main.meth -I ./include -I ../libs -o main.s
 
 <span class="c">// Using prelude (auto-imports common modules)</span>
-methasm --prelude main.masm -o main.s</code></pre>
+Methlang --prelude main.meth -o main.s</code></pre>
         </div>
       </section>
 
@@ -1401,7 +1401,7 @@ methasm --prelude main.masm -o main.s</code></pre>
       <section id="troubleshooting" class="content-section">
         <h2 class="subsection-title">Troubleshooting</h2>
         
-        <p>Common issues and their solutions when working with MethASM.</p>
+        <p>Common issues and their solutions when working with Methlang.</p>
 
         <h3 class="sub-subsection-title">Compilation Errors</h3>
         

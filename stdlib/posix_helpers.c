@@ -2,7 +2,7 @@
  * posix_helpers.c – C bridge helpers required by std/net_posix and
  * std/thread_posix on Linux and macOS.
  *
- * Compile and link this file alongside your MethASM-generated assembly:
+ * Compile and link this file alongside your Methlang-generated assembly:
  *
  *   Linux:
  *     gcc -o myapp output.s posix_helpers.c -lpthread
@@ -57,7 +57,7 @@ int posix_atomic_add_i32(int *ptr, int val) {
  * posix_helpers.c – C bridge helpers required by std/net_posix and
  * std/thread_posix on Linux and macOS.
  *
- * Compile and link this file alongside your MethASM-generated assembly:
+ * Compile and link this file alongside your Methlang-generated assembly:
  *
  *   Linux:
  *     gcc -o myapp output.s posix_helpers.c -lpthread

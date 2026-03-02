@@ -1,0 +1,112 @@
+// Methlang standard library: I/O
+//
+// Console output, file operations, and formatted printing.
+//
+// File I/O pattern with defer for automatic cleanup:
+//   var file: cstring = fopen("data.txt", "r");
+//   if (file != 0) {
+//     defer fclose(file);
+//     ... read/write operations ...
+//   }
+//
+// Multiple resources with LIFO cleanup:
+//   var src: cstring = fopen("input.txt", "r");
+//   if (src == 0) { return err(); }
+//   defer fclose(src);
+//   
+//   var dst: cstring = fopen("output.txt", "w");
+//   if (dst == 0) { return err(); }
+//   defer fclose(dst);  // Runs first (LIFO)
+//   
+//   ... copy data ...
+
+// ─── Console output ─────────────────────────────────────────────────────────
+export extern function puts(msg: cstring) -> int32;
+export extern function putchar(c: int32) -> int32;
+export extern function getchar() -> int32 = "getchar";
+
+// Convert a Methlang string to a C string (gets the underlying char pointer)
+export function cstr(s: string) -> cstring {
+  return s.chars;
+}
+
+// Output a null-terminated string exactly as-is (no trailing newline)
+export function print(msg: cstring) {
+  var i: int64 = 0;
+  while (msg[i] != 0) {
+    putchar(msg[i]);
+    i = i + 1;
+  }
+}
+
+// Output a null-terminated string followed by a newline
+export function println(msg: cstring) {
+  puts(msg);
+}
+
+// Print a newline
+export function newline() {
+  putchar(10);
+}
+
+// Print an integer to stdout (base 10, handles negatives)
+export function print_int(n: int64) {
+  if (n < 0) {
+    putchar(45);
+    n = 0 - n;
+  }
+  if (n == 0) {
+    putchar(48);
+    return;
+  }
+  // Extract digits in reverse into a buffer
+  var buf: int32[20];
+  var len: int32 = 0;
+  while (n > 0) {
+    buf[len] = 48 + n - (n / 10) * 10;
+    n = n / 10;
+    len = len + 1;
+  }
+  // Print in forward order
+  var i: int32 = len - 1;
+  while (i >= 0) {
+    putchar(buf[i]);
+    i = i - 1;
+  }
+}
+
+// Print an integer followed by a newline
+export function println_int(n: int64) {
+  print_int(n);
+  putchar(10);
+}
+
+// ─── File I/O ───────────────────────────────────────────────────────────────
+// FILE* is represented as cstring (opaque pointer)
+export extern function fopen(filename: cstring, mode: cstring) -> cstring = "fopen";
+export extern function fclose(fp: cstring) -> int32 = "fclose";
+export extern function fread(buf: cstring, size: int64, count: int64, fp: cstring) -> int64 = "fread";
+export extern function fwrite(buf: cstring, size: int64, count: int64, fp: cstring) -> int64 = "fwrite";
+export extern function fputs(s: cstring, fp: cstring) -> int32 = "fputs";
+export extern function fgets(buf: cstring, size: int32, fp: cstring) -> cstring = "fgets";
+export extern function fflush(fp: cstring) -> int32 = "fflush";
+
+// ─── Standard streams (accessed via C helpers) ──────────────────────────────
+// On Windows, stdin/stdout/stderr are macros expanding to __acrt_iob_func(n).
+// We expose them through the C runtime's _iob accessor.
+export extern function __acrt_iob_func(index: int32) -> cstring = "__acrt_iob_func";
+
+export function get_stdin() -> cstring  { return __acrt_iob_func(0); }
+export function get_stdout() -> cstring { return __acrt_iob_func(1); }
+export function get_stderr() -> cstring { return __acrt_iob_func(2); }
+
+// Write message to stderr (no newline)
+export function print_err(msg: cstring) {
+  fputs(msg, get_stderr());
+}
+
+// Write message to stderr followed by newline
+export function println_err(msg: cstring) {
+  fputs(msg, get_stderr());
+  fputs(cstr("\n"), get_stderr());
+}

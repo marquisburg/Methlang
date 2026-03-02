@@ -1,6 +1,6 @@
 # Types
 
-MethASM is statically typed. Every variable and function parameter has an explicit type. This document describes the type system.
+Methlang is statically typed. Every variable and function parameter has an explicit type. This document describes the type system.
 
 ## Type Sizes and Alignment
 
@@ -28,7 +28,7 @@ Signed integers: `int8`, `int16`, `int32`, `int64` (1, 2, 4, 8 bytes). Unsigned 
 
 Pointers use the `*` suffix. A pointer holds the address of a value of the base type. Multi-level pointers are supported.
 
-```masm
+```meth
 var p: int32*;        // pointer to int32
 var pp: int32**;      // pointer to pointer to int32
 var sp: MyStruct*;    // pointer to struct
@@ -48,7 +48,7 @@ Function pointers are first-class values that can be stored, passed as arguments
 
 Function pointer types use the `fn` keyword with parameter types and return type:
 
-```masm
+```meth
 var fp: fn(int32, int32) -> int32;  // pointer to function taking (int32, int32) returning int32
 var void_fn: fn() -> void;           // pointer to function taking nothing returning nothing
 ```
@@ -57,7 +57,7 @@ var void_fn: fn() -> void;           // pointer to function taking nothing retur
 
 Use the address-of operator `&` to create a function pointer:
 
-```masm
+```meth
 function add(a: int32, b: int32) -> int32 {
   return a + b;
 }
@@ -70,7 +70,7 @@ fp = &add;  // & takes the address of a function
 
 Call a function pointer like a regular function:
 
-```masm
+```meth
 var result: int32 = fp(3, 4);  // calls the function pointed to by fp
 ```
 
@@ -78,7 +78,7 @@ var result: int32 = fp(3, 4);  // calls the function pointed to by fp
 
 Function pointers are useful for callbacks, strategy patterns, and C interop:
 
-```masm
+```meth
 // Callback pattern
 function apply(op: fn(int32, int32) -> int32, a: int32, b: int32) -> int32 {
   return op(a, b);
@@ -95,7 +95,7 @@ function main() -> int32 {
 
 Fixed-size arrays use `[N]` where N is a constant. Arrays are value types; the elements are laid out contiguously. Indexing is zero-based.
 
-```masm
+```meth
 var arr: int32[10];
 var buf: uint8[256];
 ```
@@ -120,7 +120,7 @@ var buf: uint8[256];
 
 Structs group named fields. Fields are laid out in declaration order with appropriate alignment for the target. Structs can define methods (see [Declarations](declarations.md)).
 
-```masm
+```meth
 struct Point {
   x: int32;
   y: int32;
@@ -140,7 +140,7 @@ For C interop, match the C struct layout exactly (field order, types, padding).
 
 Enums define a named type and a set of variants, each with an integer value. Variants without an explicit value continue from the previous variant (0 if first). Variant names are in scope after the enum is defined; use them directly (e.g. `North`, not `Direction.North`).
 
-```masm
+```meth
 enum Direction {
   North,        // 0
   East = 2,     // 2
@@ -162,7 +162,7 @@ Enums can be compared with integers and used in `switch` cases. They can be expo
 
 Functions and structs can be generic. Type parameters are declared in angle brackets: `function f<T>(...)` or `struct S<T> { ... }`. Instantiation uses the same syntax: `f<int32>(args)` or `var x: Pair<int32, float64>`.
 
-```masm
+```meth
 struct Pair<A, B> {
   first: A;
   second: B;
@@ -184,9 +184,9 @@ The compiler performs **monomorphization** before type checking: each unique ins
 
 Widening conversions (e.g. `int32` to `int64`, `float32` to `float64`) are implicit. Narrowing conversions (e.g. `int32` to `int16`, `int64` to `int8`) are allowed implicitly for integer-to-integer and float-to-float. There is no implicit conversion between integers and floats, or between pointers and integers, except that `0` is valid as a null pointer initializer and in pointer comparisons.
 
-**Explicit casts:** MethASM provides an explicit cast syntax `(Type)expr`. This can be used to convert between numeric types, pointer types, and between integers and pointers. It is especially useful for pointer reinterpretation (e.g. treating `int32*` as `uint8*` for byte access) or converting floats to integers:
+**Explicit casts:** Methlang provides an explicit cast syntax `(Type)expr`. This can be used to convert between numeric types, pointer types, and between integers and pointers. It is especially useful for pointer reinterpretation (e.g. treating `int32*` as `uint8*` for byte access) or converting floats to integers:
 
-```masm
+```meth
 var p: int32*;
 var bytes: uint8* = (uint8*)p;
 

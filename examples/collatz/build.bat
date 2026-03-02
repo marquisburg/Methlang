@@ -1,19 +1,19 @@
 @echo off
-REM Build MethASM Collatz benchmark
+REM Build Methlang Collatz benchmark
 set APP=%~dp0
 set ROOT=%APP%..\..
 cd /d "%ROOT%"
 
-if not exist bin\methasm.exe (
-    echo Building MethASM compiler...
+if not exist bin\methlang.exe (
+    echo Building Methlang compiler...
     call build.bat
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
-echo Compiling collatz.masm...
-bin\methasm.exe --release examples\collatz\collatz.masm -o examples\collatz\collatz.s --stdlib stdlib
+echo Compiling collatz.meth...
+bin\methlang.exe --release examples\collatz\collatz.meth -o examples\collatz\collatz.s --stdlib stdlib
 if %ERRORLEVEL% NEQ 0 (
-    echo MethASM compilation failed.
+    echo Methlang compilation failed.
     exit /b 1
 )
 
@@ -48,11 +48,11 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo Build successful!
-echo   MethASM: examples\collatz\collatz.exe
+echo   Methlang: examples\collatz\collatz.exe
 echo   C:       examples\collatz\collatz_c.exe
 echo.
-echo Running benchmark (MethASM vs C)...
-echo ===== MethASM (--release) =====
+echo Running benchmark (Methlang vs C)...
+echo ===== Methlang (--release) =====
 examples\collatz\collatz.exe
 echo.
 echo ========= C (gcc -O2) =========

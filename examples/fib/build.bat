@@ -1,19 +1,19 @@
 @echo off
-REM Build MethASM Fibonacci benchmark
+REM Build Methlang Fibonacci benchmark
 set APP=%~dp0
 set ROOT=%APP%..\..
 cd /d "%ROOT%"
 
-if not exist bin\methasm.exe (
-    echo Building MethASM compiler...
+if not exist bin\methlang.exe (
+    echo Building Methlang compiler...
     call build.bat
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
-echo Compiling fib.masm...
-bin\methasm.exe --release examples\fib\fib.masm -o examples\fib\fib.s --stdlib stdlib
+echo Compiling fib.meth...
+bin\methlang.exe --release examples\fib\fib.meth -o examples\fib\fib.s --stdlib stdlib
 if %ERRORLEVEL% NEQ 0 (
-    echo MethASM compilation failed.
+    echo Methlang compilation failed.
     exit /b 1
 )
 
@@ -48,11 +48,11 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo Build successful!
-echo   MethASM: examples\fib\fib.exe
+echo   Methlang: examples\fib\fib.exe
 echo   C:       examples\fib\fib_c.exe
 echo.
-echo Running benchmark (MethASM vs C)...
-echo ===== MethASM (--release) =====
+echo Running benchmark (Methlang vs C)...
+echo ===== Methlang (--release) =====
 examples\fib\fib.exe
 echo.
 echo ========= C (gcc -O2) =========

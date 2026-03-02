@@ -1,5 +1,5 @@
 /**
- * dir_helpers.c - Cross-platform directory and file operations for MethASM std/dir.
+ * dir_helpers.c - Cross-platform directory and file operations for Methlang std/dir.
  * Link this when using std/dir.
  */
 
@@ -10,7 +10,7 @@
 
 #include <windows.h>
 
-int32_t masm_dir_exists(const char *path) {
+int32_t methlang_dir_exists(const char *path) {
   DWORD attrs = GetFileAttributesA(path);
   if (attrs == INVALID_FILE_ATTRIBUTES) {
     return 0;
@@ -18,14 +18,14 @@ int32_t masm_dir_exists(const char *path) {
   return (attrs & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
 }
 
-int32_t masm_dir_create(const char *path) {
+int32_t methlang_dir_create(const char *path) {
   if (CreateDirectoryA(path, NULL)) {
     return 0;
   }
   return -1;
 }
 
-int32_t masm_file_exists(const char *path) {
+int32_t methlang_file_exists(const char *path) {
   DWORD attrs = GetFileAttributesA(path);
   if (attrs == INVALID_FILE_ATTRIBUTES) {
     return 0;
@@ -34,7 +34,7 @@ int32_t masm_file_exists(const char *path) {
 }
 
 /* Fills buf with current working directory. Returns 0 on success, -1 on failure. */
-int32_t masm_getcwd(char *buf, int32_t size) {
+int32_t methlang_getcwd(char *buf, int32_t size) {
   if (!buf || size <= 0) {
     return -1;
   }
@@ -51,7 +51,7 @@ int32_t masm_getcwd(char *buf, int32_t size) {
 #include <errno.h>
 #include <unistd.h>
 
-int32_t masm_dir_exists(const char *path) {
+int32_t methlang_dir_exists(const char *path) {
   struct stat st;
   if (stat(path, &st) != 0) {
     return 0;
@@ -59,14 +59,14 @@ int32_t masm_dir_exists(const char *path) {
   return S_ISDIR(st.st_mode) ? 1 : 0;
 }
 
-int32_t masm_dir_create(const char *path) {
+int32_t methlang_dir_create(const char *path) {
   if (mkdir(path, 0755) == 0) {
     return 0;
   }
   return -1;
 }
 
-int32_t masm_file_exists(const char *path) {
+int32_t methlang_file_exists(const char *path) {
   struct stat st;
   if (stat(path, &st) != 0) {
     return 0;
@@ -74,7 +74,7 @@ int32_t masm_file_exists(const char *path) {
   return S_ISREG(st.st_mode) ? 1 : 0;
 }
 
-int32_t masm_getcwd(char *buf, int32_t size) {
+int32_t methlang_getcwd(char *buf, int32_t size) {
   if (!buf || size <= 0) {
     return -1;
   }
