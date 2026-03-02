@@ -6,7 +6,7 @@ Methlang provides two mechanisms for bringing external content into your program
 
 The `import` directive loads another Methlang source file and makes its declarations available in the current program.
 
-```masm
+```meth
 import "std/io";
 import "path/to/module";
 import "shared_math";   // .meth added if omitted
@@ -24,7 +24,7 @@ Only **exported** declarations are visible when a module uses `export`. If a mod
 
 The `import_str` expression reads a file at compile time and embeds its contents as a `string` value. Use it for HTML, config files, or any text data.
 
-```masm
+```meth
 var PAGE_CONTENT: string = import_str "index.html";
 var config: string = import_str "config.txt";
 ```
@@ -50,7 +50,7 @@ Both `import` and `import_str` resolve paths in this order:
    - In `main.meth`, `import "lib/utils"` → `lib/utils.meth` (relative to `main.meth`’s directory)
 
 4. **`-I` directories** — Each directory added with `-I` is searched in command-line order.
-   - `Methlang -I lib -I vendor main.meth` — `lib` is searched before `vendor`.
+   - `methlang -I lib -I vendor main.meth` — `lib` is searched before `vendor`.
    - First match wins: if both `lib/foo.meth` and `vendor/foo.meth` exist, `lib/foo.meth` is used.
 
 5. **Fallback** — The path is tried as-is (e.g. current working directory).
@@ -70,7 +70,7 @@ On Windows, both `/` and `\` are accepted. Use `/` for portability across platfo
 **Example:**
 
 ```bash
-Methlang -I tests/lib -I vendor main.meth -o output.s
+methlang -I tests/lib -I vendor main.meth -o output.s
 ```
 
 This allows `import "shared_math"` to resolve to `tests/lib/shared_math.meth` when `tests/lib` is on the search path.

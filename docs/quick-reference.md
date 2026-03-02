@@ -26,7 +26,7 @@ See [Imports](imports.md) for path resolution and `import_str`.
 ## With Prelude
 
 ```meth
-// Compile with: Methlang --prelude main.meth -o main.s
+// Compile with: methlang --prelude main.meth -o main.s
 function main() -> int32 {
   println("Hello");
   return 0;

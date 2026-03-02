@@ -15,7 +15,7 @@ Use C `malloc` (from `std/mem`) when you need unmanaged memory: buffers for I/O,
 When your program uses `new`, compile and link the GC runtime:
 
 ```bash
-Methlang main.meth -o main.s
+methlang main.meth -o main.s
 nasm -f win64 main.s -o main.o
 gcc -c src/runtime/gc.c -o gc.o -Isrc
 gcc main.o gc.o -o main

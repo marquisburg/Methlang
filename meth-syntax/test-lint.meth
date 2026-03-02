@@ -2,10 +2,6 @@
 // Open this file and check View > Problems (Ctrl+Shift+M)
 
 var x: int32 = 42;
-var r: int32 = x % 10;           // modulo - not supported
-
-var flag: int32 = 0;
-if (!flag) { }                   // unary ! - not supported, use flag == 0
 
 x += 1;                          // compound assignment - not supported
 x -= 1;

@@ -5,14 +5,14 @@ This document describes how to compile Methlang programs and the available compi
 ## Compiler Usage
 
 ```bash
-Methlang [options] <input.meth>
+methlang [options] <input.meth>
 ```
 
 The input file is the main source file. Imports are resolved relative to it. The compiler produces assembly (default `output.s`).
 
 ## Options
 
-`-o <file>` output assembly file (default `output.s`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default `stdlib`). `--prelude` auto-import `std/prelude`. `-d`/`--debug` debug mode. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
+`-o <file>` output assembly file (default `output.s`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default `stdlib`). `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
 
 ## Compilation Pipeline
 
@@ -41,7 +41,7 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 
 ## Build Pipeline
 
-1. Compile: `Methlang main.meth -o main.s`
+1. Compile: `methlang main.meth -o main.s`
 2. Assemble: `nasm -f win64 main.s -o main.o` (or `-f elf64` on Linux)
 3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, compile and link `src/runtime/gc.c`. See [Garbage Collector](garbage-collector.md).
 

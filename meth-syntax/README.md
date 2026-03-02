@@ -10,8 +10,6 @@ Two diagnostic layers:
 Pattern checks for common issues based on the Methlang language reference:
 
 **Unsupported operators:**
-- **Modulo `%`** — Use a helper or inline logic
-- **Unary logical NOT `!`** — Use `== 0` or `!= 0` for comparisons
 - **Compound assignment `+=`, `-=`, `*=`, `/=`** — Use `x = x + 1` instead of `x += 1`
 
 **Invalid literals:**

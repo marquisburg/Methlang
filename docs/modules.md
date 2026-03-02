@@ -77,7 +77,7 @@ function main() -> int32 {
 Compile with `-I lib` so the compiler can find `lib/math.meth`:
 
 ```bash
-Methlang -i main.meth -I lib -o output.s
+methlang -i main.meth -I lib -o output.s
 ```
 
 If the module cannot be resolved, compilation fails with an error such as:
