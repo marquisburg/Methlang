@@ -536,7 +536,7 @@ cleanup:
 }
 
 void print_usage(const char *program_name) {
-  printf("Usage: %s [options] <input.masm>\n", program_name);
+  printf("Usage: %s [options] <input.meth>\n", program_name);
   printf("Options:\n");
   printf("  -i <file>           Input file\n");
   printf("  -o <file>           Output file (default: output.s)\n");

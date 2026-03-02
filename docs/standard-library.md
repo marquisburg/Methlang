@@ -14,11 +14,11 @@ The compiler and most stdlib modules work on Linux and Windows. The compiler emi
 
 ## std/io
 
-Console and file I/O. `puts` writes a null-terminated string and appends a newline; `putchar` writes a single character; `getchar` reads one. `print` and `println` write a cstring (println adds a newline). `print_err` and `println_err` write to stderr (for error messages). `print_int` and `println_int` write an integer in decimal. `cstr(s: string) -> cstring` converts a MethASM string to a C string for passing to C functions. File operations: `fopen`, `fclose`, `fread`, `fwrite`, `fputs`, `fgets`, `fflush`. File handles are `cstring` (opaque `FILE*`). Stream accessors: `get_stdin`, `get_stdout`, `get_stderr`.
+Console and file I/O. `puts` writes a null-terminated string and appends a newline; `putchar` writes a single character; `getchar` reads one. `print` and `println` write a cstring (println adds a newline). `print_err` and `println_err` write to stderr (for error messages). `print_int` and `println_int` write an integer in decimal. `cstr(s: string) -> cstring` converts a Methlang string to a C string for passing to C functions. File operations: `fopen`, `fclose`, `fread`, `fwrite`, `fputs`, `fgets`, `fflush`. File handles are `cstring` (opaque `FILE*`). Stream accessors: `get_stdin`, `get_stdout`, `get_stderr`.
 
 ## std/mem
 
-Memory management. C runtime functions: `malloc`, `calloc`, `realloc`, `free`, `memset`, `memcpy`, `memmove`, `memcmp`. Helpers: `alloc_zeroed` (allocate and zero-initialize), `buf_dup` (allocate and copy a buffer). Use `malloc` for buffers, C interop, or when the GC is not linked. Use `new` for MethASM struct instances that should be garbage-collected. See [Garbage Collector](garbage-collector.md).
+Memory management. C runtime functions: `malloc`, `calloc`, `realloc`, `free`, `memset`, `memcpy`, `memmove`, `memcmp`. Helpers: `alloc_zeroed` (allocate and zero-initialize), `buf_dup` (allocate and copy a buffer). Use `malloc` for buffers, C interop, or when the GC is not linked. Use `new` for Methlang struct instances that should be garbage-collected. See [Garbage Collector](garbage-collector.md).
 
 ## std/math
 
@@ -34,7 +34,7 @@ Process control. `exit` terminates the program with an exit code. `rand`, `srand
 
 ## std/system
 
-Process spawning. `system(cmd: cstring) -> int32` runs a shell command via the C runtime. Use for invoking methasm, nasm, gcc, git, curl, etc. On Windows invokes cmd.exe; on Linux invokes sh -c.
+Process spawning. `system(cmd: cstring) -> int32` runs a shell command via the C runtime. Use for invoking Methlang, nasm, gcc, git, curl, etc. On Windows invokes cmd.exe; on Linux invokes sh -c.
 
 ## std/dir
 
@@ -107,7 +107,7 @@ pthread-based threading for Linux and macOS. Includes `pthread_create`, `pthread
 The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process`, and `std/net`. Use with `--prelude` to automatically import these modules without explicit `import` statements. The prelude is opt-in; it is not loaded by default. On Linux, `--prelude` will fail at link time because it pulls in `std/net` (Windows-only). Use explicit imports instead.
 
 ```bash
-methasm --prelude main.masm -o main.s
+Methlang --prelude main.meth -o main.s
 ```
 
 

@@ -1,5 +1,5 @@
 /*
- * C Fibonacci benchmark - counterpart to fib.masm
+ * C Fibonacci benchmark - counterpart to fib.meth
  *
  * Computes fib(0) through fib(35) and prints them.
  * Benchmarks fib(35) with 1,000,000 iterations.
@@ -37,7 +37,7 @@ static int64_t fib(int32_t n) {
 }
 
 #ifdef _WIN32
-/* Match MethASM: use GetTickCount64 for apples-to-apples benchmark */
+/* Match Methlang: use GetTickCount64 for apples-to-apples benchmark */
 static uint64_t get_time_ms(void) {
     return (uint64_t)GetTickCount64();
 }
@@ -57,7 +57,7 @@ int main(void) {
     }
     printf("\n");
 
-    /* Benchmark: fib(35) x 10,000,000 (matches MethASM, enough for GetTickCount64) */
+    /* Benchmark: fib(35) x 10,000,000 (matches Methlang, enough for GetTickCount64) */
     const int32_t iter = 10000000;
     printf("Benchmark: fib(35) x 10,000,000\n");
 

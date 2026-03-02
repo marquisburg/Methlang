@@ -1,19 +1,19 @@
 @echo off
-REM Build MethASM Sum-of-Squares benchmark
+REM Build Methlang Sum-of-Squares benchmark
 set APP=%~dp0
 set ROOT=%APP%..\..
 cd /d "%ROOT%"
 
-if not exist bin\methasm.exe (
-    echo Building MethASM compiler...
+if not exist bin\methlang.exe (
+    echo Building Methlang compiler...
     call build.bat
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
-echo Compiling sum_squares.masm...
-bin\methasm.exe --release examples\sum_squares\sum_squares.masm -o examples\sum_squares\sum_squares.s --stdlib stdlib
+echo Compiling sum_squares.meth...
+bin\methlang.exe --release examples\sum_squares\sum_squares.meth -o examples\sum_squares\sum_squares.s --stdlib stdlib
 if %ERRORLEVEL% NEQ 0 (
-    echo MethASM compilation failed.
+    echo Methlang compilation failed.
     exit /b 1
 )
 
@@ -48,11 +48,11 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo Build successful!
-echo   MethASM: examples\sum_squares\sum_squares.exe
+echo   Methlang: examples\sum_squares\sum_squares.exe
 echo   C:       examples\sum_squares\sum_squares_c.exe
 echo.
-echo Running benchmark (MethASM vs C)...
-echo ===== MethASM (--release) =====
+echo Running benchmark (Methlang vs C)...
+echo ===== Methlang (--release) =====
 examples\sum_squares\sum_squares.exe
 echo.
 echo ========= C (gcc -O2) =========

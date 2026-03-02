@@ -1,0 +1,52 @@
+{
+  "name": "meth-syntax",
+  "displayName": "Methlang Syntax Highlighting",
+  "description": "Syntax highlighting, folding, editor support, and basic linting for Methlang (.meth) files",
+  "version": "0.4.0",
+  "publisher": "Methlang",
+  "engines": { "vscode": "^1.74.0" },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:meth"],
+  "main": "extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "meth",
+        "aliases": ["Methlang", "meth"],
+        "extensions": [".meth"],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/methicon.svg",
+          "dark": "./icons/methicon.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "meth",
+        "scopeName": "source.meth",
+        "path": "./syntaxes/meth.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Methlang",
+      "properties": {
+        "meth.linter.compilerEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the Methlang compiler for semantic diagnostics (type errors, scope, etc.)"
+        },
+        "meth.linter.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Methlang executable (relative to workspace or absolute)"
+        },
+        "meth.linter.stdlibPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to stdlib directory"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,108 @@
+// Request matching utilities for Methlang HTTP Server
+
+export function is_get(buf: cstring, n: int32) -> int32 {
+  if (n < 4) { return 0; }
+  if (buf[0] != 71) { return 0; }
+  if (buf[1] != 69) { return 0; }
+  if (buf[2] != 84) { return 0; }
+  if (buf[3] != 32) { return 0; }
+  return 1;
+}
+
+export function is_root(buf: cstring, n: int32) -> int32 {
+  if (n < 6) { return 0; }
+  if (buf[4] != 47) { return 0; }
+  if (buf[5] != 32) { return 0; }
+  return 1;
+}
+
+export function is_health(buf: cstring, n: int32) -> int32 {
+  if (n < 12) { return 0; }
+  if (buf[4] != 47) { return 0; }
+  if (buf[5] != 104) { return 0; }
+  if (buf[6] != 101) { return 0; }
+  if (buf[7] != 97) { return 0; }
+  if (buf[8] != 108) { return 0; }
+  if (buf[9] != 116) { return 0; }
+  if (buf[10] != 104) { return 0; }
+  if (buf[11] != 32 && buf[11] != 63) { return 0; }
+  return 1;
+}
+
+export function is_post(buf: cstring, n: int32) -> int32 {
+  if (n < 5) { return 0; }
+  if (buf[0] != 80) { return 0; }
+  if (buf[1] != 79) { return 0; }
+  if (buf[2] != 83) { return 0; }
+  if (buf[3] != 84) { return 0; }
+  if (buf[4] != 32) { return 0; }
+  return 1;
+}
+
+export function is_forum(buf: cstring, n: int32, path_start: int32) -> int32 {
+  if (path_start + 6 > n) { return 0; }
+  if (buf[path_start] != 47) { return 0; }
+  if (buf[path_start + 1] != 102) { return 0; }
+  if (buf[path_start + 2] != 111) { return 0; }
+  if (buf[path_start + 3] != 114) { return 0; }
+  if (buf[path_start + 4] != 117) { return 0; }
+  if (buf[path_start + 5] != 109) { return 0; }
+  return 1;
+}
+
+export function get_thread_id(buf: cstring, n: int32, path_start: int32) -> int32 {
+  var i: int32 = path_start + 6;
+  if (i >= n) { return 0; }
+  if (buf[i] != 63) { return 0; }
+  i = i + 1;
+  if (i + 7 > n) { return 0; }
+  if (buf[i] != 116 || buf[i+1] != 104 || buf[i+2] != 114 || buf[i+3] != 101 || buf[i+4] != 97 || buf[i+5] != 100 || buf[i+6] != 61) {
+    return 0;
+  }
+  i = i + 7;
+  var id: int32 = 0;
+  while (i < n && buf[i] >= 48 && buf[i] <= 57) {
+    id = id * 10 + (buf[i] - 48);
+    i = i + 1;
+  }
+  return id;
+}
+
+export function is_demo(buf: cstring, n: int32) -> int32 {
+  if (n < 9) { return 0; }
+  if (buf[4] != 47) { return 0; }
+  if (buf[5] != 100) { return 0; }  // d
+  if (buf[6] != 101) { return 0; }  // e
+  if (buf[7] != 109) { return 0; }  // m
+  if (buf[8] != 111) { return 0; }  // o
+  if (buf[9] != 32 && buf[9] != 63) { return 0; }
+  return 1;
+}
+
+export function is_benchmarks(buf: cstring, n: int32) -> int32 {
+  if (n < 16) { return 0; }
+  if (buf[4] != 47) { return 0; }
+  if (buf[5] != 98) { return 0; }  // b
+  if (buf[6] != 101) { return 0; }  // e
+  if (buf[7] != 110) { return 0; }  // n
+  if (buf[8] != 99) { return 0; }   // c
+  if (buf[9] != 104) { return 0; }  // h
+  if (buf[10] != 109) { return 0; } // m
+  if (buf[11] != 97) { return 0; }  // a
+  if (buf[12] != 114) { return 0; } // r
+  if (buf[13] != 107) { return 0; } // k
+  if (buf[14] != 115) { return 0; } // s
+  if (buf[15] != 32 && buf[15] != 63) { return 0; }
+  return 1;
+}
+
+export function is_docs(buf: cstring, n: int32) -> int32 {
+  if (n < 9) { return 0; }
+  if (buf[4] != 47) { return 0; }
+  if (buf[5] != 100) { return 0; }  // d
+  if (buf[6] != 111) { return 0; }  // o
+  if (buf[7] != 99) { return 0; }   // c
+  if (buf[8] != 115) { return 0; }  // s
+  if (buf[9] != 32 && buf[9] != 63) { return 0; }
+  return 1;
+}

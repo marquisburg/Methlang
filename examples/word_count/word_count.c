@@ -1,5 +1,5 @@
 /*
- * C Word Count benchmark - counterpart to word_count.masm
+ * C Word Count benchmark - counterpart to word_count.meth
  *
  * Parses an in-memory buffer character-by-character to count words.
  * Exercises: malloc, buffer iteration, character classification, branching.

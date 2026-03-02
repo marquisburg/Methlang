@@ -1,6 +1,6 @@
-# MethASM
+# Methlang
 
-MethASM is a typed, low-level language that compiles `.masm` source files to x86-64 NASM assembly.
+Methlang is a typed, low-level language that compiles `.meth` source files to x86-64 NASM assembly.
 
 It is designed for systems-style control with stronger semantics than raw assembly: structured control flow, static type checking, modules, generics, and C interop.
 
@@ -15,11 +15,11 @@ It is designed for systems-style control with stronger semantics than raw assemb
 
 ## Hello World
 
-```masm
+```meth
 import "std/io";
 
 function main() -> int32 {
-  println("Hello, MethASM!");
+  println("Hello, Methlang!");
   return 0;
 }
 ```
@@ -35,13 +35,13 @@ function main() -> int32 {
 1. Compile source to assembly:
 
 ```powershell
-.\bin\methasm.exe hello.masm -o hello.s
+.\bin\methlang.exe hello.meth -o hello.s
 ```
 
 For production builds, use `--release`:
 
 ```powershell
-.\bin\methasm.exe --release hello.masm -o hello.s
+.\bin\methlang.exe --release hello.meth -o hello.s
 ```
 
 `--release` enables `-O`, strips assembly comments, removes unreachable functions, and lowers without generated runtime null/bounds trap checks.
@@ -54,13 +54,13 @@ gcc -nostartfiles hello.o src\runtime\gc.c -o hello.exe -lkernel32
 .\hello.exe
 ```
 
-Use `-nostartfiles` so MethASM's entry point (`mainCRTStartup`) is used instead of the C runtime entry.
+Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime entry.
 
 ## Quick Start (Linux)
 
 ```bash
 make
-./bin/methasm hello.masm -o hello.s
+./bin/methlang hello.meth -o hello.s
 nasm -f elf64 hello.s -o hello.o
 gcc -nostartfiles hello.o src/runtime/gc.c -o hello
 ./hello
@@ -68,7 +68,7 @@ gcc -nostartfiles hello.o src/runtime/gc.c -o hello
 
 ## Toolchain
 
-- MethASM compiler (`bin/methasm.exe` on Windows, `bin/methasm` on Linux)
+- Methlang compiler (`bin/methlang.exe` on Windows, `bin/methlang` on Linux)
 - NASM assembler
 - System C toolchain/linker (`gcc`/`clang`)
 

@@ -32,7 +32,7 @@ Numeric literals: decimal (`42`), hexadecimal (`0xFF`), binary (`0b1010`), float
 
 An identifier denotes a variable, parameter, or function. Member access uses `.` for struct fields and string fields. Pointer field access uses `->`.
 
-```masm
+```meth
 x
 obj.field
 ptr->field
@@ -44,7 +44,7 @@ s.length
 
 Arithmetic: `+`, `-`, `*`, `/`, `%`. Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`. Operands must have compatible types. Integer division truncates toward zero. Modulo `%` returns the remainder and requires integer operands.
 
-```masm
+```meth
 a + b
 a - b
 a * b
@@ -68,7 +68,7 @@ a >= b
 
 Negation `-x`. Logical NOT `!x` (returns 1 if x is 0, otherwise 0). Dereference `*p` (loads the value at the pointer). Address-of `&x` (produces a pointer to x). Address-of requires an assignable expression (lvalue).
 
-```masm
+```meth
 -x       // negation
 !x       // logical NOT
 *p       // dereference
@@ -87,7 +87,7 @@ Arrays and pointers support indexing. The index must be an integer. The expressi
 
 To pass an array to a function that expects a pointer, use `&arr[0]` or `&buf[0]`. The function parameter should have type `T*`:
 
-```masm
+```meth
 function sum(buf: int32*, len: int32) -> int32 {
   var total: int32 = 0;
   var i: int32 = 0;
@@ -107,7 +107,7 @@ var result: int32 = sum(&data[0], 10);
 
 Function calls: `name(args)`. Method calls: `obj.method(args)`. Arguments are evaluated left to right. The number and types must match the declaration.
 
-```masm
+```meth
 add(1, 2)
 puts("hello")
 obj.method(args)
@@ -122,7 +122,7 @@ obj.method(args)
 
 The `new` expression allocates a value on the GC heap and returns a pointer. It requires linking the GC runtime (`gc.c`). The pointer is managed; no explicit `free` is needed. The GC performs conservative mark-and-sweep collection. See [Garbage Collector](garbage-collector.md) for details.
 
-```masm
+```meth
 var p: MyStruct* = new MyStruct;
 ```
 
@@ -140,7 +140,7 @@ var p: MyStruct* = new MyStruct;
 
 Explicit type casting is supported using the `(Type)expression` syntax. This allows explicit conversions between different numeric types, pointer types, and between integers and pointers.
 
-```masm
+```meth
 var f: float64 = 3.14;
 var i: int64 = (int64)f;
 

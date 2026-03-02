@@ -1,6 +1,6 @@
-# MethASM Language Reference
+# Methlang Language Reference
 
-MethASM is a typed, assembly-inspired language that compiles to x86-64 assembly. This reference is split into focused documents for cohesion and clarity.
+Methlang is a typed, assembly-inspired language that compiles to x86-64 assembly. This reference is split into focused documents for cohesion and clarity.
 
 ## Table of Contents
 
@@ -20,6 +20,6 @@ MethASM is a typed, assembly-inspired language that compiles to x86-64 assembly.
 
 ## Overview
 
-MethASM provides explicit typing (all variables and function parameters have declared types), generic functions and structs with compile-time monomorphization, structured control flow (`if`, `while`, `for`, `switch` with `break`/`continue`), structs and enums, pointers and arrays with bounds-aware indexing, C interop via `extern`, a module system for importing other `.masm` files, and garbage collection for heap allocation via `new` with conservative GC runtime.
+Methlang provides explicit typing (all variables and function parameters have declared types), generic functions and structs with compile-time monomorphization, structured control flow (`if`, `while`, `for`, `switch` with `break`/`continue`), structs and enums, pointers and arrays with bounds-aware indexing, C interop via `extern`, a module system for importing other `.meth` files, and garbage collection for heap allocation via `new` with conservative GC runtime.
 
 The compiler emits NASM-compatible x86-64 assembly. Linking uses the platform C runtime and any required libraries (e.g. `ws2_32` for networking on Windows).

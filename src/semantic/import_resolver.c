@@ -146,7 +146,7 @@ static char *resolve_candidate_path(const char *candidate_base) {
       return NULL;
     }
     memcpy(with_ext, candidate_base, len);
-    memcpy(with_ext + len, ".masm", 6);
+    memcpy(with_ext + len, ".meth", 6);
 
     if (file_exists_readable(with_ext)) {
       char *resolved = canonicalize_path(with_ext);
@@ -562,8 +562,8 @@ static void pop_import_chain(ImportContext *ctx) {
   }
 }
 
-// Build a human-readable import chain string like "main.masm -> utils.masm ->
-// math.masm"
+// Build a human-readable import chain string like "main.meth -> utils.meth ->
+// math.meth"
 static char *format_import_chain(ImportContext *ctx) {
   if (!ctx || ctx->chain_depth == 0)
     return strdup("");

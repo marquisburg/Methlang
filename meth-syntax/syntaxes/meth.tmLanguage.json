@@ -1,0 +1,206 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Methlang",
+  "scopeName": "source.meth",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#extern-declarations" },
+    { "include": "#struct-declarations" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.meth",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.meth",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.meth",
+              "match": "\\\\[\\\\\"nrt0]"
+            }
+          ]
+        }
+      ]
+    },
+    "extern-declarations": {
+      "patterns": [
+        {
+          "name": "meta.extern.meth",
+          "match": "\\b(extern)\\s+(function|var)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.import.meth" },
+            "2": { "name": "keyword.declaration.meth" }
+          }
+        },
+        {
+          "name": "string.quoted.double.link.meth",
+          "match": "\\)\\s*=\\s*\"[^\"]*\"",
+          "comment": "Link name in extern declarations"
+        }
+      ]
+    },
+    "struct-declarations": {
+      "patterns": [
+        {
+          "name": "meta.struct.meth",
+          "begin": "\\b(struct)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "end": "\\}",
+          "beginCaptures": {
+            "1": { "name": "keyword.declaration.meth" },
+            "2": { "name": "storage.type.struct.meth" }
+          },
+          "patterns": [
+            { "include": "#struct-body" }
+          ]
+        }
+      ]
+    },
+    "struct-body": {
+      "patterns": [
+        {
+          "name": "variable.other.member.meth",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*:",
+          "captures": {
+            "1": { "name": "variable.other.member.meth" }
+          }
+        },
+        { "include": "#types" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.meth",
+          "match": "\\b(if|else|while|for|switch|case|default|break|continue|return)\\b"
+        },
+        {
+          "name": "keyword.declaration.meth",
+          "match": "\\b(function|import|export|var|struct|enum|method)\\b"
+        },
+        {
+          "name": "keyword.other.meth",
+          "match": "\\b(asm|this|new)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.primitive.meth",
+          "match": "\\b(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|string|cstring|void)\\b"
+        },
+        {
+          "name": "storage.type.struct.meth",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*(?=\\s*[\\*\\[\\{;,\\)])",
+          "comment": "Struct/custom type names"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.meth",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.meth",
+          "match": "\\b0[bB][01]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.meth",
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.meth",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.meth",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.comparison.meth",
+          "match": "==|!=|<=|>="
+        },
+        {
+          "name": "keyword.operator.comparison.meth",
+          "match": "<|>"
+        },
+        {
+          "name": "keyword.operator.assignment.meth",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.arithmetic.meth",
+          "match": "[+\\-*/%]"
+        },
+        {
+          "name": "keyword.operator.logical.meth",
+          "match": "&&|\\|\\|"
+        },
+        {
+          "name": "keyword.operator.bitwise.meth",
+          "match": "<<|>>|&|\\||\\^"
+        },
+        {
+          "name": "keyword.operator.dereference.meth",
+          "match": "\\*"
+        },
+        {
+          "name": "keyword.operator.address-of.meth",
+          "match": "&"
+        },
+        { "include": "#punctuation" }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.meth",
+          "match": "[:;,\\.]"
+        },
+        {
+          "name": "punctuation.definition.meth",
+          "match": "[{}\\[\\]()]"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.member.meth",
+          "match": "\\.(chars|length)\\b",
+          "comment": "String members"
+        },
+        {
+          "name": "variable.other.member.meth",
+          "match": "(?<=\\.)[a-zA-Z_][a-zA-Z0-9_]*"
+        },
+        {
+          "name": "support.function.meth",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+        }
+      ]
+    }
+  }
+}

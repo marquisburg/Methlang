@@ -1,19 +1,19 @@
 @echo off
-REM Build MethASM Word Count benchmark
+REM Build Methlang Word Count benchmark
 set APP=%~dp0
 set ROOT=%APP%..\..
 cd /d "%ROOT%"
 
-if not exist bin\methasm.exe (
-    echo Building MethASM compiler...
+if not exist bin\methlang.exe (
+    echo Building Methlang compiler...
     call build.bat
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
-echo Compiling word_count.masm...
-bin\methasm.exe --release examples\word_count\word_count.masm -o examples\word_count\word_count.s --stdlib stdlib
+echo Compiling word_count.meth...
+bin\methlang.exe --release examples\word_count\word_count.meth -o examples\word_count\word_count.s --stdlib stdlib
 if %ERRORLEVEL% NEQ 0 (
-    echo MethASM compilation failed.
+    echo Methlang compilation failed.
     exit /b 1
 )
 
@@ -48,11 +48,11 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo Build successful!
-echo   MethASM: examples\word_count\word_count.exe
+echo   Methlang: examples\word_count\word_count.exe
 echo   C:       examples\word_count\word_count_c.exe
 echo.
-echo Running benchmark (MethASM vs C)...
-echo ===== MethASM (--release) =====
+echo Running benchmark (Methlang vs C)...
+echo ===== Methlang (--release) =====
 examples\word_count\word_count.exe
 echo.
 echo ========= C (gcc -O2) =========

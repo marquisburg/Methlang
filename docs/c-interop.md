@@ -1,10 +1,10 @@
 # C Interoperability
 
-MethASM can call C functions and access C globals. This document describes the C interop facilities and conventions.
+Methlang can call C functions and access C globals. This document describes the C interop facilities and conventions.
 
 ## Calling C Functions
 
-Declare C functions with `extern function`. Use the `= "symbol"` suffix to specify the C link name when it differs from the MethASM name. Parameters and return types must match the C ABI. On Windows, the Microsoft x64 ABI applies. On Linux and macOS, the System V AMD64 ABI applies.
+Declare C functions with `extern function`. Use the `= "symbol"` suffix to specify the C link name when it differs from the Methlang name. Parameters and return types must match the C ABI. On Windows, the Microsoft x64 ABI applies. On Linux and macOS, the System V AMD64 ABI applies.
 
 ```masm
 extern function puts(msg: cstring) -> int32 = "puts";
@@ -19,7 +19,7 @@ function main() -> int32 {
 
 ## cstring
 
-`cstring` is an alias for `uint8*`. Use it for C `char*`, `void*`, or opaque pointers. `cstring` and `uint8*` are interchangeable. When passing a MethASM `string` to a C function that expects `char*`, use `s.chars` or the `cstr` helper from `std/io`.
+`cstring` is an alias for `uint8*`. Use it for C `char*`, `void*`, or opaque pointers. `cstring` and `uint8*` are interchangeable. When passing a Methlang `string` to a C function that expects `char*`, use `s.chars` or the `cstr` helper from `std/io`.
 
 ## Passing Structs to C
 
@@ -47,7 +47,7 @@ Use `-nostartfiles` when the program provides its own entry point (e.g. `_start`
 
 ## POSIX Networking (Linux / macOS)
 
-For networking on Linux or macOS, use `stdlib/std/net_posix.masm`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
+For networking on Linux or macOS, use `stdlib/std/net_posix.meth`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
 
 **Link command:**
 
@@ -80,7 +80,7 @@ The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `
 
 ## POSIX Networking (Linux / macOS)
 
-For networking on Linux or macOS, use `stdlib/std/net_posix.masm`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
+For networking on Linux or macOS, use `stdlib/std/net_posix.meth`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
 
 **Link command:**
 
@@ -112,7 +112,7 @@ The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `
 **Note:** On macOS, `SOL_SOCKET` is 0xFFFF and `SO_REUSEADDR` is 4. On Linux, they are 1 and 2 respectively. Use the constants from `std/net_posix` (which default to Linux values) or override them at call site for macOS.
 
 
-For networking on Linux or macOS, use `stdlib/std/net_posix.masm`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
+For networking on Linux or macOS, use `stdlib/std/net_posix.meth`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
 
 **Link command:**
 

@@ -1,5 +1,5 @@
 @echo off
-REM Windows build script for MethASM
+REM Windows build script for Methlang
 
 REM Check if gcc is available
 where gcc >nul 2>&1
@@ -80,14 +80,14 @@ gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\main.c -o obj\main.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Linking...
-gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\debug\debug_info.o obj\runtime\gc.o obj\error\error_reporter.o obj\main.o -o bin\methasm.exe
+gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\debug\debug_info.o obj\runtime\gc.o obj\error\error_reporter.o obj\main.o -o bin\methlang.exe
 
 if %ERRORLEVEL% NEQ 0 (
     echo Build failed!
     exit /b 1
 )
 
-echo Build successful! Executable created at bin\methasm.exe
+echo Build successful! Executable created at bin\methlang.exe
 echo.
 echo Running tests...
 powershell -ExecutionPolicy Bypass -File tests\run_tests.ps1

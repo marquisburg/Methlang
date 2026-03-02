@@ -1,0 +1,111 @@
+// Methlang standard library: Conversions
+//
+// String/number conversions, character classification, and encoding helpers.
+
+// ─── C runtime conversions ──────────────────────────────────────────────────
+export extern function atoi(s: cstring) -> int32 = "atoi";
+export extern function atol(s: cstring) -> int64 = "atol";
+
+// ─── Integer ↔ character helpers ────────────────────────────────────────────
+
+// Convert a single digit (0–9) to its ASCII character code
+export function digit_to_char(d: int32) -> int32 {
+  return d + 48;
+}
+
+// Convert an ASCII digit character to its numeric value (no validation)
+export function char_to_digit(c: int32) -> int32 {
+  return c - 48;
+}
+
+// ─── Character classification ───────────────────────────────────────────────
+
+export function is_digit(c: int32) -> int32 {
+  if (c >= 48) { if (c <= 57) { return 1; } }
+  return 0;
+}
+
+export function is_upper(c: int32) -> int32 {
+  if (c >= 65) { if (c <= 90) { return 1; } }
+  return 0;
+}
+
+export function is_lower(c: int32) -> int32 {
+  if (c >= 97) { if (c <= 122) { return 1; } }
+  return 0;
+}
+
+export function is_alpha(c: int32) -> int32 {
+  if (is_upper(c) == 1) { return 1; }
+  if (is_lower(c) == 1) { return 1; }
+  return 0;
+}
+
+export function is_alnum(c: int32) -> int32 {
+  if (is_alpha(c) == 1) { return 1; }
+  if (is_digit(c) == 1) { return 1; }
+  return 0;
+}
+
+export function is_space(c: int32) -> int32 {
+  if (c == 32) { return 1; }
+  if (c == 9)  { return 1; }
+  if (c == 10) { return 1; }
+  if (c == 13) { return 1; }
+  if (c == 12) { return 1; }
+  if (c == 11) { return 1; }
+  return 0;
+}
+
+// ─── Case conversion ────────────────────────────────────────────────────────
+
+export function to_lower(c: int32) -> int32 {
+  if (is_upper(c) == 1) { return c + 32; }
+  return c;
+}
+
+export function to_upper(c: int32) -> int32 {
+  if (is_lower(c) == 1) { return c - 32; }
+  return c;
+}
+
+// ─── String utilities ───────────────────────────────────────────────────────
+
+// Return the length of a null-terminated C string
+export function strlen(s: cstring) -> int64 {
+  var i: int64 = 0;
+  while (s[i] != 0) {
+    i = i + 1;
+  }
+  return i;
+}
+
+// Compare two C strings.  Returns 0 if equal, non-zero otherwise.
+export function streq(a: cstring, b: cstring) -> int32 {
+  var i: int64 = 0;
+  while (a[i] != 0) {
+    if (a[i] != b[i]) { return 0; }
+    i = i + 1;
+  }
+  if (b[i] != 0) { return 0; }
+  return 1;
+}
+
+// Compare buf[offset..] with a string, bounded by buf_len.
+// Returns 0 on exact match, non-zero otherwise.
+export function strncmp(buf: cstring, offset: int32, needle: string, buf_len: int32) -> int32 {
+  if (offset < 0) { return -1; }
+  if (buf_len < 0) { return -1; }
+  if (offset > buf_len) { return -1; }
+
+  var i: int32 = 0;
+  while (i < needle.length) {
+    if (offset + i >= buf_len) { return -1; }
+    if (buf[offset + i] != needle.chars[i]) {
+      return buf[offset + i] - needle.chars[i];
+    }
+    i = i + 1;
+  }
+
+  return 0;
+}

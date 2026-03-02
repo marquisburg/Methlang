@@ -1,12 +1,12 @@
 # Lexical Structure
 
-This document covers the low-level syntax of MethASM: comments, identifiers, keywords, literals, and operators.
+This document covers the low-level syntax of Methlang: comments, identifiers, keywords, literals, and operators.
 
 ## Comments
 
 Line comments start with `//` and extend to the end of the line. Everything after `//` is ignored by the compiler.
 
-```masm
+```meth
 // Line comment: everything from // to end of line is ignored
 var x: int32 = 42;  // inline comment
 ```
@@ -43,7 +43,7 @@ Underscores in numeric literals (e.g. `1_000_000`) are not supported. The unders
 
 Strings are enclosed in double quotes. The compiler processes escape sequences before storing the value. Supported escapes: `\n` (newline, LF), `\t` (tab), `\r` (carriage return), `\\` (backslash), `\"` (double quote), `\0` (null byte). Unknown escape sequences are preserved literally: the backslash and the following character are both stored. For example, `"\q"` produces the two characters `\` and `q`, not a single character. String literals have type `string` (see [Types](types.md)).
 
-```masm
+```meth
 var msg: string = "Hello\nWorld\t\"quoted\"";
 ```
 
@@ -63,7 +63,7 @@ Assignment `=`. Comparison `==`, `!=`, `<`, `>`, `<=`, `>=`. Logical `&&`, `||`.
 
 **Arrow `->`:** The arrow serves two roles. In function signatures it denotes the return type: `function f() -> int32`. In expressions it denotes pointer field access: `ptr->field`. Both uses appear in the same program:
 
-```masm
+```meth
 struct Point { x: int32; y: int32; }
 
 function get_x(p: Point*) -> int32 {

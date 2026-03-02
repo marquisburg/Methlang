@@ -1,0 +1,10 @@
+// Methlang standard library: Process
+
+// Terminate the program with a given exit code
+export extern function exit(code: int32) = "exit";
+
+// Return a (pseudo-)random integer
+export extern function rand() -> int32 = "rand";
+
+// Seed the random number generator
+export extern function srand(seed: int32) = "srand";

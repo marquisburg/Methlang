@@ -3,8 +3,8 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width,initial-scale=1'>
-<meta name='description' content='Interactive MethASM code demonstrations and examples. Try the language features in your browser.'>
-<title>MethASM — Interactive Demo</title>
+<meta name='description' content='Interactive Methlang code demonstrations and examples. Try the language features in your browser.'>
+<title>Methlang — Interactive Demo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -358,7 +358,7 @@
 
     <header class="header">
       <h1>Interactive Demo</h1>
-      <p>Explore MethASM's features through live, interactive code examples. Try modifying the code and see the results!</p>
+      <p>Explore Methlang's features through live, interactive code examples. Try modifying the code and see the results!</p>
     </header>
 
     <!-- Feature Selection -->
@@ -418,10 +418,10 @@
       <div class="editor-container">
         <div class="editor-panel">
           <div class="panel-header">
-            <div class="panel-title">📝 MethASM Code</div>
+            <div class="panel-title">📝 Methlang Code</div>
           </div>
           <div class="panel-content">
-            <textarea id="codeEditor" class="code-editor" spellcheck="false">// MethASM Interactive Demo
+            <textarea id="codeEditor" class="code-editor" spellcheck="false">// Methlang Interactive Demo
 // Try modifying this code and click "Run Code"
 
 import "std/io";
@@ -453,7 +453,7 @@ function main() -> int32 {
           </div>
           <div class="panel-content">
             <div id="outputDisplay" class="output-display">// Click "Run Code" to see the output
-// This simulates what the MethASM compiler would produce</div>
+// This simulates what the Methlang compiler would produce</div>
           </div>
         </div>
       </div>
@@ -464,8 +464,8 @@ function main() -> int32 {
     const demos = {
       basics: {
         title: "Language Basics",
-        description: "Try basic MethASM syntax and concepts",
-        code: `// MethASM Language Basics
+        description: "Try basic Methlang syntax and concepts",
+        code: `// Methlang Language Basics
 // Variables, functions, and control flow
 
 import "std/io";
@@ -505,7 +505,7 @@ function main() -> int32 {
       structs: {
         title: "Structs & Methods",
         description: "Data structures and their associated methods",
-        code: `// Structs and Methods in MethASM
+        code: `// Structs and Methods in Methlang
 // Define data structures with behavior
 
 import "std/io";
@@ -546,7 +546,7 @@ function main() -> int32 {
       memory: {
         title: "Memory Management",
         description: "Stack allocation vs garbage collection",
-        code: `// Memory Management in MethASM
+        code: `// Memory Management in Methlang
 // Stack allocation vs garbage collection
 
 import "std/io";
@@ -586,7 +586,7 @@ Freed memory`
       interop: {
         title: "C Interop",
         description: "Calling external C functions",
-        code: `// C Interoperability in MethASM
+        code: `// C Interoperability in Methlang
 // Calling external C functions
 
 import "std/io";
@@ -624,7 +624,7 @@ Parsed number: 42`
       networking: {
         title: "Networking",
         description: "Socket programming and network I/O",
-        code: `// Networking with MethASM
+        code: `// Networking with Methlang
 // Basic TCP socket operations
 
 import "std/net";
@@ -673,7 +673,7 @@ Press Ctrl+C to stop`
       advanced: {
         title: "Advanced Features",
         description: "Pointers, arrays, and optimization",
-        code: `// Advanced MethASM Features
+        code: `// Advanced Methlang Features
 // Pointers, arrays, and performance
 
 import "std/io";
@@ -768,7 +768,7 @@ Result dimensions: 2x2`
       const code = document.getElementById('codeEditor').value;
       const output = document.getElementById('outputDisplay');
       
-      showStatus('Compiling and running MethASM code...', 'info');
+      showStatus('Compiling and running Methlang code...', 'info');
       
       // Simulate compilation and execution
       setTimeout(() => {

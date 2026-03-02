@@ -1,11 +1,11 @@
 # Compilation
 
-This document describes how to compile MethASM programs and the available compiler options.
+This document describes how to compile Methlang programs and the available compiler options.
 
 ## Compiler Usage
 
 ```bash
-methasm [options] <input.masm>
+Methlang [options] <input.meth>
 ```
 
 The input file is the main source file. Imports are resolved relative to it. The compiler produces assembly (default `output.s`).
@@ -41,11 +41,11 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 
 ## Build Pipeline
 
-1. Compile: `methasm main.masm -o main.s`
+1. Compile: `Methlang main.meth -o main.s`
 2. Assemble: `nasm -f win64 main.s -o main.o` (or `-f elf64` on Linux)
-3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so MethASM's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, compile and link `src/runtime/gc.c`. See [Garbage Collector](garbage-collector.md).
+3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, compile and link `src/runtime/gc.c`. See [Garbage Collector](garbage-collector.md).
 
-**Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, you must also compile and link `src/runtime/masm_entry.c` so the runtime can obtain command-line arguments. On Windows, link with `-lshell32` as well: `gcc -nostartfiles main.o gc.o masm_entry.o -o main -lkernel32 -lshell32`.
+**Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, you must also compile and link `src/runtime/methlang_entry.c` so the runtime can obtain command-line arguments. On Windows, link with `-lshell32` as well: `gcc -nostartfiles main.o gc.o methlang_entry.o -o main -lkernel32 -lshell32`.
 
 The output format depends on the target. Use `-f win64` for Windows, `-f elf64` for Linux. NASM is required for assembly; install from https://www.nasm.us/ if needed. On Linux and macOS, use `make` to build the compiler and run tests. The web server example in `web/` is Windows-only (Winsock). See [Standard Library](standard-library.md#platform-support) for Linux support details.
 
@@ -63,7 +63,7 @@ Then open http://localhost:5000 in a browser.
 
 ### Web Server Reliability Notes
 
-When modifying `web/server.masm` or `web/index.html`, use these rules to avoid runtime crashes:
+When modifying `web/server.meth` or `web/index.html`, use these rules to avoid runtime crashes:
 
 1. Prefer streaming responses with `send_all` instead of building large dynamic response buffers on the stack.
 2. If you use `Content-Length`, compute it exactly and ensure any header buffer is large enough for worst-case digits and header text.
@@ -80,7 +80,7 @@ These checks catch the common failure mode where only one route (often `/`) cras
 
 The compiler emits a warning for unusually large function stack frames (currently 256 KiB). This is intended as an early signal for stack overflow risk in deeply nested calls or thread stacks with limited reserve.
 
-On Windows x64, MethASM now emits stack probing (`___chkstk_ms`) for large frame allocations (>4 KiB) before subtracting `rsp`, to avoid guard-page skips.
+On Windows x64, Methlang now emits stack probing (`___chkstk_ms`) for large frame allocations (>4 KiB) before subtracting `rsp`, to avoid guard-page skips.
 
 The warning threshold is currently fixed and may become configurable in a future release.
 
