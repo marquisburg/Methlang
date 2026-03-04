@@ -6,3 +6,4 @@ obj/
 *.o
 *.obj
 *.s
+*.s.ir
