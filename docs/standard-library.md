@@ -1,6 +1,6 @@
 # Standard Library
 
-The standard library lives under `stdlib/`. Modules are imported by path. The `std/` prefix is resolved under the stdlib root (default `stdlib`).
+The standard library lives under `stdlib/`. Modules are imported by path. The `std/` prefix is resolved under the stdlib root (default bundled auto-detect then `./stdlib`).
 
 ## Platform Support
 
@@ -109,5 +109,6 @@ The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process
 ```bash
 methlang --prelude main.meth -o main.s
 ```
+
 
 

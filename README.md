@@ -38,6 +38,8 @@ function main() -> int32 {
 .\bin\methlang.exe hello.meth -o hello.s
 ```
 
+No project-local `stdlib/` folder is required. The compiler auto-loads the stdlib bundled with the Methlang installation/build output. Use `--stdlib <dir>` only when you want to override that.
+
 For production builds, use `--release`:
 
 ```powershell

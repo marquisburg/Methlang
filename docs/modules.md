@@ -23,9 +23,11 @@ import "std/io";
 The compiler resolves import paths in this order:
 
 1. **Absolute paths** — used as-is if the path is absolute.
-2. **Stdlib** — if the path starts with `std/`, resolve under the stdlib root (default `stdlib`, overridable with `--stdlib`).
+2. **Stdlib** — if the path starts with `std/`, resolve under the stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`; overridable with `--stdlib`).
 3. **Relative to importing file** — relative to the directory of the file containing the import.
 4. **`-I` directories** — each directory added with `-I` is searched in the order given on the command line.
+
+This means normal projects do not need their own `stdlib/` copy just to import `std/...` modules.
 
 **First match wins:** If two `-I` directories both contain a file matching the same path (e.g. `-I lib1 -I lib2` and both have `foo/bar.meth`), the file in `lib1` is used. The first directory that yields a readable file wins.
 

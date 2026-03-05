@@ -41,9 +41,11 @@ Both `import` and `import_str` resolve paths in this order:
 
 1. **Absolute paths** — Used as-is. On Windows: `C:\path\to\file` or `\path\to\file`. On Unix: `/path/to/file`.
 
-2. **Stdlib** — If the path starts with `std/` (or `std\` on Windows), it is resolved under the stdlib root (default `stdlib`, overridable with `--stdlib`).
+2. **Stdlib** — If the path starts with `std/` (or `std\` on Windows), it is resolved under the stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`; overridable with `--stdlib`).
    - `import "std/io"` → `stdlib/std/io.meth`
    - `import_str "std/template.html"` → `stdlib/std/template.html`
+
+You do not need a project-local `stdlib/` directory for `std/...` imports in normal usage.
 
 3. **Relative to importing file** — Relative to the directory of the file containing the import.
    - In `web/server.meth`, `import_str "index.html"` → `web/index.html`
@@ -64,7 +66,7 @@ On Windows, both `/` and `\` are accepted. Use `/` for portability across platfo
 | Option | Description |
 |--------|--------------|
 | `-I <dir>` | Add import search directory. Repeatable. |
-| `--stdlib <dir>` | Set stdlib root (default: `stdlib`). |
+| `--stdlib <dir>` | Set stdlib root (default: bundled auto-detect, then `./stdlib`). |
 | `-i <file>` | Input file (entry point). Imports are resolved from this file. |
 
 **Example:**

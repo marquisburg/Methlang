@@ -31,12 +31,9 @@ export function cstr(s: string) -> cstring {
 }
 
 // Output a null-terminated string exactly as-is (no trailing newline)
+// Uses fputs for bulk write instead of N putchar syscalls.
 export function print(msg: cstring) {
-  var i: int64 = 0;
-  while (msg[i] != 0) {
-    putchar(msg[i]);
-    i = i + 1;
-  }
+  fputs(msg, get_stdout());
 }
 
 // Output a null-terminated string followed by a newline
@@ -50,29 +47,32 @@ export function newline() {
 }
 
 // Print an integer to stdout (base 10, handles negatives)
+// Builds digit string in buffer, single fputs instead of N putchar syscalls.
 export function print_int(n: int64) {
+  var buf: uint8[22];
+  var pos: int32 = 21;
+  var neg: int32 = 0;
+  buf[21] = 0;
   if (n < 0) {
-    putchar(45);
+    neg = 1;
     n = 0 - n;
   }
   if (n == 0) {
-    putchar(48);
+    buf[0] = 48;
+    buf[1] = 0;
+    fputs(&buf[0], get_stdout());
     return;
   }
-  // Extract digits in reverse into a buffer
-  var buf: int32[20];
-  var len: int32 = 0;
   while (n > 0) {
-    buf[len] = 48 + n - (n / 10) * 10;
+    pos = pos - 1;
+    buf[pos] = 48 + n - (n / 10) * 10;
     n = n / 10;
-    len = len + 1;
   }
-  // Print in forward order
-  var i: int32 = len - 1;
-  while (i >= 0) {
-    putchar(buf[i]);
-    i = i - 1;
+  if (neg != 0) {
+    pos = pos - 1;
+    buf[pos] = 45;
   }
+  fputs(&buf[pos], get_stdout());
 }
 
 // Print an integer followed by a newline

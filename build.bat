@@ -87,6 +87,10 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+echo Bundling standard library into bin\stdlib...
+if exist bin\stdlib rmdir /S /Q bin\stdlib
+xcopy stdlib bin\stdlib\ /E /I /Y >nul
+
 echo Build successful! Executable created at bin\methlang.exe
 echo.
 echo Running tests...
@@ -96,5 +100,4 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 echo All tests passed.
-
 

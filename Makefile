@@ -3,6 +3,7 @@ CFLAGS = -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE
 SRCDIR = src
 OBJDIR = obj
 BINDIR = bin
+STDLIBDIR = stdlib
 
 # Source files
 LEXER_SOURCES = $(SRCDIR)/lexer/lexer.c
@@ -20,12 +21,16 @@ OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
 TARGET = $(BINDIR)/methlang
 
-.PHONY: all clean test
+.PHONY: all clean test install bundle-stdlib
 
-all: $(TARGET)
+all: $(TARGET) bundle-stdlib
 
 $(TARGET): $(OBJECTS) | $(BINDIR)
 	$(CC) $(OBJECTS) -o $@
+
+bundle-stdlib: | $(BINDIR)
+	rm -rf $(BINDIR)/stdlib
+	cp -r $(STDLIBDIR) $(BINDIR)/stdlib
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	@mkdir -p $(dir $@)
@@ -45,11 +50,12 @@ test: $(TARGET)
 	$(CC) $(CFLAGS) tests/gc_runtime_test.c src/runtime/gc.c -o $(BINDIR)/gc_runtime_test
 	@$(BINDIR)/gc_runtime_test
 
-install: $(TARGET)
+install: $(TARGET) bundle-stdlib
+	mkdir -p /usr/local/bin /usr/local/stdlib
 	cp $(TARGET) /usr/local/bin/
+	cp -r $(BINDIR)/stdlib/* /usr/local/stdlib/
 
 .PHONY: debug
 debug: CFLAGS += -DDEBUG
 debug: $(TARGET)
-
 
