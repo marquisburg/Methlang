@@ -1,6 +1,7 @@
 #include "type_checker.h"
 #include "../error/error_reporter.h"
 #include "symbol_table.h"
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -1930,34 +1931,76 @@ static Type *type_checker_parse_function_pointer_type(TypeChecker *checker,
     return NULL;
   }
 
-  // Find the -> that separates params from return type
-  const char *arrow = strstr(name, ")->");
-  if (!arrow) {
+  size_t close_index = 0;
+  int paren_depth = 0;
+  int found_close = 0;
+  for (size_t i = 2; name[i] != '\0'; i++) {
+    if (name[i] == '(') {
+      paren_depth++;
+    } else if (name[i] == ')') {
+      paren_depth--;
+      if (paren_depth < 0) {
+        return NULL;
+      }
+      if (paren_depth == 0) {
+        close_index = i;
+        found_close = 1;
+        break;
+      }
+    }
+  }
+
+  if (!found_close || name[close_index + 1] != '-' ||
+      name[close_index + 2] != '>') {
     return NULL;
   }
 
   // Parse parameter types
   const char *params_start = name + 3; // skip "fn("
-  const char *params_end = arrow;
+  const char *params_end = name + close_index;
   size_t params_len = params_end - params_start;
 
   Type **param_types = NULL;
   size_t param_count = 0;
+  char *params_copy = NULL;
 
   if (params_len > 0) {
-    // Parse comma-separated parameter types
-    char *params_copy = malloc(params_len + 1);
+    // Parse comma-separated parameter types, splitting only on top-level commas.
+    params_copy = malloc(params_len + 1);
     if (!params_copy) {
       return NULL;
     }
     memcpy(params_copy, params_start, params_len);
     params_copy[params_len] = '\0';
 
-    // Count parameters by counting commas
+    // Count top-level parameters.
     param_count = 1;
+    int angle_depth = 0;
+    int bracket_depth = 0;
+    paren_depth = 0;
     for (size_t i = 0; i < params_len; i++) {
-      if (params_copy[i] == ',') {
+      if (params_copy[i] == '<') {
+        angle_depth++;
+      } else if (params_copy[i] == '>') {
+        if (angle_depth > 0) {
+          angle_depth--;
+        }
+      } else if (params_copy[i] == '[') {
+        bracket_depth++;
+      } else if (params_copy[i] == ']') {
+        bracket_depth--;
+      } else if (params_copy[i] == '(') {
+        paren_depth++;
+      } else if (params_copy[i] == ')') {
+        paren_depth--;
+      } else if (params_copy[i] == ',' && angle_depth == 0 &&
+                 bracket_depth == 0 && paren_depth == 0) {
         param_count++;
+      }
+
+      if (angle_depth < 0 || bracket_depth < 0 || paren_depth < 0) {
+        free(params_copy);
+        return NULL;
       }
     }
 
@@ -1967,13 +2010,66 @@ static Type *type_checker_parse_function_pointer_type(TypeChecker *checker,
       return NULL;
     }
 
-    // Parse each parameter type
-    char *param_start = params_copy;
+    // Parse each top-level parameter type.
+    size_t param_start = 0;
     size_t param_idx = 0;
+    angle_depth = 0;
+    bracket_depth = 0;
+    paren_depth = 0;
     for (size_t i = 0; i <= params_len; i++) {
-      if (params_copy[i] == ',' || params_copy[i] == '\0') {
-        params_copy[i] = '\0';
-        Type *param_type = type_checker_get_type_by_name(checker, param_start);
+      char ch = params_copy[i];
+      int is_end = (ch == '\0');
+
+      if (!is_end) {
+        if (ch == '<') {
+          angle_depth++;
+        } else if (ch == '>') {
+          if (angle_depth > 0) {
+            angle_depth--;
+          }
+        } else if (ch == '[') {
+          bracket_depth++;
+        } else if (ch == ']') {
+          bracket_depth--;
+        } else if (ch == '(') {
+          paren_depth++;
+        } else if (ch == ')') {
+          paren_depth--;
+        }
+      }
+
+      if (angle_depth < 0 || bracket_depth < 0 || paren_depth < 0) {
+        free(params_copy);
+        free(param_types);
+        return NULL;
+      }
+
+      int is_separator =
+          is_end || (ch == ',' && angle_depth == 0 && bracket_depth == 0 &&
+                     paren_depth == 0);
+      if (!is_separator) {
+        continue;
+      }
+
+      size_t start = param_start;
+      size_t end = i;
+      while (start < end && isspace((unsigned char)params_copy[start])) {
+        start++;
+      }
+      while (end > start && isspace((unsigned char)params_copy[end - 1])) {
+        end--;
+      }
+      if (end <= start) {
+        free(params_copy);
+        free(param_types);
+        return NULL;
+      }
+
+      char saved = params_copy[end];
+      params_copy[end] = '\0';
+      Type *param_type =
+          type_checker_get_type_by_name(checker, params_copy + start);
+      params_copy[end] = saved;
         if (!param_type) {
           free(params_copy);
           free(param_types);
@@ -1982,25 +2078,62 @@ static Type *type_checker_parse_function_pointer_type(TypeChecker *checker,
         if (param_idx < param_count) {
           param_types[param_idx++] = param_type;
         }
-        param_start = params_copy + i + 1;
+        param_start = i + 1;
       }
-    }
 
-    free(params_copy);
+    if (param_idx != param_count) {
+      free(params_copy);
+      free(param_types);
+      return NULL;
+    }
   }
 
   // Parse return type
-  const char *return_type_start = arrow + 3; // skip ")->"
-  Type *return_type = type_checker_get_type_by_name(checker, return_type_start);
+  const char *return_type_start = name + close_index + 3; // skip ")->"
+  if (*return_type_start == '\0') {
+    free(params_copy);
+    free(param_types);
+    return NULL;
+  }
+  char *return_copy = strdup(return_type_start);
+  if (!return_copy) {
+    free(params_copy);
+    free(param_types);
+    return NULL;
+  }
+  size_t return_start = 0;
+  size_t return_end = strlen(return_copy);
+  while (return_start < return_end &&
+         isspace((unsigned char)return_copy[return_start])) {
+    return_start++;
+  }
+  while (return_end > return_start &&
+         isspace((unsigned char)return_copy[return_end - 1])) {
+    return_end--;
+  }
+  if (return_end <= return_start) {
+    free(params_copy);
+    free(param_types);
+    free(return_copy);
+    return NULL;
+  }
+  return_copy[return_end] = '\0';
+
+  Type *return_type =
+      type_checker_get_type_by_name(checker, return_copy + return_start);
   if (!return_type) {
-    // Default to void if return type not found
-    return_type = checker->builtin_void;
+    free(params_copy);
+    free(param_types);
+    free(return_copy);
+    return NULL;
   }
 
   Type *fp_type =
       type_create_function_pointer(param_types, param_count, return_type);
+  free(params_copy);
+  free(param_types);
+  free(return_copy);
   if (!fp_type) {
-    free(param_types);
     return NULL;
   }
 

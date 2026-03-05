@@ -144,6 +144,7 @@ $cases = @(
     AsmMustNotMatch = @("(?m)^\s*global\s+errno\b", "(?m)^\s*errno:\s*$")
   },
   @{ Name = "cstring_alias_type"; Path = "tests/test_cstring_alias_type.meth"; ShouldSucceed = $true },
+  @{ Name = "nested_function_pointer_type_annotation"; Path = "tests/test_nested_function_pointer_type_annotation.meth"; ShouldSucceed = $true },
   @{ Name = "gc_alloc"; Path = "tests/test_gc_alloc.meth"; ShouldSucceed = $true },
   @{ Name = "gc_alloc_fixed"; Path = "tests/test_gc_alloc_fixed.meth"; ShouldSucceed = $true },
   @{ Name = "pointers"; Path = "tests/test_pointers.meth"; ShouldSucceed = $true },
@@ -546,6 +547,7 @@ $cases = @(
   },
 
   @{ Name = "err_unknown_char"; Path = "tests/err_unknown_char.meth"; ShouldSucceed = $false; Pattern = "Lexical error|error" },
+  @{ Name = "err_unknown_fnptr_return_type"; Path = "tests/err_unknown_fnptr_return_type.meth"; ShouldSucceed = $false; Pattern = "Unknown type|no_such_type" },
   @{ Name = "err_invalid_hex"; Path = "tests/err_invalid_hex.meth"; ShouldSucceed = $false; Pattern = "Invalid hexadecimal literal" },
   @{ Name = "err_invalid_bin"; Path = "tests/err_invalid_bin.meth"; ShouldSucceed = $false; Pattern = "Invalid binary literal" },
   @{ Name = "err_missing_brace"; Path = "tests/err_missing_brace.meth"; ShouldSucceed = $false },
