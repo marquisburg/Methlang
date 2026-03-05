@@ -1303,8 +1303,19 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
 
     IROperand base = ir_operand_none();
     IROperand index = ir_operand_none();
-    if (!ir_lower_expression(context, function, index_expression->array,
-                             &base) ||
+    int lowered_base = 0;
+    if (array_type->kind == TYPE_ARRAY) {
+      // For inline arrays (including struct fields), indexing must use the
+      // address of the array storage, not a loaded value.
+      lowered_base = ir_lower_lvalue_address(context, function,
+                                             index_expression->array, &base,
+                                             NULL);
+    } else {
+      lowered_base =
+          ir_lower_expression(context, function, index_expression->array, &base);
+    }
+
+    if (!lowered_base ||
         !ir_lower_expression(context, function, index_expression->index,
                              &index)) {
       ir_operand_destroy(&base);

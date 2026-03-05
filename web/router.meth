@@ -68,17 +68,6 @@ export function get_thread_id(buf: cstring, n: int32, path_start: int32) -> int3
   return id;
 }
 
-export function is_demo(buf: cstring, n: int32) -> int32 {
-  if (n < 9) { return 0; }
-  if (buf[4] != 47) { return 0; }
-  if (buf[5] != 100) { return 0; }  // d
-  if (buf[6] != 101) { return 0; }  // e
-  if (buf[7] != 109) { return 0; }  // m
-  if (buf[8] != 111) { return 0; }  // o
-  if (buf[9] != 32 && buf[9] != 63) { return 0; }
-  return 1;
-}
-
 export function is_benchmarks(buf: cstring, n: int32) -> int32 {
   if (n < 16) { return 0; }
   if (buf[4] != 47) { return 0; }
@@ -104,5 +93,27 @@ export function is_docs(buf: cstring, n: int32) -> int32 {
   if (buf[7] != 99) { return 0; }   // c
   if (buf[8] != 115) { return 0; }  // s
   if (buf[9] != 32 && buf[9] != 63) { return 0; }
+  return 1;
+}
+
+export function is_benchmarks_json(buf: cstring, n: int32) -> int32 {
+  if (n < 21) { return 0; }
+  if (buf[4] != 47) { return 0; }
+  if (buf[5] != 98) { return 0; }  // b
+  if (buf[6] != 101) { return 0; }  // e
+  if (buf[7] != 110) { return 0; }  // n
+  if (buf[8] != 99) { return 0; }   // c
+  if (buf[9] != 104) { return 0; }  // h
+  if (buf[10] != 109) { return 0; } // m
+  if (buf[11] != 97) { return 0; }  // a
+  if (buf[12] != 114) { return 0; } // r
+  if (buf[13] != 107) { return 0; } // k
+  if (buf[14] != 115) { return 0; } // s
+  if (buf[15] != 46) { return 0; }  // .
+  if (buf[16] != 106) { return 0; } // j
+  if (buf[17] != 115) { return 0; } // s
+  if (buf[18] != 111) { return 0; } // o
+  if (buf[19] != 110) { return 0; } // n
+  if (buf[20] != 32 && buf[20] != 63) { return 0; }
   return 1;
 }

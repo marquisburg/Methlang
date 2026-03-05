@@ -1,6 +1,6 @@
 # Standard Library
 
-The standard library lives under `stdlib/`. Modules are imported by path. The `std/` prefix is resolved under the stdlib root (default `stdlib`).
+The standard library lives under `stdlib/`. Modules are imported by path. The `std/` prefix is resolved under the stdlib root (default bundled auto-detect then `./stdlib`).
 
 ## Platform Support
 
@@ -34,7 +34,7 @@ Process control. `exit` terminates the program with an exit code. `rand`, `srand
 
 ## std/system
 
-Process spawning. `system(cmd: cstring) -> int32` runs a shell command via the C runtime. Use for invoking Methlang, nasm, gcc, git, curl, etc. On Windows invokes cmd.exe; on Linux invokes sh -c.
+Process spawning. `system(cmd: cstring) -> int32` runs a shell command via the C runtime. Use for invoking methlang, nasm, gcc, git, curl, etc. On Windows invokes cmd.exe; on Linux invokes sh -c.
 
 ## std/dir
 
@@ -107,7 +107,8 @@ pthread-based threading for Linux and macOS. Includes `pthread_create`, `pthread
 The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process`, and `std/net`. Use with `--prelude` to automatically import these modules without explicit `import` statements. The prelude is opt-in; it is not loaded by default. On Linux, `--prelude` will fail at link time because it pulls in `std/net` (Windows-only). Use explicit imports instead.
 
 ```bash
-Methlang --prelude main.meth -o main.s
+methlang --prelude main.meth -o main.s
 ```
+
 
 

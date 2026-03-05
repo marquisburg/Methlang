@@ -6,7 +6,7 @@ Methlang provides two mechanisms for bringing external content into your program
 
 The `import` directive loads another Methlang source file and makes its declarations available in the current program.
 
-```masm
+```meth
 import "std/io";
 import "path/to/module";
 import "shared_math";   // .meth added if omitted
@@ -24,7 +24,7 @@ Only **exported** declarations are visible when a module uses `export`. If a mod
 
 The `import_str` expression reads a file at compile time and embeds its contents as a `string` value. Use it for HTML, config files, or any text data.
 
-```masm
+```meth
 var PAGE_CONTENT: string = import_str "index.html";
 var config: string = import_str "config.txt";
 ```
@@ -41,16 +41,18 @@ Both `import` and `import_str` resolve paths in this order:
 
 1. **Absolute paths** — Used as-is. On Windows: `C:\path\to\file` or `\path\to\file`. On Unix: `/path/to/file`.
 
-2. **Stdlib** — If the path starts with `std/` (or `std\` on Windows), it is resolved under the stdlib root (default `stdlib`, overridable with `--stdlib`).
+2. **Stdlib** — If the path starts with `std/` (or `std\` on Windows), it is resolved under the stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`; overridable with `--stdlib`).
    - `import "std/io"` → `stdlib/std/io.meth`
    - `import_str "std/template.html"` → `stdlib/std/template.html`
+
+You do not need a project-local `stdlib/` directory for `std/...` imports in normal usage.
 
 3. **Relative to importing file** — Relative to the directory of the file containing the import.
    - In `web/server.meth`, `import_str "index.html"` → `web/index.html`
    - In `main.meth`, `import "lib/utils"` → `lib/utils.meth` (relative to `main.meth`’s directory)
 
 4. **`-I` directories** — Each directory added with `-I` is searched in command-line order.
-   - `Methlang -I lib -I vendor main.meth` — `lib` is searched before `vendor`.
+   - `methlang -I lib -I vendor main.meth` — `lib` is searched before `vendor`.
    - First match wins: if both `lib/foo.meth` and `vendor/foo.meth` exist, `lib/foo.meth` is used.
 
 5. **Fallback** — The path is tried as-is (e.g. current working directory).
@@ -64,13 +66,13 @@ On Windows, both `/` and `\` are accepted. Use `/` for portability across platfo
 | Option | Description |
 |--------|--------------|
 | `-I <dir>` | Add import search directory. Repeatable. |
-| `--stdlib <dir>` | Set stdlib root (default: `stdlib`). |
+| `--stdlib <dir>` | Set stdlib root (default: bundled auto-detect, then `./stdlib`). |
 | `-i <file>` | Input file (entry point). Imports are resolved from this file. |
 
 **Example:**
 
 ```bash
-Methlang -I tests/lib -I vendor main.meth -o output.s
+methlang -I tests/lib -I vendor main.meth -o output.s
 ```
 
 This allows `import "shared_math"` to resolve to `tests/lib/shared_math.meth` when `tests/lib` is on the search path.

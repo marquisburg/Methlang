@@ -10,48 +10,20 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg-color: #05050A;
-    --text-main: #E2E8F0;
-    --text-muted: #94A3B8;
-    --accent-1: #6366F1;
-    --accent-2: #8B5CF6;
-    --accent-3: #EC4899;
-    --accent-4: #10B981;
-    --glass-bg: rgba(255, 255, 255, 0.03);
-    --glass-border: rgba(255, 255, 255, 0.08);
-    --code-bg: #0D1117;
-    --success: #10B981;
-    --warning: #F59E0B;
-    --error: #EF4444;
+    --bg: #0d0d0d;
+    --bg-card: #1a1a1a;
+    --border: #2a2a2a;
+    --text: #e5e5e5;
+    --text-muted: #737373;
+    --accent: #3b82f6;
+    --code-bg: #141414;
+    --success: #22c55e;
+    --warning: #eab308;
+    --error: #ef4444;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  
-  body {
-    font-family: 'Inter', sans-serif;
-    background-color: var(--bg-color);
-    color: var(--text-main);
-    line-height: 1.6;
-    overflow-x: hidden;
-  }
-
-  /* Animated background mesh */
-  .bg-mesh {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    z-index: -1;
-    background: 
-      radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
-      radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.15) 0%, transparent 50%),
-      radial-gradient(circle at 50% 80%, rgba(139, 92, 246, 0.15) 0%, transparent 50%);
-    filter: blur(60px);
-    animation: pulse 15s ease-in-out infinite alternate;
-  }
-
-  @keyframes pulse {
-    0% { transform: scale(1); opacity: 0.8; }
-    100% { transform: scale(1.1); opacity: 1; }
-  }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
 
   .container {
     max-width: 1400px;
@@ -62,7 +34,6 @@
     gap: 2rem;
   }
 
-  /* Navigation */
   nav {
     grid-column: 1 / -1;
     display: flex;
@@ -70,27 +41,13 @@
     align-items: center;
     padding: 1rem 0;
     margin-bottom: 3rem;
-    border-bottom: 1px solid var(--glass-border);
+    border-bottom: 1px solid var(--border);
   }
 
-  .nav-links {
-    display: flex;
-    gap: 2rem;
-    align-items: center;
-  }
+  .nav-links { display: flex; gap: 2rem; align-items: center; }
+  .nav-link { color: var(--text-muted); text-decoration: none; font-weight: 500; }
+  .nav-link:hover { color: var(--accent); }
 
-  .nav-link {
-    color: var(--text-muted);
-    text-decoration: none;
-    font-weight: 500;
-    transition: color 0.3s ease;
-  }
-
-  .nav-link:hover {
-    color: var(--accent-1);
-  }
-
-  /* Sidebar */
   .sidebar {
     position: sticky;
     top: 2rem;
@@ -99,10 +56,7 @@
     overflow-y: auto;
   }
 
-  .sidebar-section {
-    margin-bottom: 2rem;
-  }
-
+  .sidebar-section { margin-bottom: 2rem; }
   .sidebar-title {
     font-size: 0.8rem;
     font-weight: 600;
@@ -112,332 +66,170 @@
     letter-spacing: 0.05em;
   }
 
-  .sidebar-links {
-    list-style: none;
-  }
-
+  .sidebar-links { list-style: none; }
   .sidebar-link {
     display: block;
     padding: 0.5rem 1rem;
     color: var(--text-muted);
     text-decoration: none;
-    border-radius: 8px;
-    transition: all 0.3s ease;
+    border-radius: 4px;
     margin-bottom: 0.25rem;
   }
+  .sidebar-link:hover { background: var(--bg-card); color: var(--text); }
+  .sidebar-link.active { background: var(--bg-card); color: var(--accent); border-left: 3px solid var(--accent); }
 
-  .sidebar-link:hover {
-    background: var(--glass-bg);
-    color: var(--text-main);
-  }
+  .main-content { }
+  .content-section { margin-bottom: 4rem; scroll-margin-top: 2rem; }
 
-  .sidebar-link.active {
-    background: rgba(99, 102, 241, 0.1);
-    color: var(--accent-1);
-    border-left: 3px solid var(--accent-1);
-  }
+  .section-title { font-size: 2.5rem; font-weight: 700; margin-bottom: 2rem; color: var(--text); }
+  .subsection-title { font-size: 1.8rem; font-weight: 600; margin-bottom: 1.5rem; color: var(--text); margin-top: 3rem; }
+  .sub-subsection-title { font-size: 1.4rem; font-weight: 600; margin-bottom: 1rem; color: var(--text); margin-top: 2rem; }
 
-  /* Main Content */
-  .main-content {
-    animation: fadeUp 0.8s ease-out;
-  }
+  p { color: var(--text-muted); margin-bottom: 1.5rem; line-height: 1.7; }
 
-  .content-section {
-    margin-bottom: 4rem;
-    scroll-margin-top: 2rem;
-  }
-
-  .section-title {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin-bottom: 2rem;
-    background: linear-gradient(135deg, var(--text-main) 0%, var(--accent-1) 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
-
-  .subsection-title {
-    font-size: 1.8rem;
-    font-weight: 600;
-    margin-bottom: 1.5rem;
-    color: white;
-    margin-top: 3rem;
-  }
-
-  .sub-subsection-title {
-    font-size: 1.4rem;
-    font-weight: 600;
-    margin-bottom: 1rem;
-    color: var(--text-main);
-    margin-top: 2rem;
-  }
-
-  /* Typography */
-  p {
-    color: var(--text-muted);
-    margin-bottom: 1.5rem;
-    line-height: 1.7;
-  }
-
-  /* Code Blocks */
   .code-block {
     background: var(--code-bg);
-    border: 1px solid #30363D;
-    border-radius: 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
     overflow: hidden;
     margin: 2rem 0;
   }
 
   .code-header {
-    background: #161B22;
+    background: var(--bg-card);
     padding: 0.75rem 1rem;
-    border-bottom: 1px solid #30363D;
+    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
 
-  .code-title {
-    color: var(--text-main);
-    font-weight: 500;
-    font-size: 0.9rem;
-  }
-
-  .code-actions {
-    display: flex;
-    gap: 0.5rem;
-  }
+  .code-title { color: var(--text); font-weight: 500; font-size: 0.9rem; }
+  .code-actions { display: flex; gap: 0.5rem; }
 
   .copy-btn {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
+    background: var(--bg);
+    border: 1px solid var(--border);
     color: var(--text-muted);
     padding: 0.3rem 0.8rem;
-    border-radius: 6px;
+    border-radius: 4px;
     font-size: 0.8rem;
     cursor: pointer;
-    transition: all 0.3s ease;
   }
+  .copy-btn:hover { color: var(--text); }
 
-  .copy-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-main);
-  }
+  pre { padding: 1.5rem; overflow-x: auto; margin: 0; }
+  code { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; line-height: 1.6; }
 
-  pre {
-    padding: 1.5rem;
-    overflow-x: auto;
-    margin: 0;
-  }
-
-  code {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.9rem;
-    line-height: 1.6;
-  }
-
-  /* Inline Code */
   p code, li code {
-    background: rgba(99, 102, 241, 0.1);
-    color: var(--accent-1);
+    background: var(--bg-card);
+    color: var(--accent);
     padding: 0.2rem 0.4rem;
     border-radius: 4px;
     font-size: 0.85rem;
   }
 
-  /* Syntax Highlighting */
-  .k { color: #FF7B72; font-weight: 500; } /* Keyword */
-  .f { color: #D2A8FF; font-weight: 500; } /* Function */
-  .s { color: #A5D6FF; } /* String */
-  .c { color: #8B949E; font-style: italic; } /* Comment */
-  .t { color: #FFA657; } /* Type */
-  .n { color: #79C0FF; } /* Number */
-  .o { color: #FF7B72; } /* Operator */
+  .k { color: #f87171; font-weight: 500; }
+  .f { color: #a78bfa; font-weight: 500; }
+  .s { color: #7dd3fc; }
+  .c { color: #737373; font-style: italic; }
+  .t { color: #fb923c; }
+  .n { color: #60a5fa; }
+  .o { color: #f87171; }
 
-  /* Lists */
-  ul, ol {
-    color: var(--text-muted);
-    margin-bottom: 1.5rem;
-    padding-left: 2rem;
-  }
+  ul, ol { color: var(--text-muted); margin-bottom: 1.5rem; padding-left: 2rem; }
+  li { margin-bottom: 0.5rem; }
 
-  li {
-    margin-bottom: 0.5rem;
-  }
+  .table-container { overflow-x: auto; margin: 2rem 0; }
+  table { width: 100%; border-collapse: collapse; background: var(--bg-card); border: 1px solid var(--border); }
+  th, td { padding: 1rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th { background: var(--bg); color: var(--text); font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
 
-  /* Tables */
-  .table-container {
-    overflow-x: auto;
-    margin: 2rem 0;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    border-radius: 12px;
-    overflow: hidden;
-  }
-
-  th, td {
-    padding: 1rem;
-    text-align: left;
-    border-bottom: 1px solid var(--glass-border);
-  }
-
-  th {
-    background: rgba(99, 102, 241, 0.1);
-    color: white;
-    font-weight: 600;
-  }
-
-  tr:last-child td {
-    border-bottom: none;
-  }
-
-  tr:hover {
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  /* Alert Boxes */
   .alert {
-    padding: 1.5rem;
-    border-radius: 12px;
-    margin: 2rem 0;
-    border-left: 4px solid;
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+    border: 1px solid var(--border);
+    border-left: 3px solid;
+    background: var(--bg-card);
   }
 
-  .alert-info {
-    background: rgba(99, 102, 241, 0.1);
-    border-color: var(--accent-1);
-  }
-
-  .alert-warning {
-    background: rgba(245, 158, 11, 0.1);
-    border-color: var(--warning);
-  }
-
-  .alert-success {
-    background: rgba(16, 185, 129, 0.1);
-    border-color: var(--success);
-  }
-
-  .alert-error {
-    background: rgba(239, 68, 68, 0.1);
-    border-color: var(--error);
-  }
+  .alert-info { border-left-color: var(--accent); }
+  .alert-warning { border-left-color: var(--warning); }
+  .alert-success { border-left-color: var(--success); }
+  .alert-error { border-left-color: var(--error); }
 
   .alert-title {
     font-weight: 600;
     margin-bottom: 0.5rem;
-    color: var(--text-main);
+    color: var(--text);
   }
 
-  /* Quick Start Card */
   .quickstart-card {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    border-radius: 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
     padding: 2rem;
     margin-bottom: 2rem;
-    backdrop-filter: blur(10px);
   }
 
-  .quickstart-title {
-    font-size: 1.3rem;
-    font-weight: 600;
-    color: white;
-    margin-bottom: 1.5rem;
-  }
+  .quickstart-title { font-size: 1.3rem; font-weight: 600; color: var(--text); margin-bottom: 1.5rem; }
 
   .step-list {
+    list-style: none;
     counter-reset: step;
+    padding-left: 0;
   }
 
   .step-item {
-    position: relative;
-    padding-left: 3rem;
-    margin-bottom: 2rem;
     counter-increment: step;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
   }
 
   .step-item::before {
-    content: counter(step);
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 2rem;
-    height: 2rem;
-    background: var(--accent-1);
-    color: white;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    content: counter(step) ".";
     font-weight: 600;
+    color: var(--accent);
+    flex-shrink: 0;
   }
 
-  /* Animations */
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+  .step-item p {
+    margin-bottom: 0;
   }
 
-  /* Responsive */
   @media (max-width: 1024px) {
-    .container {
-      grid-template-columns: 1fr;
-    }
-
-    .sidebar {
-      position: static;
-      max-height: none;
-      margin-bottom: 2rem;
-    }
-
-    nav {
-      flex-direction: column;
-      gap: 1rem;
-    }
+    .container { grid-template-columns: 1fr; }
+    .sidebar { position: static; max-height: none; margin-bottom: 2rem; }
+    nav { flex-direction: column; gap: 1rem; }
   }
 
   @media (max-width: 768px) {
-    .nav-links {
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .section-title {
-      font-size: 2rem;
-    }
-
-    .subsection-title {
-      font-size: 1.5rem;
-    }
+    .nav-links { flex-direction: column; gap: 1rem; }
+    .section-title { font-size: 2rem; }
+    .subsection-title { font-size: 1.5rem; }
   }
 </style>
 </head>
 <body>
-  <div class="bg-mesh"></div>
-  
   <div class="container">
     <nav>
       <div class="nav-links">
         <a href="/" class="nav-link">Home</a>
-        <a href="/demo" class="nav-link">Demo</a>
         <a href="/benchmarks" class="nav-link">Benchmarks</a>
         <a href="/docs" class="nav-link">Docs</a>
         <a href="/forum" class="nav-link">Forum</a>
       </div>
     </nav>
 
-    <!-- Sidebar Navigation -->
+    <!-- Sidebar Navigation (matches docs/LANGUAGE.md) -->
     <aside class="sidebar">
       <div class="sidebar-section">
         <div class="sidebar-title">Getting Started</div>
         <ul class="sidebar-links">
+          <li><a href="#overview" class="sidebar-link">Overview</a></li>
           <li><a href="#quickstart" class="sidebar-link">Quick Start</a></li>
           <li><a href="#installation" class="sidebar-link">Installation</a></li>
           <li><a href="#hello-world" class="sidebar-link">Hello World</a></li>
@@ -445,39 +237,35 @@
       </div>
 
       <div class="sidebar-section">
-        <div class="sidebar-title">Language Guide</div>
+        <div class="sidebar-title">Language Reference</div>
         <ul class="sidebar-links">
+          <li><a href="#lexical-structure" class="sidebar-link">Lexical Structure</a></li>
           <li><a href="#types" class="sidebar-link">Types</a></li>
-          <li><a href="#variables" class="sidebar-link">Variables</a></li>
-          <li><a href="#functions" class="sidebar-link">Functions</a></li>
+          <li><a href="#declarations" class="sidebar-link">Declarations</a></li>
+          <li><a href="#expressions" class="sidebar-link">Expressions</a></li>
           <li><a href="#control-flow" class="sidebar-link">Control Flow</a></li>
-          <li><a href="#structs" class="sidebar-link">Structs</a></li>
-          <li><a href="#enums" class="sidebar-link">Enums</a></li>
-        </ul>
-      </div>
-
-      <div class="sidebar-section">
-        <div class="sidebar-title">Advanced Topics</div>
-        <ul class="sidebar-links">
-          <li><a href="#memory-management" class="sidebar-link">Memory Management</a></li>
-          <li><a href="#c-interop" class="sidebar-link">C Interop</a></li>
           <li><a href="#modules" class="sidebar-link">Modules</a></li>
-          <li><a href="#compilation" class="sidebar-link">Compilation</a></li>
-        </ul>
-      </div>
-
-      <div class="sidebar-section">
-        <div class="sidebar-title">Reference</div>
-        <ul class="sidebar-links">
+          <li><a href="#imports" class="sidebar-link">Imports</a></li>
           <li><a href="#standard-library" class="sidebar-link">Standard Library</a></li>
-          <li><a href="#compiler-options" class="sidebar-link">Compiler Options</a></li>
-          <li><a href="#troubleshooting" class="sidebar-link">Troubleshooting</a></li>
+          <li><a href="#garbage-collector" class="sidebar-link">Garbage Collector</a></li>
+          <li><a href="#c-interop" class="sidebar-link">C Interoperability</a></li>
+          <li><a href="#compilation" class="sidebar-link">Compilation</a></li>
+          <li><a href="#quick-reference" class="sidebar-link">Quick Reference</a></li>
+          <li><a href="#known-limitations" class="sidebar-link">Known Limitations</a></li>
         </ul>
       </div>
     </aside>
 
     <!-- Main Content -->
     <main class="main-content">
+      <!-- Overview (from docs/LANGUAGE.md) -->
+      <section id="overview" class="content-section">
+        <h1 class="section-title">Methlang Language Reference</h1>
+        <p>Methlang is a typed, assembly-inspired language that compiles to x86-64 assembly. This reference covers the language and toolchain.</p>
+        <p>Methlang provides explicit typing (all variables and function parameters have declared types), generic functions and structs with compile-time monomorphization, structured control flow (<code>if</code>, <code>while</code>, <code>for</code>, <code>switch</code> with <code>break</code>/<code>continue</code>), structs and enums, pointers and arrays with bounds-aware indexing, C interop via <code>extern</code>, a module system for importing other <code>.meth</code> files, and garbage collection for heap allocation via <code>new</code> with conservative GC runtime.</p>
+        <p>The compiler emits NASM-compatible x86-64 assembly. Linking uses the platform C runtime and any required libraries (e.g. <code>ws2_32</code> for networking on Windows).</p>
+      </section>
+
       <!-- Quick Start -->
       <section id="quickstart" class="content-section">
         <h1 class="section-title">Quick Start</h1>
@@ -495,7 +283,7 @@
               <p><strong>Compile and run:</strong> Use the build pipeline to create an executable.</p>
             </div>
             <div class="step-item">
-              <p><strong>Explore:</strong> Check out the demo page and documentation for more examples.</p>
+              <p><strong>Explore:</strong> See the documentation for more examples.</p>
             </div>
           </div>
         </div>
@@ -568,6 +356,64 @@ hello.exe</code></pre>
         </div>
       </section>
 
+      <!-- Lexical Structure (from docs/lexical-structure.md) -->
+      <section id="lexical-structure" class="content-section">
+        <h2 class="subsection-title">Lexical Structure</h2>
+        <p>Low-level syntax: comments, identifiers, keywords, literals, and operators.</p>
+
+        <h3 class="sub-subsection-title">Comments</h3>
+        <p>Line comments start with <code>//</code> and extend to the end of the line. Block comments are not supported. The sequence <code>//</code> inside a string literal is not treated as a comment; it becomes part of the string. For example, <code>"http://example.com"</code> produces a string containing <code>http://example.com</code> with no comment.</p>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Comment examples</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="c">// Line comment: everything from // to end of line is ignored</span>
+<span class="k">var</span> x: <span class="t">int32</span> = <span class="n">42</span>;  <span class="c">// inline comment</span></code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Identifiers</h3>
+        <p>Identifiers name variables, functions, types, and other program elements. They must start with a letter or underscore, followed by any combination of letters, digits, or underscores. Case-sensitive. ASCII only; Unicode identifiers are not supported. The compiler interns identifier-like names for memory efficiency.</p>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Valid identifiers</div>
+          </div>
+          <pre><code>my_var
+_private
+Vector3</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Keywords</h3>
+        <p>Reserved words cannot be used as identifiers.</p>
+        <p><strong>Declarations:</strong> <code>import</code>, <code>extern</code>, <code>export</code>, <code>var</code>, <code>function</code>, <code>struct</code>, <code>enum</code>, <code>method</code>. <strong>Control flow:</strong> <code>if</code>, <code>else</code>, <code>while</code>, <code>for</code>, <code>switch</code>, <code>case</code>, <code>default</code>, <code>break</code>, <code>continue</code>, <code>return</code>. <strong>Other:</strong> <code>asm</code>, <code>this</code>, <code>new</code>. <strong>Types:</strong> <code>int8</code>, <code>int16</code>, <code>int32</code>, <code>int64</code>, <code>uint8</code>, <code>uint16</code>, <code>uint32</code>, <code>uint64</code>, <code>float32</code>, <code>float64</code>, <code>string</code>.</p>
+        <p><code>this</code> is only valid inside method bodies; it refers to the receiver. <code>new</code> is an expression keyword (e.g. <code>var p: T* = new T</code>); it cannot start a statement by itself. <code>cstring</code> is a type alias, not a keyword; it is available as a built-in name.</p>
+
+        <h3 class="sub-subsection-title">Numeric Literals</h3>
+        <p>Decimal: <code>42</code>, <code>0</code>. Hexadecimal: <code>0x1A</code>, <code>0xFF</code>, <code>0Xdead</code>. Binary: <code>0b1010</code>, <code>0B1111</code>. Floating-point: <code>3.14</code>, <code>0.5</code>, <code>1e-3</code>.</p>
+        <p>A leading minus is not part of the literal. The expression <code>-17</code> is parsed as the unary minus operator applied to the literal <code>17</code>. So <code>var x: int8 = -128</code> is valid: the literal <code>128</code> is negated to <code>-128</code>, which fits in <code>int8</code>.</p>
+        <p>Underscores in numeric literals (e.g. <code>1_000_000</code>) are not supported. Use <code>1000000</code> instead.</p>
+
+        <h3 class="sub-subsection-title">String Literals</h3>
+        <p>Strings are enclosed in double quotes. Supported escapes: <code>\n</code> (newline), <code>\t</code> (tab), <code>\r</code> (carriage return), <code>\\</code> (backslash), <code>\"</code> (double quote), <code>\0</code> (null byte). Unknown escape sequences are preserved literally: the backslash and the following character are both stored. For example, <code>"\q"</code> produces the two characters <code>\</code> and <code>q</code>. Multiline strings are supported; a newline inside the quotes is stored as a literal newline.</p>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">String example</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">var</span> msg: <span class="t">string</span> = <span class="s">"Hello\nWorld\t\"quoted\""</span>;</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Operators and Punctuation</h3>
+        <p>Assignment <code>=</code>. Comparison <code>==</code>, <code>!=</code>, <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code>. Logical <code>&amp;&amp;</code>, <code>||</code>. Arithmetic <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>. Unary <code>-</code> (negation), <code>*</code> (dereference), <code>&amp;</code> (address-of). Member access <code>.</code>. Arrow <code>-&gt;</code>. Brackets <code>( )</code>, <code>{ }</code>, <code>[ ]</code>. Delimiters <code>:</code>, <code>;</code>, <code>,</code>.</p>
+        <p><strong>Operator precedence</strong> (highest first): member access (<code>.</code>), multiplicative (<code>*</code>, <code>/</code>, <code>%</code>), additive (<code>+</code>, <code>-</code>), relational (<code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>), equality (<code>==</code>, <code>!=</code>), logical AND (<code>&amp;&amp;</code>), logical OR (<code>||</code>). So <code>a + b * c</code> parses as <code>a + (b * c)</code>. Use parentheses to override.</p>
+        <p><strong>Bitwise:</strong> <code>&amp;</code>, <code>|</code>, <code>^</code>, <code>~</code>, <code>&lt;&lt;</code>, <code>&gt;&gt;</code> for integer types. Unary <code>&amp;</code> is address-of; binary <code>&amp;</code> is bitwise AND. Context disambiguates.</p>
+        <p><strong>Arrow <code>-&gt;</code>:</strong> In function signatures it denotes the return type: <code>function f() -&gt; int32</code>. In expressions it denotes pointer field access: <code>ptr-&gt;field</code>.</p>
+      </section>
+
       <!-- Types -->
       <section id="types" class="content-section">
         <h2 class="subsection-title">Types</h2>
@@ -629,9 +475,12 @@ hello.exe</code></pre>
         </div>
       </section>
 
-      <!-- Variables -->
-      <section id="variables" class="content-section">
-        <h2 class="subsection-title">Variables</h2>
+      <!-- Declarations (Variables + Functions, from docs/declarations.md) -->
+      <section id="declarations" class="content-section">
+        <h2 class="subsection-title">Declarations</h2>
+        <p>Declarations introduce variables, functions, types, and other program elements. All declarations appear at top level or within struct bodies (for methods). A symbol must be declared before use, except for forward declarations.</p>
+
+        <h3 class="sub-subsection-title">Variables</h3>
         
         <p>Variables in Methlang are declared with the <code>var</code> keyword and must be explicitly typed.</p>
 
@@ -657,14 +506,11 @@ result = <span class="n">100</span>;
         </div>
 
         <div class="alert alert-warning">
-          <div class="alert-title">⚠️ Initialization Required</div>
+          <div class="alert-title">Initialization Required</div>
           <p>Local variables must be initialized before their first use. The compiler will error if you try to read an uninitialized variable.</p>
         </div>
-      </section>
 
-      <!-- Functions -->
-      <section id="functions" class="content-section">
-        <h2 class="subsection-title">Functions</h2>
+        <h3 class="sub-subsection-title">Functions</h3>
         
         <p>Functions are the primary building blocks in Methlang. They have explicit parameter types and return types.</p>
 
@@ -694,6 +540,14 @@ result = <span class="n">100</span>;
   <span class="f">println</span>(msg);
 }</code></pre>
         </div>
+      </section>
+
+      <!-- Expressions (from docs/expressions.md) -->
+      <section id="expressions" class="content-section">
+        <h2 class="subsection-title">Expressions</h2>
+        <p>Expressions produce values. Operator precedence (highest first): member access (<code>.</code>, <code>-&gt;</code>), unary (<code>-</code>, <code>!</code>, <code>*</code>, <code>&amp;</code>), multiplicative, additive, relational, equality, bitwise AND/XOR/OR, logical AND, logical OR.</p>
+        <p>Arithmetic: <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>. Comparison: <code>==</code>, <code>!=</code>, <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code>. Logical: <code>&amp;&amp;</code>, <code>||</code>. Bitwise: <code>&amp;</code>, <code>|</code>, <code>^</code>, <code>~</code>, <code>&lt;&lt;</code>, <code>&gt;&gt;</code>.</p>
+        <p>Unary: negation <code>-x</code>, logical NOT <code>!x</code>, dereference <code>*p</code>, address-of <code>&amp;x</code>. Use <code>ptr[i]</code> for indexing; <code>ptr + n</code> is not supported.</p>
       </section>
 
       <!-- Control Flow -->
@@ -804,7 +658,7 @@ result = <span class="n">100</span>;
         </div>
 
         <div class="alert alert-info">
-          <div class="alert-title">ℹ️ LIFO Ordering</div>
+          <div class="alert-title">LIFO Ordering</div>
           <p>Deferred statements execute in reverse order of declaration. The most recently deferred statement executes first.</p>
         </div>
 
@@ -923,7 +777,7 @@ result = <span class="n">100</span>;
 
         <h3 class="sub-subsection-title">Enum Properties</h3>
         <div class="alert alert-info">
-          <div class="alert-title">ℹ️ Enum Characteristics</div>
+          <div class="alert-title">Enum Characteristics</div>
           <ul>
             <li><strong>Underlying Type:</strong> Enums use <code>int64</code> as the underlying representation (8 bytes, aligned to 8)</li>
             <li><strong>Auto-increment:</strong> Variants without explicit values continue from previous variant (0 if first)</li>
@@ -991,12 +845,12 @@ result = <span class="n">100</span>;
 
         <h3 class="sub-subsection-title">Module Resolution</h3>
         <div class="alert alert-info">
-          <div class="alert-title">ℹ️ Import Search Order</div>
+          <div class="alert-title">Import Search Order</div>
           <p>The compiler resolves imports in this order:</p>
           <ol>
             <li><strong>Relative to current file:</strong> <code>"utils/helpers"</code> looks for <code>utils/helpers.meth</code></li>
             <li><strong>Include directories:</strong> Paths added with <code>-I</code> flag</li>
-            <li><strong>Standard library:</strong> <code>std/</code> prefix searches in stdlib root</li>
+            <li><strong>Standard library:</strong> <code>std/</code> prefix searches in the bundled stdlib (shipped with the compiler)</li>
           </ol>
         </div>
 
@@ -1071,7 +925,7 @@ result = <span class="n">100</span>;
 
         <h3 class="sub-subsection-title">Module Best Practices</h3>
         <div class="alert alert-warning">
-          <div class="alert-title">⚠️ Module Guidelines</div>
+          <div class="alert-title">Module Guidelines</div>
           <ul>
             <li><strong>Single Responsibility:</strong> Each module should have a clear, focused purpose</li>
             <li><strong>Explicit Exports:</strong> Use <code>export</code> keyword for functions/types meant to be used externally</li>
@@ -1082,16 +936,39 @@ result = <span class="n">100</span>;
         </div>
       </section>
 
-      <!-- Memory Management -->
-      <section id="memory-management" class="content-section">
-        <h2 class="subsection-title">Memory Management</h2>
-        
-        <p>Methlang offers both manual memory management and optional garbage collection.</p>
+      <!-- Imports (from docs/imports.md) -->
+      <section id="imports" class="content-section">
+        <h2 class="subsection-title">Imports</h2>
+        <p>Methlang provides <strong>module imports</strong> (<code>import</code>) and <strong>embedded file imports</strong> (<code>import_str</code>). Both use the same path resolution rules.</p>
+        <h3 class="sub-subsection-title">Module Import</h3>
+        <p><code>import "std/io"</code> loads another Methlang source file. Paths use forward or backslashes. If no extension, <code>.meth</code> is appended. Imported declarations are flattened into the global scope. Only <code>export</code>ed declarations are visible when a module uses <code>export</code>.</p>
+        <h3 class="sub-subsection-title">Embedded File Import</h3>
+        <p><code>import_str "index.html"</code> reads a file at compile time and embeds its contents as a <code>string</code>. Use for HTML, config files, or any text. No automatic extension. Result has <code>.chars</code> and <code>.length</code>.</p>
+        <h3 class="sub-subsection-title">Path Resolution</h3>
+        <p>1. Absolute paths used as-is. 2. Paths starting with <code>std/</code> resolve under the stdlib root (bundled with the compiler by default; override with <code>--stdlib</code> for a custom stdlib). 3. Relative paths are relative to the importing file's directory. 4. <code>-I</code> adds import search directories.</p>
+      </section>
 
-        <h3 class="sub-subsection-title">Stack Allocation</h3>
-        <p>Most variables are allocated on the stack and automatically cleaned up when they go out of scope.</p>
+      <!-- Garbage Collector (from docs/garbage-collector.md) -->
+      <section id="garbage-collector" class="content-section">
+        <h2 class="subsection-title">Garbage Collector</h2>
+        <p>Methlang provides an optional conservative mark-and-sweep garbage collector. Programs that use <code>new</code> must link the GC runtime (<code>gc.c</code>). Programs using only stack allocation and C <code>malloc</code> do not need it.</p>
+        <p>Use <code>new</code> for managed heap allocation (struct instances, dynamic data). Use C <code>malloc</code> for unmanaged memory (I/O buffers, C interop).</p>
 
-        <h3 class="sub-subsection-title">Manual Memory Management</h3>
+        <h3 class="sub-subsection-title">Linking the GC</h3>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Build with GC</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code>methlang main.meth -o main.s
+nasm -f win64 main.s -o main.o
+gcc -c src/runtime/gc.c -o gc.o -Isrc
+gcc main.o gc.o -o main</code></pre>
+        </div>
+
+        <h3 class="sub-subsection-title">Manual Memory (malloc)</h3>
         <div class="code-block">
           <div class="code-header">
             <div class="code-title">Using C malloc/free</div>
@@ -1119,7 +996,7 @@ result = <span class="n">100</span>;
 
         <h3 class="sub-subsection-title">Garbage Collection</h3>
         <div class="alert alert-info">
-          <div class="alert-title">ℹ️ GC Optional</div>
+          <div class="alert-title">GC Optional</div>
           <p>When you link the GC runtime, you can use <code>new T</code> for automatic memory management. The GC uses conservative mark-and-sweep collection.</p>
         </div>
 
@@ -1178,57 +1055,33 @@ result = <span class="n">100</span>;
         </div>
       </section>
 
-      <!-- Compilation -->
+      <!-- Compilation (from docs/compilation.md) -->
       <section id="compilation" class="content-section">
         <h2 class="subsection-title">Compilation</h2>
-        
-        <p>Methlang compiles to x86-64 NASM assembly, which is then assembled and linked to create executables.</p>
+        <p>Usage: <code>methlang [options] &lt;input.meth&gt;</code>. The input file is the main source. Imports are resolved relative to it. Default output is <code>output.s</code>.</p>
+
+        <div class="alert alert-info">
+          <div class="alert-title">Standard library</div>
+          <p>You do <strong>not</strong> need a <code>stdlib/</code> folder in your project. The compiler uses the bundled stdlib that ships with it by default. Use <code>--stdlib &lt;dir&gt;</code> only when you intentionally want a custom stdlib.</p>
+        </div>
+
+        <h3 class="sub-subsection-title">Options</h3>
+        <p><code>-o &lt;file&gt;</code> output assembly. <code>-i &lt;file&gt;</code> input file. <code>-I &lt;dir&gt;</code> add import search directory (repeatable). <code>--stdlib &lt;dir&gt;</code> use a custom stdlib (default: bundled stdlib). <code>--prelude</code> auto-import std/prelude. <code>-d</code>/<code>--debug</code> debug mode. <code>-g</code>/<code>--debug-symbols</code> generate debug symbols. <code>-l</code>/<code>--line-mapping</code> source line mapping. <code>-O</code>/<code>--optimize</code> enable optimizations. <code>-r</code>/<code>--release</code> enables <code>-O</code>, strips comments, removes unreachable functions, disables runtime null/bounds checks.</p>
+
+        <h3 class="sub-subsection-title">Compilation Pipeline</h3>
+        <p>1. Lexing 2. Parsing 3. Import resolution 4. Monomorphization 5. Type checking 6. IR lowering 7. Optimization (optional) 8. Code generation</p>
 
         <h3 class="sub-subsection-title">Build Pipeline</h3>
         <div class="step-list">
           <div class="step-item">
-            <p><strong>Compile to assembly:</strong> <code>Methlang input.meth -o output.s</code></p>
+            <p><strong>Compile:</strong> <code>methlang main.meth -o main.s</code></p>
           </div>
           <div class="step-item">
-            <p><strong>Assemble to object:</strong> <code>nasm -f win64 output.s -o output.o</code></p>
+            <p><strong>Assemble:</strong> <code>nasm -f win64 main.s -o main.o</code> (or <code>-f elf64</code> on Linux)</p>
           </div>
           <div class="step-item">
-            <p><strong>Link to executable:</strong> <code>gcc output.o -o output.exe</code></p>
+            <p><strong>Link:</strong> <code>gcc -nostartfiles main.o gc.o -o main -lkernel32</code>. Use <code>-nostartfiles</code> so Methlang's entry point is used. If using <code>new</code>, compile and link <code>src/runtime/gc.c</code>.</p>
           </div>
-        </div>
-
-        <h3 class="sub-subsection-title">Compiler Options</h3>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Option</th>
-                <th>Description</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>-o file</code></td>
-                <td>Output assembly file</td>
-              </tr>
-              <tr>
-                <td><code>-O</code></td>
-                <td>Enable optimizations</td>
-              </tr>
-              <tr>
-                <td><code>-d</code></td>
-                <td>Debug mode</td>
-              </tr>
-              <tr>
-                <td><code>-g</code></td>
-                <td>Generate debug symbols</td>
-              </tr>
-              <tr>
-                <td><code>-I dir</code></td>
-                <td>Add import search directory</td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </section>
 
@@ -1304,109 +1157,73 @@ result = <span class="n">100</span>;
         </div>
       </section>
 
-      <!-- Compiler Options -->
-      <section id="compiler-options" class="content-section">
-        <h2 class="subsection-title">Compiler Options</h2>
-        
-        <p>The Methlang compiler provides various options for controlling compilation behavior and output.</p>
-
-        <h3 class="sub-subsection-title">Command Line Options</h3>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Option</th>
-                <th>Long Form</th>
-                <th>Description</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><code>-o file</code></td>
-                <td><code>--output</code></td>
-                <td>Specify output assembly file (default: output.s)</td>
-              </tr>
-              <tr>
-                <td><code>-i file</code></td>
-                <td><code>--input</code></td>
-                <td>Specify input file (alternative to positional argument)</td>
-              </tr>
-              <tr>
-                <td><code>-I dir</code></td>
-                <td><code>--include</code></td>
-                <td>Add directory to import search path (repeatable)</td>
-              </tr>
-              <tr>
-                <td><code>--stdlib dir</code></td>
-                <td><code>--stdlib</code></td>
-                <td>Set standard library root (default: stdlib)</td>
-              </tr>
-              <tr>
-                <td><code>--prelude</code></td>
-                <td><code>--prelude</code></td>
-                <td>Auto-import std/prelude (includes std/io, std/mem, etc.)</td>
-              </tr>
-              <tr>
-                <td><code>-O</code></td>
-                <td><code>--optimize</code></td>
-                <td>Enable compiler optimizations</td>
-              </tr>
-              <tr>
-                <td><code>-d</code></td>
-                <td><code>--debug</code></td>
-                <td>Enable debug mode (generates IR dump)</td>
-              </tr>
-              <tr>
-                <td><code>-g</code></td>
-                <td><code>--debug-symbols</code></td>
-                <td>Generate debug symbols for debugging</td>
-              </tr>
-              <tr>
-                <td><code>-l</code></td>
-                <td><code>--line-mapping</code></td>
-                <td>Generate source line mapping information</td>
-              </tr>
-              <tr>
-                <td><code>-h</code></td>
-                <td><code>--help</code></td>
-                <td>Print usage information and exit</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h3 class="sub-subsection-title">Example Usage</h3>
+      <!-- Quick Reference (from docs/quick-reference.md) -->
+      <section id="quick-reference" class="content-section">
+        <h2 class="subsection-title">Quick Reference</h2>
+        <p>Short examples for common use cases.</p>
         <div class="code-block">
           <div class="code-header">
-            <div class="code-title">Compiler command examples</div>
+            <div class="code-title">Minimal</div>
             <div class="code-actions">
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
           </div>
-          <pre><code><span class="c">// Basic compilation</span>
-Methlang main.meth -o main.s
+          <pre><code><span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
+        </div>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">With imports</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">import</span> <span class="s">"std/io"</span>;
 
-<span class="c">// With optimizations and debug symbols</span>
-Methlang main.meth -O -g -o main.s
+<span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="f">println</span>(<span class="s">"Hello, Methlang!"</span>);
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
+        </div>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">With extern</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code><span class="k">extern function</span> <span class="f">puts</span>(msg: <span class="t">cstring</span>) -> <span class="t">int32</span> = <span class="s">"puts"</span>;
 
-<span class="c">// With custom include paths</span>
-Methlang main.meth -I ./include -I ../libs -o main.s
-
-<span class="c">// Using prelude (auto-imports common modules)</span>
-Methlang --prelude main.meth -o main.s</code></pre>
+<span class="k">function</span> <span class="f">main</span>() -> <span class="t">int32</span> {
+  <span class="f">puts</span>(<span class="s">"Hello"</span>);
+  <span class="k">return</span> <span class="n">0</span>;
+}</code></pre>
         </div>
       </section>
 
-      <!-- Troubleshooting -->
-      <section id="troubleshooting" class="content-section">
-        <h2 class="subsection-title">Troubleshooting</h2>
-        
-        <p>Common issues and their solutions when working with Methlang.</p>
+      <!-- Known Limitations (from docs/known-limitations.md) -->
+      <section id="known-limitations" class="content-section">
+        <h2 class="subsection-title">Known Limitations</h2>
+        <p>Current limitations of the Methlang language and compiler.</p>
+        <ul>
+          <li>No block comments. Only line comments (<code>//</code>).</li>
+          <li>No top-level constant expressions. Use functions that return constant values.</li>
+          <li>Generic type parameters are unconstrained. No trait bounds.</li>
+          <li><code>switch</code> case values must be compile-time constant integers. No range cases.</li>
+          <li>No compound assignment (<code>+=</code>, <code>-=</code>). Use <code>x = x + 1</code>.</li>
+          <li>No labeled <code>break</code> or <code>continue</code>.</li>
+          <li>No pointer arithmetic with <code>ptr + n</code>. Use indexing <code>ptr[i]</code>.</li>
+          <li>Runtime null/bounds checks disabled in <code>--release</code>.</li>
+          <li>Deferred calls capture by reference, not by value.</li>
+          <li>No conditional imports.</li>
+          <li><code>std/net</code> and web server are Windows-only (Winsock2).</li>
+        </ul>
 
-        <h3 class="sub-subsection-title">Compilation Errors</h3>
+        <h3 class="sub-subsection-title">Common Issues</h3>
         
         <div class="alert alert-error">
-          <div class="alert-title">❌ "Undefined reference to `gc_alloc'"</div>
+          <div class="alert-title">"Undefined reference to `gc_alloc'"</div>
           <p><strong>Cause:</strong> Using <code>new</code> expressions without linking the GC runtime.</p>
           <p><strong>Solution:</strong> Compile and link <code>src/runtime/gc.c</code> with your program:</p>
           <div class="code-block">
@@ -1422,13 +1239,13 @@ gcc main.o gc.o -o main</code></pre>
         </div>
 
         <div class="alert alert-error">
-          <div class="alert-title">❌ "Cannot open output file: Permission denied"</div>
+          <div class="alert-title">"Cannot open output file: Permission denied"</div>
           <p><strong>Cause:</strong> The output executable is currently running or locked.</p>
           <p><strong>Solution:</strong> Stop any running instances of the program before rebuilding.</p>
         </div>
 
         <div class="alert alert-warning">
-          <div class="alert-title">⚠️ "Use before initialization" error</div>
+          <div class="alert-title">"Use before initialization" error</div>
           <p><strong>Cause:</strong> Reading from a local variable before assigning it a value.</p>
           <p><strong>Solution:</strong> Always initialize variables before use:</p>
           <div class="code-block">
@@ -1451,13 +1268,13 @@ gcc main.o gc.o -o main</code></pre>
         <h3 class="sub-subsection-title">Runtime Issues</h3>
         
         <div class="alert alert-warning">
-          <div class="alert-title">⚠️ Program crashes on startup</div>
+          <div class="alert-title">Program crashes on startup</div>
           <p><strong>Cause:</strong> Missing GC initialization when using <code>new</code> expressions.</p>
           <p><strong>Solution:</strong> Ensure the entry point calls <code>gc_init()</code> (handled automatically when linking with GC runtime).</p>
         </div>
 
         <div class="alert alert-info">
-          <div class="alert-title">ℹ️ Performance slower than expected</div>
+          <div class="alert-title">Performance slower than expected</div>
           <p><strong>Possible causes:</strong></p>
           <ul>
             <li>Not using optimization flag (<code>-O</code>)</li>
@@ -1470,7 +1287,7 @@ gcc main.o gc.o -o main</code></pre>
         <h3 class="sub-subsection-title">Getting Help</h3>
         <p>If you encounter issues not covered here:</p>
         <ul>
-          <li>Check the <a href="/forum" style="color: var(--accent-1);">Community Forum</a> for help from other users</li>
+          <li>Check the <a href="/forum" style="color: var(--accent);">Community Forum</a> for help from other users</li>
           <li>Review the language reference documentation</li>
           <li>Try compiling with <code>-d</code> flag to see generated IR</li>
           <li>Start with minimal examples and gradually add complexity</li>

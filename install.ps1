@@ -13,15 +13,14 @@ if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 }
 
-# Ensure destination structured paths
-if (-not (Test-Path "$InstallDir\src")) {
-    New-Item -ItemType Directory -Force -Path "$InstallDir\src" | Out-Null
+if (-not (Test-Path "$InstallDir\runtime")) {
+    New-Item -ItemType Directory -Force -Path "$InstallDir\runtime" | Out-Null
 }
 
 Write-Host "Copying files..."
 Copy-Item "bin" "$InstallDir\" -Recurse -Force
 Copy-Item "stdlib" "$InstallDir\" -Recurse -Force
-Copy-Item "src\runtime" "$InstallDir\src\" -Recurse -Force
+Copy-Item "src\runtime\*" "$InstallDir\runtime\" -Recurse -Force
 Copy-Item "methicon.ico" "$InstallDir\" -Force
 
 if (Test-Path "installer\meth-build.bat") {

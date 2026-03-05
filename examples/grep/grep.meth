@@ -1,0 +1,200 @@
+// Methlang Grep benchmark
+//
+// Counts lines containing "ERROR" in a 256 KB log buffer, 200 passes.
+// Targets: malloc, nested loops, substring search, indexed loads, CSE across blocks.
+//
+// Build: build.bat
+// Run: grep.exe
+
+import "std/io";
+import "std/mem";
+
+extern function GetTickCount64() -> uint64 = "GetTickCount64";
+
+var pattern: string = "ERROR";
+var pattern_len: int64 = 5;
+
+// "ERROR" as little-endian uint64 (low 5 bytes): E=0x45 R=0x52 R=0x52 O=0x4F R=0x52
+var pattern_u64: uint64 = 0x524F525245;
+
+// Count lines in buf[0..len-1] that contain the pattern.
+//
+// Overhead sources:
+// 1. 262K indexed loads (buf[i]) per pass - sequential scan, one per byte
+// 2. ~4766 pattern compares - now inline 64-bit load (no memcmp call)
+// 3. Branch pressure - newline rare (~1/55), c==69 rare (~1.8%); mispredicts
+// 4. i+pattern_len<=len - evaluated every non-newline byte (CSE should hoist)
+// 5. Use c==69 not buf[i]==69 to avoid redundant load (we already have c)
+function grep_count(buf: cstring, len: int64) -> int64 {
+  var count: int64 = 0;
+  var i: int64 = 0;
+  var found: int32 = 0;
+  while (i < len) {
+    var c: int32 = buf[i];
+    if (c == 10) {
+      if (found != 0) {
+        count = count + 1;
+      }
+      found = 0;
+    } else {
+      if (found == 0 && i + pattern_len <= len && c == 69) {
+        if (i + 8 <= len) {
+          var p: uint64* = (uint64*)(buf + i);
+          var val: uint64 = *p;
+          if ((val & 0xFFFFFFFFFF) == pattern_u64) {
+            found = 1;
+          }
+        } else {
+          if (memcmp(buf + i, cstr(pattern), pattern_len) == 0) {
+            found = 1;
+          }
+        }
+      }
+    }
+    i = i + 1;
+  }
+  if (found != 0) {
+    count = count + 1;
+  }
+  return count;
+}
+
+// Same loop structure but skips memcmp - measures scan-only overhead.
+// Sets found=1 on 'E' to match full version's short-circuit (skip rest of line).
+function grep_count_scan_only(buf: cstring, len: int64) -> int64 {
+  var i: int64 = 0;
+  var found: int32 = 0;
+  while (i < len) {
+    var c: int32 = buf[i];
+    if (c == 10) {
+      found = 0;
+    } else {
+      if (found == 0 && i + pattern_len <= len && c == 69) {
+        found = 1;
+      }
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+function main() -> int32 {
+  var buf_size: int64 = 262144;
+
+  var t_malloc_0: uint64 = GetTickCount64();
+  var buf: cstring = malloc(buf_size);
+  var t_malloc_1: uint64 = GetTickCount64();
+  if (buf == 0) {
+    println(cstr("malloc failed"));
+    return 1;
+  }
+
+  // Repeating log block: 1 ERROR line + 4 INFO lines = 55 bytes, 4766 matches in 256 KB
+  // INFO first so trailing partial block doesn't add an extra match
+  var block: string = "INFO 12345\nERROR 12345\nINFO 12345\nINFO 12345\nINFO 1234\n";
+  var block_len: int64 = 55;
+  var t_fill_0: uint64 = GetTickCount64();
+  var pos: int64 = 0;
+  while (pos < buf_size) {
+    var chunk: int64 = block_len;
+    if (pos + chunk > buf_size) {
+      chunk = buf_size - pos;
+    }
+    memcpy(buf + pos, cstr(block), chunk);
+    pos = pos + chunk;
+  }
+  var t_fill_1: uint64 = GetTickCount64();
+
+  var t_grep1_0: uint64 = GetTickCount64();
+  var matches: int64 = grep_count(buf, buf_size);
+  var t_grep1_1: uint64 = GetTickCount64();
+
+  var passes: int32 = 200;
+  var t_bench_0: uint64 = GetTickCount64();
+  var total: int64 = 0;
+  var p: int32 = 0;
+  while (p < passes) {
+    total = total + grep_count(buf, buf_size);
+    p = p + 1;
+  }
+  var t_bench_1: uint64 = GetTickCount64();
+
+  var t_scan_0: uint64 = GetTickCount64();
+  p = 0;
+  while (p < passes) {
+    grep_count_scan_only(buf, buf_size);
+    p = p + 1;
+  }
+  var t_scan_1: uint64 = GetTickCount64();
+
+  var t_out_0: uint64 = GetTickCount64();
+  var header: string = "Grep: count lines containing ERROR (256 KB log buffer)";
+  println(cstr(header));
+  var result_str: string = "Matches = ";
+  print(cstr(result_str));
+  println_int(matches);
+  var bench_header: string = "Benchmark: 200 passes (grep_count)";
+  println(cstr(bench_header));
+  var sum_str: string = "Total matches = ";
+  print(cstr(sum_str));
+  println_int(total);
+  var time_str: string = "Time: ";
+  print(cstr(time_str));
+  print_int(t_bench_1 - t_bench_0);
+  println(cstr(" ms"));
+  var per_pass: uint64 = (t_bench_1 - t_bench_0) * 1000 / passes;
+  var us_str: string = "Per pass: ~";
+  print(cstr(us_str));
+  print_int(per_pass);
+  println(cstr(" us"));
+  var t_out_1: uint64 = GetTickCount64();
+
+  println(cstr(""));
+  println(cstr("Debug: call timings (ms)"));
+  var dbg_malloc: string = "  malloc: ";
+  print(cstr(dbg_malloc));
+  println_int(t_malloc_1 - t_malloc_0);
+  var dbg_fill: string = "  buffer fill (memcpy loop): ";
+  print(cstr(dbg_fill));
+  println_int(t_fill_1 - t_fill_0);
+  var dbg_grep1: string = "  grep_count x1: ";
+  print(cstr(dbg_grep1));
+  println_int(t_grep1_1 - t_grep1_0);
+  var dbg_bench: string = "  grep_count x200 (full): ";
+  print(cstr(dbg_bench));
+  println_int(t_bench_1 - t_bench_0);
+  var dbg_scan: string = "  grep_count_scan_only x200 (loop, no memcmp): ";
+  print(cstr(dbg_scan));
+  println_int(t_scan_1 - t_scan_0);
+  var scan_ms: uint64 = t_scan_1 - t_scan_0;
+  var full_ms: uint64 = t_bench_1 - t_bench_0;
+  var memcmp_ms: uint64 = 0;
+  if (full_ms > scan_ms) {
+    memcmp_ms = full_ms - scan_ms;
+  }
+  var dbg_memcmp: string = "  inferred memcmp time: ";
+  print(cstr(dbg_memcmp));
+  println_int(memcmp_ms);
+  var dbg_out: string = "  output (print/println): ";
+  print(cstr(dbg_out));
+  println_int(t_out_1 - t_out_0);
+  println(cstr(""));
+  var dbg_per_full: string = "  grep_count full: ";
+  print(cstr(dbg_per_full));
+  print_int((t_bench_1 - t_bench_0) * 1000 / passes);
+  println(cstr(" us/pass"));
+  var dbg_per_scan: string = "  grep_count scan_only: ";
+  print(cstr(dbg_per_scan));
+  print_int((t_scan_1 - t_scan_0) * 1000 / passes);
+  println(cstr(" us/pass"));
+  var dbg_per_memcmp: string = "  inferred memcmp: ";
+  print(cstr(dbg_per_memcmp));
+  print_int(memcmp_ms * 1000 / passes);
+  println(cstr(" us/pass (~4766 memcmp calls)"));
+  println(cstr(""));
+  var dbg_note: string = "  full = inline 64-bit load+compare at 'E' (no memcmp); scan_only = loop only";
+  println(cstr(dbg_note));
+
+  free(buf);
+  return 0;
+}

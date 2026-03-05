@@ -10,6 +10,158 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <sys/stat.h>
+#else
+#include <limits.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+#endif
+
+static int directory_exists(const char *path) {
+  if (!path || path[0] == '\0') {
+    return 0;
+  }
+#ifdef _WIN32
+  struct _stat st;
+  return _stat(path, &st) == 0 && (st.st_mode & _S_IFDIR) != 0;
+#else
+  struct stat st;
+  return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+#endif
+}
+
+static char *join_paths(const char *left, const char *right) {
+  if (!left || !right) {
+    return NULL;
+  }
+
+  size_t left_len = strlen(left);
+  size_t right_len = strlen(right);
+  int has_sep = left_len > 0 &&
+                (left[left_len - 1] == '/' || left[left_len - 1] == '\\');
+  size_t total = left_len + right_len + (has_sep ? 1 : 2);
+
+  char *joined = malloc(total);
+  if (!joined) {
+    return NULL;
+  }
+
+  memcpy(joined, left, left_len);
+  if (!has_sep) {
+#ifdef _WIN32
+    joined[left_len++] = '\\';
+#else
+    joined[left_len++] = '/';
+#endif
+  }
+  memcpy(joined + left_len, right, right_len);
+  joined[left_len + right_len] = '\0';
+  return joined;
+}
+
+static char *directory_from_path(const char *path) {
+  if (!path || path[0] == '\0') {
+    return NULL;
+  }
+
+  const char *last_slash = strrchr(path, '/');
+  const char *last_backslash = strrchr(path, '\\');
+  const char *last_sep =
+      (last_slash > last_backslash) ? last_slash : last_backslash;
+  if (!last_sep) {
+    return NULL;
+  }
+
+  size_t len = (size_t)(last_sep - path);
+  char *dir = malloc(len + 1);
+  if (!dir) {
+    return NULL;
+  }
+
+  memcpy(dir, path, len);
+  dir[len] = '\0';
+  return dir;
+}
+
+static char *get_executable_path(const char *argv0) {
+#ifdef _WIN32
+  char *program_path = NULL;
+  if (_get_pgmptr(&program_path) == 0 && program_path &&
+      program_path[0] != '\0') {
+    return strdup(program_path);
+  }
+  if (argv0 && argv0[0] != '\0') {
+    return strdup(argv0);
+  }
+  return NULL;
+#elif defined(__APPLE__)
+  uint32_t size = 0;
+  if (_NSGetExecutablePath(NULL, &size) != -1 || size == 0) {
+    return NULL;
+  }
+  char *buffer = malloc((size_t)size + 1);
+  if (!buffer) {
+    return NULL;
+  }
+  if (_NSGetExecutablePath(buffer, &size) != 0) {
+    free(buffer);
+    return NULL;
+  }
+  buffer[size] = '\0';
+  return buffer;
+#else
+  char buffer[PATH_MAX + 1];
+  ssize_t len = readlink("/proc/self/exe", buffer, PATH_MAX);
+  if (len > 0) {
+    buffer[len] = '\0';
+    return strdup(buffer);
+  }
+  if (argv0 && argv0[0] != '\0') {
+    return strdup(argv0);
+  }
+  return NULL;
+#endif
+}
+
+static char *infer_default_stdlib_directory(const char *argv0) {
+  char *exe_path = get_executable_path(argv0);
+  char *exe_dir = directory_from_path(exe_path);
+
+  if (exe_dir) {
+    char *parent_dir = join_paths(exe_dir, "..");
+    if (parent_dir) {
+      char *packaged_stdlib = join_paths(parent_dir, "stdlib");
+      free(parent_dir);
+      if (packaged_stdlib && directory_exists(packaged_stdlib)) {
+        free(exe_path);
+        free(exe_dir);
+        return packaged_stdlib;
+      }
+      free(packaged_stdlib);
+    }
+
+    char *local_stdlib = join_paths(exe_dir, "stdlib");
+    if (local_stdlib && directory_exists(local_stdlib)) {
+      free(exe_path);
+      free(exe_dir);
+      return local_stdlib;
+    }
+    free(local_stdlib);
+  }
+
+  free(exe_path);
+  free(exe_dir);
+
+  if (directory_exists("stdlib")) {
+    return strdup("stdlib");
+  }
+
+  return strdup("stdlib");
+}
 
 static int validate_lexical_phase(const char *source, ErrorReporter *reporter) {
   if (!source) {
@@ -93,6 +245,7 @@ static int add_import_directory(CompilerOptions *options, const char *path) {
 
 int main(int argc, char *argv[]) {
   CompilerOptions options = {0};
+  char *auto_stdlib_directory = NULL;
   options.output_filename = "output.s"; // Default output filename
   options.debug_format = "dwarf";
 
@@ -164,9 +317,17 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  if (!options.stdlib_directory) {
+    auto_stdlib_directory = infer_default_stdlib_directory(argv[0]);
+    if (auto_stdlib_directory) {
+      options.stdlib_directory = auto_stdlib_directory;
+    }
+  }
+
   int result =
       compile_file(options.input_filename, options.output_filename, &options);
   free((void *)options.import_directories);
+  free(auto_stdlib_directory);
   string_intern_clear();
   return result;
 }
@@ -541,7 +702,8 @@ void print_usage(const char *program_name) {
   printf("  -i <file>           Input file\n");
   printf("  -o <file>           Output file (default: output.s)\n");
   printf("  -I <dir>            Add import search directory (repeatable)\n");
-  printf("  --stdlib <dir>      Set stdlib root directory (default: stdlib)\n");
+  printf("  --stdlib <dir>      Set stdlib root directory (default: auto-detect "
+         "bundled stdlib, then ./stdlib)\n");
   printf("  -d, --debug         Enable debug output and symbols\n");
   printf("  -g, --debug-symbols Generate debug symbols\n");
   printf("  -l, --line-mapping  Generate source line mapping\n");

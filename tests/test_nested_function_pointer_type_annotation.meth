@@ -1,0 +1,16 @@
+function inner(x: int32) -> int32 {
+  return x + 1;
+}
+
+function invoke(cb: fn(int32) -> int32, v: int32) -> int32 {
+  return cb(v);
+}
+
+function make_caller() -> fn(fn(int32) -> int32, int32) -> int32 {
+  return &invoke;
+}
+
+function main() -> int32 {
+  var caller: fn(fn(int32) -> int32, int32) -> int32 = make_caller();
+  return caller(&inner, 41);
+}

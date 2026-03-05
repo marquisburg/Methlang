@@ -87,6 +87,16 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+echo Bundling standard library into bin\stdlib...
+if exist bin\stdlib rmdir /S /Q bin\stdlib
+xcopy stdlib bin\stdlib\ /E /I /Y >nul
+
+echo Bundling runtime into bin\runtime...
+if exist bin\runtime rmdir /S /Q bin\runtime
+xcopy src\runtime bin\runtime\ /E /I /Y >nul
+
+if exist installer\meth-build.bat copy /Y installer\meth-build.bat bin\meth-build.bat >nul
+
 echo Build successful! Executable created at bin\methlang.exe
 echo.
 echo Running tests...
@@ -96,5 +106,3 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 echo All tests passed.
-
-

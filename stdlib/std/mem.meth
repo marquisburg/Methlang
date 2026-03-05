@@ -22,6 +22,7 @@ export function alloc_zeroed(n: int64) -> cstring {
 
 // Copy `len` bytes from src into a freshly allocated buffer.
 export function buf_dup(src: cstring, len: int64) -> cstring {
+  if (len <= 0) { return 0; }
   var dst: cstring = malloc(len);
   if (dst == 0) { return 0; }
   memcpy(dst, src, len);

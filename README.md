@@ -38,6 +38,8 @@ function main() -> int32 {
 .\bin\methlang.exe hello.meth -o hello.s
 ```
 
+No project-local `stdlib/` folder is required. The compiler auto-loads the stdlib bundled with the Methlang installation/build output. Use `--stdlib <dir>` only when you want to override that.
+
 For production builds, use `--release`:
 
 ```powershell
@@ -50,7 +52,7 @@ For production builds, use `--release`:
 
 ```powershell
 nasm -f win64 hello.s -o hello.o
-gcc -nostartfiles hello.o src\runtime\gc.c -o hello.exe -lkernel32
+gcc -nostartfiles hello.o "$env:ProgramFiles\Methlang\runtime\gc.c" -o hello.exe -lkernel32
 .\hello.exe
 ```
 
@@ -62,7 +64,7 @@ Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead
 make
 ./bin/methlang hello.meth -o hello.s
 nasm -f elf64 hello.s -o hello.o
-gcc -nostartfiles hello.o src/runtime/gc.c -o hello
+gcc -nostartfiles hello.o /usr/local/runtime/gc.c -o hello
 ./hello
 ```
 
@@ -74,7 +76,7 @@ gcc -nostartfiles hello.o src/runtime/gc.c -o hello
 
 ## Runtime and Linking Notes
 
-- Link `src/runtime/gc.c` when using `new` or string concatenation.
+- Link bundled `runtime/gc.c` from your Methlang installation when using `new` or string concatenation.
 - Networking examples may require extra libraries (for example `-lws2_32` on Windows).
 - For GC use from worker threads, use `gc_thread_attach` and `gc_thread_detach`.
 
