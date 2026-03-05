@@ -4,6 +4,7 @@ SRCDIR = src
 OBJDIR = obj
 BINDIR = bin
 STDLIBDIR = stdlib
+RUNTIMEDIR = src/runtime
 
 # Source files
 LEXER_SOURCES = $(SRCDIR)/lexer/lexer.c
@@ -21,9 +22,9 @@ OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
 TARGET = $(BINDIR)/methlang
 
-.PHONY: all clean test install bundle-stdlib
+.PHONY: all clean test install bundle-stdlib bundle-runtime
 
-all: $(TARGET) bundle-stdlib
+all: $(TARGET) bundle-stdlib bundle-runtime
 
 $(TARGET): $(OBJECTS) | $(BINDIR)
 	$(CC) $(OBJECTS) -o $@
@@ -31,6 +32,10 @@ $(TARGET): $(OBJECTS) | $(BINDIR)
 bundle-stdlib: | $(BINDIR)
 	rm -rf $(BINDIR)/stdlib
 	cp -r $(STDLIBDIR) $(BINDIR)/stdlib
+
+bundle-runtime: | $(BINDIR)
+	rm -rf $(BINDIR)/runtime
+	cp -r $(RUNTIMEDIR) $(BINDIR)/runtime
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	@mkdir -p $(dir $@)
@@ -50,12 +55,12 @@ test: $(TARGET)
 	$(CC) $(CFLAGS) tests/gc_runtime_test.c src/runtime/gc.c -o $(BINDIR)/gc_runtime_test
 	@$(BINDIR)/gc_runtime_test
 
-install: $(TARGET) bundle-stdlib
-	mkdir -p /usr/local/bin /usr/local/stdlib
+install: $(TARGET) bundle-stdlib bundle-runtime
+	mkdir -p /usr/local/bin /usr/local/stdlib /usr/local/runtime
 	cp $(TARGET) /usr/local/bin/
 	cp -r $(BINDIR)/stdlib/* /usr/local/stdlib/
+	cp -r $(BINDIR)/runtime/* /usr/local/runtime/
 
 .PHONY: debug
 debug: CFLAGS += -DDEBUG
 debug: $(TARGET)
-

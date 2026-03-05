@@ -12,7 +12,8 @@ if "%~1"=="" (
 set "METH_INSTALL_DIR=%~dp0.."
 set "METH_CC=%~dp0methlang.exe"
 set "METH_STDLIB=%METH_INSTALL_DIR%\stdlib"
-set "METH_RUNTIME=%METH_INSTALL_DIR%\src\runtime"
+set "METH_RUNTIME=%METH_INSTALL_DIR%\runtime"
+if not exist "%METH_RUNTIME%\gc.c" set "METH_RUNTIME=%METH_INSTALL_DIR%\src\runtime"
 
 REM Check for target tools
 where gcc >nul 2>&1

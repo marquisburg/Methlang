@@ -45,9 +45,9 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 
 1. Compile: `methlang main.meth -o main.s`
 2. Assemble: `nasm -f win64 main.s -o main.o` (or `-f elf64` on Linux)
-3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, compile and link `src/runtime/gc.c`. See [Garbage Collector](garbage-collector.md).
+3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, compile and link bundled `runtime/gc.c` from your Methlang installation (for example `C:\Program Files\Methlang\runtime\gc.c` on Windows or `/usr/local/runtime/gc.c` on Linux/macOS). See [Garbage Collector](garbage-collector.md).
 
-**Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, you must also compile and link `src/runtime/methlang_entry.c` so the runtime can obtain command-line arguments. On Windows, link with `-lshell32` as well: `gcc -nostartfiles main.o gc.o methlang_entry.o -o main -lkernel32 -lshell32`.
+**Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, you must also compile and link bundled `runtime/methlang_entry.c` from your Methlang installation so the runtime can obtain command-line arguments. On Windows, link with `-lshell32` as well: `gcc -nostartfiles main.o gc.o methlang_entry.o -o main -lkernel32 -lshell32`.
 
 The output format depends on the target. Use `-f win64` for Windows, `-f elf64` for Linux. NASM is required for assembly; install from https://www.nasm.us/ if needed. On Linux and macOS, use `make` to build the compiler and run tests. The web server example in `web/` is Windows-only (Winsock). See [Standard Library](standard-library.md#platform-support) for Linux support details.
 

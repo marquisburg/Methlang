@@ -3,10 +3,10 @@
 This directory contains the files needed to build a native Windows installer (`.exe`) for Methlang.
 
 ## Features
-- Copies `methlang.exe`, `stdlib\`, and `src\runtime\` to the installation directory (`C:\Program Files\Methlang`).
+- Copies `methlang.exe`, `stdlib\`, and `runtime\` to the installation directory (`C:\Program Files\Methlang`).
 - Installs `meth-build.bat` for project builds.
-- Automatically adds Methlang's `bin\` directory to your user `%PATH%`.
-- Registers the `.meth` file extension with Methlang's icon.
+- Optionally adds Methlang's `bin\` directory to the system `%PATH%` (installer task, enabled by default).
+- Optionally registers the `.meth` file extension with Methlang's icon and open command.
 - Provides a clean uninstaller that removes Methlang and cleans up your `%PATH%`.
 
 ## How to Build the Installer
