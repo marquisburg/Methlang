@@ -41,6 +41,8 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->extern_symbols = NULL;
   generator->extern_symbol_count = 0;
   generator->extern_symbol_capacity = 0;
+  generator->last_runtime_location_line = 0;
+  generator->last_runtime_location_column = 0;
 
   if (!generator->output_buffer || !generator->global_variables_buffer) {
     free(generator->output_buffer);

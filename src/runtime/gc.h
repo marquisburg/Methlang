@@ -4,6 +4,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef struct {
+  const void *start_address;
+  const void *end_address;
+  const char *function_name;
+  const char *filename;
+  uintptr_t line;
+  uintptr_t column;
+} MethRuntimeFunctionInfo;
+
+typedef struct {
+  const void *address;
+  const char *function_name;
+  const char *filename;
+  uintptr_t line;
+  uintptr_t column;
+} MethRuntimeLocationInfo;
+
 /**
  * @brief Initialize the garbage collector.
  *
@@ -13,6 +30,13 @@
  * @param stack_base Pointer to the bottom (highest address) of the stack.
  */
 void gc_init(void *stack_base);
+void meth_runtime_debug_install_crash_handler(void);
+void meth_runtime_debug_register_image(const MethRuntimeFunctionInfo *functions,
+                                       size_t function_count,
+                                       const MethRuntimeLocationInfo *locations,
+                                       size_t location_count);
+void meth_runtime_debug_trap(const char *message, const void *program_counter,
+                             const void *frame_pointer);
 
 /**
  * @brief Attach the current thread to the GC runtime.

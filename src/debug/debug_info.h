@@ -33,6 +33,23 @@ typedef struct {
 } SourceLineMapping;
 
 typedef struct {
+    char* function_name;
+    char* start_label;
+    char* end_label;
+    char* filename;
+    size_t line;
+    size_t column;
+} RuntimeFunctionMapping;
+
+typedef struct {
+    char* function_name;
+    char* address_label;
+    char* filename;
+    size_t line;
+    size_t column;
+} RuntimeLocationMapping;
+
+typedef struct {
     DebugSymbol* symbols;
     size_t symbol_count;
     size_t symbol_capacity;
@@ -40,6 +57,14 @@ typedef struct {
     SourceLineMapping* line_mappings;
     size_t mapping_count;
     size_t mapping_capacity;
+
+    RuntimeFunctionMapping* runtime_functions;
+    size_t runtime_function_count;
+    size_t runtime_function_capacity;
+
+    RuntimeLocationMapping* runtime_locations;
+    size_t runtime_location_count;
+    size_t runtime_location_capacity;
     
     char* source_filename;
     char* assembly_filename;
@@ -61,6 +86,19 @@ DebugSymbol* debug_info_find_symbol(DebugInfo* debug_info, const char* name);
 void debug_info_add_line_mapping(DebugInfo* debug_info, size_t source_line, size_t source_column,
                                 size_t assembly_line, const char* filename);
 SourceLineMapping* debug_info_find_line_mapping(DebugInfo* debug_info, size_t assembly_line);
+
+// Runtime crash-trace metadata
+void debug_info_add_runtime_function_mapping(DebugInfo* debug_info,
+                                             const char* function_name,
+                                             const char* start_label,
+                                             const char* end_label,
+                                             const char* filename,
+                                             size_t line, size_t column);
+void debug_info_add_runtime_location_mapping(DebugInfo* debug_info,
+                                             const char* function_name,
+                                             const char* address_label,
+                                             const char* filename,
+                                             size_t line, size_t column);
 
 // Debug output generation
 void debug_info_generate_dwarf(DebugInfo* debug_info, const char* output_filename);

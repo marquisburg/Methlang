@@ -164,6 +164,8 @@ If the GC appears to collect too aggressively (use-after-free, premature collect
 
 The compiler emits a warning when a managed struct pointer is passed to an `extern function` or stored in an `extern` variable, because those are common ways to let C retain a GC-managed pointer without registering the storage slot. The warning is heuristic: it does not prove that C will retain the pointer, and it does not eliminate the need to call `gc_register_root` when C-owned storage keeps the reference.
 
+When compiled with `-s` or `-d` on Windows, the runtime also prints Meth source tracebacks for native crashes such as access violations (`0xC0000005`) and heap corruption (`0xC0000374`), as well as compiler-generated null/bounds traps. This is useful when debugging memory corruption that escapes the explicit runtime checks.
+
 If the GC retains too much memory (growth without bound, high `gc_get_allocated_bytes`), use the diagnostic API to inspect:
 
 - `gc_get_allocation_count()`: number of live objects

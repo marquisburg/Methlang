@@ -42,6 +42,8 @@ typedef struct {
   char **extern_symbols;
   size_t extern_symbol_count;
   size_t extern_symbol_capacity;
+  size_t last_runtime_location_line;
+  size_t last_runtime_location_column;
 } CodeGenerator;
 
 // Function declarations
@@ -108,6 +110,18 @@ void code_generator_add_line_mapping(CodeGenerator *generator,
                                      const char *filename);
 void code_generator_emit_debug_label(CodeGenerator *generator,
                                      size_t source_line);
+void code_generator_emit_runtime_location_marker(CodeGenerator *generator,
+                                                 size_t source_line,
+                                                 size_t source_column,
+                                                 const char *filename);
+void code_generator_add_runtime_function_mapping(CodeGenerator *generator,
+                                                 const char *function_name,
+                                                 const char *start_label,
+                                                 const char *end_label,
+                                                 size_t source_line,
+                                                 size_t source_column,
+                                                 const char *filename);
+void code_generator_emit_runtime_debug_tables(CodeGenerator *generator);
 int code_generator_allocate_stack_space(CodeGenerator *generator, int size,
                                         int alignment);
 

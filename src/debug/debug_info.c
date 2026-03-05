@@ -14,6 +14,8 @@ static char* string_duplicate(const char* s) {
 
 #define INITIAL_SYMBOL_CAPACITY 64
 #define INITIAL_MAPPING_CAPACITY 256
+#define INITIAL_RUNTIME_FUNCTION_CAPACITY 64
+#define INITIAL_RUNTIME_LOCATION_CAPACITY 256
 
 DebugInfo* debug_info_create(const char* source_filename, const char* assembly_filename) {
     DebugInfo* debug_info = malloc(sizeof(DebugInfo));
@@ -36,6 +38,29 @@ DebugInfo* debug_info_create(const char* source_filename, const char* assembly_f
     debug_info->symbol_capacity = INITIAL_SYMBOL_CAPACITY;
     debug_info->mapping_count = 0;
     debug_info->mapping_capacity = INITIAL_MAPPING_CAPACITY;
+    debug_info->runtime_functions =
+        malloc(sizeof(RuntimeFunctionMapping) * INITIAL_RUNTIME_FUNCTION_CAPACITY);
+    if (!debug_info->runtime_functions) {
+        free(debug_info->line_mappings);
+        free(debug_info->symbols);
+        free(debug_info);
+        return NULL;
+    }
+
+    debug_info->runtime_locations =
+        malloc(sizeof(RuntimeLocationMapping) * INITIAL_RUNTIME_LOCATION_CAPACITY);
+    if (!debug_info->runtime_locations) {
+        free(debug_info->runtime_functions);
+        free(debug_info->line_mappings);
+        free(debug_info->symbols);
+        free(debug_info);
+        return NULL;
+    }
+
+    debug_info->runtime_function_count = 0;
+    debug_info->runtime_function_capacity = INITIAL_RUNTIME_FUNCTION_CAPACITY;
+    debug_info->runtime_location_count = 0;
+    debug_info->runtime_location_capacity = INITIAL_RUNTIME_LOCATION_CAPACITY;
     
     debug_info->source_filename = string_duplicate(source_filename);
     debug_info->assembly_filename = string_duplicate(assembly_filename);
@@ -59,6 +84,21 @@ void debug_info_destroy(DebugInfo* debug_info) {
         free(debug_info->line_mappings[i].filename);
     }
     free(debug_info->line_mappings);
+
+    for (size_t i = 0; i < debug_info->runtime_function_count; i++) {
+        free(debug_info->runtime_functions[i].function_name);
+        free(debug_info->runtime_functions[i].start_label);
+        free(debug_info->runtime_functions[i].end_label);
+        free(debug_info->runtime_functions[i].filename);
+    }
+    free(debug_info->runtime_functions);
+
+    for (size_t i = 0; i < debug_info->runtime_location_count; i++) {
+        free(debug_info->runtime_locations[i].function_name);
+        free(debug_info->runtime_locations[i].address_label);
+        free(debug_info->runtime_locations[i].filename);
+    }
+    free(debug_info->runtime_locations);
     
     free(debug_info->source_filename);
     free(debug_info->assembly_filename);
@@ -87,6 +127,34 @@ static int debug_info_expand_mappings(DebugInfo* debug_info) {
         
         debug_info->line_mappings = new_mappings;
         debug_info->mapping_capacity = new_capacity;
+    }
+    return 1;
+}
+
+static int debug_info_expand_runtime_functions(DebugInfo* debug_info) {
+    if (debug_info->runtime_function_count >= debug_info->runtime_function_capacity) {
+        size_t new_capacity = debug_info->runtime_function_capacity * 2;
+        RuntimeFunctionMapping* new_items = realloc(
+            debug_info->runtime_functions,
+            sizeof(RuntimeFunctionMapping) * new_capacity);
+        if (!new_items) return 0;
+
+        debug_info->runtime_functions = new_items;
+        debug_info->runtime_function_capacity = new_capacity;
+    }
+    return 1;
+}
+
+static int debug_info_expand_runtime_locations(DebugInfo* debug_info) {
+    if (debug_info->runtime_location_count >= debug_info->runtime_location_capacity) {
+        size_t new_capacity = debug_info->runtime_location_capacity * 2;
+        RuntimeLocationMapping* new_items = realloc(
+            debug_info->runtime_locations,
+            sizeof(RuntimeLocationMapping) * new_capacity);
+        if (!new_items) return 0;
+
+        debug_info->runtime_locations = new_items;
+        debug_info->runtime_location_capacity = new_capacity;
     }
     return 1;
 }
@@ -173,6 +241,46 @@ SourceLineMapping* debug_info_find_line_mapping(DebugInfo* debug_info, size_t as
         }
     }
     return NULL;
+}
+
+void debug_info_add_runtime_function_mapping(DebugInfo* debug_info,
+                                             const char* function_name,
+                                             const char* start_label,
+                                             const char* end_label,
+                                             const char* filename,
+                                             size_t line, size_t column) {
+    if (!debug_info || !function_name || !start_label || !end_label) return;
+
+    if (!debug_info_expand_runtime_functions(debug_info)) return;
+
+    RuntimeFunctionMapping* mapping =
+        &debug_info->runtime_functions[debug_info->runtime_function_count];
+    mapping->function_name = string_duplicate(function_name);
+    mapping->start_label = string_duplicate(start_label);
+    mapping->end_label = string_duplicate(end_label);
+    mapping->filename = string_duplicate(filename);
+    mapping->line = line;
+    mapping->column = column;
+    debug_info->runtime_function_count++;
+}
+
+void debug_info_add_runtime_location_mapping(DebugInfo* debug_info,
+                                             const char* function_name,
+                                             const char* address_label,
+                                             const char* filename,
+                                             size_t line, size_t column) {
+    if (!debug_info || !function_name || !address_label) return;
+
+    if (!debug_info_expand_runtime_locations(debug_info)) return;
+
+    RuntimeLocationMapping* mapping =
+        &debug_info->runtime_locations[debug_info->runtime_location_count];
+    mapping->function_name = string_duplicate(function_name);
+    mapping->address_label = string_duplicate(address_label);
+    mapping->filename = string_duplicate(filename);
+    mapping->line = line;
+    mapping->column = column;
+    debug_info->runtime_location_count++;
 }
 
 // Debug output generation functions

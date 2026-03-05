@@ -517,43 +517,24 @@ static int ir_emit_runtime_trap(IRLoweringContext *context,
     return 0;
   }
 
-  IRInstruction puts_call = {0};
-  puts_call.op = IR_OP_CALL;
-  puts_call.location = location;
-  puts_call.text = "puts";
-  puts_call.argument_count = 1;
-  puts_call.arguments = malloc(sizeof(IROperand));
-  if (!puts_call.arguments) {
+  IRInstruction trap_call = {0};
+  trap_call.op = IR_OP_CALL;
+  trap_call.location = location;
+  trap_call.text = "meth_runtime_debug_trap";
+  trap_call.argument_count = 1;
+  trap_call.arguments = malloc(sizeof(IROperand));
+  if (!trap_call.arguments) {
     ir_set_error(context, "Out of memory while lowering runtime trap");
     return 0;
   }
-  puts_call.arguments[0] = ir_operand_string(message);
-  if (!ir_emit(context, function, &puts_call)) {
-    ir_operand_destroy(&puts_call.arguments[0]);
-    free(puts_call.arguments);
+  trap_call.arguments[0] = ir_operand_string(message);
+  if (!ir_emit(context, function, &trap_call)) {
+    ir_operand_destroy(&trap_call.arguments[0]);
+    free(trap_call.arguments);
     return 0;
   }
-  ir_operand_destroy(&puts_call.arguments[0]);
-  free(puts_call.arguments);
-
-  IRInstruction exit_call = {0};
-  exit_call.op = IR_OP_CALL;
-  exit_call.location = location;
-  exit_call.text = "exit";
-  exit_call.argument_count = 1;
-  exit_call.arguments = malloc(sizeof(IROperand));
-  if (!exit_call.arguments) {
-    ir_set_error(context, "Out of memory while lowering runtime trap");
-    return 0;
-  }
-  exit_call.arguments[0] = ir_operand_int(1);
-  if (!ir_emit(context, function, &exit_call)) {
-    ir_operand_destroy(&exit_call.arguments[0]);
-    free(exit_call.arguments);
-    return 0;
-  }
-  ir_operand_destroy(&exit_call.arguments[0]);
-  free(exit_call.arguments);
+  ir_operand_destroy(&trap_call.arguments[0]);
+  free(trap_call.arguments);
   return 1;
 }
 

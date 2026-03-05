@@ -21,6 +21,8 @@ void code_generator_function_prologue(CodeGenerator *generator,
   }
   generator->function_stack_size = stack_size;
   generator->current_stack_offset = 0; // Reset for new function
+  generator->last_runtime_location_line = 0;
+  generator->last_runtime_location_column = 0;
 
   // Generate function label
   code_generator_emit(generator, "\n%s:\n", function_name);

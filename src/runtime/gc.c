@@ -4,6 +4,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(_WIN32) || defined(_WIN64)
+#include <windows.h>
+#ifndef STATUS_HEAP_CORRUPTION
+#define STATUS_HEAP_CORRUPTION ((DWORD)0xC0000374)
+#endif
+#ifndef STATUS_STACK_BUFFER_OVERRUN
+#define STATUS_STACK_BUFFER_OVERRUN ((DWORD)0xC0000409)
+#endif
+#endif
 
 #define GC_ROOT_SLOT_CAPACITY 4096
 #define GC_PAGE_SHIFT 12
@@ -82,6 +91,331 @@ static _Atomic unsigned int g_stw_epoch = 0;
 static _Atomic size_t g_stw_parked_count = 0;
 
 static GCPageBucket *g_page_buckets[GC_PAGE_BUCKET_COUNT];
+static const MethRuntimeFunctionInfo *g_runtime_debug_functions = NULL;
+static size_t g_runtime_debug_function_count = 0;
+static const MethRuntimeLocationInfo *g_runtime_debug_locations = NULL;
+static size_t g_runtime_debug_location_count = 0;
+
+#if defined(_WIN32) || defined(_WIN64)
+static volatile LONG g_runtime_debug_handler_installed = 0;
+static volatile LONG g_runtime_debug_in_handler = 0;
+static PVOID g_runtime_debug_vectored_handler = NULL;
+
+static void meth_runtime_write_stderr_bytes(const char *text, size_t length) {
+  if (!text || length == 0) {
+    return;
+  }
+
+  HANDLE stderr_handle = GetStdHandle(STD_ERROR_HANDLE);
+  if (stderr_handle && stderr_handle != INVALID_HANDLE_VALUE) {
+    DWORD written = 0;
+    WriteFile(stderr_handle, text, (DWORD)length, &written, NULL);
+  } else {
+    OutputDebugStringA(text);
+  }
+}
+
+static void meth_runtime_write_stderr(const char *text) {
+  if (!text) {
+    return;
+  }
+  meth_runtime_write_stderr_bytes(text, strlen(text));
+}
+
+static void meth_runtime_write_decimal_uintptr(uintptr_t value) {
+  char buffer[32];
+  size_t index = sizeof(buffer);
+  buffer[--index] = '\0';
+
+  do {
+    buffer[--index] = (char)('0' + (value % 10u));
+    value /= 10u;
+  } while (value != 0 && index > 0);
+
+  meth_runtime_write_stderr(buffer + index);
+}
+
+static void meth_runtime_write_hex_uintptr(uintptr_t value, size_t width) {
+  static const char digits[] = "0123456789ABCDEF";
+  char buffer[2 + (sizeof(uintptr_t) * 2) + 1];
+  size_t index = sizeof(buffer);
+  buffer[--index] = '\0';
+
+  size_t digit_count = 0;
+  do {
+    buffer[--index] = digits[value & 0xFu];
+    value >>= 4u;
+    digit_count++;
+  } while ((value != 0 || digit_count < width) && index > 2);
+
+  buffer[--index] = 'x';
+  buffer[--index] = '0';
+  meth_runtime_write_stderr(buffer + index);
+}
+
+static void meth_runtime_write_pointer(const void *value) {
+  meth_runtime_write_hex_uintptr((uintptr_t)value, sizeof(uintptr_t) * 2);
+}
+
+static const char *meth_runtime_exception_name(DWORD code) {
+  switch (code) {
+  case EXCEPTION_ACCESS_VIOLATION:
+    return "access violation";
+  case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+    return "array bounds exceeded";
+  case EXCEPTION_BREAKPOINT:
+    return "breakpoint";
+  case EXCEPTION_DATATYPE_MISALIGNMENT:
+    return "datatype misalignment";
+  case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+    return "floating-point divide by zero";
+  case EXCEPTION_ILLEGAL_INSTRUCTION:
+    return "illegal instruction";
+  case EXCEPTION_IN_PAGE_ERROR:
+    return "in-page error";
+  case EXCEPTION_INT_DIVIDE_BY_ZERO:
+    return "integer divide by zero";
+  case EXCEPTION_STACK_OVERFLOW:
+    return "stack overflow";
+  case STATUS_HEAP_CORRUPTION:
+    return "heap corruption";
+  case STATUS_STACK_BUFFER_OVERRUN:
+    return "stack buffer overrun";
+  default:
+    return "unknown exception";
+  }
+}
+
+static int meth_runtime_address_is_readable(const void *address, size_t length) {
+  if (!address || length == 0) {
+    return 0;
+  }
+
+  MEMORY_BASIC_INFORMATION info;
+  if (VirtualQuery(address, &info, sizeof(info)) == 0) {
+    return 0;
+  }
+  if (info.State != MEM_COMMIT) {
+    return 0;
+  }
+  if ((info.Protect & PAGE_GUARD) != 0 || info.Protect == PAGE_NOACCESS) {
+    return 0;
+  }
+
+  uintptr_t start = (uintptr_t)address;
+  uintptr_t region_start = (uintptr_t)info.BaseAddress;
+  uintptr_t region_end = region_start + info.RegionSize;
+  return start >= region_start && start + length <= region_end;
+}
+
+static const MethRuntimeFunctionInfo *
+meth_runtime_find_function(uintptr_t program_counter) {
+  for (size_t i = 0; i < g_runtime_debug_function_count; i++) {
+    const MethRuntimeFunctionInfo *info = &g_runtime_debug_functions[i];
+    uintptr_t start = (uintptr_t)info->start_address;
+    uintptr_t end = (uintptr_t)info->end_address;
+    if (program_counter >= start && program_counter < end) {
+      return info;
+    }
+  }
+  return NULL;
+}
+
+static const MethRuntimeLocationInfo *
+meth_runtime_find_location(uintptr_t program_counter,
+                           const MethRuntimeFunctionInfo *function_info) {
+  const MethRuntimeLocationInfo *best = NULL;
+  uintptr_t best_address = 0;
+  uintptr_t function_start = function_info ? (uintptr_t)function_info->start_address : 0;
+  uintptr_t function_end =
+      function_info ? (uintptr_t)function_info->end_address : UINTPTR_MAX;
+
+  for (size_t i = 0; i < g_runtime_debug_location_count; i++) {
+    const MethRuntimeLocationInfo *info = &g_runtime_debug_locations[i];
+    uintptr_t address = (uintptr_t)info->address;
+    if (address < function_start || address >= function_end) {
+      continue;
+    }
+    if (address <= program_counter && (!best || address >= best_address)) {
+      best = info;
+      best_address = address;
+    }
+  }
+
+  return best;
+}
+
+static void meth_runtime_print_frame(size_t index, uintptr_t program_counter) {
+  const MethRuntimeFunctionInfo *function_info =
+      meth_runtime_find_function(program_counter);
+  const MethRuntimeLocationInfo *location_info =
+      meth_runtime_find_location(program_counter, function_info);
+  const char *function_name = "<unknown>";
+  const char *filename = NULL;
+  uintptr_t line = 0;
+  uintptr_t column = 0;
+
+  if (location_info) {
+    function_name =
+        location_info->function_name ? location_info->function_name : function_name;
+    filename = location_info->filename;
+    line = location_info->line;
+    column = location_info->column;
+  } else if (function_info) {
+    function_name =
+        function_info->function_name ? function_info->function_name : function_name;
+    filename = function_info->filename;
+    line = function_info->line;
+    column = function_info->column;
+  }
+
+  if (filename && line > 0) {
+    meth_runtime_write_stderr("  #");
+    meth_runtime_write_decimal_uintptr((uintptr_t)index);
+    meth_runtime_write_stderr(" ");
+    meth_runtime_write_stderr(function_name);
+    meth_runtime_write_stderr(" at ");
+    meth_runtime_write_stderr(filename);
+    meth_runtime_write_stderr(":");
+    meth_runtime_write_decimal_uintptr(line);
+    meth_runtime_write_stderr(":");
+    meth_runtime_write_decimal_uintptr(column);
+    meth_runtime_write_stderr(" (");
+    meth_runtime_write_pointer((void *)program_counter);
+    meth_runtime_write_stderr(")\r\n");
+  } else {
+    meth_runtime_write_stderr("  #");
+    meth_runtime_write_decimal_uintptr((uintptr_t)index);
+    meth_runtime_write_stderr(" ");
+    meth_runtime_write_stderr(function_name);
+    meth_runtime_write_stderr(" (");
+    meth_runtime_write_pointer((void *)program_counter);
+    meth_runtime_write_stderr(")\r\n");
+  }
+}
+
+static void meth_runtime_print_trace_from_frame(uintptr_t program_counter,
+                                                uintptr_t frame_pointer) {
+  meth_runtime_write_stderr("Stack trace:\r\n");
+  meth_runtime_print_frame(0, program_counter);
+
+  uintptr_t current_frame = frame_pointer;
+  for (size_t index = 1; index < 32; index++) {
+    uintptr_t next_frame = 0;
+    uintptr_t return_address = 0;
+
+    if (!current_frame ||
+        !meth_runtime_address_is_readable((const void *)current_frame,
+                                          sizeof(uintptr_t) * 2)) {
+      break;
+    }
+
+    next_frame = *((uintptr_t *)current_frame);
+    return_address = *(((uintptr_t *)current_frame) + 1);
+
+    if (next_frame <= current_frame || return_address == 0) {
+      break;
+    }
+
+    meth_runtime_print_frame(index, return_address - 1u);
+    current_frame = next_frame;
+  }
+}
+
+static void meth_runtime_terminate_with_code(UINT exit_code) {
+  HANDLE process = GetCurrentProcess();
+  TerminateProcess(process, exit_code);
+}
+
+static LONG WINAPI
+meth_runtime_unhandled_exception_filter(EXCEPTION_POINTERS *exception_info) {
+  if (!exception_info || !exception_info->ExceptionRecord) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+
+  if (InterlockedExchange(&g_runtime_debug_in_handler, 1) != 0) {
+    meth_runtime_terminate_with_code(1);
+  }
+
+  const EXCEPTION_RECORD *record = exception_info->ExceptionRecord;
+  const CONTEXT *context = exception_info->ContextRecord;
+  uintptr_t program_counter = (uintptr_t)record->ExceptionAddress;
+  uintptr_t frame_pointer = context ? (uintptr_t)context->Rbp : 0;
+
+  meth_runtime_write_stderr("Unhandled runtime exception ");
+  meth_runtime_write_hex_uintptr((uintptr_t)record->ExceptionCode, 8);
+  meth_runtime_write_stderr(" (");
+  meth_runtime_write_stderr(
+      meth_runtime_exception_name(record->ExceptionCode));
+  meth_runtime_write_stderr(")\r\n");
+  meth_runtime_write_stderr("Exception address: ");
+  meth_runtime_write_pointer((void *)program_counter);
+  meth_runtime_write_stderr("\r\n");
+
+  if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+      record->NumberParameters >= 2) {
+    const char *operation = "read";
+    if (record->ExceptionInformation[0] == 1u) {
+      operation = "write";
+    } else if (record->ExceptionInformation[0] == 8u) {
+      operation = "execute";
+    }
+    meth_runtime_write_stderr(operation);
+    meth_runtime_write_stderr(" access violation at ");
+    meth_runtime_write_pointer((void *)record->ExceptionInformation[1]);
+    meth_runtime_write_stderr("\r\n");
+  }
+
+  meth_runtime_print_trace_from_frame(program_counter, frame_pointer);
+  meth_runtime_terminate_with_code(1);
+  return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
+
+void meth_runtime_debug_register_image(const MethRuntimeFunctionInfo *functions,
+                                       size_t function_count,
+                                       const MethRuntimeLocationInfo *locations,
+                                       size_t location_count) {
+  g_runtime_debug_functions = functions;
+  g_runtime_debug_function_count = function_count;
+  g_runtime_debug_locations = locations;
+  g_runtime_debug_location_count = location_count;
+}
+
+void meth_runtime_debug_install_crash_handler(void) {
+#if defined(_WIN32) || defined(_WIN64)
+  if (InterlockedCompareExchange(&g_runtime_debug_handler_installed, 1, 0) == 0) {
+    g_runtime_debug_vectored_handler =
+        AddVectoredExceptionHandler(1, meth_runtime_unhandled_exception_filter);
+    SetUnhandledExceptionFilter(meth_runtime_unhandled_exception_filter);
+  }
+#endif
+}
+
+void meth_runtime_debug_trap(const char *message, const void *program_counter,
+                             const void *frame_pointer) {
+#if defined(_WIN32) || defined(_WIN64)
+  if (InterlockedExchange(&g_runtime_debug_in_handler, 1) != 0) {
+    meth_runtime_terminate_with_code(1);
+    return;
+  }
+
+  meth_runtime_write_stderr(message ? message : "Fatal runtime trap");
+  meth_runtime_write_stderr("\r\n");
+  meth_runtime_print_trace_from_frame((uintptr_t)program_counter,
+                                      (uintptr_t)frame_pointer);
+  meth_runtime_terminate_with_code(1);
+#else
+  if (message && message[0] != '\0') {
+    fprintf(stderr, "%s\n", message);
+  } else {
+    fprintf(stderr, "Fatal runtime trap\n");
+  }
+  (void)program_counter;
+  (void)frame_pointer;
+  exit(1);
+#endif
+}
 
 static void gc_tlab_free_chunk_list(GCTlabChunk *chunk) {
   while (chunk) {
@@ -1180,6 +1514,11 @@ void gc_shutdown(void) {
   atomic_store_explicit(&g_stw_requested, 0u, memory_order_release);
   atomic_store_explicit(&g_stw_epoch, 0u, memory_order_release);
   atomic_store_explicit(&g_stw_parked_count, 0u, memory_order_release);
+
+  g_runtime_debug_functions = NULL;
+  g_runtime_debug_function_count = 0;
+  g_runtime_debug_locations = NULL;
+  g_runtime_debug_location_count = 0;
 
   gc_unlock();
 }

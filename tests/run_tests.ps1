@@ -153,13 +153,27 @@ $cases = @(
     Name          = "runtime_null_deref_check"
     Path          = "tests/test_runtime_null_deref_check.meth"
     ShouldSucceed = $true
-    AsmMustMatch  = @("Fatal error: Null pointer dereference", "\bcall exit\b")
+    AsmMustMatch  = @("Fatal error: Null pointer dereference", "\bcall meth_runtime_debug_trap\b")
   },
   @{
     Name          = "runtime_array_bounds_check"
     Path          = "tests/test_runtime_array_bounds_check.meth"
     ShouldSucceed = $true
     AsmMustMatch  = @("Fatal error: Array index out of bounds", "(\bsetl al\b|\bjge\s+ir_trap_bounds_|\bjl\s+ir_in_bounds_)")
+  },
+  @{
+    Name          = "stack_trace_support"
+    Path          = "tests/test_runtime_null_deref_check.meth"
+    ShouldSucceed = $true
+    Args          = @("-s")
+    AsmMustMatch  = @(
+      "extern meth_runtime_debug_install_crash_handler",
+      "call meth_runtime_debug_install_crash_handler",
+      "extern meth_runtime_debug_register_image",
+      "extern meth_runtime_debug_trap",
+      "meth_debug_functions:",
+      "meth_debug_locations:"
+    )
   },
   @{ Name = "pointer_param_address"; Path = "tests/test_pointer_param_address.meth"; ShouldSucceed = $true },
   @{
@@ -851,6 +865,102 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "main_argc_argv" -Passed $false -Reason $_.Exception.Message
+}
+
+$total++
+try {
+  $nullAsm = Join-Path $tmpDir "test_runtime_null_trace.s"
+  $nullObj = Join-Path $tmpDir "test_runtime_null_trace.o"
+  $nullGc = Join-Path $tmpDir "test_runtime_null_trace_gc.o"
+  $nullExe = Join-Path $tmpDir "test_runtime_null_trace.exe"
+
+  $nullOut = & $CompilerPath -s tests\test_runtime_null_deref_check.meth -o $nullAsm 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Runtime null trace compile failed: $nullOut"
+  }
+
+  & nasm -f win64 $nullAsm -o $nullObj 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Runtime null trace NASM assembly failed"
+  }
+
+  & gcc -c src\runtime\gc.c -o $nullGc -Isrc 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Runtime null trace gc.c compile failed"
+  }
+
+  & gcc -nostartfiles $nullObj $nullGc -o $nullExe -lkernel32 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Runtime null trace link failed"
+  }
+
+  $nullRuntime = & $nullExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 1) {
+    throw "Runtime null trace exited with $LASTEXITCODE (expected 1)"
+  }
+  if ($nullRuntime -notmatch "Fatal error: Null pointer dereference") {
+    throw "Runtime null trace output missing null-deref message"
+  }
+  if ($nullRuntime -notmatch "Stack trace:") {
+    throw "Runtime null trace output missing stack trace header"
+  }
+  if ($nullRuntime -notmatch "main") {
+    throw "Runtime null trace output missing Meth frame names"
+  }
+
+  Write-CaseResult -Name "runtime_null_trace" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "runtime_null_trace" -Passed $false -Reason $_.Exception.Message
+}
+
+$total++
+try {
+  $avAsm = Join-Path $tmpDir "test_runtime_av_trace.s"
+  $avObj2 = Join-Path $tmpDir "test_runtime_av_trace.o"
+  $avGc2 = Join-Path $tmpDir "test_runtime_av_trace_gc.o"
+  $avExe2 = Join-Path $tmpDir "test_runtime_av_trace.exe"
+
+  $avTraceOut = & $CompilerPath -s tests\test_runtime_access_violation_trace.meth -o $avAsm 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Runtime access-violation trace compile failed: $avTraceOut"
+  }
+
+  & nasm -f win64 $avAsm -o $avObj2 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Runtime access-violation trace NASM assembly failed"
+  }
+
+  & gcc -c src\runtime\gc.c -o $avGc2 -Isrc 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Runtime access-violation trace gc.c compile failed"
+  }
+
+  & gcc -nostartfiles $avObj2 $avGc2 -o $avExe2 -lkernel32 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Runtime access-violation trace link failed"
+  }
+
+  $avRuntime = & $avExe2 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 1) {
+    throw "Runtime access-violation trace exited with $LASTEXITCODE (expected 1)"
+  }
+  if ($avRuntime -notmatch "0xC0000005") {
+    throw "Runtime access-violation trace output missing exception code"
+  }
+  if ($avRuntime -notmatch "Stack trace:") {
+    throw "Runtime access-violation trace output missing stack trace header"
+  }
+  if ($avRuntime -notmatch "leaf_crash" -or $avRuntime -notmatch "intermediate") {
+    throw "Runtime access-violation trace output missing generated frame names"
+  }
+
+  Write-CaseResult -Name "runtime_access_violation_trace" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "runtime_access_violation_trace" -Passed $false -Reason $_.Exception.Message
 }
 
 if (-not $SkipRuntime) {

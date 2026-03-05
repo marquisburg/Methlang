@@ -77,8 +77,21 @@ gcc -nostartfiles hello.o /usr/local/runtime/gc.c -o hello
 ## Runtime and Linking Notes
 
 - Link bundled `runtime/gc.c` from your Methlang installation when using `new` or string concatenation.
+- Compile with `-s` to embed runtime crash traceback support, or use `-d` to enable it alongside normal debug output.
+- On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated runtime traps with Meth function/source frames.
 - Networking examples may require extra libraries (for example `-lws2_32` on Windows).
 - For GC use from worker threads, use `gc_thread_attach` and `gc_thread_detach`.
+
+Example runtime crash output:
+
+```text
+Unhandled runtime exception 0xC0000005 (access violation)
+Exception address: 0x00007FF7DFD71046
+write access violation at 0x0000000000000001
+Stack trace:
+  #0 leaf_crash at app.meth:2:3 (0x00007FF7DFD71046)
+  #1 main at app.meth:8:3 (0x00007FF7DFD71080)
+```
 
 ## Compiler Snapshot
 

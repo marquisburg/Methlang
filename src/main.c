@@ -275,6 +275,7 @@ int main(int argc, char *argv[]) {
       options.debug_mode = 1;
       options.generate_debug_symbols = 1;
       options.generate_line_mapping = 1;
+      options.generate_stack_trace_support = 1;
     } else if (strcmp(argv[i], "-g") == 0 ||
                strcmp(argv[i], "--debug-symbols") == 0) {
       options.generate_debug_symbols = 1;
@@ -644,22 +645,8 @@ int compile_file(const char *input_filename, const char *output_filename,
       free(debug_output);
     }
 
-    if (options->generate_stack_trace_support) {
-      char *stack_trace_output =
-          build_sidecar_filename(output_filename, ".stacktrace.s");
-      if (!stack_trace_output) {
-        fprintf(
-            stderr,
-            "Error: Failed to allocate stack trace output filename for '%s'\n",
-            output_filename);
-        result = 1;
-        goto cleanup;
-      }
-      debug_info_generate_stack_trace_code(debug_info, stack_trace_output);
-      if (options->debug_mode) {
-        printf("Generated stack trace support: %s\n", stack_trace_output);
-      }
-      free(stack_trace_output);
+    if (options->generate_stack_trace_support && options->debug_mode) {
+      printf("Embedded runtime stack trace support enabled\n");
     }
   }
 
@@ -707,7 +694,7 @@ void print_usage(const char *program_name) {
   printf("  -d, --debug         Enable debug output and symbols\n");
   printf("  -g, --debug-symbols Generate debug symbols\n");
   printf("  -l, --line-mapping  Generate source line mapping\n");
-  printf("  -s, --stack-trace   Generate stack trace support\n");
+  printf("  -s, --stack-trace   Embed runtime crash traceback support\n");
   printf("  --debug-format <fmt> Debug format: dwarf, stabs, or map (default: "
          "dwarf)\n");
   printf("  -O, --optimize      Enable optimizations\n");
