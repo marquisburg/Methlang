@@ -1,0 +1,15 @@
+function leaf_crash() -> int32 {
+  asm {
+    mov rax, 1
+    mov qword [rax], 42
+  }
+  return 0
+}
+
+function intermediate() -> int32 {
+  return leaf_crash()
+}
+
+function main() -> int32 {
+  return intermediate()
+}

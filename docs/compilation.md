@@ -14,7 +14,7 @@ The input file is the main source file. Imports are resolved relative to it. The
 
 ## Options
 
-`-o <file>` output assembly file (default `output.s`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`). `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
+`-o <file>` output assembly file (default `output.s`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`). `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode and embedded runtime crash traceback support. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-s`/`--stack-trace` embeds runtime crash traceback support without the rest of debug mode. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
 
 ## Compilation Pipeline
 
@@ -50,6 +50,36 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 **Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, you must also compile and link bundled `runtime/methlang_entry.c` from your Methlang installation so the runtime can obtain command-line arguments. On Windows, link with `-lshell32` as well: `gcc -nostartfiles main.o gc.o methlang_entry.o -o main -lkernel32 -lshell32`.
 
 The output format depends on the target. Use `-f win64` for Windows, `-f elf64` for Linux. NASM is required for assembly; install from https://www.nasm.us/ if needed. On Linux and macOS, use `make` to build the compiler and run tests. The web server example in `web/` is Windows-only (Winsock). See [Standard Library](standard-library.md#platform-support) for Linux support details.
+
+## Runtime Crash Tracebacks
+
+Compile with `-s` or `-d` to embed runtime crash traceback support in the generated program. This adds failure-path-only metadata for Meth function names and source locations and installs a crash handler at program startup on Windows.
+
+- `-s` enables embedded runtime crash tracebacks without the rest of debug mode.
+- `-d` enables debug output and also implies embedded runtime crash tracebacks.
+- `--release` still disables generated null/bounds runtime checks, so only native crashes remain traceable there.
+
+On Windows, native exceptions are printed with their exception code and decoded name when available. Compiler-generated null dereference and array-bounds traps also print the same traceback shape.
+
+Example:
+
+```text
+Unhandled runtime exception 0xC0000005 (access violation)
+Exception address: 0x00007FF7DFD71046
+write access violation at 0x0000000000000001
+Stack trace:
+  #0 leaf_crash at app.meth:2:3 (0x00007FF7DFD71046)
+  #1 intermediate at app.meth:6:3 (0x00007FF7DFD71080)
+  #2 main at app.meth:10:3 (0x00007FF7DFD710A0)
+```
+
+Compiler-generated runtime traps are formatted as:
+
+```text
+Fatal error: Null pointer dereference
+Stack trace:
+  #0 main at app.meth:9:10 (0x00007FF7DFD71046)
+```
 
 ## Web Server Example
 

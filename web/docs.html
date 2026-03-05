@@ -1066,7 +1066,7 @@ gcc main.o gc.o -o main</code></pre>
         </div>
 
         <h3 class="sub-subsection-title">Options</h3>
-        <p><code>-o &lt;file&gt;</code> output assembly. <code>-i &lt;file&gt;</code> input file. <code>-I &lt;dir&gt;</code> add import search directory (repeatable). <code>--stdlib &lt;dir&gt;</code> use a custom stdlib (default: bundled stdlib). <code>--prelude</code> auto-import std/prelude. <code>-d</code>/<code>--debug</code> debug mode. <code>-g</code>/<code>--debug-symbols</code> generate debug symbols. <code>-l</code>/<code>--line-mapping</code> source line mapping. <code>-O</code>/<code>--optimize</code> enable optimizations. <code>-r</code>/<code>--release</code> enables <code>-O</code>, strips comments, removes unreachable functions, disables runtime null/bounds checks.</p>
+        <p><code>-o &lt;file&gt;</code> output assembly. <code>-i &lt;file&gt;</code> input file. <code>-I &lt;dir&gt;</code> add import search directory (repeatable). <code>--stdlib &lt;dir&gt;</code> use a custom stdlib (default: bundled stdlib). <code>--prelude</code> auto-import std/prelude. <code>-d</code>/<code>--debug</code> debug mode and embedded runtime crash traceback support. <code>-g</code>/<code>--debug-symbols</code> generate debug symbols. <code>-l</code>/<code>--line-mapping</code> source line mapping. <code>-s</code>/<code>--stack-trace</code> embed runtime crash traceback support without the rest of debug mode. <code>-O</code>/<code>--optimize</code> enable optimizations. <code>-r</code>/<code>--release</code> enables <code>-O</code>, strips comments, removes unreachable functions, disables runtime null/bounds checks.</p>
 
         <h3 class="sub-subsection-title">Compilation Pipeline</h3>
         <p>1. Lexing 2. Parsing 3. Import resolution 4. Monomorphization 5. Type checking 6. IR lowering 7. Optimization (optional) 8. Code generation</p>
@@ -1082,6 +1082,24 @@ gcc main.o gc.o -o main</code></pre>
           <div class="step-item">
             <p><strong>Link:</strong> <code>gcc -nostartfiles main.o gc.o -o main -lkernel32</code>. Use <code>-nostartfiles</code> so Methlang's entry point is used. If using <code>new</code>, compile and link <code>src/runtime/gc.c</code>.</p>
           </div>
+        </div>
+
+        <h3 class="sub-subsection-title">Runtime Crash Tracebacks</h3>
+        <p>Compile with <code>-s</code> or <code>-d</code> to embed runtime crash traceback support. On Windows, generated programs print native exception codes such as <code>0xC0000005</code> with Meth function and source frames when metadata is available.</p>
+        <div class="code-block">
+          <div class="code-header">
+            <div class="code-title">Example crash output</div>
+            <div class="code-actions">
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+          <pre><code>Unhandled runtime exception 0xC0000005 (access violation)
+Exception address: 0x00007FF7DFD71046
+write access violation at 0x0000000000000001
+Stack trace:
+  #0 leaf_crash at app.meth:2:3 (0x00007FF7DFD71046)
+  #1 intermediate at app.meth:6:3 (0x00007FF7DFD71080)
+  #2 main at app.meth:10:3 (0x00007FF7DFD710A0)</code></pre>
         </div>
       </section>
 
@@ -1271,6 +1289,11 @@ gcc main.o gc.o -o main</code></pre>
           <div class="alert-title">Program crashes on startup</div>
           <p><strong>Cause:</strong> Missing GC initialization when using <code>new</code> expressions.</p>
           <p><strong>Solution:</strong> Ensure the entry point calls <code>gc_init()</code> (handled automatically when linking with GC runtime).</p>
+        </div>
+
+        <div class="alert alert-info">
+          <div class="alert-title">Need Better Crash Diagnostics</div>
+          <p>Compile with <code>-s</code> or <code>-d</code> to embed runtime crash traceback support. On Windows this reports native exception codes and prints Meth stack frames for null dereferences, bounds traps, and access violations when frame metadata is available.</p>
         </div>
 
         <div class="alert alert-info">

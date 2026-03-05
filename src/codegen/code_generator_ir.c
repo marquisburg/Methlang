@@ -693,12 +693,10 @@ static int ir_function_requires_entry_safepoint(const IRFunction *function) {
     }
 
     if (instruction->op == IR_OP_CALL) {
-      // Null/bounds trap blocks lower to puts+exit calls. They are cold terminal
-      // paths and should not force every hot invocation through entry safepoint
-      // spill/restore.
+      // Runtime trap helpers are cold terminal paths and should not force every
+      // hot invocation through entry safepoint spill/restore.
       if (instruction->text &&
-          (strcmp(instruction->text, "puts") == 0 ||
-           strcmp(instruction->text, "exit") == 0)) {
+          strcmp(instruction->text, "meth_runtime_debug_trap") == 0) {
         continue;
       }
       return 1;
@@ -1577,6 +1575,72 @@ static int code_generator_emit_ir_call_argument_register(
   return 1;
 }
 
+static int code_generator_emit_ir_runtime_trap_call(
+    CodeGenerator *generator, const IRInstruction *instruction,
+    IRTempTable *temp_table) {
+  if (!generator || !instruction || instruction->argument_count == 0) {
+    return 0;
+  }
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator->calling_convention;
+  if (!conv_spec || conv_spec->int_param_count < 3) {
+    code_generator_set_error(generator,
+                             "Runtime trap helper requires three integer registers");
+    return 0;
+  }
+
+  if (!code_generator_emit_extern_symbol(generator, "meth_runtime_debug_trap")) {
+    return 0;
+  }
+
+  char *trap_pc_label = code_generator_generate_label(generator, "methdbg_trap_pc");
+  if (!trap_pc_label) {
+    code_generator_set_error(generator,
+                             "Out of memory while creating runtime trap label");
+    return 0;
+  }
+
+  int shadow_space =
+      (conv_spec->convention == CALLING_CONV_MS_X64) ? conv_spec->shadow_space_size
+                                                     : 0;
+  int call_stack_total = shadow_space;
+  if ((call_stack_total % 16) != 0) {
+    call_stack_total += 8;
+  }
+
+  code_generator_emit(generator, "    ; IR runtime trap\n");
+  code_generator_emit(generator, "%s:\n", trap_pc_label);
+  if (instruction->arguments[0].kind == IR_OPERAND_STRING) {
+    code_generator_load_string_literal_as_cstring(
+        generator, instruction->arguments[0].name);
+  } else if (!code_generator_load_ir_operand(generator, &instruction->arguments[0],
+                                             temp_table)) {
+    free(trap_pc_label);
+    return 0;
+  }
+  code_generator_emit(generator, "    mov %s, rax\n",
+                      code_generator_get_register_name(
+                          conv_spec->int_param_registers[0]));
+  code_generator_emit(generator, "    lea %s, [rel %s]\n",
+                      code_generator_get_register_name(
+                          conv_spec->int_param_registers[1]),
+                      trap_pc_label);
+  code_generator_emit(generator, "    mov %s, rbp\n",
+                      code_generator_get_register_name(
+                          conv_spec->int_param_registers[2]));
+  if (call_stack_total > 0) {
+    code_generator_emit(generator, "    sub rsp, %d\n", call_stack_total);
+  }
+  code_generator_emit(generator, "    call meth_runtime_debug_trap\n");
+  if (call_stack_total > 0) {
+    code_generator_emit(generator, "    add rsp, %d\n", call_stack_total);
+  }
+
+  free(trap_pc_label);
+  return 1;
+}
+
 static int code_generator_emit_ir_call(CodeGenerator *generator,
                                        const IRInstruction *instruction,
                                        IRTempTable *temp_table) {
@@ -1597,6 +1661,10 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
   if (!call_target) {
     code_generator_set_error(generator, "Invalid IR call target");
     return 0;
+  }
+  if (strcmp(call_target, "meth_runtime_debug_trap") == 0) {
+    return code_generator_emit_ir_runtime_trap_call(generator, instruction,
+                                                    temp_table);
   }
   if ((function_symbol && function_symbol->is_extern) || !function_symbol) {
     if (!code_generator_emit_extern_symbol(generator, call_target)) {
@@ -2387,6 +2455,19 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
     code_generator_set_error(generator, "Malformed function declaration");
     return 0;
   }
+  char *runtime_end_label = NULL;
+  if (generator->debug_info) {
+    runtime_end_label = code_generator_generate_label(generator, "methdbg_func_end");
+    if (!runtime_end_label) {
+      code_generator_set_error(generator,
+                               "Out of memory while tracking function debug range");
+      return 0;
+    }
+    code_generator_add_runtime_function_mapping(
+        generator, function_data->name, function_data->name, runtime_end_label,
+        function_declaration->location.line, function_declaration->location.column,
+        generator->debug_info->source_filename);
+  }
 
   symbol_table_enter_scope(generator->symbol_table, SCOPE_FUNCTION);
 
@@ -3000,6 +3081,11 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   if (!generator->has_error) {
     for (size_t i = 0; i < ir_function->instruction_count; i++) {
       const IRInstruction *instruction = &ir_function->instructions[i];
+      if (generator->debug_info && instruction->location.line > 0) {
+        code_generator_emit_runtime_location_marker(
+            generator, instruction->location.line, instruction->location.column,
+            generator->debug_info->source_filename);
+      }
       if (i + 1 < ir_function->instruction_count) {
         const IRInstruction *next = &ir_function->instructions[i + 1];
         if (instruction->op == IR_OP_BINARY && !instruction->is_float &&
@@ -3075,12 +3161,16 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
                         promoted_symbols[index].save_offset);
   }
   code_generator_function_epilogue(generator);
+  if (runtime_end_label) {
+    code_generator_emit(generator, "%s:\n", runtime_end_label);
+  }
 
   ir_temp_use_map_destroy(&temp_use_map);
   ir_temp_table_destroy(&temp_table);
   ir_local_table_destroy(&local_table);
   ir_symbol_stats_map_destroy(&symbol_stats);
   symbol_table_exit_scope(generator->symbol_table);
+  free(runtime_end_label);
 
   return generator->has_error ? 0 : 1;
 }

@@ -655,6 +655,24 @@ int code_generator_generate_program(CodeGenerator *generator,
   }
 
   int is_ms_x64 = (entry_conv_spec->convention == CALLING_CONV_MS_X64);
+  const char *second_param_reg =
+      (entry_conv_spec->int_param_count > 1 &&
+       code_generator_get_register_name(entry_conv_spec->int_param_registers[1]))
+          ? code_generator_get_register_name(
+                entry_conv_spec->int_param_registers[1])
+          : (is_ms_x64 ? "rdx" : "rsi");
+  const char *third_param_reg =
+      (entry_conv_spec->int_param_count > 2 &&
+       code_generator_get_register_name(entry_conv_spec->int_param_registers[2]))
+          ? code_generator_get_register_name(
+                entry_conv_spec->int_param_registers[2])
+          : (is_ms_x64 ? "r8" : "rdx");
+  const char *fourth_param_reg =
+      (entry_conv_spec->int_param_count > 3 &&
+       code_generator_get_register_name(entry_conv_spec->int_param_registers[3]))
+          ? code_generator_get_register_name(
+                entry_conv_spec->int_param_registers[3])
+          : (is_ms_x64 ? "r9" : "rcx");
 
   code_generator_emit(generator, "\n; Default program entry point\n");
   if (is_ms_x64) {
@@ -677,6 +695,21 @@ int code_generator_generate_program(CodeGenerator *generator,
 
   code_generator_emit(generator,
                       "    ; Initialize garbage collector runtime\n");
+  code_generator_emit(generator, "    extern meth_runtime_debug_install_crash_handler\n");
+  code_generator_emit(generator, "    call meth_runtime_debug_install_crash_handler\n");
+  if (generator->debug_info && generator->debug_info->runtime_function_count > 0) {
+    code_generator_emit(generator,
+                        "    extern meth_runtime_debug_register_image\n");
+    code_generator_emit(generator, "    lea %s, [rel meth_debug_functions]\n",
+                        first_param_reg);
+    code_generator_emit(generator, "    mov %s, %zu\n", second_param_reg,
+                        generator->debug_info->runtime_function_count);
+    code_generator_emit(generator, "    lea %s, [rel meth_debug_locations]\n",
+                        third_param_reg);
+    code_generator_emit(generator, "    mov %s, %zu\n", fourth_param_reg,
+                        generator->debug_info->runtime_location_count);
+    code_generator_emit(generator, "    call meth_runtime_debug_register_image\n");
+  }
   if (is_ms_x64) {
     // Anchor GC to the caller-visible stack top (before our 40-byte reserve).
     code_generator_emit(generator, "    lea %s, [rsp + 40]\n", first_param_reg);
@@ -812,6 +845,7 @@ int code_generator_generate_program(CodeGenerator *generator,
   // Emit all collected global data after all executable code so labels created
   // during function emission (e.g. local string literals) are always defined
   // and cannot interrupt entrypoint instruction flow.
+  code_generator_emit_runtime_debug_tables(generator);
   if (generator->global_variables_size > 0) {
     code_generator_emit(generator, "\n; Data section for global variables\n");
     code_generator_emit(generator, "section .data\n");
@@ -992,6 +1026,17 @@ void code_generator_generate_function(CodeGenerator *generator,
   FunctionDeclaration *func_data = (FunctionDeclaration *)function->data;
   if (!func_data || !func_data->name) {
     return;
+  }
+  char *runtime_end_label = NULL;
+  if (generator->debug_info) {
+    runtime_end_label = code_generator_generate_label(generator, "methdbg_func_end");
+    if (!runtime_end_label) {
+      return;
+    }
+    code_generator_add_runtime_function_mapping(
+        generator, func_data->name, func_data->name, runtime_end_label,
+        function->location.line, function->location.column,
+        generator->debug_info->source_filename);
   }
 
   // Enter a new scope for the function
@@ -1339,9 +1384,13 @@ void code_generator_generate_function(CodeGenerator *generator,
 
   // Generate function epilogue
   code_generator_function_epilogue(generator);
+  if (runtime_end_label) {
+    code_generator_emit(generator, "%s:\n", runtime_end_label);
+  }
 
   // Exit the function's scope
   symbol_table_exit_scope(generator->symbol_table);
+  free(runtime_end_label);
 }
 
 void code_generator_generate_statement(CodeGenerator *generator,
@@ -1356,6 +1405,9 @@ void code_generator_generate_statement(CodeGenerator *generator,
                                     statement->location.column,
                                     generator->debug_info->source_filename);
     code_generator_emit_debug_label(generator, statement->location.line);
+    code_generator_emit_runtime_location_marker(
+        generator, statement->location.line, statement->location.column,
+        generator->debug_info->source_filename);
   }
 
   switch (statement->type) {
