@@ -19,5 +19,7 @@ const char *code_generator_get_link_symbol_name(CodeGenerator *generator,
 int code_generator_emit_escaped_string_bytes(CodeGenerator *generator,
                                              const char *value,
                                              int include_null_terminator);
+int code_generator_generate_program_binary_object(CodeGenerator *generator,
+                                                  ASTNode *program);
 
 #endif // CODE_GENERATOR_INTERNAL_H

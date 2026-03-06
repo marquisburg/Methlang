@@ -7,10 +7,16 @@
 #include "../semantic/register_allocator.h"
 #include "../semantic/symbol_table.h"
 #include "../semantic/type_checker.h"
+#include "binary_emitter.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+typedef enum {
+  CODEGEN_BACKEND_TEXT_ASSEMBLY = 0,
+  CODEGEN_BACKEND_BINARY_OBJECT,
+} CodegenBackendMode;
 
 typedef struct {
   SymbolTable *symbol_table;
@@ -44,6 +50,8 @@ typedef struct {
   size_t extern_symbol_capacity;
   size_t last_runtime_location_line;
   size_t last_runtime_location_column;
+  CodegenBackendMode backend_mode;
+  BinaryEmitter *binary_emitter;
 } CodeGenerator;
 
 // Function declarations
@@ -57,6 +65,8 @@ CodeGenerator *code_generator_create_with_debug(SymbolTable *symbol_table,
 void code_generator_destroy(CodeGenerator *generator);
 void code_generator_set_ir_program(CodeGenerator *generator,
                                    IRProgram *ir_program);
+void code_generator_set_backend_mode(CodeGenerator *generator,
+                                     CodegenBackendMode mode);
 int code_generator_generate_program(CodeGenerator *generator, ASTNode *program);
 void code_generator_generate_function(CodeGenerator *generator,
                                       ASTNode *function);
@@ -69,6 +79,7 @@ void code_generator_set_eliminate_unreachable_functions(CodeGenerator *generator
                                                         int enable);
 void code_generator_emit(CodeGenerator *generator, const char *format, ...);
 char *code_generator_get_output(CodeGenerator *generator);
+BinaryEmitter *code_generator_get_binary_emitter(CodeGenerator *generator);
 
 // Stack frame management
 void code_generator_function_prologue(CodeGenerator *generator,

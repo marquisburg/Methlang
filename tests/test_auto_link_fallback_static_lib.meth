@@ -1,0 +1,5 @@
+extern function fallback_value() -> int32;
+
+function main() -> int32 {
+  return fallback_value();
+}

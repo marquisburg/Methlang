@@ -14,9 +14,6 @@ Optimization passes are limited. The `-O` flag enables some optimizations.
 
 Struct-by-value passing to functions can have ABI quirks; prefer pointers for large structs.
 
-Prelude is opt-in (`--prelude`) and not loaded by default.
-
-
 No pointer arithmetic with `ptr + n`. Use indexing `ptr[i]` instead, which scales by element size.
 
 Null pointer dereference is diagnosed for constant nulls such as `*0`. Runtime null checks are emitted for dynamic dereference and pointer-based indexing in normal builds, but are disabled in `--release`. Pointers originating from C or inline assembly can still be invalid in ways the compiler cannot prove.
@@ -33,7 +30,7 @@ Deferred calls capture variables by reference, not by value. In loops, copy the 
 
 Unreachable code analysis is currently block-local and conservative; some dead paths in complex control-flow may not be diagnosed yet.
 
-String concatenation via `+` is now supported, but it allocates via the GC runtime (`gc_alloc`). Link `gc.c` and initialize the runtime before using `string + string`.
+String concatenation via `+` is now supported, but it allocates via the GC runtime (`gc_alloc`). Use `methlang --build` or otherwise link the bundled GC runtime before using `string + string`.
 
 Managed pointers that cross into C remain a hazard. The compiler now warns when a managed struct pointer is passed to an `extern function` or stored in an `extern` variable, but C code that retains such pointers must still register the storage slot with `gc_register_root`.
 

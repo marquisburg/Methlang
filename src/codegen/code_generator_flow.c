@@ -454,6 +454,10 @@ int code_generator_generate_program(CodeGenerator *generator,
     return 0;
   }
 
+  if (generator->backend_mode == CODEGEN_BACKEND_BINARY_OBJECT) {
+    return code_generator_generate_program_binary_object(generator, program);
+  }
+
   if (program->type != AST_PROGRAM) {
     code_generator_set_error(generator, "Expected AST_PROGRAM root node");
     return 0;

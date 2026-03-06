@@ -1485,7 +1485,18 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       Type *expr_type = ir_infer_expression_type(context, expression);
       if (expr_type && expr_type->kind == TYPE_STRING) {
         IROperand destination = ir_operand_none();
+        IROperand left = ir_operand_none();
+        IROperand right = ir_operand_none();
         if (!ir_make_temp_operand(context, &destination)) {
+          return 0;
+        }
+        if (!ir_lower_expression(context, function, binary->left, &left)) {
+          ir_operand_destroy(&destination);
+          return 0;
+        }
+        if (!ir_lower_expression(context, function, binary->right, &right)) {
+          ir_operand_destroy(&left);
+          ir_operand_destroy(&destination);
           return 0;
         }
 
@@ -1493,13 +1504,19 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
         instruction.op = IR_OP_BINARY;
         instruction.location = expression->location;
         instruction.dest = destination;
+        instruction.lhs = left;
+        instruction.rhs = right;
         instruction.text = binary->operator;
         instruction.ast_ref = expression;
         if (!ir_emit(context, function, &instruction)) {
+          ir_operand_destroy(&right);
+          ir_operand_destroy(&left);
           ir_operand_destroy(&destination);
           return 0;
         }
 
+        ir_operand_destroy(&right);
+        ir_operand_destroy(&left);
         *out_value = destination;
         return 1;
       }

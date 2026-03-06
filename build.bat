@@ -16,6 +16,7 @@ if not exist obj\parser mkdir obj\parser
 if not exist obj\semantic mkdir obj\semantic
 if not exist obj\ir mkdir obj\ir
 if not exist obj\codegen mkdir obj\codegen
+if not exist obj\linker mkdir obj\linker
 if not exist obj\debug mkdir obj\debug
 if not exist obj\error mkdir obj\error
 if not exist obj\runtime mkdir obj\runtime
@@ -63,6 +64,13 @@ for %%f in (src\\codegen\\*.c) do (
     if errorlevel 1 exit /b 1
 )
 
+echo Compiling linker modules...
+for %%f in (src\\linker\\*.c) do (
+    echo   %%~nxf
+    gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -Isrc -c %%f -o obj\\linker\\%%~nf.o
+    if errorlevel 1 exit /b 1
+)
+
 echo Compiling debug info...
 gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\debug\debug_info.c -o obj\debug\debug_info.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
@@ -71,16 +79,20 @@ echo Compiling gc runtime...
 gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\runtime\gc.c -o obj\runtime\gc.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
+echo Compiling Methlang entry runtime...
+gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\runtime\methlang_entry.c -o obj\runtime\methlang_entry.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+
 echo Compiling error reporter...
 gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\error\error_reporter.c -o obj\error\error_reporter.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling main...
-gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\main.c -o obj\main.o
+gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -Isrc -c src\main.c -o obj\main.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Linking...
-gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\debug\debug_info.o obj\runtime\gc.o obj\error\error_reporter.o obj\main.o -o bin\methlang.exe
+gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\runtime\gc.o obj\error\error_reporter.o obj\main.o -o bin\methlang.exe
 
 if %ERRORLEVEL% NEQ 0 (
     echo Build failed!
@@ -94,6 +106,10 @@ xcopy stdlib bin\stdlib\ /E /I /Y >nul
 echo Bundling runtime into bin\runtime...
 if exist bin\runtime rmdir /S /Q bin\runtime
 xcopy src\runtime bin\runtime\ /E /I /Y >nul
+copy /Y obj\runtime\gc.o bin\runtime\gc.o >nul
+copy /Y obj\runtime\methlang_entry.o bin\runtime\methlang_entry.o >nul
+copy /Y obj\runtime\gc.o bin\runtime\gc.obj >nul
+copy /Y obj\runtime\methlang_entry.o bin\runtime\methlang_entry.obj >nul
 
 if exist installer\meth-build.bat copy /Y installer\meth-build.bat bin\meth-build.bat >nul
 

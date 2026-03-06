@@ -43,10 +43,15 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->extern_symbol_capacity = 0;
   generator->last_runtime_location_line = 0;
   generator->last_runtime_location_column = 0;
+  generator->backend_mode = CODEGEN_BACKEND_TEXT_ASSEMBLY;
+  generator->binary_emitter =
+      binary_emitter_create(BINARY_TARGET_FORMAT_COFF_WIN64);
 
-  if (!generator->output_buffer || !generator->global_variables_buffer) {
+  if (!generator->output_buffer || !generator->global_variables_buffer ||
+      !generator->binary_emitter) {
     free(generator->output_buffer);
     free(generator->global_variables_buffer);
+    binary_emitter_destroy(generator->binary_emitter);
     free(generator);
     return NULL;
   }
@@ -84,6 +89,7 @@ void code_generator_destroy(CodeGenerator *generator) {
     free(generator->current_function_name);
     free(generator->global_variables_buffer);
     free(generator->error_message);
+    binary_emitter_destroy(generator->binary_emitter);
     if (generator->extern_symbols) {
       for (size_t i = 0; i < generator->extern_symbol_count; i++) {
         free(generator->extern_symbols[i]);
@@ -100,6 +106,15 @@ void code_generator_set_ir_program(CodeGenerator *generator,
     return;
   }
   generator->ir_program = ir_program;
+}
+
+void code_generator_set_backend_mode(CodeGenerator *generator,
+                                     CodegenBackendMode mode) {
+  if (!generator) {
+    return;
+  }
+
+  generator->backend_mode = mode;
 }
 
 void code_generator_set_error(CodeGenerator *generator,
@@ -315,6 +330,10 @@ void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
 
 char *code_generator_get_output(CodeGenerator *generator) {
   return generator->output_buffer;
+}
+
+BinaryEmitter *code_generator_get_binary_emitter(CodeGenerator *generator) {
+  return generator ? generator->binary_emitter : NULL;
 }
 
 const char *code_generator_get_link_symbol_name(CodeGenerator *generator,

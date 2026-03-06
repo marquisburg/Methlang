@@ -1,24 +1,35 @@
 # Garbage Collector
 
-Methlang provides an optional conservative mark-and-sweep garbage collector for heap allocation. Programs that use the `new` expression must link the GC runtime (`gc.c`). Programs that use only stack allocation and C `malloc` do not need it.
+Methlang provides an optional conservative mark-and-sweep garbage collector for heap allocation. On Windows, `methlang --build` links the bundled GC/runtime automatically. Programs that use only stack allocation and C `malloc` do not need it.
 
 ## When to Use GC
 
 Use `new` when you want managed heap allocation: struct instances, dynamic data structures, or values that outlive the current function. The GC reclaims memory when it is no longer reachable. No explicit `free` is needed.
 
-Use C `malloc` (from `std/mem`) when you need unmanaged memory: buffers for I/O, C interop, or when the GC runtime is intentionally omitted (simple CLI utilities can skip the GC). The Windows web server example now links `gc.c` because it uses GC-backed string concatenation for its responses, but it still mixes stack buffers and `malloc` where appropriate.
+Use C `malloc` (from `std/mem`) when you need unmanaged memory: buffers for I/O, C interop, or when the GC runtime is intentionally omitted (simple CLI utilities can skip the GC). The Windows web server example links the bundled GC runtime because it uses GC-backed string concatenation for its responses, but it still mixes stack buffers and `malloc` where appropriate.
 
 **Rule of thumb:** Use `new` for program-level data structures whose lifetime is tied to reachability (trees, graphs, long-lived caches). Use `malloc` for buffers and C interop where you control the lifetime explicitly (I/O buffers, structs passed to C APIs that expect manual free).
 
 ## Linking the GC
 
-When your program uses `new`, compile and link the GC runtime:
+### Recommended Windows Flow
+
+When your program uses `new`, the default Windows flow is:
+
+```bat
+methlang --build main.meth -o main.exe
+```
+
+This automatically assembles and links the bundled GC/runtime for you.
+
+### Manual Flow
+
+If you are using the manual assembly/link pipeline, link the bundled GC runtime object:
 
 ```bash
 methlang main.meth -o main.s
 nasm -f win64 main.s -o main.o
-gcc -c src/runtime/gc.c -o gc.o -Isrc
-gcc main.o gc.o -o main
+gcc -nostartfiles main.o path/to/runtime/gc.o -o main -lkernel32
 ```
 
 The compiler emits calls to `gc_alloc` for `new` expressions. The entry point (`_start`) calls `gc_init` with the stack base before invoking `main`. See [Compilation](compilation.md) for the full pipeline.
@@ -114,16 +125,16 @@ The GC runtime (`gc.h`) exposes these functions for advanced use:
 
 ## Programs Without GC
 
-Programs that do not use `new` or string concatenation do not need to link `gc.c`. The Windows forum server (`web/server.meth`) now calls `gc_init` and relies on `string + string`, so it must link the GC runtime (`gc.o`); simple CLI utilities that stick to stack and `malloc` can still be built without it.
+Programs that do not use `new` or string concatenation do not need to link the GC runtime. The Windows forum server ([server.meth](/g:/Projects/MethASM/web/server.meth)) relies on `string + string`, so it must link the GC runtime; simple CLI utilities that stick to stack and `malloc` can still be built without it.
 
-If you use `new` but forget to link `gc.c`, the linker will report undefined references:
+If you use `new` but forget to link the GC runtime, the linker will report undefined references:
 
 ```
 undefined reference to `gc_alloc'
 undefined reference to `gc_init'
 ```
 
-Resolve by adding `gc.o` to the link command.
+Resolve by linking the bundled `gc.o` or by using `methlang --build`.
 
 ## GC and Threads
 

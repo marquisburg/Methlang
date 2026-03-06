@@ -1,0 +1,43 @@
+struct Box {
+  value: int32;
+  spare: int32;
+}
+
+function read_through(p: int32*) -> int32 {
+  return *p;
+}
+
+function bump(p: int32*) -> int32 {
+  *p = *p + 2;
+  return *p;
+}
+
+function main() -> int32 {
+  var local: int32 = 5;
+  var p: int32* = &local;
+
+  if (read_through(p) != 5) {
+    return 1;
+  }
+
+  if (bump(&local) != 7) {
+    return 2;
+  }
+
+  var box: Box* = new Box;
+  box->value = 11;
+  box->spare = 4;
+
+  var vp: int32* = &box->value;
+  *vp = *vp + box->spare;
+
+  if (*vp != 15) {
+    return 3;
+  }
+
+  if (box == 0) {
+    return 4;
+  }
+
+  return 29;
+}

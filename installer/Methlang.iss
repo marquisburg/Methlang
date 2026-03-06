@@ -31,7 +31,7 @@ Source: "..\bin\methlang.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "meth-build.bat"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "..\methicon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\stdlib\*"; DestDir: "{app}\stdlib"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\src\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\bin\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -46,7 +46,7 @@ Root: HKCR; Subkey: "MethlangFile\DefaultIcon"; ValueType: string; ValueName: ""
 Root: HKCR; Subkey: "MethlangFile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\methlang.exe"" ""%1"""; Tasks: associate
 
 [Run]
-Filename: "{cmd}"; Parameters: "/K echo Methlang installed. Use meth-build your_file.meth or methlang --help"; Description: "Open terminal with usage hint"; Flags: postinstall nowait skipifsilent
+Filename: "{cmd}"; Parameters: "/K echo Methlang installed. Use methlang --build your_file.meth for a one-command build."; Description: "Open terminal with usage hint"; Flags: postinstall nowait skipifsilent
 
 [Code]
 const

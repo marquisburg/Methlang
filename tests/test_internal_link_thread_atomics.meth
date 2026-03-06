@@ -1,0 +1,28 @@
+import "std/thread";
+
+function main() -> int32 {
+  var value: int32 = 0;
+
+  if (atomic_compare_exchange_i32(&value, 1, 0) != 0) {
+    return 1;
+  }
+  if (value != 1) {
+    return 2;
+  }
+
+  if (atomic_exchange_i32(&value, 4) != 1) {
+    return 3;
+  }
+  if (value != 4) {
+    return 4;
+  }
+
+  if (atomic_inc_i32(&value) != 5) {
+    return 5;
+  }
+  if (atomic_dec_i32(&value) != 4) {
+    return 6;
+  }
+
+  return 0;
+}

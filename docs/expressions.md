@@ -120,7 +120,7 @@ obj.method(args)
 
 ## Allocation
 
-The `new` expression allocates a value on the GC heap and returns a pointer. It requires linking the GC runtime (`gc.c`). The pointer is managed; no explicit `free` is needed. The GC performs conservative mark-and-sweep collection. See [Garbage Collector](garbage-collector.md) for details.
+The `new` expression allocates a value on the GC heap and returns a pointer. In the normal Windows flow, `methlang --build` links the bundled GC runtime automatically. The pointer is managed; no explicit `free` is needed. The GC performs conservative mark-and-sweep collection. See [Garbage Collector](garbage-collector.md) for details.
 
 ```meth
 var p: MyStruct* = new MyStruct;
@@ -164,6 +164,6 @@ Comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) produce `int32` with val
 
 ## String Expressions
 
-**Concatenation:** The `+` operator concatenates two `string` values. Both operands must be `string`; the result is a new GC-managed string whose `.chars` points to a freshly allocated buffer and whose `.length` is the sum of the operand lengths. Because the runtime allocates via `gc_alloc`, link `gc.c` and call `gc_init` (the entry point does this automatically) before using string concatenation or other heap-backed string helpers.
+**Concatenation:** The `+` operator concatenates two `string` values. Both operands must be `string`; the result is a new GC-managed string whose `.chars` points to a freshly allocated buffer and whose `.length` is the sum of the operand lengths. Because the runtime allocates via `gc_alloc`, use `methlang --build` or otherwise link the bundled GC runtime before using string concatenation or other heap-backed string helpers. `gc_init` is handled automatically by the generated entry point.
 
 **Indexing:** Use `s.chars[i]` to access the i-th byte of a string. The `.chars` field is a pointer; indexing advances by 1 byte (element size of `uint8`). Pointer indexing is not bounds-checked; ensure `i < s.length` to avoid undefined behavior.

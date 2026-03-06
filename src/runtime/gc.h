@@ -37,6 +37,11 @@ void meth_runtime_debug_register_image(const MethRuntimeFunctionInfo *functions,
                                        size_t location_count);
 void meth_runtime_debug_trap(const char *message, const void *program_counter,
                              const void *frame_pointer);
+int32_t meth_atomic_compare_exchange_i32(int32_t *target, int32_t exchange,
+                                         int32_t comparand);
+int32_t meth_atomic_exchange_i32(int32_t *target, int32_t value);
+int32_t meth_atomic_inc_i32(int32_t *target);
+int32_t meth_atomic_dec_i32(int32_t *target);
 
 /**
  * @brief Attach the current thread to the GC runtime.

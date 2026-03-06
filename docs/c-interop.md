@@ -36,7 +36,14 @@ struct SockAddrIn {
 
 ## Linking
 
-Link the compiled assembly with the C runtime and any required libraries. For programs using `new` (GC), include `gc.c` in the link. Example:
+On Windows, the recommended path is to let Methlang do the assemble/link step for you:
+
+```bash
+methlang --build main.meth -o main.exe
+methlang --build main.meth -o main.exe --link-arg -lws2_32
+```
+
+If you use the manual assembly/link flow, link the compiled assembly with the C runtime and any required libraries. For programs using `new` (GC), include the bundled `gc.o` in the link. Example:
 
 ```bash
 # Windows (Winsock2)
@@ -63,10 +70,10 @@ gcc -o myapp output.s stdlib/posix_helpers.c
 
 ```bash
 # Linux
-gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c -lpthread
+gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o -lpthread
 
 # macOS
-gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c
+gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o
 ```
 
 The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `recv`, `close`) are in libc on both Linux and macOS, so no extra libraries are needed beyond the C runtime. The `posix_helpers.c` file provides:
@@ -96,10 +103,10 @@ gcc -o myapp output.s stdlib/posix_helpers.c
 
 ```bash
 # Linux
-gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c -lpthread
+gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o -lpthread
 
 # macOS
-gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c
+gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o
 ```
 
 The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `recv`, `close`) are in libc on both Linux and macOS, so no extra libraries are needed beyond the C runtime. The `posix_helpers.c` file provides:
@@ -128,10 +135,10 @@ gcc -o myapp output.s stdlib/posix_helpers.c
 
 ```bash
 # Linux
-gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c -lpthread
+gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o -lpthread
 
 # macOS
-gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c
+gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o
 ```
 
 The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `recv`, `close`) are in libc on both Linux and macOS, so no extra libraries are needed beyond the C runtime. The `posix_helpers.c` file provides:
@@ -141,4 +148,3 @@ The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `
 - `posix_atomic_exchange_i32()` – atomic exchange
 
 **Note:** On macOS, `SOL_SOCKET` is 0xFFFF and `SO_REUSEADDR` is 4. On Linux, they are 1 and 2 respectively. Use the constants from `std/net_posix` (which default to Linux values) or override them at call site for macOS.
-

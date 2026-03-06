@@ -1,0 +1,40 @@
+function fold8(a: int32, b: int32, c: int32, d: int32, e: int32, f: int32, g: int32, h: int32) -> int32 {
+  return a + b + c + d + e + f + g + h;
+}
+
+function main() -> int32 {
+  var divv: int32 = 43 / 6;
+  if (divv != 7) { return 1; }
+
+  var modv: int32 = 43 % 6;
+  if (modv != 1) { return 2; }
+
+  var andv: int32 = 6 & 3;
+  if (andv != 2) { return 3; }
+
+  var orv: int32 = 6 | 1;
+  if (orv != 7) { return 4; }
+
+  var xorv: int32 = 6 ^ 3;
+  if (xorv != 5) { return 5; }
+
+  var lsh: int32 = 3 << 4;
+  if (lsh != 48) { return 6; }
+
+  var rsh: int32 = 32 >> 3;
+  if (rsh != 4) { return 7; }
+
+  var notv: int32 = ~1;
+  if (notv != -2) { return 8; }
+
+  var negv: int32 = -7;
+  if (negv != -7) { return 9; }
+
+  var truthy: int32 = (0 || 12) + (5 && 2) + !0 + !9;
+  if (truthy != 3) { return 10; }
+
+  var folded: int32 = fold8(1, 2, 3, 4, 5, 6, 7, 8);
+  if (folded != 36) { return 11; }
+
+  return 37;
+}

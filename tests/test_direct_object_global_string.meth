@@ -1,0 +1,9 @@
+var GREETING: string = "hello";
+
+function main() -> int32 {
+  if (GREETING.length == 5) {
+    return 0;
+  }
+
+  return 1;
+}
