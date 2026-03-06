@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
+#include <direct.h>
+#include <io.h>
 #include <sys/stat.h>
 #else
 #include <limits.h>
@@ -163,6 +165,166 @@ static char *infer_default_stdlib_directory(const char *argv0) {
   return strdup("stdlib");
 }
 
+static char *infer_default_runtime_directory(const char *argv0) {
+  char *exe_path = get_executable_path(argv0);
+  char *exe_dir = directory_from_path(exe_path);
+
+  if (exe_dir) {
+    char *parent_dir = join_paths(exe_dir, "..");
+    if (parent_dir) {
+      char *packaged_runtime = join_paths(parent_dir, "runtime");
+      free(parent_dir);
+      if (packaged_runtime && directory_exists(packaged_runtime)) {
+        free(exe_path);
+        free(exe_dir);
+        return packaged_runtime;
+      }
+      free(packaged_runtime);
+    }
+
+    char *local_runtime = join_paths(exe_dir, "runtime");
+    if (local_runtime && directory_exists(local_runtime)) {
+      free(exe_path);
+      free(exe_dir);
+      return local_runtime;
+    }
+    free(local_runtime);
+  }
+
+  free(exe_path);
+  free(exe_dir);
+
+  if (directory_exists("runtime")) {
+    return strdup("runtime");
+  }
+
+  return NULL;
+}
+
+static char *infer_default_docs_directory(const char *argv0) {
+  char *exe_path = get_executable_path(argv0);
+  char *exe_dir = directory_from_path(exe_path);
+
+  if (exe_dir) {
+    char *parent_dir = join_paths(exe_dir, "..");
+    if (parent_dir) {
+      char *packaged_docs = join_paths(parent_dir, "docs");
+      free(parent_dir);
+      if (packaged_docs && directory_exists(packaged_docs)) {
+        free(exe_path);
+        free(exe_dir);
+        return packaged_docs;
+      }
+      free(packaged_docs);
+    }
+
+    char *local_docs = join_paths(exe_dir, "docs");
+    if (local_docs && directory_exists(local_docs)) {
+      free(exe_path);
+      free(exe_dir);
+      return local_docs;
+    }
+    free(local_docs);
+  }
+
+  free(exe_path);
+  free(exe_dir);
+
+  if (directory_exists("docs")) {
+    return strdup("docs");
+  }
+
+  return NULL;
+}
+
+static void print_doc_reference(const char *argv0, const char *relative_path) {
+  char *docs_dir = infer_default_docs_directory(argv0);
+  if (docs_dir && relative_path) {
+    char *full_path = join_paths(docs_dir, relative_path);
+    if (full_path) {
+      printf("Doc: %s\n", full_path);
+      free(full_path);
+      free(docs_dir);
+      return;
+    }
+  }
+
+  if (relative_path) {
+    printf("Doc: docs/%s\n", relative_path);
+  }
+  free(docs_dir);
+}
+
+static int print_help_topic(const char *program_name, const char *argv0,
+                            const char *topic) {
+  if (!topic || topic[0] == '\0') {
+    print_usage(program_name);
+    return 0;
+  }
+
+  if (strcmp(topic, "build") == 0 || strcmp(topic, "compile") == 0) {
+    printf("Build help\n");
+    printf("  methlang --build app.meth -o app.exe\n");
+    printf("  Builds an executable directly on Windows.\n");
+    printf("  Uses NASM, then tries gcc, then link.exe.\n");
+    printf("  Add repeatable linker flags with --link-arg <arg>.\n");
+    printf("  Example: methlang --build web\\\\server.meth -o web\\\\server.exe "
+           "--link-arg -lws2_32\n");
+    print_doc_reference(argv0, "compilation.md");
+    return 0;
+  }
+
+  if (strcmp(topic, "gc") == 0 || strcmp(topic, "runtime") == 0) {
+    printf("GC help\n");
+    printf("  The .s file contains calls to gc_alloc/gc_init, not the GC "
+           "implementation itself.\n");
+    printf("  methlang --build links the bundled runtime automatically.\n");
+    printf("  Manual assembly/linking still requires the bundled runtime "
+           "objects.\n");
+    printf("  If you use new or GC-backed string concatenation, use "
+           "--build or link gc.o manually.\n");
+    print_doc_reference(argv0, "garbage-collector.md");
+    return 0;
+  }
+
+  if (strcmp(topic, "interop") == 0 || strcmp(topic, "c") == 0) {
+    printf("C interop help\n");
+    printf("  Declare external C functions with extern function.\n");
+    printf("  Use --link-arg for extra linker libraries in --build mode.\n");
+    printf("  Example: methlang --build main.meth -o main.exe --link-arg "
+           "-lws2_32\n");
+    print_doc_reference(argv0, "c-interop.md");
+    return 0;
+  }
+
+  if (strcmp(topic, "stdlib") == 0) {
+    printf("Stdlib help\n");
+    printf("  std/... imports resolve against the bundled stdlib by default.\n");
+    printf("  Override with --stdlib <dir> only when you need a custom root.\n");
+    print_doc_reference(argv0, "standard-library.md");
+    return 0;
+  }
+
+  if (strcmp(topic, "web") == 0) {
+    printf("Web example help\n");
+    printf("  Build the demo server with .\\\\web\\\\build.bat\n");
+    printf("  That now delegates to methlang --build with --link-arg "
+           "-lws2_32.\n");
+    print_doc_reference(argv0, "compilation.md");
+    return 0;
+  }
+
+  if (strcmp(topic, "docs") == 0 || strcmp(topic, "topics") == 0) {
+    printf("Help topics: build, gc, interop, stdlib, web\n");
+    print_doc_reference(argv0, "LANGUAGE.md");
+    return 0;
+  }
+
+  fprintf(stderr, "Error: Unknown help topic '%s'\n", topic);
+  fprintf(stderr, "Available topics: build, gc, interop, stdlib, web\n");
+  return 1;
+}
+
 static int validate_lexical_phase(const char *source, ErrorReporter *reporter) {
   if (!source) {
     return 0;
@@ -225,6 +387,580 @@ static char *build_sidecar_filename(const char *base_filename,
   return path;
 }
 
+static char *replace_extension(const char *path, const char *extension) {
+  if (!path || !extension) {
+    return NULL;
+  }
+
+  const char *last_slash = strrchr(path, '/');
+  const char *last_backslash = strrchr(path, '\\');
+  const char *last_sep =
+      (last_slash > last_backslash) ? last_slash : last_backslash;
+  const char *last_dot = strrchr(path, '.');
+  size_t stem_len =
+      (last_dot && (!last_sep || last_dot > last_sep)) ? (size_t)(last_dot - path)
+                                                       : strlen(path);
+  size_t ext_len = strlen(extension);
+
+  char *result = malloc(stem_len + ext_len + 1);
+  if (!result) {
+    return NULL;
+  }
+
+  memcpy(result, path, stem_len);
+  memcpy(result + stem_len, extension, ext_len);
+  result[stem_len + ext_len] = '\0';
+  return result;
+}
+
+static char *default_executable_filename(const char *input_filename) {
+  if (!input_filename || input_filename[0] == '\0') {
+    return NULL;
+  }
+
+  return replace_extension(input_filename, ".exe");
+}
+
+#ifdef _WIN32
+static int append_argument_text(char *buffer, size_t buffer_size, size_t *offset,
+                                const char *text) {
+  if (!buffer || !offset || !text) {
+    return 0;
+  }
+
+  size_t text_len = strlen(text);
+  if (*offset + text_len >= buffer_size) {
+    return 0;
+  }
+
+  memcpy(buffer + *offset, text, text_len);
+  *offset += text_len;
+  buffer[*offset] = '\0';
+  return 1;
+}
+
+static int append_quoted_argument(char *buffer, size_t buffer_size,
+                                  size_t *offset, const char *argument) {
+  if (!append_argument_text(buffer, buffer_size, offset, "\"")) {
+    return 0;
+  }
+  if (!append_argument_text(buffer, buffer_size, offset, argument)) {
+    return 0;
+  }
+  return append_argument_text(buffer, buffer_size, offset, "\"");
+}
+
+static int append_gcc_link_arguments(char *buffer, size_t buffer_size,
+                                     size_t *offset,
+                                     const CompilerOptions *options) {
+  if (!options) {
+    return 1;
+  }
+
+  for (size_t i = 0; i < options->link_argument_count; i++) {
+    const char *arg = options->link_arguments[i];
+    if (!arg || arg[0] == '\0') {
+      continue;
+    }
+    if (!append_argument_text(buffer, buffer_size, offset, " ")) {
+      return 0;
+    }
+    if (!append_argument_text(buffer, buffer_size, offset, arg)) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+static int append_msvc_link_argument(char *buffer, size_t buffer_size,
+                                     size_t *offset, const char *argument) {
+  if (!argument || argument[0] == '\0') {
+    return 1;
+  }
+
+  if (strncmp(argument, "-l", 2) == 0 && argument[2] != '\0') {
+    if (!append_argument_text(buffer, buffer_size, offset, " ")) {
+      return 0;
+    }
+    if (!append_argument_text(buffer, buffer_size, offset, argument + 2)) {
+      return 0;
+    }
+    return append_argument_text(buffer, buffer_size, offset, ".lib");
+  }
+
+  if (strncmp(argument, "-L", 2) == 0 && argument[2] != '\0') {
+    if (!append_argument_text(buffer, buffer_size, offset, " /LIBPATH:\"")) {
+      return 0;
+    }
+    if (!append_argument_text(buffer, buffer_size, offset, argument + 2)) {
+      return 0;
+    }
+    return append_argument_text(buffer, buffer_size, offset, "\"");
+  }
+
+  if (!append_argument_text(buffer, buffer_size, offset, " ")) {
+    return 0;
+  }
+  return append_argument_text(buffer, buffer_size, offset, argument);
+}
+
+static int append_msvc_link_arguments(char *buffer, size_t buffer_size,
+                                      size_t *offset,
+                                      const CompilerOptions *options) {
+  if (!options) {
+    return 1;
+  }
+
+  for (size_t i = 0; i < options->link_argument_count; i++) {
+    if (!append_msvc_link_argument(buffer, buffer_size, offset,
+                                   options->link_arguments[i])) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+static int run_system_command(const char *command) {
+  if (!command || command[0] == '\0') {
+    return 0;
+  }
+  return system(command);
+}
+
+static int windows_tool_exists(const char *tool_name) {
+  if (!tool_name || tool_name[0] == '\0') {
+    return 0;
+  }
+
+  size_t command_len = strlen(tool_name) + 32;
+  char *command = malloc(command_len);
+  if (!command) {
+    return 0;
+  }
+
+  snprintf(command, command_len, "where %s >nul 2>&1", tool_name);
+  int result = run_system_command(command);
+  free(command);
+  return result == 0;
+}
+
+static int run_nasm_assemble(const char *asm_filename,
+                             const char *object_filename) {
+  size_t nasm_len = strlen(asm_filename) + strlen(object_filename) + 64;
+  char *nasm_command = malloc(nasm_len);
+  if (!nasm_command) {
+    fprintf(stderr, "Error: Failed to allocate NASM command\n");
+    return 1;
+  }
+
+  snprintf(nasm_command, nasm_len, "nasm -f win64 \"%s\" -o \"%s\"",
+           asm_filename, object_filename);
+  int result = run_system_command(nasm_command);
+  free(nasm_command);
+  if (result != 0) {
+    fprintf(stderr, "Error: NASM assembly step failed\n");
+    return 1;
+  }
+  return 0;
+}
+
+static int methlang_build_with_gcc(const char *object_filename,
+                                   const char *executable_filename,
+                                   const char *gc_object,
+                                   const char *entry_object,
+                                   const CompilerOptions *options) {
+  size_t gcc_len = strlen(object_filename) + strlen(gc_object) +
+                   strlen(executable_filename) + 160;
+  if (entry_object && entry_object[0] != '\0') {
+    gcc_len += strlen(entry_object);
+  }
+  if (options) {
+    for (size_t i = 0; i < options->link_argument_count; i++) {
+      if (options->link_arguments[i]) {
+        gcc_len += strlen(options->link_arguments[i]) + 1;
+      }
+    }
+  }
+
+  char *gcc_command = malloc(gcc_len);
+  if (!gcc_command) {
+    fprintf(stderr, "Error: Failed to allocate GCC command\n");
+    return 1;
+  }
+
+  size_t offset = 0;
+  if (entry_object && entry_object[0] != '\0') {
+    if (!append_argument_text(gcc_command, gcc_len, &offset,
+                              "gcc -nostartfiles ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
+        !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object) ||
+        !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset, entry_object) ||
+        !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset,
+                                executable_filename) ||
+        !append_argument_text(gcc_command, gcc_len, &offset,
+                              " -lkernel32 -lshell32") ||
+        !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
+      free(gcc_command);
+      fprintf(stderr, "Error: Failed to build GCC command\n");
+      return 1;
+    }
+  } else {
+    if (!append_argument_text(gcc_command, gcc_len, &offset,
+                              "gcc -nostartfiles ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
+        !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object) ||
+        !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset,
+                                executable_filename) ||
+        !append_argument_text(gcc_command, gcc_len, &offset, " -lkernel32") ||
+        !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
+      free(gcc_command);
+      fprintf(stderr, "Error: Failed to build GCC command\n");
+      return 1;
+    }
+  }
+
+  int result = run_system_command(gcc_command);
+  free(gcc_command);
+  if (result != 0) {
+    fprintf(stderr, "Warning: GCC link step failed\n");
+    return 1;
+  }
+  return 0;
+}
+
+static int methlang_build_with_link(const char *object_filename,
+                                    const char *executable_filename,
+                                    const char *gc_object,
+                                    const char *entry_object,
+                                    const CompilerOptions *options) {
+  size_t link_len = strlen(object_filename) + strlen(executable_filename) +
+                    strlen(gc_object) + 256;
+  if (entry_object && entry_object[0] != '\0') {
+    link_len += strlen(entry_object) + 16;
+  }
+  if (options) {
+    for (size_t i = 0; i < options->link_argument_count; i++) {
+      if (options->link_arguments[i]) {
+        link_len += strlen(options->link_arguments[i]) + 16;
+      }
+    }
+  }
+
+  char *link_command = malloc(link_len);
+  if (!link_command) {
+    fprintf(stderr, "Error: Failed to allocate MSVC link command\n");
+    return 1;
+  }
+
+  size_t offset = 0;
+  if (entry_object && entry_object[0] != '\0') {
+    if (!append_argument_text(
+            link_command, link_len, &offset,
+            "link.exe /nologo /entry:mainCRTStartup /subsystem:console /out:") ||
+        !append_quoted_argument(link_command, link_len, &offset,
+                                executable_filename) ||
+        !append_argument_text(link_command, link_len, &offset, " ") ||
+        !append_quoted_argument(link_command, link_len, &offset, object_filename) ||
+        !append_argument_text(link_command, link_len, &offset, " ") ||
+        !append_quoted_argument(link_command, link_len, &offset, gc_object) ||
+        !append_argument_text(link_command, link_len, &offset, " ") ||
+        !append_quoted_argument(link_command, link_len, &offset, entry_object) ||
+        !append_argument_text(link_command, link_len, &offset,
+                              " kernel32.lib shell32.lib msvcrt.lib") ||
+        !append_msvc_link_arguments(link_command, link_len, &offset, options)) {
+      free(link_command);
+      fprintf(stderr, "Error: Failed to build MSVC link command\n");
+      return 1;
+    }
+  } else {
+    if (!append_argument_text(
+            link_command, link_len, &offset,
+            "link.exe /nologo /entry:mainCRTStartup /subsystem:console /out:") ||
+        !append_quoted_argument(link_command, link_len, &offset,
+                                executable_filename) ||
+        !append_argument_text(link_command, link_len, &offset, " ") ||
+        !append_quoted_argument(link_command, link_len, &offset, object_filename) ||
+        !append_argument_text(link_command, link_len, &offset, " ") ||
+        !append_quoted_argument(link_command, link_len, &offset, gc_object) ||
+        !append_argument_text(link_command, link_len, &offset,
+                              " kernel32.lib msvcrt.lib") ||
+        !append_msvc_link_arguments(link_command, link_len, &offset, options)) {
+      free(link_command);
+      fprintf(stderr, "Error: Failed to build MSVC link command\n");
+      return 1;
+    }
+  }
+
+  int result = run_system_command(link_command);
+  free(link_command);
+  if (result != 0) {
+    fprintf(stderr, "Warning: MSVC link.exe step failed\n");
+    return 1;
+  }
+  return 0;
+}
+
+static int methlang_link_object_with_gcc(const char *object_filename,
+                                         const char *executable_filename,
+                                         const char *gc_object,
+                                         const CompilerOptions *options) {
+  size_t gcc_len = strlen(object_filename) + strlen(gc_object) +
+                   strlen(executable_filename) + 160;
+  if (options) {
+    for (size_t i = 0; i < options->link_argument_count; i++) {
+      if (options->link_arguments[i]) {
+        gcc_len += strlen(options->link_arguments[i]) + 1;
+      }
+    }
+  }
+
+  char *gcc_command = malloc(gcc_len);
+  if (!gcc_command) {
+    fprintf(stderr, "Error: Failed to allocate GCC command\n");
+    return 1;
+  }
+
+  size_t offset = 0;
+  if (!append_argument_text(gcc_command, gcc_len, &offset, "gcc ") ||
+      !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
+      !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+      !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object) ||
+      !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
+      !append_quoted_argument(gcc_command, gcc_len, &offset,
+                              executable_filename) ||
+      !append_argument_text(gcc_command, gcc_len, &offset,
+                            " -mconsole -lkernel32") ||
+      !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
+    free(gcc_command);
+    fprintf(stderr, "Error: Failed to build GCC object link command\n");
+    return 1;
+  }
+
+  int result = run_system_command(gcc_command);
+  free(gcc_command);
+  if (result != 0) {
+    fprintf(stderr, "Warning: GCC object link step failed\n");
+    return 1;
+  }
+  return 0;
+}
+
+static int methlang_link_object_with_link(const char *object_filename,
+                                          const char *executable_filename,
+                                          const char *gc_object,
+                                          const CompilerOptions *options) {
+  size_t link_len = strlen(object_filename) + strlen(executable_filename) +
+                    strlen(gc_object) + 256;
+  if (options) {
+    for (size_t i = 0; i < options->link_argument_count; i++) {
+      if (options->link_arguments[i]) {
+        link_len += strlen(options->link_arguments[i]) + 16;
+      }
+    }
+  }
+
+  char *link_command = malloc(link_len);
+  if (!link_command) {
+    fprintf(stderr, "Error: Failed to allocate MSVC link command\n");
+    return 1;
+  }
+
+  size_t offset = 0;
+  if (!append_argument_text(link_command, link_len, &offset,
+                            "link.exe /nologo /subsystem:console /out:") ||
+      !append_quoted_argument(link_command, link_len, &offset,
+                              executable_filename) ||
+      !append_argument_text(link_command, link_len, &offset, " ") ||
+      !append_quoted_argument(link_command, link_len, &offset, object_filename) ||
+      !append_argument_text(link_command, link_len, &offset, " ") ||
+      !append_quoted_argument(link_command, link_len, &offset, gc_object) ||
+      !append_argument_text(link_command, link_len, &offset,
+                            " kernel32.lib msvcrt.lib") ||
+      !append_msvc_link_arguments(link_command, link_len, &offset, options)) {
+    free(link_command);
+    fprintf(stderr, "Error: Failed to build MSVC object link command\n");
+    return 1;
+  }
+
+  int result = run_system_command(link_command);
+  free(link_command);
+  if (result != 0) {
+    fprintf(stderr, "Warning: MSVC object link step failed\n");
+    return 1;
+  }
+  return 0;
+}
+
+static int methlang_build_executable(const char *asm_filename,
+                                     const char *executable_filename,
+                                     const char *runtime_directory,
+                                     const CompilerOptions *options) {
+  if (!asm_filename || !executable_filename || !runtime_directory) {
+    fprintf(stderr, "Error: Missing build inputs for executable generation\n");
+    return 1;
+  }
+
+  if (!windows_tool_exists("nasm")) {
+    fprintf(stderr, "Error: nasm not found in PATH. Please install NASM.\n");
+    return 1;
+  }
+
+  int has_gcc = windows_tool_exists("gcc");
+  int has_link = windows_tool_exists("link.exe");
+  if (!has_gcc && !has_link) {
+    fprintf(stderr,
+            "Error: No supported linker found. Install GCC or run from a "
+            "Visual Studio Developer Command Prompt.\n");
+    return 1;
+  }
+
+  char *gcc_object_filename = replace_extension(executable_filename, ".o");
+  char *msvc_object_filename = replace_extension(executable_filename, ".obj");
+  char *gc_gcc_object = join_paths(runtime_directory, "gc.o");
+  char *entry_gcc_object = join_paths(runtime_directory, "methlang_entry.o");
+  char *gc_msvc_object = join_paths(runtime_directory, "gc.obj");
+  char *entry_msvc_object = join_paths(runtime_directory, "methlang_entry.obj");
+  if (!gcc_object_filename || !msvc_object_filename || !gc_gcc_object ||
+      !entry_gcc_object || !gc_msvc_object || !entry_msvc_object) {
+    fprintf(stderr, "Error: Failed to allocate build paths\n");
+    free(gcc_object_filename);
+    free(msvc_object_filename);
+    free(gc_gcc_object);
+    free(entry_gcc_object);
+    free(gc_msvc_object);
+    free(entry_msvc_object);
+    return 1;
+  }
+
+  if (_access(gc_gcc_object, 0) != 0 && _access(gc_msvc_object, 0) != 0) {
+    fprintf(stderr,
+            "Error: Bundled GC runtime object not found in '%s'\n",
+            runtime_directory);
+    free(gcc_object_filename);
+    free(msvc_object_filename);
+    free(gc_gcc_object);
+    free(entry_gcc_object);
+    free(gc_msvc_object);
+    free(entry_msvc_object);
+    return 1;
+  }
+
+  int build_result = 1;
+
+  if (has_gcc) {
+    if (run_nasm_assemble(asm_filename, gcc_object_filename) == 0) {
+      const char *entry_object =
+          (_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL;
+      if (methlang_build_with_gcc(gcc_object_filename, executable_filename,
+                                  gc_gcc_object, entry_object, options) == 0) {
+        build_result = 0;
+        goto cleanup;
+      }
+    }
+  }
+
+  if (has_link) {
+    if (run_nasm_assemble(asm_filename, msvc_object_filename) == 0) {
+      const char *gc_object =
+          (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
+      const char *entry_object =
+          (_access(entry_msvc_object, 0) == 0)
+              ? entry_msvc_object
+              : ((_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL);
+      if (methlang_build_with_link(msvc_object_filename, executable_filename,
+                                   gc_object, entry_object, options) == 0) {
+        build_result = 0;
+        goto cleanup;
+      }
+    }
+  }
+
+  fprintf(stderr,
+          "Error: Failed to link executable with both GCC and MSVC toolchains\n");
+
+cleanup:
+  free(gcc_object_filename);
+  free(msvc_object_filename);
+  free(gc_gcc_object);
+  free(entry_gcc_object);
+  free(gc_msvc_object);
+  free(entry_msvc_object);
+  return build_result;
+}
+
+static int methlang_link_object_file(const char *object_filename,
+                                     const char *executable_filename,
+                                     const char *runtime_directory,
+                                     const CompilerOptions *options) {
+  if (!object_filename || !executable_filename || !runtime_directory) {
+    fprintf(stderr, "Error: Missing build inputs for executable generation\n");
+    return 1;
+  }
+
+  int has_gcc = windows_tool_exists("gcc");
+  int has_link = windows_tool_exists("link.exe");
+  if (!has_gcc && !has_link) {
+    fprintf(stderr,
+            "Error: No supported linker found. Install GCC or run from a "
+            "Visual Studio Developer Command Prompt.\n");
+    return 1;
+  }
+
+  char *gc_gcc_object = join_paths(runtime_directory, "gc.o");
+  char *gc_msvc_object = join_paths(runtime_directory, "gc.obj");
+  if (!gc_gcc_object || !gc_msvc_object) {
+    fprintf(stderr, "Error: Failed to allocate build paths\n");
+    free(gc_gcc_object);
+    free(gc_msvc_object);
+    return 1;
+  }
+
+  if (_access(gc_gcc_object, 0) != 0 && _access(gc_msvc_object, 0) != 0) {
+    fprintf(stderr,
+            "Error: Bundled GC runtime object not found in '%s'\n",
+            runtime_directory);
+    free(gc_gcc_object);
+    free(gc_msvc_object);
+    return 1;
+  }
+
+  int build_result = 1;
+
+  if (has_gcc) {
+    if (methlang_link_object_with_gcc(object_filename, executable_filename,
+                                      gc_gcc_object, options) == 0) {
+      build_result = 0;
+      goto cleanup;
+    }
+  }
+
+  if (has_link) {
+    const char *gc_object =
+        (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
+    if (methlang_link_object_with_link(object_filename, executable_filename,
+                                       gc_object, options) == 0) {
+      build_result = 0;
+      goto cleanup;
+    }
+  }
+
+  fprintf(stderr,
+          "Error: Failed to link executable with both GCC and MSVC toolchains\n");
+
+cleanup:
+  free(gc_gcc_object);
+  free(gc_msvc_object);
+  return build_result;
+}
+#endif
+
 static int add_import_directory(CompilerOptions *options, const char *path) {
   if (!options || !path || path[0] == '\0') {
     return 0;
@@ -243,11 +979,51 @@ static int add_import_directory(CompilerOptions *options, const char *path) {
   return 1;
 }
 
+static int add_link_argument(CompilerOptions *options, const char *argument) {
+  if (!options || !argument || argument[0] == '\0') {
+    return 0;
+  }
+
+  size_t next_count = options->link_argument_count + 1;
+  const char **grown = realloc((void *)options->link_arguments,
+                               next_count * sizeof(const char *));
+  if (!grown) {
+    return 0;
+  }
+
+  grown[options->link_argument_count] = argument;
+  options->link_arguments = grown;
+  options->link_argument_count = next_count;
+  return 1;
+}
+
 int main(int argc, char *argv[]) {
   CompilerOptions options = {0};
   char *auto_stdlib_directory = NULL;
+  char *auto_runtime_directory = NULL;
+  char *build_output_filename = NULL;
+  char *assembly_output_filename = NULL;
+  char *object_output_filename = NULL;
+  int build_executable = 0;
+  int output_filename_explicit = 0;
   options.output_filename = "output.s"; // Default output filename
   options.debug_format = "dwarf";
+
+  if (argc >= 2) {
+    if (strcmp(argv[1], "help") == 0) {
+      return print_help_topic(argv[0], argv[0], argc >= 3 ? argv[2] : NULL);
+    }
+    if (strcmp(argv[1], "docs") == 0) {
+      if (argc >= 3) {
+        return print_help_topic(argv[0], argv[0], argv[2]);
+      }
+      printf("Methlang documentation topics: build, gc, interop, stdlib, web\n");
+      print_doc_reference(argv[0], "LANGUAGE.md");
+      print_doc_reference(argv[0], "compilation.md");
+      print_doc_reference(argv[0], "garbage-collector.md");
+      return 0;
+    }
+  }
 
   // Parse command line arguments
   for (int i = 1; i < argc; i++) {
@@ -255,6 +1031,7 @@ int main(int argc, char *argv[]) {
       options.input_filename = argv[++i];
     } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
       options.output_filename = argv[++i];
+      output_filename_explicit = 1;
     } else if (strcmp(argv[i], "-I") == 0) {
       if (i + 1 >= argc) {
         fprintf(stderr, "Error: Missing import directory after '-I'\n");
@@ -271,6 +1048,15 @@ int main(int argc, char *argv[]) {
       }
     } else if (strcmp(argv[i], "--stdlib") == 0 && i + 1 < argc) {
       options.stdlib_directory = argv[++i];
+    } else if (strcmp(argv[i], "--build") == 0) {
+      build_executable = 1;
+    } else if (strcmp(argv[i], "--emit-obj") == 0) {
+      options.emit_object = 1;
+    } else if (strcmp(argv[i], "--link-arg") == 0 && i + 1 < argc) {
+      if (!add_link_argument(&options, argv[++i])) {
+        fprintf(stderr, "Error: Failed to add linker argument\n");
+        return 1;
+      }
     } else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--debug") == 0) {
       options.debug_mode = 1;
       options.generate_debug_symbols = 1;
@@ -315,7 +1101,12 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Error: No input file specified.\n");
     print_usage(argv[0]);
     free((void *)options.import_directories);
+    free((void *)options.link_arguments);
     return 1;
+  }
+
+  if (!output_filename_explicit && options.emit_object) {
+    options.output_filename = "output.obj";
   }
 
   if (!options.stdlib_directory) {
@@ -325,10 +1116,100 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  auto_runtime_directory = infer_default_runtime_directory(argv[0]);
+
+  if (build_executable) {
+#ifndef _WIN32
+    fprintf(stderr,
+            "Error: --build is currently supported only on Windows\n");
+    free((void *)options.import_directories);
+    free((void *)options.link_arguments);
+    free(auto_stdlib_directory);
+    free(auto_runtime_directory);
+    return 1;
+#else
+    if (!auto_runtime_directory) {
+      fprintf(stderr,
+              "Error: Could not locate bundled runtime directory for --build\n");
+      free((void *)options.import_directories);
+      free((void *)options.link_arguments);
+      free(auto_stdlib_directory);
+      free(auto_runtime_directory);
+      return 1;
+    }
+
+    if (output_filename_explicit) {
+      build_output_filename = strdup(options.output_filename);
+    } else {
+      build_output_filename = default_executable_filename(options.input_filename);
+    }
+    if (!build_output_filename) {
+      fprintf(stderr, "Error: Failed to determine executable output path\n");
+      free((void *)options.import_directories);
+      free((void *)options.link_arguments);
+      free(auto_stdlib_directory);
+      free(auto_runtime_directory);
+      return 1;
+    }
+
+    if (options.emit_object) {
+      object_output_filename = replace_extension(build_output_filename, ".obj");
+      if (!object_output_filename) {
+        fprintf(stderr, "Error: Failed to determine object output path\n");
+        free(build_output_filename);
+        free((void *)options.import_directories);
+        free((void *)options.link_arguments);
+        free(auto_stdlib_directory);
+        free(auto_runtime_directory);
+        return 1;
+      }
+      options.output_filename = object_output_filename;
+    } else {
+      assembly_output_filename = replace_extension(build_output_filename, ".s");
+      if (!assembly_output_filename) {
+        fprintf(stderr, "Error: Failed to determine assembly output path\n");
+        free(build_output_filename);
+        free((void *)options.import_directories);
+        free((void *)options.link_arguments);
+        free(auto_stdlib_directory);
+        free(auto_runtime_directory);
+        return 1;
+      }
+      options.output_filename = assembly_output_filename;
+    }
+#endif
+  }
+
   int result =
       compile_file(options.input_filename, options.output_filename, &options);
+  if (result == 0 && build_executable) {
+#ifdef _WIN32
+    if (options.emit_object) {
+      result = methlang_link_object_file(options.output_filename,
+                                         build_output_filename,
+                                         auto_runtime_directory, &options);
+    } else {
+      result = methlang_build_executable(options.output_filename,
+                                         build_output_filename,
+                                         auto_runtime_directory, &options);
+    }
+    if (result == 0) {
+      printf("Built executable '%s'\n", build_output_filename);
+    }
+#endif
+  } else if (result == 0 && auto_runtime_directory && !options.debug_mode) {
+    fprintf(stderr,
+            "Note: bundled runtime detected at '%s'. Use --build to assemble "
+            "and link the packaged GC/runtime automatically.\n",
+            auto_runtime_directory);
+  }
   free((void *)options.import_directories);
+  free((void *)options.link_arguments);
   free(auto_stdlib_directory);
+  free(auto_runtime_directory);
+  free(build_output_filename);
+  free(assembly_output_filename);
+  free(object_output_filename);
   string_intern_clear();
   return result;
 }
@@ -453,6 +1334,20 @@ int compile_file(const char *input_filename, const char *output_filename,
       code_generator, options->release ? 1 : 0);
 
   int result = 0;
+
+  if (options->emit_object) {
+    if (options->debug_mode || options->generate_debug_symbols ||
+        options->generate_line_mapping ||
+        options->generate_stack_trace_support) {
+      fprintf(stderr,
+              "Error: direct object emission does not yet support debug "
+              "metadata or runtime trace instrumentation\n");
+      result = 1;
+      goto cleanup;
+    }
+    code_generator_set_backend_mode(code_generator,
+                                    CODEGEN_BACKEND_BINARY_OBJECT);
+  }
 
   // Parse the source code
   program = parser_parse_program(parser);
@@ -589,18 +1484,32 @@ int compile_file(const char *input_filename, const char *output_filename,
     goto cleanup;
   }
 
-  // Write output file
-  FILE *output_file = fopen(output_filename, "w");
-  if (!output_file) {
-    fprintf(stderr, "Error: Could not create output file '%s': %s\n",
-            output_filename, strerror(errno));
-    result = 1;
-    goto cleanup;
-  }
+  if (options->emit_object) {
+    BinaryEmitter *binary_emitter =
+        code_generator_get_binary_emitter(code_generator);
+    if (!binary_emitter_write_object_file(binary_emitter, output_filename)) {
+      fprintf(stderr, "Error: Could not create object file '%s': %s\n",
+              output_filename,
+              binary_emitter_get_error(binary_emitter)
+                  ? binary_emitter_get_error(binary_emitter)
+                  : "Unknown error");
+      result = 1;
+      goto cleanup;
+    }
+  } else {
+    // Write output file
+    FILE *output_file = fopen(output_filename, "w");
+    if (!output_file) {
+      fprintf(stderr, "Error: Could not create output file '%s': %s\n",
+              output_filename, strerror(errno));
+      result = 1;
+      goto cleanup;
+    }
 
-  char *generated_code = code_generator_get_output(code_generator);
-  fprintf(output_file, "%s", generated_code);
-  fclose(output_file);
+    char *generated_code = code_generator_get_output(code_generator);
+    fprintf(output_file, "%s", generated_code);
+    fclose(output_file);
+  }
 
   // Generate debug information files if requested
   if (debug_info) {
@@ -685,12 +1594,21 @@ cleanup:
 
 void print_usage(const char *program_name) {
   printf("Usage: %s [options] <input.meth>\n", program_name);
+  printf("       %s help [topic]\n", program_name);
+  printf("       %s docs [topic]\n", program_name);
   printf("Options:\n");
   printf("  -i <file>           Input file\n");
-  printf("  -o <file>           Output file (default: output.s)\n");
+  printf("  -o <file>           Output file (default: output.s, or output.obj "
+         "with --emit-obj)\n");
   printf("  -I <dir>            Add import search directory (repeatable)\n");
   printf("  --stdlib <dir>      Set stdlib root directory (default: auto-detect "
          "bundled stdlib, then ./stdlib)\n");
+  printf("  --build             Compile, assemble, and link to an executable "
+         "(Windows)\n");
+  printf("  --emit-obj          Emit a Win64 COFF object directly "
+         "(experimental subset)\n");
+  printf("  --link-arg <arg>    Pass an extra linker argument (repeatable; "
+         "use with --build)\n");
   printf("  -d, --debug         Enable debug output and symbols\n");
   printf("  -g, --debug-symbols Generate debug symbols\n");
   printf("  -l, --line-mapping  Generate source line mapping\n");
@@ -704,6 +1622,7 @@ void print_usage(const char *program_name) {
   printf("  --prelude           Auto-import the standard prelude (std/io, "
          "std/net, etc.)\n");
   printf("  -h, --help          Show this help message\n");
+  printf("Topics: build, gc, interop, stdlib, web\n");
 }
 
 char *read_file(const char *filename) {

@@ -1,0 +1,213 @@
+# DWARF Debug Information
+# Generated for tests\test_string_concat.meth -> tmp_string_concat.s
+
+.section .debug_info
+.long .Ldebug_info_end - .Ldebug_info_start
+.Ldebug_info_start:
+.short 4  # DWARF version
+.long .debug_abbrev  # Abbreviation table offset
+.byte 8  # Address size
+
+# Symbol: cstr
+.uleb128 1  # DW_TAG_variable
+.string "cstr"  # DW_AT_name
+.long 29  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: print
+.uleb128 1  # DW_TAG_variable
+.string "print"  # DW_AT_name
+.long 35  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: println
+.uleb128 1  # DW_TAG_variable
+.string "println"  # DW_AT_name
+.long 40  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: newline
+.uleb128 1  # DW_TAG_variable
+.string "newline"  # DW_AT_name
+.long 45  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: print_int
+.uleb128 1  # DW_TAG_variable
+.string "print_int"  # DW_AT_name
+.long 51  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: buf
+.uleb128 1  # DW_TAG_variable
+.string "buf"  # DW_AT_name
+.long 52  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -54  # Stack offset
+
+# Symbol: println_int
+.uleb128 1  # DW_TAG_variable
+.string "println_int"  # DW_AT_name
+.long 79  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: get_stdin
+.uleb128 1  # DW_TAG_variable
+.string "get_stdin"  # DW_AT_name
+.long 99  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: get_stdout
+.uleb128 1  # DW_TAG_variable
+.string "get_stdout"  # DW_AT_name
+.long 100  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: get_stderr
+.uleb128 1  # DW_TAG_variable
+.string "get_stderr"  # DW_AT_name
+.long 101  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: print_err
+.uleb128 1  # DW_TAG_variable
+.string "print_err"  # DW_AT_name
+.long 104  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: println_err
+.uleb128 1  # DW_TAG_variable
+.string "println_err"  # DW_AT_name
+.long 109  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: main
+.uleb128 1  # DW_TAG_variable
+.string "main"  # DW_AT_name
+.long 3  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: hello
+.uleb128 1  # DW_TAG_variable
+.string "hello"  # DW_AT_name
+.long 3  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -16  # Stack offset
+
+# Symbol: world
+.uleb128 1  # DW_TAG_variable
+.string "world"  # DW_AT_name
+.long 4  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -32  # Stack offset
+
+# Symbol: result
+.uleb128 1  # DW_TAG_variable
+.string "result"  # DW_AT_name
+.long 6  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -48  # Stack offset
+
+.byte 0  # End of compilation unit
+.Ldebug_info_end:
+
+.section .debug_line
+.long .Ldebug_line_end - .Ldebug_line_start
+.Ldebug_line_start:
+.short 4  # DWARF version
+.long .Ldebug_line_header_end - .Ldebug_line_header_start
+.Ldebug_line_header_start:
+.byte 1  # Minimum instruction length
+.byte 1  # Default is_stmt
+.byte -5  # Line base
+.byte 14  # Line range
+.byte 13  # Opcode base
+.byte 0
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.Ldebug_line_header_end:
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L38  # Assembly line 38
+.byte 34  # Advance line to 29
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L75  # Assembly line 75
+.byte 40  # Advance line to 35
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L189  # Assembly line 189
+.byte 45  # Advance line to 40
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L295  # Assembly line 295
+.byte 50  # Advance line to 45
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L398  # Assembly line 398
+.byte 56  # Advance line to 51
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L894  # Assembly line 894
+.byte 84  # Advance line to 79
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L1014  # Assembly line 1014
+.byte 104  # Advance line to 99
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L1117  # Assembly line 1117
+.byte 105  # Advance line to 100
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L1220  # Assembly line 1220
+.byte 106  # Advance line to 101
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L1323  # Assembly line 1323
+.byte 109  # Advance line to 104
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L1436  # Assembly line 1436
+.byte 114  # Advance line to 109
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L1574  # Assembly line 1574
+.byte 8  # Advance line to 3
+.byte 0  # Extended opcode
+.uleb128 1  # Length
+.byte 1  # DW_LNE_end_sequence
+.Ldebug_line_end:

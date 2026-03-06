@@ -32,10 +32,11 @@ function main() -> int32 {
 .\build.bat
 ```
 
-1. Compile source to assembly:
+1. Build an executable:
 
 ```powershell
-.\bin\methlang.exe hello.meth -o hello.s
+.\bin\methlang.exe --build hello.meth -o hello.exe
+.\hello.exe
 ```
 
 No project-local `stdlib/` folder is required. The compiler auto-loads the stdlib bundled with the Methlang installation/build output. Use `--stdlib <dir>` only when you want to override that.
@@ -43,20 +44,21 @@ No project-local `stdlib/` folder is required. The compiler auto-loads the stdli
 For production builds, use `--release`:
 
 ```powershell
-.\bin\methlang.exe --release hello.meth -o hello.s
+.\bin\methlang.exe --build --release hello.meth -o hello.exe
 ```
 
 `--release` enables `-O`, strips assembly comments, removes unreachable functions, and lowers without generated runtime null/bounds trap checks.
 
-1. Assemble and link:
+1. Optional: emit assembly only:
 
 ```powershell
+.\bin\methlang.exe hello.meth -o hello.s
 nasm -f win64 hello.s -o hello.o
-gcc -nostartfiles hello.o "$env:ProgramFiles\Methlang\runtime\gc.c" -o hello.exe -lkernel32
+gcc -nostartfiles hello.o "$env:ProgramFiles\Methlang\runtime\gc.o" -o hello.exe -lkernel32
 .\hello.exe
 ```
 
-Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime entry.
+Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime entry. Manual assembly/linking is mainly for advanced cases; the default workflow is `methlang --build`.
 
 ## Quick Start (Linux)
 
@@ -64,7 +66,7 @@ Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead
 make
 ./bin/methlang hello.meth -o hello.s
 nasm -f elf64 hello.s -o hello.o
-gcc -nostartfiles hello.o /usr/local/runtime/gc.c -o hello
+gcc -nostartfiles hello.o /usr/local/runtime/gc.o -o hello
 ./hello
 ```
 
@@ -74,12 +76,26 @@ gcc -nostartfiles hello.o /usr/local/runtime/gc.c -o hello
 - NASM assembler
 - System C toolchain/linker (`gcc`/`clang`)
 
+## Built-In Help
+
+Use the CLI help/docs commands to jump to the right topic quickly:
+
+```powershell
+.\bin\methlang.exe help
+.\bin\methlang.exe help gc
+.\bin\methlang.exe help build
+.\bin\methlang.exe docs
+```
+
+Available topics: `build`, `gc`, `interop`, `stdlib`, `web`.
+
 ## Runtime and Linking Notes
 
-- Link bundled `runtime/gc.c` from your Methlang installation when using `new` or string concatenation.
+- `methlang --build` automatically links the bundled GC/runtime on Windows.
+- If you use the manual assembly/link flow, link bundled `runtime/gc.o` from your Methlang installation when using `new` or string concatenation.
 - Compile with `-s` to embed runtime crash traceback support, or use `-d` to enable it alongside normal debug output.
 - On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated runtime traps with Meth function/source frames.
-- Networking examples may require extra libraries (for example `-lws2_32` on Windows).
+- Networking examples may require extra libraries (for example `--link-arg -lws2_32` on Windows).
 - For GC use from worker threads, use `gc_thread_attach` and `gc_thread_detach`.
 
 Example runtime crash output:

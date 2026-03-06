@@ -1,43 +1,30 @@
 @echo off
-REM Build Methlang web server (pure Methlang + gc runtime + Winsock)
-set WEB=%~dp0
-set ROOT=%WEB%..
+setlocal enabledelayedexpansion
+REM Build Methlang web server with the built-in one-command build path.
+set "WEB=%~dp0"
+set "ROOT=%WEB%.."
 cd /d "%ROOT%"
 
-if not exist bin\methlang.exe (
+set "METH_CC=bin\methlang.exe"
+if not exist "%METH_CC%" (
     echo Building Methlang compiler...
     call build.bat
-    if %ERRORLEVEL% NEQ 0 exit /b 1
+    if !ERRORLEVEL! NEQ 0 exit /b 1
 )
-
-echo Compiling server.meth...
-bin\methlang.exe --release web\server.meth -o web\server.s
-if %ERRORLEVEL% NEQ 0 (
-    echo Methlang compilation failed.
-    exit /b 1
-)
-
-echo Assembling and linking...
-where nasm >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    nasm -f win64 web\server.s -o web\server.o
-    if %ERRORLEVEL% NEQ 0 (
-        echo NASM assembly failed.
-        exit /b 1
+if not exist "%METH_CC%" (
+    where methlang >nul 2>&1
+    if !ERRORLEVEL! EQU 0 (
+        set "METH_CC=methlang"
     )
-    gcc -c src\runtime\gc.c -o web\gc.o -Isrc
-    if %ERRORLEVEL% NEQ 0 exit /b 1
-    gcc -nostartfiles web\server.o web\gc.o -o web\server.exe -L"%MINGW_PREFIX%\lib" -lws2_32 -lkernel32
-) else (
-    echo NASM required. Install from https://www.nasm.us/
+)
+
+echo Building server.meth...
+"%METH_CC%" --build --release web\server.meth -o web\server.exe --link-arg -lws2_32
+if !ERRORLEVEL! NEQ 0 (
+    echo Web server build failed.
     exit /b 1
 )
 
-if %ERRORLEVEL% EQU 0 (
-    echo.
-    echo Build successful. Run: cd web ^&^& server.exe
-    echo Then open http://localhost:5000
-) else (
-    echo Link failed.
-    exit /b 1
-)
+echo.
+echo Build successful. Run: cd web ^&^& server.exe
+echo Then open http://localhost:5000

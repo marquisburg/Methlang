@@ -1,0 +1,36 @@
+function null_i64_ptr() -> int64* {
+  return (int64*)0;
+}
+
+function main() -> int32 {
+  var wide: int64 = 257;
+  var small: int8 = (int8)wide;
+  if (small != 1) {
+    return 1;
+  }
+
+  var neg: int64 = -1;
+  var byte_value: uint8 = (uint8)neg;
+  if (byte_value != 255) {
+    return 2;
+  }
+
+  var signed32: int32 = -7;
+  var signed64: int64 = (int64)signed32;
+  if (signed64 != -7) {
+    return 3;
+  }
+
+  var p1: int64* = null_i64_ptr();
+  var p2: uint8* = (uint8*)p1;
+  if (p2 != 0) {
+    return 4;
+  }
+
+  var p3: int64* = (int64*)0;
+  if (p3 != 0) {
+    return 5;
+  }
+
+  return 21;
+}

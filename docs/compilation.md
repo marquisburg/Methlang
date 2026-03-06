@@ -6,15 +6,28 @@ This document describes how to compile Methlang programs and the available compi
 
 ```bash
 methlang [options] <input.meth>
+methlang help [topic]
+methlang docs [topic]
 ```
 
-The input file is the main source file. Imports are resolved relative to it. The compiler produces assembly (default `output.s`).
+The input file is the main source file. Imports are resolved relative to it. By default the compiler produces assembly (`output.s`), or with `--build` it produces an executable directly on Windows.
 
 `std/...` imports use the stdlib bundled with the compiler by default. You do not need to copy `stdlib/` into every project directory. Use `--stdlib <dir>` only when you want to override the bundled stdlib.
 
+## Built-In Help and Docs
+
+The compiler includes topic-oriented help commands:
+
+- `methlang help` prints CLI usage.
+- `methlang help build` explains the Windows build flow.
+- `methlang help gc` explains how the bundled GC/runtime is linked.
+- `methlang docs` lists the main documentation entry points and their paths.
+
+Available topics: `build`, `gc`, `interop`, `stdlib`, `web`.
+
 ## Options
 
-`-o <file>` output assembly file (default `output.s`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`). `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode and embedded runtime crash traceback support. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-s`/`--stack-trace` embeds runtime crash traceback support without the rest of debug mode. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
+`-o <file>` output assembly file (default `output.s`, or executable path when used with `--build`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`). `--build` compile, assemble, and link to an executable on Windows. `--link-arg <arg>` pass an extra linker argument in `--build` mode (repeatable; for example `--link-arg -lws2_32`). `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode and embedded runtime crash traceback support. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-s`/`--stack-trace` embeds runtime crash traceback support without the rest of debug mode. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
 
 ## Compilation Pipeline
 
@@ -43,11 +56,20 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 
 ## Build Pipeline
 
+### Recommended Windows Flow
+
+1. Build directly: `methlang --build main.meth -o main.exe`
+2. Optional extra libraries: `methlang --build main.meth -o main.exe --link-arg -lws2_32`
+
+`--build` invokes NASM and then links with the bundled runtime automatically. On Windows it tries `gcc` first, then `link.exe` as a fallback. The packaged GC/runtime is part of the Methlang installation/build output; you do not need to add `gc.c` to each project.
+
+### Manual Assembly/Link Flow
+
 1. Compile: `methlang main.meth -o main.s`
 2. Assemble: `nasm -f win64 main.s -o main.o` (or `-f elf64` on Linux)
-3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, compile and link bundled `runtime/gc.c` from your Methlang installation (for example `C:\Program Files\Methlang\runtime\gc.c` on Windows or `/usr/local/runtime/gc.c` on Linux/macOS). See [Garbage Collector](garbage-collector.md).
+3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, link bundled `runtime/gc.o` from your Methlang installation/build output. See [Garbage Collector](garbage-collector.md).
 
-**Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, you must also compile and link bundled `runtime/methlang_entry.c` from your Methlang installation so the runtime can obtain command-line arguments. On Windows, link with `-lshell32` as well: `gcc -nostartfiles main.o gc.o methlang_entry.o -o main -lkernel32 -lshell32`.
+**Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, you must also link bundled `runtime/methlang_entry.o` from your Methlang installation/build output. On Windows, link with `-lshell32` as well: `gcc -nostartfiles main.o gc.o methlang_entry.o -o main -lkernel32 -lshell32`.
 
 The output format depends on the target. Use `-f win64` for Windows, `-f elf64` for Linux. NASM is required for assembly; install from https://www.nasm.us/ if needed. On Linux and macOS, use `make` to build the compiler and run tests. The web server example in `web/` is Windows-only (Winsock). See [Standard Library](standard-library.md#platform-support) for Linux support details.
 
@@ -86,9 +108,7 @@ Stack trace:
 The `web/` directory contains a complete HTTP server example. Build and run:
 
 ```bash
-cd web
-.\build.bat
-.\server.exe
+.\web\build.bat
 ```
 
 Then open http://localhost:5000 in a browser.

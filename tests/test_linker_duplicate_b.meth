@@ -1,0 +1,3 @@
+function duplicate_symbol() -> int32 {
+  return 2;
+}

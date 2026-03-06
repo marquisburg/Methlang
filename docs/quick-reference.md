@@ -76,7 +76,7 @@ function main() -> int32 {
 
 ## With GC and Structs
 
-Uses `new` for heap allocation. Link `gc.c` when building. See [Garbage Collector](garbage-collector.md).
+Uses `new` for heap allocation. `methlang --build` links the bundled GC/runtime automatically on Windows. See [Garbage Collector](garbage-collector.md).
 
 ```meth
 struct Point {

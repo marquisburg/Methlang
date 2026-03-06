@@ -821,6 +821,750 @@ catch {
   Write-CaseResult -Name "function_pointer" -Passed $false -Reason $_.Exception.Message
 }
 
+# Direct object backend test: emit COFF object directly, then build and run
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_return_const.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_return_const.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_return_const.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object compile did not produce an object file"
+  }
+
+  $objSymbols = & objdump -t $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object symbol dump failed"
+  }
+  if ($objSymbols -notmatch "(?m)\bmain\b") {
+    throw "Direct object symbol table did not contain main"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_return_const.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 7) {
+    throw "Direct object executable exited with $LASTEXITCODE (expected 7)"
+  }
+
+  Write-CaseResult -Name "direct_object_return_const" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_return_const" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend relocation test: internal call lowered to REL32 relocation
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_call_return.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_call_return.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_call_return.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object call compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object call compile did not produce an object file"
+  }
+
+  $relocs = & objdump -r $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object relocation dump failed"
+  }
+  if ($relocs -notmatch "IMAGE_REL_AMD64_REL32\s+callee") {
+    throw "Direct object relocation table did not contain a REL32 call to callee"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_call_return.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object call build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object call build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 5) {
+    throw "Direct object call executable exited with $LASTEXITCODE (expected 5)"
+  }
+
+  Write-CaseResult -Name "direct_object_call_return" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_call_return" -Passed $false -Reason $_.Exception.Message
+}
+
+# COFF reader test: parse Methlang and GCC-produced COFF objects
+$total++
+try {
+  $coffReaderExe = Join-Path $tmpDir "coff_reader_test.exe"
+  $basicObjPath = Join-Path $tmpDir "coff_reader_basic.obj"
+  $relocObjPath = Join-Path $tmpDir "coff_reader_reloc.obj"
+  $longObjPath = Join-Path $tmpDir "coff_reader_long.obj"
+  $gccSourcePath = Join-Path $tmpDir "coff_reader_gcc_input.c"
+  $gccObjPath = Join-Path $tmpDir "coff_reader_gcc_input.o"
+
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\coff_reader_test.c src\linker\coff_reader.c -Isrc -o $coffReaderExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "COFF reader harness compile failed: $compileHarness"
+  }
+
+  $basicOut = & $CompilerPath --emit-obj tests\test_direct_object_return_const.meth -o $basicObjPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "COFF reader basic object compile failed: $basicOut"
+  }
+
+  $relocOut = & $CompilerPath --emit-obj tests\test_direct_object_call_return.meth -o $relocObjPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "COFF reader relocation object compile failed: $relocOut"
+  }
+
+  $longOut = & $CompilerPath --emit-obj tests\test_direct_object_long_symbol_name.meth -o $longObjPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "COFF reader long-symbol object compile failed: $longOut"
+  }
+
+  @'
+int gcc_reader_helper_symbol_name(void) {
+  return 11;
+}
+
+int gcc_reader_entry_symbol_name(void) {
+  return gcc_reader_helper_symbol_name();
+}
+'@ | Set-Content -Path $gccSourcePath
+
+  $gccOut = & gcc -c $gccSourcePath -o $gccObjPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "COFF reader GCC object compile failed: $gccOut"
+  }
+
+  $coffOut = & $coffReaderExe $basicObjPath $relocObjPath $longObjPath $gccObjPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "COFF reader verification failed: $coffOut"
+  }
+
+  Write-CaseResult -Name "coff_reader" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "coff_reader" -Passed $false -Reason $_.Exception.Message
+}
+
+# Linker symbol resolution test: merge sections, resolve externals, and reject invalid symbol graphs
+$total++
+try {
+  $symbolResolveExe = Join-Path $tmpDir "symbol_resolve_test.exe"
+  $fnEntryObj = Join-Path $tmpDir "linker_merge_entry.obj"
+  $fnProviderObj = Join-Path $tmpDir "linker_merge_provider.obj"
+  $dataEntryObj = Join-Path $tmpDir "linker_merge_data_entry.obj"
+  $dataProviderObj = Join-Path $tmpDir "linker_merge_data_provider.obj"
+  $bssEntryObj = Join-Path $tmpDir "linker_merge_bss_entry.obj"
+  $bssProviderObj = Join-Path $tmpDir "linker_merge_bss_provider.obj"
+  $dupAObj = Join-Path $tmpDir "linker_duplicate_a.obj"
+  $dupBObj = Join-Path $tmpDir "linker_duplicate_b.obj"
+  $unresolvedObj = Join-Path $tmpDir "linker_unresolved_entry.obj"
+
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\symbol_resolve_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c -Isrc -o $symbolResolveExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Symbol-resolve harness compile failed: $compileHarness"
+  }
+
+  $cases = @(
+    @{ Path = "tests\test_linker_merge_entry.meth"; Out = $fnEntryObj; Label = "function-entry" },
+    @{ Path = "tests\test_linker_merge_provider.meth"; Out = $fnProviderObj; Label = "function-provider" },
+    @{ Path = "tests\test_linker_merge_data_entry.meth"; Out = $dataEntryObj; Label = "data-entry" },
+    @{ Path = "tests\test_linker_merge_data_provider.meth"; Out = $dataProviderObj; Label = "data-provider" },
+    @{ Path = "tests\test_linker_merge_bss_entry.meth"; Out = $bssEntryObj; Label = "bss-entry" },
+    @{ Path = "tests\test_linker_merge_bss_provider.meth"; Out = $bssProviderObj; Label = "bss-provider" },
+    @{ Path = "tests\test_linker_duplicate_a.meth"; Out = $dupAObj; Label = "duplicate-a" },
+    @{ Path = "tests\test_linker_duplicate_b.meth"; Out = $dupBObj; Label = "duplicate-b" },
+    @{ Path = "tests\test_linker_unresolved_entry.meth"; Out = $unresolvedObj; Label = "unresolved-entry" }
+  )
+
+  foreach ($case in $cases) {
+    $objOut = & $CompilerPath --emit-obj $case.Path -o $case.Out 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "Symbol-resolve $($case.Label) object compile failed: $objOut"
+    }
+    if (-not (Test-Path $case.Out)) {
+      throw "Symbol-resolve $($case.Label) object compile did not produce an object file"
+    }
+  }
+
+  $resolveOut = & $symbolResolveExe $fnEntryObj $fnProviderObj $dataEntryObj $dataProviderObj $bssEntryObj $bssProviderObj $dupAObj $dupBObj $unresolvedObj 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Symbol-resolve verification failed: $resolveOut"
+  }
+
+  Write-CaseResult -Name "symbol_resolve" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "symbol_resolve" -Passed $false -Reason $_.Exception.Message
+}
+
+# Linker relocation test: apply merged-image relocations for REL32, ADDR64, ADDR32NB, and SECREL
+$total++
+try {
+  $relocationExe = Join-Path $tmpDir "relocation_test.exe"
+
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\relocation_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $relocationExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Relocation harness compile failed: $compileHarness"
+  }
+
+  $relocationOut = & $relocationExe $tmpDir 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Relocation verification failed: $relocationOut"
+  }
+
+  Write-CaseResult -Name "relocation" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "relocation" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend parameter test: integer arg passed into callee home slot
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_params.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_params.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_params.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object params compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object params compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_params.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object params build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object params build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 9) {
+    throw "Direct object params executable exited with $LASTEXITCODE (expected 9)"
+  }
+
+  Write-CaseResult -Name "direct_object_params" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_params" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend control-flow test: labels and conditional branches lower directly
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_control_flow.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_control_flow.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_control_flow.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object control-flow compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object control-flow compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_control_flow.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object control-flow build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object control-flow build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 11) {
+    throw "Direct object control-flow executable exited with $LASTEXITCODE (expected 11)"
+  }
+
+  Write-CaseResult -Name "direct_object_control_flow" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_control_flow" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend local-slot test: locals plus call result materialization
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_abi_return_int.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_abi_return_int.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_abi_return_int.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object ABI-return-int compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object ABI-return-int compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_abi_return_int.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object ABI-return-int build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object ABI-return-int build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object ABI-return-int executable exited with $LASTEXITCODE (expected 1)"
+  }
+
+  Write-CaseResult -Name "direct_object_abi_return_int" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_abi_return_int" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend arithmetic test: locals plus unary/binary integer lowering
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_signed_arithmetic.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_signed_arithmetic.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_signed_arithmetic.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object signed-arithmetic compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object signed-arithmetic compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_signed_arithmetic.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object signed-arithmetic build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object signed-arithmetic build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object signed-arithmetic executable exited with $LASTEXITCODE (expected 1)"
+  }
+
+  Write-CaseResult -Name "direct_object_signed_arithmetic" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_signed_arithmetic" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend structured control-flow test: locals, comparisons, loops, and switch lowering
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_structured_control_flow.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_structured_control_flow.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_control_flow.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object structured control-flow compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object structured control-flow compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_control_flow.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object structured control-flow build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object structured control-flow build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 64) {
+    throw "Direct object structured control-flow executable exited with $LASTEXITCODE (expected 64)"
+  }
+
+  Write-CaseResult -Name "direct_object_structured_control_flow" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_structured_control_flow" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend scalar matrix test: integer ops plus stack args
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_integer_matrix.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_integer_matrix.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_integer_matrix.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object integer-matrix compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object integer-matrix compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_integer_matrix.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object integer-matrix build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object integer-matrix build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 37) {
+    throw "Direct object integer-matrix executable exited with $LASTEXITCODE (expected 37)"
+  }
+
+  Write-CaseResult -Name "direct_object_integer_matrix" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_integer_matrix" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend scalar cast test: integer truncation/extension and pointer reinterpretation
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_scalar_casts.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_scalar_casts.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_scalar_casts.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object scalar-casts compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object scalar-casts compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_scalar_casts.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object scalar-casts build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object scalar-casts build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 21) {
+    throw "Direct object scalar-casts executable exited with $LASTEXITCODE (expected 21)"
+  }
+
+  Write-CaseResult -Name "direct_object_scalar_casts" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_scalar_casts" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend float/scalar coverage: Win64 float ABI plus float/int casts
+$directObjectFloatCases = @(
+  @{ Name = "direct_object_abi_float_return"; Path = "tests/test_abi_float_return.meth"; ExitCode = 1; Label = "float-return" },
+  @{ Name = "direct_object_abi_float_args"; Path = "tests/test_abi_float_args.meth"; ExitCode = 1; Label = "float-args" },
+  @{ Name = "direct_object_abi_mixed_args"; Path = "tests/test_abi_mixed_args.meth"; ExitCode = 1; Label = "mixed-args" },
+  @{ Name = "direct_object_abi_float_symbol_args"; Path = "tests/test_abi_float_symbol_args.meth"; ExitCode = 1; Label = "float-symbol-args" },
+  @{ Name = "direct_object_abi_float4_args"; Path = "tests/test_abi_float4_args.meth"; ExitCode = 1; Label = "float4-args" },
+  @{ Name = "direct_object_abi_float_stack"; Path = "tests/test_abi_float_stack.meth"; ExitCode = 1; Label = "float-stack" },
+  @{ Name = "direct_object_cast_expression"; Path = "tests/test_cast_expression.meth"; ExitCode = 0; Label = "cast-expression" }
+)
+
+foreach ($case in $directObjectFloatCases) {
+  $total++
+  try {
+    $objPath = Join-Path $tmpDir ($case.Name + ".obj")
+    $exePath = Join-Path $tmpDir ($case.Name + ".exe")
+
+    $objOut = & $CompilerPath --emit-obj $case.Path -o $objPath 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "Direct object $($case.Label) compile failed: $objOut"
+    }
+    if (-not (Test-Path $objPath)) {
+      throw "Direct object $($case.Label) compile did not produce an object file"
+    }
+
+    $buildOut = & $CompilerPath --build --emit-obj $case.Path -o $exePath 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "Direct object $($case.Label) build failed: $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "Direct object $($case.Label) build did not produce an executable"
+    }
+
+    & $exePath 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne $case.ExitCode) {
+      throw "Direct object $($case.Label) executable exited with $LASTEXITCODE (expected $($case.ExitCode))"
+    }
+
+    Write-CaseResult -Name $case.Name -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name $case.Name -Passed $false -Reason $_.Exception.Message
+  }
+}
+
+# Direct object backend globals: scalar definitions plus extern-global symbol emission
+$total++
+try {
+  $objPath = Join-Path $tmpDir "direct_object_ok_global_int.obj"
+  $exePath = Join-Path $tmpDir "direct_object_ok_global_int.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\ok_global_int.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object ok-global-int compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object ok-global-int compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\ok_global_int.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object ok-global-int build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object ok-global-int build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object ok-global-int executable exited with $LASTEXITCODE (expected 1)"
+  }
+
+  Write-CaseResult -Name "direct_object_ok_global_int" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_ok_global_int" -Passed $false -Reason $_.Exception.Message
+}
+
+$total++
+try {
+  $objPath = Join-Path $tmpDir "direct_object_extern_global_link_name.obj"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_extern_global_link_name.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object extern-global-link-name compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object extern-global-link-name compile did not produce an object file"
+  }
+
+  $symbols = & objdump -t $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object extern-global-link-name symbol dump failed"
+  }
+  if ($symbols -notmatch "errno") {
+    throw "Direct object extern-global-link-name object is missing extern symbol 'errno'"
+  }
+
+  $relocs = & objdump -r $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object extern-global-link-name relocation dump failed"
+  }
+  if ($relocs -notmatch "IMAGE_REL_AMD64_REL32" -or $relocs -notmatch "errno") {
+    throw "Direct object extern-global-link-name object is missing REL32 relocations to 'errno'"
+  }
+
+  Write-CaseResult -Name "direct_object_extern_global_link_name" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_extern_global_link_name" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend pointer-param-address test: address of parameter slot survives load/store
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_pointer_param_address.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_pointer_param_address.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_pointer_param_address.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object pointer-param-address compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object pointer-param-address compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_pointer_param_address.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object pointer-param-address build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object pointer-param-address build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 7) {
+    throw "Direct object pointer-param-address executable exited with $LASTEXITCODE (expected 7)"
+  }
+
+  Write-CaseResult -Name "direct_object_pointer_param_address" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_pointer_param_address" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend pointer-memory test: new, addr_of, load, store, and pointer args
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_pointer_memory.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_pointer_memory.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_pointer_memory.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object pointer-memory compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object pointer-memory compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_pointer_memory.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object pointer-memory build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object pointer-memory build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 29) {
+    throw "Direct object pointer-memory executable exited with $LASTEXITCODE (expected 29)"
+  }
+
+  Write-CaseResult -Name "direct_object_pointer_memory" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_pointer_memory" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend aggregate-local test: stack-allocated struct addressed and passed by pointer
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_struct_field_offset.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_struct_field_offset.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_struct_field_offset.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object struct-field-offset compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object struct-field-offset compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_struct_field_offset.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object struct-field-offset build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object struct-field-offset build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object struct-field-offset executable exited with $LASTEXITCODE (expected 1)"
+  }
+
+  Write-CaseResult -Name "direct_object_struct_field_offset" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_struct_field_offset" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend function-pointer test: addr_of function plus indirect call
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_function_pointer.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_function_pointer.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_function_pointer.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object function-pointer compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object function-pointer compile did not produce an object file"
+  }
+
+  $relocs = & objdump -r $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object function-pointer relocation dump failed"
+  }
+  if ($relocs -notmatch "IMAGE_REL_AMD64_REL32\s+add") {
+    throw "Direct object function-pointer relocations did not contain add"
+  }
+  if ($relocs -notmatch "IMAGE_REL_AMD64_REL32\s+multiply") {
+    throw "Direct object function-pointer relocations did not contain multiply"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_function_pointer.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object function-pointer build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object function-pointer build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object function-pointer executable exited with $LASTEXITCODE (expected 1)"
+  }
+
+  Write-CaseResult -Name "direct_object_function_pointer" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_function_pointer" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend runtime trap test: null deref lowers and links through the trap helper
+$total++
+try {
+  $exePath = Join-Path $tmpDir "test_direct_object_runtime_null_deref.exe"
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_runtime_null_deref_check.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object runtime-null build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object runtime-null build did not produce an executable"
+  }
+
+  $runtimeOut = & $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object runtime-null executable exited with $LASTEXITCODE (expected 1)"
+  }
+  if ($runtimeOut -notmatch "Fatal error: Null pointer dereference") {
+    throw "Direct object runtime-null output missing null-deref message"
+  }
+
+  Write-CaseResult -Name "direct_object_runtime_null_deref" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_runtime_null_deref" -Passed $false -Reason $_.Exception.Message
+}
+
 # main(argc, argv) test: requires methlang_entry.o and shell32 on Windows
 $total++
 try {

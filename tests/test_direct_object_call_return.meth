@@ -1,0 +1,7 @@
+function callee() -> int32 {
+  return 5;
+}
+
+function main() -> int32 {
+  return callee();
+}

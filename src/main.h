@@ -19,12 +19,15 @@ typedef struct {
   int optimize;
   int release;
   int strip_asm_comments;
+  int emit_object;
   int generate_debug_symbols;
   int generate_line_mapping;
   int generate_stack_trace_support;
   const char *debug_format; // "dwarf", "stabs", or "map"
   const char **import_directories;
   size_t import_directory_count;
+  const char **link_arguments;
+  size_t link_argument_count;
   const char *stdlib_directory;
   int prelude;
 } CompilerOptions;

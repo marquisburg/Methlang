@@ -7,3 +7,6 @@ obj/
 *.obj
 *.s
 *.s.ir
+
+# Implementation notes (local only)
+docs/linker-implementation-todo.md
