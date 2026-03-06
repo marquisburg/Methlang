@@ -10,7 +10,7 @@ methlang help [topic]
 methlang docs [topic]
 ```
 
-The input file is the main source file. Imports are resolved relative to it. By default the compiler produces assembly (`output.s`), or with `--build` it produces an executable directly on Windows.
+The input file is the main source file. Imports are resolved relative to it. By default the compiler produces assembly (`output.s`). On Windows, `--emit-obj` produces a COFF object, and `--build` produces an executable.
 
 `std/...` imports use the stdlib bundled with the compiler by default. You do not need to copy `stdlib/` into every project directory. Use `--stdlib <dir>` only when you want to override the bundled stdlib.
 
@@ -27,7 +27,7 @@ Available topics: `build`, `gc`, `interop`, `stdlib`, `web`.
 
 ## Options
 
-`-o <file>` output assembly file (default `output.s`, or executable path when used with `--build`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`). `--build` compile, assemble, and link to an executable on Windows. `--link-arg <arg>` pass an extra linker argument in `--build` mode (repeatable; for example `--link-arg -lws2_32`). `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode and embedded runtime crash traceback support. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-s`/`--stack-trace` embeds runtime crash traceback support without the rest of debug mode. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
+`-o <file>` output assembly/object file (default `output.s`, or executable path when used with `--build`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`). `--emit-obj` emit a COFF object on Windows instead of assembly. `--build` build an executable on Windows. `--linker <auto|internal|gcc|msvc>` choose the Windows linker path. `--link-arg <arg>` pass an extra linker argument in `--build` mode (repeatable; for example `--link-arg -lws2_32`). `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode and embedded runtime crash traceback support. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-s`/`--stack-trace` embeds runtime crash traceback support without the rest of debug mode. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
 
 ## Compilation Pipeline
 
@@ -40,7 +40,7 @@ The compiler runs these phases in order:
 5. **Type checking** - semantic analysis and symbol resolution
 6. **IR lowering** - convert AST to intermediate representation
 7. **Optimization** (optional, `-O`) - copy/constant propagation, integer folding/simplification, branch cleanup, unreachable IR cleanup, and control-flow/codegen branch peepholes
-8. **Code generation** - emit x86-64 assembly
+8. **Code generation** - emit x86-64 assembly or, on Windows with `--emit-obj`, a COFF object
 
 `--release` uses the same optimization pipeline as `-O` and additionally lowers without runtime null/bounds trap checks. Use `-O` for optimized builds that still keep those generated checks.
 
@@ -58,10 +58,11 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 
 ### Recommended Windows Flow
 
-1. Build directly: `methlang --build main.meth -o main.exe`
-2. Optional extra libraries: `methlang --build main.meth -o main.exe --link-arg -lws2_32`
+1. Native object/internal-link build: `methlang --build --emit-obj --linker internal main.meth -o main.exe`
+2. Optional extra libraries: `methlang --build --emit-obj --linker internal main.meth -o main.exe --link-arg -lws2_32`
+3. Assembly/auto path: `methlang --build main.meth -o main.exe`
 
-`--build` invokes NASM and then links with the bundled runtime automatically. On Windows it tries `gcc` first, then `link.exe` as a fallback. The packaged GC/runtime is part of the Methlang installation/build output; you do not need to add `gc.c` to each project.
+`--build --emit-obj --linker internal` keeps the target build inside Methlang's object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. `--build` with `--linker auto` tries the internal linker first and falls back to external linkers if needed. If you do not pass `--emit-obj`, the build still goes through assembly and requires `NASM`. The packaged GC/runtime is part of the Methlang installation/build output; you do not need to add `gc.c` to each project.
 
 ### Manual Assembly/Link Flow
 
@@ -105,7 +106,7 @@ Stack trace:
 
 ## Web Server Example
 
-The `web/` directory contains a complete HTTP server example. Build and run:
+The `web/` directory contains a complete HTTP server example. Its build script uses the native Windows object/internal-link path. Build and run:
 
 ```bash
 .\web\build.bat

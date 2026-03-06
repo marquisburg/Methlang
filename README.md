@@ -1,12 +1,12 @@
 # Methlang
 
-Methlang is a typed, low-level language that compiles `.meth` source files to x86-64 NASM assembly.
+Methlang is a typed, low-level language that compiles `.meth` source files to x86-64 NASM assembly and, on Windows, native COFF objects for direct PE linking.
 
 It is designed for systems-style control with stronger semantics than raw assembly: structured control flow, static type checking, modules, generics, and C interop.
 
 ## Highlights
 
-- Compiles to x86-64 NASM assembly (`win64`, `elf64` object formats)
+- Compiles to x86-64 NASM assembly and Windows COFF objects
 - Strong typing with pointers, arrays, structs, enums, and function pointers
 - Control flow: `if`, `while`, `for`, `switch`, `defer`, `errdefer`
 - C interop via `extern` and `cstring`
@@ -32,19 +32,21 @@ function main() -> int32 {
 .\build.bat
 ```
 
-1. Build an executable:
+1. Build an executable with the native Windows path:
 
 ```powershell
-.\bin\methlang.exe --build hello.meth -o hello.exe
+.\bin\methlang.exe --build --emit-obj --linker internal hello.meth -o hello.exe
 .\hello.exe
 ```
+
+This path does not require `NASM`, `gcc`, or `link.exe` for the target build. Plain `--build` still defaults to the assembly-based auto path unless you also pass `--emit-obj`.
 
 No project-local `stdlib/` folder is required. The compiler auto-loads the stdlib bundled with the Methlang installation/build output. Use `--stdlib <dir>` only when you want to override that.
 
 For production builds, use `--release`:
 
 ```powershell
-.\bin\methlang.exe --build --release hello.meth -o hello.exe
+.\bin\methlang.exe --build --emit-obj --linker internal --release hello.meth -o hello.exe
 ```
 
 `--release` enables `-O`, strips assembly comments, removes unreachable functions, and lowers without generated runtime null/bounds trap checks.
@@ -73,8 +75,8 @@ gcc -nostartfiles hello.o /usr/local/runtime/gc.o -o hello
 ## Toolchain
 
 - Methlang compiler (`bin/methlang.exe` on Windows, `bin/methlang` on Linux)
-- NASM assembler
-- System C toolchain/linker (`gcc`/`clang`)
+- NASM assembler for assembly-based builds
+- System C toolchain/linker (`gcc`/`clang`) for external-link fallback and manual assembly/object flows
 
 ## Built-In Help
 
@@ -91,7 +93,8 @@ Available topics: `build`, `gc`, `interop`, `stdlib`, `web`.
 
 ## Runtime and Linking Notes
 
-- `methlang --build` automatically links the bundled GC/runtime on Windows.
+- `methlang --build --emit-obj --linker internal` uses the bundled runtime objects plus Methlang's internal PE linker on Windows.
+- `methlang --build` in `auto` mode tries the internal linker first and falls back to external linkers if needed.
 - If you use the manual assembly/link flow, link bundled `runtime/gc.o` from your Methlang installation when using `new` or string concatenation.
 - Compile with `-s` to embed runtime crash traceback support, or use `-d` to enable it alongside normal debug output.
 - On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated runtime traps with Meth function/source frames.
@@ -156,4 +159,5 @@ See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](d
 .\build.bat
 .\tests\run_tests.ps1
 .\tests\run_tests.ps1 -BuildCompiler
+.\web\build.bat
 ```
