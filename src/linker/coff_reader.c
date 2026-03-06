@@ -670,6 +670,12 @@ CoffSectionKind coff_section_kind_from_name(const char *name) {
   if (coff_section_name_matches_prefix(name, ".bss")) {
     return COFF_SECTION_KIND_BSS;
   }
+  if (coff_section_name_matches_prefix(name, ".pdata")) {
+    return COFF_SECTION_KIND_PDATA;
+  }
+  if (coff_section_name_matches_prefix(name, ".xdata")) {
+    return COFF_SECTION_KIND_XDATA;
+  }
 
   return COFF_SECTION_KIND_UNKNOWN;
 }
@@ -684,6 +690,10 @@ const char *coff_section_kind_name(CoffSectionKind kind) {
     return ".data";
   case COFF_SECTION_KIND_BSS:
     return ".bss";
+  case COFF_SECTION_KIND_PDATA:
+    return ".pdata";
+  case COFF_SECTION_KIND_XDATA:
+    return ".xdata";
   case COFF_SECTION_KIND_UNKNOWN:
   default:
     return "<unknown>";

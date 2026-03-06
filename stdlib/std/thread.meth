@@ -22,10 +22,10 @@ export extern function gc_thread_attach() -> int32 = "gc_thread_attach";
 export extern function gc_thread_detach() -> int32 = "gc_thread_detach";
 
 // Interlocked atomics
-export extern function InterlockedCompareExchange(target: int32*, exchange: int32, comparand: int32) -> int32 = "_InterlockedCompareExchange";
-export extern function InterlockedExchange(target: int32*, value: int32) -> int32 = "_InterlockedExchange";
-export extern function InterlockedIncrement(target: int32*) -> int32 = "_InterlockedIncrement";
-export extern function InterlockedDecrement(target: int32*) -> int32 = "_InterlockedDecrement";
+export extern function InterlockedCompareExchange(target: int32*, exchange: int32, comparand: int32) -> int32 = "meth_atomic_compare_exchange_i32";
+export extern function InterlockedExchange(target: int32*, value: int32) -> int32 = "meth_atomic_exchange_i32";
+export extern function InterlockedIncrement(target: int32*) -> int32 = "meth_atomic_inc_i32";
+export extern function InterlockedDecrement(target: int32*) -> int32 = "meth_atomic_dec_i32";
 
 export function thread_close(handle: int64) -> int32 {
   return CloseHandle(handle);

@@ -201,9 +201,9 @@ static int expect_section_name_normalization(void) {
                           ".text$/.text./.rdata$/.data$/.bss$");
   }
 
-  if (coff_section_kind_from_name(".pdata") != COFF_SECTION_KIND_UNKNOWN ||
-      coff_section_kind_from_name(".xdata") != COFF_SECTION_KIND_UNKNOWN) {
-    return report_failure("COFF section-name normalization misclassified unwind sections",
+  if (coff_section_kind_from_name(".pdata") != COFF_SECTION_KIND_PDATA ||
+      coff_section_kind_from_name(".xdata") != COFF_SECTION_KIND_XDATA) {
+    return report_failure("COFF section-name normalization did not classify unwind sections",
                           ".pdata/.xdata");
   }
 

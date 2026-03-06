@@ -89,6 +89,10 @@ static size_t link_section_index_from_kind(CoffSectionKind kind) {
     return 2u;
   case COFF_SECTION_KIND_BSS:
     return 3u;
+  case COFF_SECTION_KIND_PDATA:
+    return 4u;
+  case COFF_SECTION_KIND_XDATA:
+    return 5u;
   case COFF_SECTION_KIND_UNKNOWN:
   default:
     return LINKED_SECTION_INDEX_NONE;
@@ -105,6 +109,10 @@ static const char *link_section_name_from_kind(CoffSectionKind kind) {
     return ".data";
   case COFF_SECTION_KIND_BSS:
     return ".bss";
+  case COFF_SECTION_KIND_PDATA:
+    return ".pdata";
+  case COFF_SECTION_KIND_XDATA:
+    return ".xdata";
   case COFF_SECTION_KIND_UNKNOWN:
   default:
     return "<unknown>";
@@ -157,6 +165,8 @@ static size_t link_default_section_alignment(CoffSectionKind kind,
   case COFF_SECTION_KIND_RDATA:
   case COFF_SECTION_KIND_DATA:
   case COFF_SECTION_KIND_BSS:
+  case COFF_SECTION_KIND_PDATA:
+  case COFF_SECTION_KIND_XDATA:
     return 16u;
   case COFF_SECTION_KIND_UNKNOWN:
   default:
@@ -304,16 +314,16 @@ static size_t link_estimate_section_size(const CoffObject *object,
 }
 
 static int link_resolution_init_sections(LinkResolution *resolution) {
-  static const CoffSectionKind kinds[4] = {
+  static const CoffSectionKind kinds[LINKED_SECTION_COUNT] = {
       COFF_SECTION_KIND_TEXT, COFF_SECTION_KIND_RDATA, COFF_SECTION_KIND_DATA,
-      COFF_SECTION_KIND_BSS};
+      COFF_SECTION_KIND_BSS, COFF_SECTION_KIND_PDATA, COFF_SECTION_KIND_XDATA};
   size_t i = 0;
 
   if (!resolution) {
     return 0;
   }
 
-  for (i = 0; i < 4u; i++) {
+  for (i = 0; i < LINKED_SECTION_COUNT; i++) {
     resolution->sections[i].kind = kinds[i];
     resolution->sections[i].name = link_section_name_from_kind(kinds[i]);
     resolution->sections[i].alignment = 1u;
@@ -643,7 +653,7 @@ static int link_resolution_assign_virtual_addresses(
     return 0;
   }
 
-  for (section_index = 0; section_index < 4u; section_index++) {
+  for (section_index = 0; section_index < LINKED_SECTION_COUNT; section_index++) {
     LinkedSection *section = &resolution->sections[section_index];
 
     if (section->virtual_size == 0u) {
@@ -810,7 +820,7 @@ void link_resolution_destroy(LinkResolution *resolution) {
     coff_object_destroy(input->object);
   }
 
-  for (section_index = 0; section_index < 4u; section_index++) {
+  for (section_index = 0; section_index < LINKED_SECTION_COUNT; section_index++) {
     free(resolution->sections[section_index].data);
     free(resolution->sections[section_index].contributions);
   }

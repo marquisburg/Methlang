@@ -671,6 +671,7 @@ static int collect_internal_link_imports(const CompilerOptions *options,
   }
 
   if (!string_list_append_copy(import_dll_names, "kernel32.dll") ||
+      !string_list_append_copy(import_dll_names, "ucrtbase.dll") ||
       !string_list_append_copy(import_dll_names, "msvcrt.dll") ||
       (include_shell32 &&
        !string_list_append_copy(import_dll_names, "shell32.dll"))) {

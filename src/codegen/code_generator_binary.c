@@ -1634,6 +1634,7 @@ static int code_generator_binary_prepare_function_context(
     int local_alignment = 0;
     int local_storage_size = 0;
     int scalar_local = 0;
+    int existing_offset = 0;
 
     if (!instruction || instruction->op != IR_OP_DECLARE_LOCAL) {
       continue;
@@ -1678,6 +1679,23 @@ static int code_generator_binary_prepare_function_context(
                                function_data->name);
       binary_function_context_destroy(context);
       return 0;
+    }
+
+    existing_offset =
+        binary_named_slot_table_get_offset(&context->local_slots,
+                                           instruction->dest.name);
+    if (existing_offset > 0) {
+      if (code_generator_binary_resolved_type_is_float64(local_type) &&
+          !code_generator_binary_mark_float64_symbol(context,
+                                                     instruction->dest.name)) {
+        code_generator_set_error(
+            generator,
+            "Failed to allocate float64 local metadata in function '%s'",
+            function_data->name);
+        binary_function_context_destroy(context);
+        return 0;
+      }
+      continue;
     }
 
     if (!binary_align_up_int(local_storage_size_total, local_alignment,
@@ -2018,6 +2036,123 @@ cleanup:
   free(chars_label);
   free(struct_label);
   return success;
+}
+
+static int code_generator_binary_emit_global_string_variable(
+    CodeGenerator *generator, const char *link_name, const char *value) {
+  BinaryEmitter *emitter = NULL;
+  BinarySection *section = NULL;
+  size_t data_section = 0;
+  size_t rdata_section = 0;
+  size_t chars_offset = 0;
+  size_t struct_offset = 0;
+  size_t length = 0;
+  uint64_t string_length = 0;
+  unsigned char terminator = 0;
+  char *chars_label = NULL;
+
+  if (!generator || !link_name || link_name[0] == '\0') {
+    return 0;
+  }
+
+  emitter = code_generator_get_binary_emitter(generator);
+  if (!emitter) {
+    code_generator_set_error(generator, "Binary emitter is not initialized");
+    return 0;
+  }
+
+  data_section = binary_emitter_get_or_create_section(emitter, ".data",
+                                                      BINARY_SECTION_DATA, 0, 8);
+  if (data_section == (size_t)-1) {
+    code_generator_set_error(generator, "%s",
+                             binary_emitter_get_error(emitter)
+                                 ? binary_emitter_get_error(emitter)
+                                 : "Failed to create .data section");
+    return 0;
+  }
+
+  if (value) {
+    chars_label = code_generator_generate_label(generator, "str_chars");
+    if (!chars_label) {
+      code_generator_set_error(generator,
+                               "Out of memory while creating string labels");
+      return 0;
+    }
+
+    rdata_section = binary_emitter_get_or_create_section(
+        emitter, ".rdata", BINARY_SECTION_RDATA, 0, 8);
+    if (rdata_section == (size_t)-1) {
+      code_generator_set_error(generator, "%s",
+                               binary_emitter_get_error(emitter)
+                                   ? binary_emitter_get_error(emitter)
+                                   : "Failed to create .rdata section");
+      free(chars_label);
+      return 0;
+    }
+
+    length = strlen(value);
+    string_length = (uint64_t)length;
+    if (!binary_emitter_append_bytes(emitter, rdata_section, value, length,
+                                     &chars_offset) ||
+        !binary_emitter_append_bytes(emitter, rdata_section, &terminator, 1,
+                                     NULL) ||
+        !binary_emitter_define_symbol(emitter, chars_label, BINARY_SYMBOL_LOCAL,
+                                      rdata_section, chars_offset,
+                                      length + 1)) {
+      code_generator_set_error(generator, "%s",
+                               binary_emitter_get_error(emitter)
+                                   ? binary_emitter_get_error(emitter)
+                                   : "Failed to emit global string characters");
+      free(chars_label);
+      return 0;
+    }
+  }
+
+  if (!binary_emitter_align_section(emitter, data_section, 8, 0) ||
+      !binary_emitter_append_zeros(emitter, data_section, 16, &struct_offset)) {
+    code_generator_set_error(generator, "%s",
+                             binary_emitter_get_error(emitter)
+                                 ? binary_emitter_get_error(emitter)
+                                 : "Failed to reserve global string storage");
+    free(chars_label);
+    return 0;
+  }
+
+  section = binary_emitter_get_section(emitter, data_section);
+  if (!section || !section->data || struct_offset + 16 > section->size) {
+    code_generator_set_error(generator,
+                             "Failed to access emitted global string storage");
+    free(chars_label);
+    return 0;
+  }
+
+  if (value) {
+    memcpy(section->data + struct_offset + 8, &string_length,
+           sizeof(string_length));
+    if (!binary_emitter_add_relocation(emitter, data_section, struct_offset,
+                                       BINARY_RELOCATION_ADDR64, chars_label,
+                                       0)) {
+      code_generator_set_error(generator, "%s",
+                               binary_emitter_get_error(emitter)
+                                   ? binary_emitter_get_error(emitter)
+                                   : "Failed to emit global string relocation");
+      free(chars_label);
+      return 0;
+    }
+  }
+
+  if (!binary_emitter_define_symbol(emitter, link_name, BINARY_SYMBOL_GLOBAL,
+                                    data_section, struct_offset, 16)) {
+    code_generator_set_error(generator, "%s",
+                             binary_emitter_get_error(emitter)
+                                 ? binary_emitter_get_error(emitter)
+                                 : "Failed to define global string symbol");
+    free(chars_label);
+    return 0;
+  }
+
+  free(chars_label);
+  return 1;
 }
 
 static int code_generator_binary_get_access_size(CodeGenerator *generator,
@@ -4408,11 +4543,56 @@ static int code_generator_emit_binary_global_variable(CodeGenerator *generator,
                 : code_generator_binary_get_resolved_type(generator,
                                                           var_data->type_name,
                                                           0);
-  if (!type || !code_generator_binary_resolved_type_is_supported(type, 0)) {
+  if (!type) {
     code_generator_set_error(
         generator,
-        "Direct object backend only supports scalar integer/pointer/float64 "
-        "global variables (encountered '%s')",
+        "Direct object backend only supports scalar integer/pointer/string/"
+        "float64 global variables (encountered '%s')",
+        var_data->name);
+    return 0;
+  }
+
+  link_name = code_generator_get_link_symbol_name(generator, var_data->name);
+  if (!link_name || link_name[0] == '\0') {
+    code_generator_set_error(generator, "Invalid global symbol '%s'",
+                             var_data->name);
+    return 0;
+  }
+
+  if (type->kind == TYPE_STRING) {
+    const char *initializer_value = NULL;
+    StringLiteral *literal = NULL;
+
+    if (var_data->initializer) {
+      if (var_data->initializer->type != AST_STRING_LITERAL) {
+        code_generator_set_error(
+            generator,
+            "Direct object backend only supports string-literal global "
+            "initializers for string globals (encountered '%s')",
+            var_data->name);
+        return 0;
+      }
+
+      literal = (StringLiteral *)var_data->initializer->data;
+      if (!literal) {
+        code_generator_set_error(generator,
+                                 "Malformed string global initializer '%s'",
+                                 var_data->name);
+        return 0;
+      }
+      initializer_value = literal->value ? literal->value : "";
+    }
+
+    return code_generator_binary_emit_global_string_variable(generator,
+                                                             link_name,
+                                                             initializer_value);
+  }
+
+  if (!code_generator_binary_resolved_type_is_supported(type, 0)) {
+    code_generator_set_error(
+        generator,
+        "Direct object backend only supports scalar integer/pointer/string/"
+        "float64 global variables (encountered '%s')",
         var_data->name);
     return 0;
   }
@@ -4424,13 +4604,6 @@ static int code_generator_emit_binary_global_variable(CodeGenerator *generator,
         "Direct object backend only supports global variables up to 8 bytes "
         "(encountered '%s')",
         var_data->name);
-    return 0;
-  }
-
-  link_name = code_generator_get_link_symbol_name(generator, var_data->name);
-  if (!link_name || link_name[0] == '\0') {
-    code_generator_set_error(generator, "Invalid global symbol '%s'",
-                             var_data->name);
     return 0;
   }
 

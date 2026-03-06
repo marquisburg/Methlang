@@ -83,7 +83,11 @@ static atomic_flag g_gc_lock = ATOMIC_FLAG_INIT;
 
 static GCThread *g_threads = NULL;
 static size_t g_attached_thread_count = 0;
+#if defined(_WIN32) || defined(_WIN64)
+static DWORD g_current_thread_tls_index = TLS_OUT_OF_INDEXES;
+#else
 static _Thread_local GCThread *g_current_thread = NULL;
+#endif
 static GCTlabChunk *g_detached_tlab_chunks = NULL;
 
 static _Atomic unsigned int g_stw_requested = 0;
@@ -100,6 +104,39 @@ static size_t g_runtime_debug_location_count = 0;
 static volatile LONG g_runtime_debug_handler_installed = 0;
 static volatile LONG g_runtime_debug_in_handler = 0;
 static PVOID g_runtime_debug_vectored_handler = NULL;
+
+static int gc_current_thread_tls_ensure_locked(void) {
+  if (g_current_thread_tls_index != TLS_OUT_OF_INDEXES) {
+    return 1;
+  }
+
+  DWORD tls_index = TlsAlloc();
+  if (tls_index == TLS_OUT_OF_INDEXES) {
+    return 0;
+  }
+
+  g_current_thread_tls_index = tls_index;
+  return 1;
+}
+
+static GCThread *gc_current_thread_get(void) {
+  if (g_current_thread_tls_index == TLS_OUT_OF_INDEXES) {
+    return NULL;
+  }
+  return (GCThread *)TlsGetValue(g_current_thread_tls_index);
+}
+
+static int gc_current_thread_set_locked(GCThread *thread) {
+  if (g_current_thread_tls_index == TLS_OUT_OF_INDEXES) {
+    if (!thread) {
+      return 1;
+    }
+    if (!gc_current_thread_tls_ensure_locked()) {
+      return 0;
+    }
+  }
+  return TlsSetValue(g_current_thread_tls_index, thread) ? 1 : 0;
+}
 
 static void meth_runtime_write_stderr_bytes(const char *text, size_t length) {
   if (!text || length == 0) {
@@ -382,6 +419,17 @@ void meth_runtime_debug_register_image(const MethRuntimeFunctionInfo *functions,
   g_runtime_debug_location_count = location_count;
 }
 
+static void gc_fatal_error(const char *message) {
+#if defined(_WIN32) || defined(_WIN64)
+  meth_runtime_write_stderr(message ? message : "Fatal runtime error");
+  meth_runtime_write_stderr("\r\n");
+  meth_runtime_terminate_with_code(1);
+#else
+  fprintf(stderr, "%s\n", message ? message : "Fatal runtime error");
+  exit(1);
+#endif
+}
+
 void meth_runtime_debug_install_crash_handler(void) {
 #if defined(_WIN32) || defined(_WIN64)
   if (InterlockedCompareExchange(&g_runtime_debug_handler_installed, 1, 0) == 0) {
@@ -417,6 +465,40 @@ void meth_runtime_debug_trap(const char *message, const void *program_counter,
 #endif
 }
 
+int32_t meth_atomic_compare_exchange_i32(int32_t *target, int32_t exchange,
+                                         int32_t comparand) {
+#if defined(_WIN32) || defined(_WIN64)
+  return (int32_t)InterlockedCompareExchange((volatile LONG *)target,
+                                             (LONG)exchange, (LONG)comparand);
+#else
+  return (int32_t)__sync_val_compare_and_swap(target, comparand, exchange);
+#endif
+}
+
+int32_t meth_atomic_exchange_i32(int32_t *target, int32_t value) {
+#if defined(_WIN32) || defined(_WIN64)
+  return (int32_t)InterlockedExchange((volatile LONG *)target, (LONG)value);
+#else
+  return (int32_t)__sync_lock_test_and_set(target, value);
+#endif
+}
+
+int32_t meth_atomic_inc_i32(int32_t *target) {
+#if defined(_WIN32) || defined(_WIN64)
+  return (int32_t)InterlockedIncrement((volatile LONG *)target);
+#else
+  return (int32_t)__sync_add_and_fetch(target, 1);
+#endif
+}
+
+int32_t meth_atomic_dec_i32(int32_t *target) {
+#if defined(_WIN32) || defined(_WIN64)
+  return (int32_t)InterlockedDecrement((volatile LONG *)target);
+#else
+  return (int32_t)__sync_sub_and_fetch(target, 1);
+#endif
+}
+
 static void gc_tlab_free_chunk_list(GCTlabChunk *chunk) {
   while (chunk) {
     GCTlabChunk *next = chunk->next;
@@ -425,6 +507,17 @@ static void gc_tlab_free_chunk_list(GCTlabChunk *chunk) {
     chunk = next;
   }
 }
+
+#if !defined(_WIN32) && !defined(_WIN64)
+static GCThread *gc_current_thread_get(void) {
+  return g_current_thread;
+}
+
+static int gc_current_thread_set_locked(GCThread *thread) {
+  g_current_thread = thread;
+  return 1;
+}
+#endif
 
 static void gc_lock(void) {
   while (atomic_flag_test_and_set_explicit(&g_gc_lock, memory_order_acquire)) {
@@ -804,8 +897,9 @@ static void gc_tlab_reclaim_empty_chunks_locked(void) {
 }
 
 static GCThread *gc_get_or_create_current_thread_locked(void) {
-  if (g_current_thread) {
-    return g_current_thread;
+  GCThread *current_thread = gc_current_thread_get();
+  if (current_thread) {
+    return current_thread;
   }
 
   GCThread *thread = (GCThread *)calloc(1, sizeof(GCThread));
@@ -816,15 +910,18 @@ static GCThread *gc_get_or_create_current_thread_locked(void) {
   atomic_store_explicit(&thread->parked_epoch, 0u, memory_order_relaxed);
   thread->next = g_threads;
   g_threads = thread;
-  g_current_thread = thread;
+  if (!gc_current_thread_set_locked(thread)) {
+    g_threads = thread->next;
+    free(thread);
+    return NULL;
+  }
   return thread;
 }
 
 static void gc_attach_current_thread_locked(void *stack_base) {
   GCThread *thread = gc_get_or_create_current_thread_locked();
   if (!thread) {
-    fprintf(stderr, "Fatal error: Out of memory while attaching GC thread\n");
-    exit(1);
+    gc_fatal_error("Fatal error: Out of memory while attaching GC thread");
   }
 
   if (!thread->attached) {
@@ -840,7 +937,7 @@ static void gc_attach_current_thread_locked(void *stack_base) {
 }
 
 static void gc_detach_current_thread_locked(void) {
-  GCThread *thread = g_current_thread;
+  GCThread *thread = gc_current_thread_get();
   if (!thread) {
     return;
   }
@@ -873,7 +970,7 @@ static void gc_detach_current_thread_locked(void) {
     thread_ptr = &(*thread_ptr)->next;
   }
 
-  g_current_thread = NULL;
+  (void)gc_current_thread_set_locked(NULL);
   free(thread);
 }
 
@@ -954,8 +1051,7 @@ static void mark_pointer(void *ptr, GCMarkStack *stack) {
 
   allocation->marked = 1;
   if (!gc_mark_stack_push(stack, allocation)) {
-    fprintf(stderr, "Fatal error: Out of memory during GC mark phase\n");
-    exit(1);
+    gc_fatal_error("Fatal error: Out of memory during GC mark phase");
   }
 }
 
@@ -1020,7 +1116,7 @@ static void gc_begin_stop_the_world_locked(void *current_rsp,
 
   atomic_store_explicit(&g_stw_parked_count, 0, memory_order_release);
 
-  GCThread *self = g_current_thread;
+  GCThread *self = gc_current_thread_get();
   if (self && self->attached) {
     atomic_store_explicit(&self->safepoint_rsp, current_rsp, memory_order_release);
     atomic_store_explicit(&self->parked_epoch, epoch, memory_order_release);
@@ -1033,7 +1129,7 @@ static void gc_begin_stop_the_world_locked(void *current_rsp,
 }
 
 static void gc_end_stop_the_world_locked(void) {
-  GCThread *self = g_current_thread;
+  GCThread *self = gc_current_thread_get();
   if (self) {
     atomic_store_explicit(&self->safepoint_rsp, NULL, memory_order_release);
   }
@@ -1054,7 +1150,7 @@ void gc_safepoint(void *current_rsp) {
     return;
   }
 
-  GCThread *thread = g_current_thread;
+  GCThread *thread = gc_current_thread_get();
   if (!thread || !thread->attached) {
     return;
   }
@@ -1125,9 +1221,8 @@ void gc_register_root(void **root_slot) {
   }
 
   if (g_root_count >= GC_ROOT_SLOT_CAPACITY) {
-    fprintf(stderr, "Fatal error: Exceeded maximum GC root slots\n");
     gc_unlock();
-    exit(1);
+    gc_fatal_error("Fatal error: Exceeded maximum GC root slots");
   }
 
   g_root_slots[g_root_count++] = root_slot;
@@ -1216,12 +1311,11 @@ void *gc_alloc(size_t size) {
 
   size_t total_size = 0;
   if (!gc_try_add_size(sizeof(GCAllocation), size, &total_size)) {
-    fprintf(stderr, "Fatal error: Allocation size overflow during gc_alloc\n");
     gc_unlock();
-    exit(1);
+    gc_fatal_error("Fatal error: Allocation size overflow during gc_alloc");
   }
 
-  GCThread *thread = g_current_thread;
+  GCThread *thread = gc_current_thread_get();
   GCAllocation *alloc = NULL;
   int use_tlab = (total_size <= GC_TLAB_SMALL_ALLOC_MAX);
   int allocated_from_tlab = 0;
@@ -1255,14 +1349,12 @@ void *gc_alloc(size_t size) {
   }
 
   if (!alloc) {
-    fprintf(stderr, "Fatal error: Out of memory during gc_alloc\n");
     gc_unlock();
-    exit(1);
+    gc_fatal_error("Fatal error: Out of memory during gc_alloc");
   }
   if (allocated_from_tlab && !allocation_chunk) {
-    fprintf(stderr, "Fatal error: Missing TLAB chunk metadata in gc_alloc\n");
     gc_unlock();
-    exit(1);
+    gc_fatal_error("Fatal error: Missing TLAB chunk metadata in gc_alloc");
   }
 
   alloc->size = size;
@@ -1272,10 +1364,9 @@ void *gc_alloc(size_t size) {
 
   size_t next_allocated_bytes = 0;
   if (!gc_try_add_size(g_allocated_bytes, size, &next_allocated_bytes)) {
-    fprintf(stderr,
-            "Fatal error: allocated-byte accounting overflow during gc_alloc\n");
     gc_unlock();
-    exit(1);
+    gc_fatal_error(
+        "Fatal error: allocated-byte accounting overflow during gc_alloc");
   }
 
   alloc->next = g_allocations;
@@ -1293,9 +1384,8 @@ void *gc_alloc(size_t size) {
   }
 
   if (!gc_page_table_insert_allocation(alloc)) {
-    fprintf(stderr, "Fatal error: Out of memory while indexing GC page table\n");
     gc_unlock();
-    exit(1);
+    gc_fatal_error("Fatal error: Out of memory while indexing GC page table");
   }
 
   memset((void *)(alloc + 1), 0, size);
@@ -1314,7 +1404,8 @@ static void gc_collect_locked(void *current_rsp) {
   if (!g_allocations) {
     return;
   }
-  if (!g_current_thread || !g_current_thread->attached) {
+  GCThread *self = gc_current_thread_get();
+  if (!self || !self->attached) {
     return;
   }
 
@@ -1348,7 +1439,7 @@ static void gc_collect_locked(void *current_rsp) {
   while (thread) {
     if (thread->attached && thread->stack_base) {
       void *stack_rsp = NULL;
-      if (thread == g_current_thread) {
+      if (thread == self) {
         stack_rsp = current_rsp;
       } else {
         stack_rsp =
@@ -1493,7 +1584,13 @@ void gc_shutdown(void) {
     thread = next_thread;
   }
   g_threads = NULL;
-  g_current_thread = NULL;
+  (void)gc_current_thread_set_locked(NULL);
+#if defined(_WIN32) || defined(_WIN64)
+  if (g_current_thread_tls_index != TLS_OUT_OF_INDEXES) {
+    TlsFree(g_current_thread_tls_index);
+    g_current_thread_tls_index = TLS_OUT_OF_INDEXES;
+  }
+#endif
 
   gc_tlab_free_chunk_list(g_detached_tlab_chunks);
   g_detached_tlab_chunks = NULL;

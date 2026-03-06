@@ -90,6 +90,17 @@ static void relocation_write_u64(unsigned char *bytes, uint64_t value) {
   bytes[7] = (unsigned char)((value >> 56) & 0xFFu);
 }
 
+static int relocation_section_is_debug_only(const CoffSection *section) {
+  const char *name = NULL;
+
+  if (!section || !section->name) {
+    return 0;
+  }
+
+  name = section->name;
+  return strncmp(name, ".debug", 6u) == 0 || strncmp(name, ".zdebug", 7u) == 0;
+}
+
 static int relocation_resolve_target(const LinkResolution *resolution,
                                      const LinkedInputObject *input,
                                      uint32_t symbol_index,
@@ -188,6 +199,9 @@ int link_apply_relocations(LinkResolution *resolution,
         continue;
       }
       if (merged_section_index == LINKED_SECTION_INDEX_NONE) {
+        if (relocation_section_is_debug_only(source_section)) {
+          continue;
+        }
         relocation_set_error(error_message_out,
                              "Section '%s' has relocations but was not merged",
                              source_section->name ? source_section->name

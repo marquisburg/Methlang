@@ -1109,6 +1109,56 @@ catch {
   Write-CaseResult -Name "internal_link_ws2_32" -Passed $false -Reason $_.Exception.Message
 }
 
+# Internal linker UCRT test: std/io path resolves __acrt_iob_func via default DLL imports
+$total++
+try {
+  $exePath = Join-Path $tmpDir "internal_link_std_io.exe"
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_std_io.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker std-io build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Internal linker std-io build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker std-io executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "internal_link_std_io" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "internal_link_std_io" -Passed $false -Reason $_.Exception.Message
+}
+
+# Internal linker kernel32 atomics test: std/thread uses exported Interlocked* names
+$total++
+try {
+  $exePath = Join-Path $tmpDir "internal_link_thread_atomics.exe"
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_internal_link_thread_atomics.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker thread-atomics build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Internal linker thread-atomics build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker thread-atomics executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "internal_link_thread_atomics" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "internal_link_thread_atomics" -Passed $false -Reason $_.Exception.Message
+}
+
 # Auto linker PATH isolation test: auto mode should succeed with only NASM on PATH
 $total++
 try {
@@ -1529,6 +1579,39 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "direct_object_ok_global_int" -Passed $false -Reason $_.Exception.Message
+}
+
+$total++
+try {
+  $objPath = Join-Path $tmpDir "direct_object_global_string.obj"
+  $exePath = Join-Path $tmpDir "direct_object_global_string.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_global_string.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object global-string compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object global-string compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_global_string.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object global-string build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object global-string build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object global-string executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "direct_object_global_string" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_global_string" -Passed $false -Reason $_.Exception.Message
 }
 
 $total++

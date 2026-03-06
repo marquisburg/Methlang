@@ -65,6 +65,7 @@
 #define PE_DATA_DIRECTORY_COUNT 16u
 #define PE_OPTIONAL_HEADER64_SIZE 240u
 
+#define PE_DIRECTORY_EXCEPTION 3u
 #define PE_DIRECTORY_IMPORT 1u
 #define PE_DIRECTORY_IAT 12u
 
@@ -74,6 +75,10 @@
 
 #define PE_SECTION_INDEX_TEXT 0u
 #define PE_SECTION_INDEX_RDATA 1u
+#define PE_SECTION_INDEX_DATA 2u
+#define PE_SECTION_INDEX_BSS 3u
+#define PE_SECTION_INDEX_PDATA 4u
+#define PE_SECTION_INDEX_XDATA 5u
 
 typedef struct {
   size_t merged_section_index;
@@ -315,6 +320,9 @@ static uint32_t pe_characteristics_for_kind(CoffSectionKind kind) {
   case COFF_SECTION_KIND_BSS:
     return IMAGE_SCN_CNT_UNINITIALIZED_DATA | IMAGE_SCN_MEM_READ |
            IMAGE_SCN_MEM_WRITE;
+  case COFF_SECTION_KIND_PDATA:
+  case COFF_SECTION_KIND_XDATA:
+    return IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ;
   case COFF_SECTION_KIND_UNKNOWN:
   default:
     return IMAGE_SCN_MEM_READ;
@@ -457,7 +465,7 @@ static int pe_collect_sections(const LinkResolution *resolution,
     return 0;
   }
 
-  for (section_index = 0u; section_index < 4u; section_index++) {
+  for (section_index = 0u; section_index < LINKED_SECTION_COUNT; section_index++) {
     const LinkedSection *section = &resolution->sections[section_index];
 
     if (section->virtual_size == 0u) {
@@ -549,6 +557,8 @@ static int pe_layout_sections(PeSectionLayout *layouts, size_t layout_count,
       }
       break;
     case COFF_SECTION_KIND_RDATA:
+    case COFF_SECTION_KIND_PDATA:
+    case COFF_SECTION_KIND_XDATA:
     case COFF_SECTION_KIND_DATA:
       size_of_init_data += layouts[i].raw_size;
       break;
@@ -584,7 +594,7 @@ static int pe_apply_layout_to_resolution(LinkResolution *resolution,
     return 0;
   }
 
-  for (section_index = 0u; section_index < 4u; section_index++) {
+  for (section_index = 0u; section_index < LINKED_SECTION_COUNT; section_index++) {
     resolution->sections[section_index].virtual_address = 0u;
   }
 
@@ -1491,6 +1501,7 @@ static int pe_write_headers(FILE *file, const PeSectionLayout *layouts,
                             uint32_t base_of_code, uint32_t entry_rva,
                             uint32_t section_alignment,
                             uint32_t file_alignment, uint16_t subsystem,
+                            uint32_t exception_rva, uint32_t exception_size,
                             uint32_t import_rva, uint32_t import_size,
                             uint32_t iat_rva, uint32_t iat_size,
                             char **error_message_out) {
@@ -1540,7 +1551,10 @@ static int pe_write_headers(FILE *file, const PeSectionLayout *layouts,
     uint32_t directory_rva = 0u;
     uint32_t directory_size = 0u;
 
-    if (i == PE_DIRECTORY_IMPORT) {
+    if (i == PE_DIRECTORY_EXCEPTION) {
+      directory_rva = exception_rva;
+      directory_size = exception_size;
+    } else if (i == PE_DIRECTORY_IMPORT) {
       directory_rva = import_rva;
       directory_size = import_size;
     } else if (i == PE_DIRECTORY_IAT) {
@@ -1636,7 +1650,7 @@ static int pe_write_payloads(FILE *file, const PeSectionLayout *layouts,
 int pe_emit_executable(LinkResolution *resolution, const char *output_path,
                        const PeEmissionOptions *options,
                        char **error_message_out) {
-  PeSectionLayout layouts[4];
+  PeSectionLayout layouts[LINKED_SECTION_COUNT];
   size_t layout_count = 0u;
   FILE *file = NULL;
   ImportLibrary **libraries = NULL;
@@ -1653,6 +1667,8 @@ int pe_emit_executable(LinkResolution *resolution, const char *output_path,
   uint32_t size_of_uninit_data = 0u;
   uint32_t base_of_code = 0u;
   uint32_t entry_rva = 0u;
+  uint32_t exception_rva = 0u;
+  uint32_t exception_size = 0u;
   LinkRelocationOptions relocation_options;
   int ok = 0;
 
@@ -1734,6 +1750,15 @@ int pe_emit_executable(LinkResolution *resolution, const char *output_path,
   }
 
   entry_rva = (uint32_t)(resolution->entry_symbol->virtual_address - image_base);
+  {
+    const PeSectionLayout *exception_layout =
+        pe_find_layout(layouts, layout_count, PE_SECTION_INDEX_PDATA);
+    if (exception_layout && exception_layout->source &&
+        exception_layout->source->size > 0u) {
+      exception_rva = exception_layout->virtual_address;
+      exception_size = (uint32_t)exception_layout->source->size;
+    }
+  }
   relocation_options.image_base = image_base;
   if (!link_apply_relocations(resolution, &relocation_options, error_message_out)) {
     goto cleanup;
@@ -1750,6 +1775,7 @@ int pe_emit_executable(LinkResolution *resolution, const char *output_path,
                         size_of_image, size_of_code, size_of_init_data,
                         size_of_uninit_data, base_of_code, entry_rva,
                         section_alignment, file_alignment, subsystem,
+                        exception_rva, exception_size,
                         import_plan.import_directory_rva,
                         import_plan.import_directory_size, import_plan.iat_rva,
                         import_plan.iat_size, error_message_out) ||

@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #define LINKED_SECTION_INDEX_NONE ((size_t)-1)
+#define LINKED_SECTION_COUNT 6u
 
 typedef struct {
   size_t object_index;
@@ -75,7 +76,7 @@ typedef struct {
 typedef struct {
   LinkedInputObject *objects;
   size_t object_count;
-  LinkedSection sections[4];
+  LinkedSection sections[LINKED_SECTION_COUNT];
   LinkedSymbol *symbols;
   size_t symbol_count;
   size_t symbol_capacity;
