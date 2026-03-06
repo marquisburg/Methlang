@@ -19,7 +19,7 @@ if not exist "%METH_CC%" (
 )
 
 echo Building server.meth...
-"%METH_CC%" --build --release web\server.meth -o web\server.exe --link-arg -lws2_32
+"%METH_CC%" --build --emit-obj --release web\server.meth -o web\server.exe --link-arg -lws2_32
 if !ERRORLEVEL! NEQ 0 (
     echo Web server build failed.
     exit /b 1

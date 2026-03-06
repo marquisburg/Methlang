@@ -88,7 +88,7 @@ gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\error\error_reporter.c -o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling main...
-gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\main.c -o obj\main.o
+gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -Isrc -c src\main.c -o obj\main.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Linking...

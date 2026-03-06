@@ -12,6 +12,13 @@
 #include "semantic/type_checker.h"
 #include <stddef.h>
 
+typedef enum {
+  LINKER_MODE_AUTO = 0,
+  LINKER_MODE_INTERNAL,
+  LINKER_MODE_GCC,
+  LINKER_MODE_MSVC,
+} LinkerMode;
+
 typedef struct {
   const char *input_filename;
   const char *output_filename;
@@ -30,6 +37,7 @@ typedef struct {
   size_t link_argument_count;
   const char *stdlib_directory;
   int prelude;
+  LinkerMode linker_mode;
 } CompilerOptions;
 
 // Function declarations

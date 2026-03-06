@@ -191,6 +191,25 @@ cleanup:
   return result;
 }
 
+static int expect_section_name_normalization(void) {
+  if (coff_section_kind_from_name(".text$mn") != COFF_SECTION_KIND_TEXT ||
+      coff_section_kind_from_name(".text.startup") != COFF_SECTION_KIND_TEXT ||
+      coff_section_kind_from_name(".rdata$zzz") != COFF_SECTION_KIND_RDATA ||
+      coff_section_kind_from_name(".data$linkonce") != COFF_SECTION_KIND_DATA ||
+      coff_section_kind_from_name(".bss$foo") != COFF_SECTION_KIND_BSS) {
+    return report_failure("COFF section-name normalization did not classify suffixed sections",
+                          ".text$/.text./.rdata$/.data$/.bss$");
+  }
+
+  if (coff_section_kind_from_name(".pdata") != COFF_SECTION_KIND_UNKNOWN ||
+      coff_section_kind_from_name(".xdata") != COFF_SECTION_KIND_UNKNOWN) {
+    return report_failure("COFF section-name normalization misclassified unwind sections",
+                          ".pdata/.xdata");
+  }
+
+  return 0;
+}
+
 int main(int argc, char **argv) {
   if (argc != 5) {
     fprintf(stderr,
@@ -204,7 +223,8 @@ int main(int argc, char **argv) {
       expect_long_symbol(argv[3],
                          "reader_target_symbol_long_name") != 0 ||
       expect_rel32_call(argv[3], "reader_target_symbol_long_name") != 0 ||
-      expect_gcc_object(argv[4]) != 0) {
+      expect_gcc_object(argv[4]) != 0 ||
+      expect_section_name_normalization() != 0) {
     return 1;
   }
 

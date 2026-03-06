@@ -976,7 +976,7 @@ try {
   $dupBObj = Join-Path $tmpDir "linker_duplicate_b.obj"
   $unresolvedObj = Join-Path $tmpDir "linker_unresolved_entry.obj"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\symbol_resolve_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c -Isrc -o $symbolResolveExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\symbol_resolve_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $symbolResolveExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Symbol-resolve harness compile failed: $compileHarness"
   }
@@ -1003,7 +1003,7 @@ try {
     }
   }
 
-  $resolveOut = & $symbolResolveExe $fnEntryObj $fnProviderObj $dataEntryObj $dataProviderObj $bssEntryObj $bssProviderObj $dupAObj $dupBObj $unresolvedObj 2>&1 | Out-String
+  $resolveOut = & $symbolResolveExe $fnEntryObj $fnProviderObj $dataEntryObj $dataProviderObj $bssEntryObj $bssProviderObj $dupAObj $dupBObj $unresolvedObj $tmpDir 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Symbol-resolve verification failed: $resolveOut"
   }
@@ -1035,6 +1035,182 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "relocation" -Passed $false -Reason $_.Exception.Message
+}
+
+# PE emitter test: write a minimal PE32+ image, verify headers/sections, and run it
+$total++
+try {
+  $peEmitterExe = Join-Path $tmpDir "pe_emitter_test.exe"
+
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\pe_emitter_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\linker\pe_emitter.c src\linker\import_lib.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $peEmitterExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "PE-emitter harness compile failed: $compileHarness"
+  }
+
+  $peEmitterOut = & $peEmitterExe $tmpDir 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "PE-emitter verification failed: $peEmitterOut"
+  }
+
+  Write-CaseResult -Name "pe_emitter" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "pe_emitter" -Passed $false -Reason $_.Exception.Message
+}
+
+# Internal linker basic test: direct object build uses native PE emission for default imports
+$total++
+try {
+  $exePath = Join-Path $tmpDir "internal_link_return_const.exe"
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_direct_object_return_const.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker basic build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Internal linker basic build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 7) {
+    throw "Internal linker basic executable exited with $LASTEXITCODE (expected 7)"
+  }
+
+  Write-CaseResult -Name "internal_link_basic" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "internal_link_basic" -Passed $false -Reason $_.Exception.Message
+}
+
+# Internal linker extra-library test: --link-arg -lws2_32 resolves imports via the native linker
+$total++
+try {
+  $exePath = Join-Path $tmpDir "internal_link_ws2_32.exe"
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_internal_link_ws2_32.meth -o $exePath --link-arg -lws2_32 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker ws2_32 build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Internal linker ws2_32 build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker ws2_32 executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "internal_link_ws2_32" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "internal_link_ws2_32" -Passed $false -Reason $_.Exception.Message
+}
+
+# Auto linker PATH isolation test: auto mode should succeed with only NASM on PATH
+$total++
+try {
+  $exePath = Join-Path $tmpDir "auto_link_internal_only.exe"
+  $wrapperDir = Join-Path $tmpDir "phase6_auto_path_bin"
+  $wrapperPath = Join-Path $wrapperDir "nasm.cmd"
+  $compilerFullPath = (Resolve-Path $CompilerPath).Path
+  $system32Dir = Join-Path $env:SystemRoot "System32"
+  $gccBinDir = Split-Path -Parent ((Get-Command gcc -CommandType Application -ErrorAction Stop).Source)
+  $nasmCommand = Get-Command nasm -CommandType Application -ErrorAction Stop
+
+  if (-not (Test-Path $wrapperDir)) {
+    New-Item -Path $wrapperDir -ItemType Directory | Out-Null
+  }
+
+  Get-ChildItem -Path $gccBinDir -Filter *.dll | Copy-Item -Destination $wrapperDir -Force
+
+  @(
+    "@echo off"
+    "`"$($nasmCommand.Source)`" %*"
+  ) | Set-Content -Path $wrapperPath -Encoding ASCII
+
+  $originalPath = $env:PATH
+  try {
+    $env:PATH = "$wrapperDir;$system32Dir"
+    $buildOut = & $compilerFullPath --build --emit-obj tests\test_direct_object_return_const.meth -o $exePath 2>&1 | Out-String
+  }
+  finally {
+    $env:PATH = $originalPath
+  }
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Auto linker internal-only build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Auto linker internal-only build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 7) {
+    throw "Auto linker internal-only executable exited with $LASTEXITCODE (expected 7)"
+  }
+
+  Write-CaseResult -Name "auto_link_internal_only_path" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "auto_link_internal_only_path" -Passed $false -Reason $_.Exception.Message
+}
+
+# Auto linker fallback test: a static archive should fail internally, then link via GCC
+$total++
+try {
+  $cSourcePath = Join-Path $tmpDir "phase6_fallback_static_lib.c"
+  $cObjectPath = Join-Path $tmpDir "phase6_fallback_static_lib.o"
+  $libPath = Join-Path $tmpDir "phase6_fallback_static_lib.a"
+  $exePath = Join-Path $tmpDir "auto_link_fallback_static_lib.exe"
+  $arCommand = Get-Command ar -CommandType Application -ErrorAction SilentlyContinue
+  if (-not $arCommand) {
+    $arCommand = Get-Command gcc-ar -CommandType Application -ErrorAction SilentlyContinue
+  }
+  if (-not $arCommand) {
+    throw "Static-library archiver not found (expected ar or gcc-ar)"
+  }
+
+  @'
+int fallback_value(void) {
+  return 42;
+}
+'@ | Set-Content -Path $cSourcePath -Encoding ASCII
+
+  $gccOut = & gcc -c $cSourcePath -o $cObjectPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Static-library compile failed: $gccOut"
+  }
+
+  $arOut = & $arCommand.Source rcs $libPath $cObjectPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Static-library archive build failed: $arOut"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_auto_link_fallback_static_lib.meth -o $exePath --link-arg $libPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Auto linker fallback build failed: $buildOut"
+  }
+  if ($buildOut -notmatch "Internal linker failed in auto mode, falling back to external linkers") {
+    throw "Auto linker fallback build did not report an internal-link failure before fallback: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Auto linker fallback build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Auto linker fallback executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "auto_link_fallback_static_lib" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "auto_link_fallback_static_lib" -Passed $false -Reason $_.Exception.Message
 }
 
 # Direct object backend parameter test: integer arg passed into callee home slot

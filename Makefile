@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE
+CFLAGS = -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -Isrc
 SRCDIR = src
 OBJDIR = obj
 BINDIR = bin

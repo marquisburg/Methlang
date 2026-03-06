@@ -1,4 +1,5 @@
 #include "linker/relocation.h"
+#include "linker/symbol_resolve.h"
 
 #include <limits.h>
 #include <stdarg.h>

@@ -635,24 +635,39 @@ const CoffSymbol *coff_object_find_symbol(const CoffObject *object,
   return NULL;
 }
 
-CoffSectionKind coff_section_kind_from_name(const char *name) {
-  size_t prefix_length = 0;
+static int coff_section_name_matches_prefix(const char *name,
+                                            const char *prefix) {
+  size_t prefix_length = 0u;
+  char suffix = '\0';
 
+  if (!name || !prefix) {
+    return 0;
+  }
+
+  prefix_length = strlen(prefix);
+  if (strncmp(name, prefix, prefix_length) != 0) {
+    return 0;
+  }
+
+  suffix = name[prefix_length];
+  return suffix == '\0' || suffix == '$' || suffix == '.';
+}
+
+CoffSectionKind coff_section_kind_from_name(const char *name) {
   if (!name || name[0] != '.') {
     return COFF_SECTION_KIND_UNKNOWN;
   }
 
-  prefix_length = strcspn(name, "$");
-  if (prefix_length == 5 && strncmp(name, ".text", 5) == 0) {
+  if (coff_section_name_matches_prefix(name, ".text")) {
     return COFF_SECTION_KIND_TEXT;
   }
-  if (prefix_length == 6 && strncmp(name, ".rdata", 6) == 0) {
+  if (coff_section_name_matches_prefix(name, ".rdata")) {
     return COFF_SECTION_KIND_RDATA;
   }
-  if (prefix_length == 5 && strncmp(name, ".data", 5) == 0) {
+  if (coff_section_name_matches_prefix(name, ".data")) {
     return COFF_SECTION_KIND_DATA;
   }
-  if (prefix_length == 4 && strncmp(name, ".bss", 4) == 0) {
+  if (coff_section_name_matches_prefix(name, ".bss")) {
     return COFF_SECTION_KIND_BSS;
   }
 
