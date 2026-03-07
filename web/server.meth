@@ -70,6 +70,8 @@ var HTTP_HEALTH_BODY: string = "OK";
 // Forum HTML chunks (Connection: close, no Content-Length)
 var FORUM_HEADER: string = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n";
 var FORUM_CSS: string = import_str "templates/forum.css";
+var FORUM_STYLE_OPEN: string = "<style>";
+var FORUM_STYLE_CLOSE: string = "</style>";
 var FORUM_INDEX_START: string = "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Community Forum</title><link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' rel='stylesheet'>";
 var FORUM_INDEX_BODY: string = "</head><body><div class='container'><h1>Community Forum</h1><a href='/' class='back'>Back to Website</a><h2>Threads</h2><ul>";
 var FORUM_INDEX_END: string = "</ul><h2>Start a Discussion</h2>";
@@ -362,7 +364,7 @@ function send_redirect(client: int64, location: cstring) {
 
 // Serve forum index: thread list + new thread form. show_err_empty=1 to show empty-title error.
 function serve_forum_index(client: int64, show_err_empty: int32) {
-  var out: string = FORUM_HEADER + FORUM_INDEX_START + FORUM_CSS + FORUM_INDEX_BODY;
+  var out: string = FORUM_HEADER + FORUM_INDEX_START + FORUM_STYLE_OPEN + FORUM_CSS + FORUM_STYLE_CLOSE + FORUM_INDEX_BODY;
   send_all(client, out.chars, out.length);
 
   if (mutex_lock_infinite(file_mutex) != 1) { return; }
@@ -402,7 +404,7 @@ function serve_forum_index(client: int64, show_err_empty: int32) {
 
 // Serve thread view: title, posts, reply form
 function serve_forum_thread(client: int64, thread_id: int32) {
-  var out: string = FORUM_HEADER + FORUM_THREAD_START + FORUM_CSS + FORUM_THREAD_HEAD_END;
+  var out: string = FORUM_HEADER + FORUM_THREAD_START + FORUM_STYLE_OPEN + FORUM_CSS + FORUM_STYLE_CLOSE + FORUM_THREAD_HEAD_END;
   send_all(client, out.chars, out.length);
 
   if (mutex_lock_infinite(file_mutex) != 1) { return; }

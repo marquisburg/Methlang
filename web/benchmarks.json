@@ -1,42 +1,42 @@
 ﻿{
     "benchmarks":  [
                        {
-                           "meth_ms":  93,
+                           "meth_ms":  328,
                            "description":  "Fibonacci fib(35) x 10M",
                            "name":  "fib",
-                           "relative":  1.19,
-                           "c_ms":  78
+                           "relative":  4.15,
+                           "c_ms":  79
                        },
                        {
-                           "meth_ms":  93,
+                           "meth_ms":  250,
                            "description":  "Word count 256 KB buffer x 500",
                            "name":  "word_count",
-                           "relative":  1.98,
-                           "c_ms":  47
+                           "relative":  4.03,
+                           "c_ms":  62
                        },
                        {
-                           "meth_ms":  63,
+                           "meth_ms":  235,
                            "description":  "Grep ERROR 256 KB x 200",
                            "name":  "grep",
                            "relative":  null,
                            "c_ms":  0
                        },
                        {
-                           "meth_ms":  15,
+                           "meth_ms":  78,
                            "description":  "Sum of squares 1..100000 x 500",
                            "name":  "sum_squares",
                            "relative":  null,
                            "c_ms":  0
                        },
                        {
-                           "meth_ms":  156,
+                           "meth_ms":  844,
                            "description":  "Collatz steps 1..100000 x 10",
                            "name":  "collatz",
-                           "relative":  1.42,
-                           "c_ms":  110
+                           "relative":  4.91,
+                           "c_ms":  172
                        }
                    ],
-    "generated":  "2026-03-04T13:44:17Z",
+    "generated":  "2026-03-07T01:43:48Z",
     "failed":  [
 
                ]

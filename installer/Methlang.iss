@@ -46,7 +46,7 @@ Root: HKCR; Subkey: "MethlangFile\DefaultIcon"; ValueType: string; ValueName: ""
 Root: HKCR; Subkey: "MethlangFile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\methlang.exe"" ""%1"""; Tasks: associate
 
 [Run]
-Filename: "{cmd}"; Parameters: "/K echo Methlang installed. Use methlang --build your_file.meth for a one-command build."; Description: "Open terminal with usage hint"; Flags: postinstall nowait skipifsilent
+Filename: "{cmd}"; Parameters: "/K echo Methlang installed. Native Windows build: methlang --build --emit-obj --linker internal your_file.meth -o your_file.exe ^& echo Docs: methlang help build"; Description: "Open terminal with usage hint"; Flags: postinstall nowait skipifsilent
 
 [Code]
 const

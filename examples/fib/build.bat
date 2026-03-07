@@ -10,31 +10,10 @@ if not exist bin\methlang.exe (
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
-echo Compiling fib.meth...
-bin\methlang.exe --release examples\fib\fib.meth -o examples\fib\fib.s --stdlib stdlib
+echo Building fib.meth (native compiler backend)...
+bin\methlang.exe --build --emit-obj --linker internal --release examples\fib\fib.meth -o examples\fib\fib.exe --stdlib stdlib
 if %ERRORLEVEL% NEQ 0 (
-    echo Methlang compilation failed.
-    exit /b 1
-)
-
-echo Assembling and linking...
-where nasm >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    nasm -f win64 examples\fib\fib.s -o examples\fib\fib.o
-    if %ERRORLEVEL% NEQ 0 (
-        echo NASM assembly failed.
-        exit /b 1
-    )
-    gcc -c src\runtime\gc.c -o examples\fib\gc.o -Isrc
-    if %ERRORLEVEL% NEQ 0 exit /b 1
-    gcc -nostartfiles examples\fib\fib.o examples\fib\gc.o -o examples\fib\fib.exe -lkernel32
-) else (
-    echo NASM required. Install from https://www.nasm.us/
-    exit /b 1
-)
-
-if %ERRORLEVEL% NEQ 0 (
-    echo Link failed.
+    echo Methlang build failed.
     exit /b 1
 )
 
