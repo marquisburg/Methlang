@@ -1,12 +1,14 @@
 # Methlang vs C Benchmark Script
 #
-# Builds all benchmarks, runs Methlang and C counterparts, parses timing,
-# and writes web/benchmarks.json for the benchmarks page.
+# Builds all benchmarks using the native compiler backend (--build --emit-obj
+# --linker internal), runs Methlang and C counterparts, parses timing, and
+# writes web/benchmarks.json for the benchmarks page.
 #
 # Usage: .\tools\benchmark\run-benchmarks.ps1
 #        .\tools\benchmark\run-benchmarks.ps1 -BuildCompiler
 #
-# Requires: NASM, gcc, Methlang compiler (or -BuildCompiler)
+# Requires: Methlang compiler (or -BuildCompiler), gcc (for C counterparts).
+#           No NASM needed—Methlang uses the native COFF object/internal linker path.
 
 param(
     [switch]$BuildCompiler
