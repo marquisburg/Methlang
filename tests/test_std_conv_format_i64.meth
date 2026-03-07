@@ -1,0 +1,15 @@
+import "std/conv";
+import "std/io";
+
+function main() -> int32 {
+  var digits: uint8[32];
+  var text: uint8[32];
+
+  var digits_len: int32 = int_to_dec(&digits[0], -12345);
+  var text_len: int32 = format_i64(&text[0], 32, "/forum?thread=%d", 7);
+
+  puts(&digits[0]);
+  puts(&text[0]);
+
+  return digits_len + text_len;
+}

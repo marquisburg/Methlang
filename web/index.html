@@ -86,7 +86,6 @@
     padding: 2.5rem;
   }
 
-  .card-icon { font-size: 2.5rem; margin-bottom: 1.5rem; display: block; }
   .card h3 { font-size: 1.5rem; margin-bottom: 1rem; color: var(--text); font-weight: 600; }
   .card p { color: var(--text-muted); font-size: 1rem; line-height: 1.7; }
 
@@ -186,12 +185,12 @@
       <p class="subtitle">A typed, assembly-inspired language with C interop and garbage collection, compiling to high-performance x86-64 NASM assembly.</p>
       
       <div class="badges">
-        <span class="badge">🔒 Statically Typed</span>
-        <span class="badge">⚡ Zero-Cost Abstractions</span>
-        <span class="badge">🔗 Native C Interop</span>
-        <span class="badge">📦 Module System</span>
-        <span class="badge">🗑️ Conservative GC</span>
-        <span class="badge">🎯 x86-64 Native</span>
+        <span class="badge">Statically Typed</span>
+        <span class="badge">Zero-Cost Abstractions</span>
+        <span class="badge">Native C Interop</span>
+        <span class="badge">Module System</span>
+        <span class="badge">Conservative GC</span>
+        <span class="badge">x86-64 Native</span>
       </div>
 
       <div class="cta-buttons">
@@ -204,37 +203,31 @@
       <h2 class="section-title">Language Features</h2>
       <div class="grid">
         <div class="card">
-          <span class="card-icon">⚡</span>
           <h3>Explicit Control</h3>
           <p>No hidden magic. All variables and parameters have explicit types. Structured control flow with <code>if</code>, <code>while</code>, <code>for</code>, and <code>switch</code> statements. Compile to efficient x86-64 assembly.</p>
         </div>
         
         <div class="card">
-          <span class="card-icon">🛡️</span>
           <h3>Memory Management</h3>
           <p>Leverage the built-in conservative garbage collection via <code>new T</code> for heap allocation, or manage it yourself with C <code>malloc</code> when you need precise control.</p>
         </div>
 
         <div class="card">
-          <span class="card-icon">🔗</span>
           <h3>Seamless FFI</h3>
           <p>First-class C interoperability. Declare <code>extern function</code> and <code>extern var</code> to effortlessly interface with external libraries like Winsock2 and the MSVC runtime.</p>
         </div>
 
         <div class="card">
-          <span class="card-icon">📦</span>
           <h3>Module System</h3>
           <p>Organize your codebase efficiently. Import standard libraries or your own modules to keep namespaces clean and dependency resolution robust.</p>
         </div>
 
         <div class="card">
-          <span class="card-icon">🎯</span>
           <h3>Performance</h3>
           <p>Compiles directly to x86-64 NASM assembly. No runtime overhead beyond what you explicitly use. Perfect for systems programming and performance-critical applications.</p>
         </div>
 
         <div class="card">
-          <span class="card-icon">🔧</span>
           <h3>Rich Type System</h3>
           <p>Comprehensive primitive types (int8-int64, uint8-uint64, float32/64), structs, enums, pointers, arrays, and strings with proper memory layout for C interop.</p>
         </div>

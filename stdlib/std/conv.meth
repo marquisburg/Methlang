@@ -80,6 +80,106 @@ export function strlen(s: cstring) -> int64 {
   return i;
 }
 
+// Convert an integer to decimal ASCII in buf and append a trailing NUL.
+// Returns the number of digits written, excluding the trailing NUL.
+export function int_to_dec(buf: cstring, n: int64) -> int32 {
+  var tmp: int32[32];
+  var value: int64 = n;
+  var digits: int32 = 0;
+  var pos: int32 = 0;
+
+  if (value == 0) {
+    buf[0] = 48;
+    buf[1] = 0;
+    return 1;
+  }
+
+  if (value < 0) {
+    buf[0] = 45;
+    pos = 1;
+  }
+
+  while (value <= -10 || value >= 10) {
+    var digit: int32 = value % 10;
+    if (digit < 0) {
+      digit = 0 - digit;
+    }
+    tmp[digits] = digit;
+    digits = digits + 1;
+    value = value / 10;
+  }
+
+  var final_digit: int32 = value;
+  if (final_digit < 0) {
+    final_digit = 0 - final_digit;
+  }
+  tmp[digits] = final_digit;
+  digits = digits + 1;
+
+  var i: int32 = digits - 1;
+  while (i >= 0) {
+    buf[pos] = digit_to_char(tmp[i]);
+    pos = pos + 1;
+    i = i - 1;
+  }
+
+  buf[pos] = 0;
+  return pos;
+}
+
+// Copy pattern into buf, replacing %d with the decimal form of value.
+// Returns the number of bytes written excluding the trailing NUL, or -1 if the
+// output would not fit.
+export function format_i64(buf: cstring, buf_len: int32, pattern: string, value: int64) -> int32 {
+  var num_buf: uint8[32];
+  var num_len: int32 = int_to_dec(&num_buf[0], value);
+  var src: int32 = 0;
+  var dst: int32 = 0;
+
+  if (buf_len <= 0) {
+    return -1;
+  }
+
+  while (src < pattern.length) {
+    if (pattern.chars[src] == 37) {
+      if (src + 1 < pattern.length) {
+        if (pattern.chars[src + 1] == 100) {
+          if (dst + num_len >= buf_len) {
+            return -1;
+          }
+          var j: int32 = 0;
+          while (j < num_len) {
+            buf[dst] = num_buf[j];
+            dst = dst + 1;
+            j = j + 1;
+          }
+          src = src + 2;
+          continue;
+        }
+        if (pattern.chars[src + 1] == 37) {
+          if (dst + 1 >= buf_len) {
+            return -1;
+          }
+          buf[dst] = 37;
+          dst = dst + 1;
+          src = src + 2;
+          continue;
+        }
+      }
+    }
+
+    if (dst + 1 >= buf_len) {
+      return -1;
+    }
+    buf[dst] = pattern.chars[src];
+    dst = dst + 1;
+    src = src + 1;
+  }
+
+  buf[dst] = 0;
+  return dst;
+}
+
 // Compare two C strings.  Returns 0 if equal, non-zero otherwise.
 export function streq(a: cstring, b: cstring) -> int32 {
   var i: int64 = 0;

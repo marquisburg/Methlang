@@ -41,51 +41,142 @@
   .nav-link:hover { color: var(--accent); }
 
   .header { text-align: center; margin-bottom: 4rem; }
-  .header h1 { font-size: clamp(2.5rem, 6vw, 4rem); font-weight: 700; margin-bottom: 1.5rem; color: var(--text); }
-  .header p { font-size: 1.2rem; color: var(--text-muted); max-width: 600px; margin: 0 auto; }
+  .header h1 { font-size: clamp(2.5rem, 6vw, 4rem); font-weight: 700; margin-bottom: 1rem; color: var(--text); letter-spacing: -1px; }
+  .header .subtitle { font-size: 1.2rem; color: var(--text-muted); max-width: 640px; margin: 0 auto; }
+
+  .summary-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    align-items: center;
+    justify-content: center;
+    padding: 1.25rem 1.5rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 3rem;
+    font-size: 0.95rem;
+  }
+  .summary-bar .stat { color: var(--text-muted); }
+  .summary-bar .stat strong { color: var(--text); font-weight: 600; }
+  .summary-bar .stat.accent strong { color: var(--accent); }
+  .summary-bar .stat.success strong { color: var(--success); }
+  .summary-bar .stat.warning strong { color: var(--warning); }
+  .summary-bar .divider { color: var(--border); font-weight: 300; }
 
   .benchmark-section { margin-bottom: 4rem; }
   .section-title { font-size: 2rem; font-weight: 600; margin-bottom: 2rem; color: var(--text); }
 
   .benchmark-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-    gap: 2rem;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 1.5rem;
     margin-bottom: 3rem;
   }
 
   .benchmark-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 2rem;
+    border-radius: 6px;
+    padding: 1.75rem;
+    transition: border-color 0.2s;
   }
+  .benchmark-card:hover { border-color: #3a3a3a; }
 
-  .benchmark-title { font-size: 1.3rem; font-weight: 600; color: var(--text); margin-bottom: 0.5rem; }
-  .benchmark-description { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .benchmark-name { font-size: 1.1rem; font-weight: 600; color: var(--text); margin-bottom: 0.25rem; font-family: 'JetBrains Mono', monospace; }
+  .benchmark-description { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.25rem; }
 
-  .performance-table { width: 100%; border-collapse: collapse; margin-bottom: 2rem; }
-  .performance-table th, .performance-table td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid var(--border); }
-  .performance-table th { background: var(--bg); color: var(--text); font-weight: 600; }
-  .performance-value { font-weight: 600; color: var(--accent); }
+  .perf-bar-container {
+    height: 6px;
+    background: var(--bg);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+    display: flex;
+  }
+  .perf-bar {
+    height: 100%;
+    transition: flex 0.3s ease;
+  }
+  .perf-bar.meth { background: var(--accent); }
+  .perf-bar.c { background: var(--border); }
+  .perf-legend { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem; }
+  .perf-legend span { margin-right: 1rem; }
+  .perf-legend .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 0.35rem; vertical-align: middle; }
+  .perf-legend .dot.meth { background: var(--accent); }
+  .perf-legend .dot.c { background: var(--border); }
+
+  .performance-table { width: 100%; border-collapse: collapse; }
+  .performance-table th, .performance-table td { padding: 0.5rem 0; text-align: left; border: none; font-size: 0.9rem; }
+  .performance-table th { color: var(--text-muted); font-weight: 500; width: 40%; }
+  .performance-value { font-weight: 600; color: var(--accent); font-family: 'JetBrains Mono', monospace; }
   .performance-better { color: var(--success); font-weight: 600; }
   .performance-worse { color: var(--warning); font-weight: 600; }
+  .performance-na { color: var(--text-muted); }
 
-  .benchmark-loading, .benchmark-empty {
+  .benchmark-loading {
     color: var(--text-muted);
-    padding: 2rem;
+    padding: 3rem;
     text-align: center;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 6px;
   }
+  .benchmark-loading::after {
+    content: '';
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    margin-left: 0.5rem;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  .benchmark-meta { font-size: 0.85rem; color: var(--text-muted); margin-top: 1rem; }
+  .benchmark-empty {
+    color: var(--text-muted);
+    padding: 3rem;
+    text-align: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .benchmark-empty code { background: var(--code-bg); padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.9em; }
+
+  .methodology-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2rem;
+  }
+  .methodology-card h3 { font-size: 1.25rem; font-weight: 600; color: var(--text); margin-bottom: 0.75rem; }
+  .methodology-card p { color: var(--text-muted); margin-bottom: 1rem; font-size: 0.95rem; }
+  .methodology-card pre {
+    background: var(--code-bg);
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+    border: 1px solid var(--border);
+  }
+  .methodology-card ul {
+    color: var(--text-muted);
+    line-height: 1.9;
+    padding-left: 1.25rem;
+    font-size: 0.95rem;
+  }
+  .methodology-card li { margin-bottom: 0.25rem; }
+  .methodology-card code { background: var(--code-bg); padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.88em; }
 
   @media (max-width: 768px) {
     .nav-links { flex-direction: column; gap: 1rem; }
     .benchmark-grid { grid-template-columns: 1fr; }
-    .performance-table { font-size: 0.9rem; }
+    .summary-bar { flex-direction: column; align-items: flex-start; }
   }
 </style>
 </head>
@@ -102,27 +193,28 @@
 
     <header class="header">
       <h1>Methlang vs C Benchmarks</h1>
-      <p>Real benchmark results comparing Methlang (--release) to C (gcc -O2). Run <code>.\tools\benchmark\run-benchmarks.ps1</code> to regenerate.</p>
+      <p class="subtitle">Real-world performance comparison: Methlang (--release) vs C (gcc -O2). Run the benchmark script to regenerate results.</p>
     </header>
+
+    <div id="summary-bar" style="display: none;"></div>
 
     <div class="benchmark-section">
       <h2 class="section-title">Benchmark Results</h2>
-      <div id="benchmark-content" class="benchmark-loading">Loading benchmark data...</div>
-      <div id="benchmark-meta" class="benchmark-meta"></div>
+      <div id="benchmark-content" class="benchmark-loading">Loading benchmark data</div>
     </div>
 
     <div class="benchmark-section">
       <h2 class="section-title">Methodology</h2>
-      <div class="benchmark-card">
-        <h3 class="benchmark-title">Test Environment</h3>
-        <p class="benchmark-description">Benchmarks are run locally. Run the script to update results:</p>
-        <pre style="background: var(--code-bg); padding: 1rem; border-radius: 4px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem;">.\tools\benchmark\run-benchmarks.ps1
+      <div class="methodology-card">
+        <h3>Test Environment</h3>
+        <p>Benchmarks run locally. Regenerate with:</p>
+        <pre>.\tools\benchmark\run-benchmarks.ps1
 .\tools\benchmark\run-benchmarks.ps1 -BuildCompiler</pre>
-        <ul style="color: var(--text-muted); line-height: 1.8; margin-top: 1rem;">
-          <li>Methlang: <code>--release</code> (optimizations, no runtime checks)</li>
-          <li>C: <code>gcc -O2</code></li>
-          <li>Timing: GetTickCount64 (Windows) or gettimeofday (Linux)</li>
-          <li>Output: <code>web/benchmarks.json</code> (served at /benchmarks.json)</li>
+        <ul>
+          <li><strong>Methlang:</strong> <code>--release</code> (optimizations, no runtime checks)</li>
+          <li><strong>C:</strong> <code>gcc -O2</code></li>
+          <li><strong>Timing:</strong> GetTickCount64 (Windows) or gettimeofday (Linux)</li>
+          <li><strong>Output:</strong> <code>web/benchmarks.json</code> (served at /benchmarks.json)</li>
         </ul>
       </div>
     </div>
@@ -131,7 +223,7 @@
   <script>
     (function() {
       const content = document.getElementById('benchmark-content');
-      const meta = document.getElementById('benchmark-meta');
+      const summaryBar = document.getElementById('summary-bar');
 
       fetch('/benchmarks.json')
         .then(r => {
@@ -153,37 +245,49 @@
           let countWithRelative = 0;
 
           data.benchmarks.forEach(b => {
-            const methMs = b.meth_ms != null ? b.meth_ms : '—';
-            const cMs = b.c_ms != null ? b.c_ms : '—';
+            const methMs = b.meth_ms ?? 0;
+            const cMs = b.c_ms ?? 0;
+            const relative = b.relative ?? (cMs > 0 ? methMs / cMs : 0);
+
             let relClass = '';
             let relText = '—';
-            if (b.relative != null) {
+            if (cMs > 0) {
               countWithRelative++;
-              avgRelative += b.relative;
-              relClass = b.relative <= 1 ? 'performance-better' : 'performance-worse';
-              relText = b.relative.toFixed(2) + 'x';
+              avgRelative += relative;
+              relClass = relative <= 1 ? 'performance-better' : 'performance-worse';
+              relText = relative.toFixed(2) + 'x';
             }
+
+            const hasBoth = methMs > 0 || cMs > 0;
+            const totalMs = methMs + cMs;
+            const methPct = totalMs > 0 ? (methMs / totalMs) * 100 : 50;
+            const cPct = totalMs > 0 ? (cMs / totalMs) * 100 : 50;
+
+            const methDisplay = methMs.toLocaleString() + ' ms';
+            const cDisplay = cMs.toLocaleString() + ' ms';
 
             html += `
               <div class="benchmark-card">
-                <h3 class="benchmark-title">${escapeHtml(b.name)}</h3>
+                <div class="benchmark-name">${escapeHtml(b.name)}</div>
                 <p class="benchmark-description">${escapeHtml(b.description)}</p>
+                ${hasBoth ? `
+                <div class="perf-legend"><span><span class="dot meth"></span>Methlang</span><span><span class="dot c"></span>C</span></div>
+                <div class="perf-bar-container" title="Methlang vs C (proportional)">
+                  <div class="perf-bar meth" style="flex: ${methPct}"></div>
+                  <div class="perf-bar c" style="flex: ${cPct}"></div>
+                </div>
+                ` : ''}
                 <table class="performance-table">
-                  <thead>
-                    <tr><th>Implementation</th><th>Time (ms)</th><th>vs C</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>Methlang</td>
-                      <td class="performance-value">${methMs}</td>
-                      <td class="${relClass}">${relText}</td>
-                    </tr>
-                    <tr>
-                      <td>C (gcc -O2)</td>
-                      <td>${cMs}</td>
-                      <td>1.00x</td>
-                    </tr>
-                  </tbody>
+                  <tr>
+                    <th>Methlang</th>
+                    <td class="performance-value">${methDisplay}</td>
+                    <td class="${relClass}">${relText}</td>
+                  </tr>
+                  <tr>
+                    <th>C (gcc -O2)</th>
+                    <td>${cDisplay}</td>
+                    <td class="performance-na">1.00x</td>
+                  </tr>
                 </table>
               </div>
             `;
@@ -191,21 +295,27 @@
 
           content.innerHTML = html;
 
+          const parts = [];
+          parts.push('<span class="stat"><strong>' + data.benchmarks.length + '</strong> benchmarks</span>');
           if (data.generated) {
-            meta.textContent = 'Generated: ' + data.generated;
+            const d = new Date(data.generated);
+            parts.push('<span class="stat">Generated <strong>' + d.toLocaleDateString() + '</strong></span>');
           }
           if (data.failed && data.failed.length > 0) {
-            meta.textContent += ' | Failed: ' + data.failed.join(', ');
+            parts.push('<span class="stat warning"><strong>' + data.failed.length + ' failed</strong>: ' + escapeHtml(data.failed.join(', ')) + '</span>');
           }
           if (countWithRelative > 0) {
             const avg = (avgRelative / countWithRelative).toFixed(2);
-            meta.textContent += ' | Avg Methlang/C: ' + avg + 'x';
+            const avgClass = parseFloat(avg) <= 1 ? 'success' : 'accent';
+            parts.push('<span class="stat ' + avgClass + '">Avg vs C: <strong>' + avg + 'x</strong></span>');
           }
+          summaryBar.innerHTML = parts.join('<span class="divider">·</span>');
+          summaryBar.style.display = 'flex';
         })
         .catch(err => {
           content.classList.remove('benchmark-loading');
           content.classList.add('benchmark-empty');
-          content.innerHTML = 'Could not load benchmark data. Ensure the server is running and benchmarks.json exists.';
+          content.innerHTML = 'Could not load benchmark data. Ensure the server is running and <code>benchmarks.json</code> exists.';
         });
 
       function escapeHtml(s) {

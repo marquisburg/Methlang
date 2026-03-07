@@ -1517,12 +1517,12 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       int is_null_pointer_arg =
           (param_type && param_type->kind == TYPE_POINTER &&
            type_checker_is_null_pointer_constant(call->arguments[i]));
-      // Allow implicit string literal -> cstring coercion.
-      // A string literal's .chars is always a valid null-terminated pointer.
+      // Allow implicit string -> cstring coercion on extern calls.
+      // Strings are backed by a null-terminated chars pointer suitable for C.
       int is_string_to_cstring =
-          (param_type && param_type->name &&
-           strcmp(param_type->name, "cstring") == 0 &&
-           call->arguments[i]->type == AST_STRING_LITERAL);
+          (func_symbol->is_extern && param_type && param_type->name &&
+           strcmp(param_type->name, "cstring") == 0 && arg_type &&
+           arg_type->kind == TYPE_STRING);
       if (!is_null_pointer_arg && !is_string_to_cstring &&
           !type_checker_is_assignable(checker, param_type, arg_type)) {
         type_checker_report_type_mismatch(checker, call->arguments[i]->location,
@@ -2489,10 +2489,11 @@ int type_checker_validate_function_call(TypeChecker *checker,
     int is_null_pointer_arg =
         (param_type && param_type->kind == TYPE_POINTER &&
          type_checker_is_null_pointer_constant(call->arguments[i]));
-    // Allow implicit string literal -> cstring coercion.
-    int is_string_to_cstring = (param_type && param_type->name &&
+    // Allow implicit string -> cstring coercion on extern calls.
+    int is_string_to_cstring = (func_symbol->is_extern && param_type &&
+                                param_type->name &&
                                 strcmp(param_type->name, "cstring") == 0 &&
-                                call->arguments[i]->type == AST_STRING_LITERAL);
+                                arg_type && arg_type->kind == TYPE_STRING);
     if (!is_null_pointer_arg && !is_string_to_cstring &&
         !type_checker_is_assignable(checker, param_type, arg_type)) {
       type_checker_set_error(

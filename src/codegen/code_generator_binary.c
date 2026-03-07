@@ -1525,6 +1525,35 @@ static int code_generator_binary_type_is_cstring(Type *type) {
          strcmp(type->name, "cstring") == 0;
 }
 
+static int code_generator_binary_type_is_string(Type *type) {
+  return type && type->kind == TYPE_STRING;
+}
+
+static Type *code_generator_binary_get_operand_type(CodeGenerator *generator,
+                                                    const IROperand *operand) {
+  Symbol *symbol = NULL;
+
+  if (!generator || !operand) {
+    return NULL;
+  }
+
+  switch (operand->kind) {
+  case IR_OPERAND_STRING:
+    return generator->type_checker ? generator->type_checker->builtin_string
+                                   : NULL;
+
+  case IR_OPERAND_SYMBOL:
+    if (!generator->symbol_table || !operand->name) {
+      return NULL;
+    }
+    symbol = symbol_table_lookup(generator->symbol_table, operand->name);
+    return symbol ? symbol->type : NULL;
+
+  default:
+    return NULL;
+  }
+}
+
 static int code_generator_binary_validate_signature(CodeGenerator *generator,
                                                     FunctionDeclaration *function_data,
                                                     IRFunction *ir_function) {
@@ -2643,6 +2672,8 @@ static int code_generator_binary_emit_call_argument_load(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IROperand *operand, Type *parameter_type,
     BinaryGpRegister target_register) {
+  Type *operand_type = NULL;
+
   if (!generator || !context || !operand) {
     return 0;
   }
@@ -2654,8 +2685,19 @@ static int code_generator_binary_emit_call_argument_load(
         target_register);
   }
 
-  return code_generator_binary_emit_operand_load(generator, context, operand,
-                                                 target_register);
+  if (!code_generator_binary_emit_operand_load(generator, context, operand,
+                                               target_register)) {
+    return 0;
+  }
+
+  operand_type = code_generator_binary_get_operand_type(generator, operand);
+  if (code_generator_binary_type_is_cstring(parameter_type) &&
+      code_generator_binary_type_is_string(operand_type)) {
+    return binary_emit_mov_reg_mem(&context->code, target_register,
+                                   target_register, 0);
+  }
+
+  return 1;
 }
 
 static int code_generator_binary_emit_local_string_store(

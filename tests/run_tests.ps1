@@ -263,6 +263,8 @@ $cases = @(
   @{ Name = "extern_signed_param"; Path = "tests/test_extern_signed_param.meth"; ShouldSucceed = $true },
   @{ Name = "extern_signed_return"; Path = "tests/test_extern_signed_return.meth"; ShouldSucceed = $true },
   @{ Name = "extern_cstring"; Path = "tests/test_extern_cstring.meth"; ShouldSucceed = $true },
+  @{ Name = "extern_string_auto_cstring"; Path = "tests/test_extern_string_auto_cstring.meth"; ShouldSucceed = $true },
+  @{ Name = "std_conv_format_i64"; Path = "tests/test_std_conv_format_i64.meth"; ShouldSucceed = $true },
 
   # ABI tests (MS x64 on Windows; patterns may need adjustment for SysV/Linux)
   @{
