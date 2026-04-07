@@ -1,0 +1,8 @@
+async fn add_one(v: int32) -> int32 {
+    return v + 1;
+}
+
+function main() -> int32 {
+    var f: Future<int32> = add_one(41);
+    return await f;
+}

@@ -1,0 +1,202 @@
+// sql_parser.meth
+/*
+ * Implements basic SQL parsing capabilities for Methlang.
+ * Supports AST generation for CREATE TABLE and simple SELECT statements only.
+ */
+
+// --- Abstract Syntax Tree (AST) Structures ---
+
+/// Base structure for all parsed SQL statements.
+enum SqlStatement {
+    CreateTable(CreateTableNode),
+    SelectQuery(SelectQueryNode),
+    Unknown,
+}
+
+/// Node representing a CREATE TABLE statement.
+struct CreateTableNode {
+    table_name: String;
+    column_definitions: List<ColumnDefinition>; // Reusing ColumnDefinition from storage.meth
+}
+
+/// Node representing a simple SELECT * FROM table; query.
+struct SelectQueryNode {
+    columns: List<String>; // For simplicity, always "*" or explicit list
+    table_name: String;
+}
+
+// --- Tokenizer ---
+
+enum SqlToken {
+    Keyword(String),      // e.g., "SELECT", "FROM", "CREATE"
+    Identifier(String),   // e.g., table names, column names
+    Literal(String),      // e.g., string literals in SQL
+    Operator(String),     // e.g., "=", ">"
+    EndOfFile,
+}
+
+/// Basic tokenizer to break raw SQL text into meaningful tokens.
+fn tokenize_sql(sql: &str) -> List<SqlToken> {
+    // TODO: Implement a state machine or regex-based tokenizer here.
+    // This placeholder assumes simple splitting and keyword checking.
+    let parts = sql.split_whitespace();
+    let mut tokens = Vec::new();
+
+    for part in parts {
+        if ["SELECT", "FROM", "CREATE", "TABLE"].contains(&part) {
+            tokens.push(SqlToken::Keyword(part.to_string()));
+        } else if is_valid_identifier(part) {
+            let type_name = get_meth_type_from_identifier(part); // New helper function needed
+            if let Some(MethType::Unknown) = type_name { // Simple check for now
+                tokens.push(SqlToken::Keyword(part.to_string())); // Treat unknown types as keywords/reserved words for simplicity in tokenization pass
+            } else if is_sql_type(part) { // New helper function needed
+                 tokens.push(SqlToken::Keyword(part.to_string())); // Treat known types as reserved keywords
+            } else {
+                tokens.push(SqlToken::Identifier(part.to_string()));
+            }
+        } else if is_operator(part) { // New helper function needed
+            tokens.push(SqlToken::Operator(part.to_string()));
+        } else {
+            // Handle literals (e.g., quoted strings)
+            tokens.push(SqlToken::Literal(part.to_string()));
+        }
+    }
+    tokens.push(SqlToken::EndOfFile);
+    tokens
+}
+
+// --- Parser ---
+
+/// Parses a list of tokens into an AST structure.
+fn parse_sql(tokens: List<SqlToken>) -> Result<SqlStatement, String> {
+    let mut cursor = 0;
+
+    // Check for CREATE TABLE statement first
+    if tokens[cursor].is_keyword("CREATE") && tokens[cursor+1].is_keyword("TABLE") {
+        cursor += 2; // Skip "CREATE" and "TABLE"
+        let table_name = get_next_identifier(&tokens, &mut cursor)?;
+
+        var columns: List<ColumnDefinition> = Vec::new();
+        // Expect '(' next
+        if tokens[cursor].is_operator("(") {
+            cursor += 1; // Skip '('
+            loop {
+                let col_name = get_next_identifier(&tokens, &mut cursor)?;
+                // Use the type helper function to correctly parse the column type token
+                let col_type_token = tokens[*cursor].to_string(); // Assuming next token is the type string
+                let col_type = match get_meth_type_from_identifier(&col_type_token) {
+                    Some(t) => t,
+                    None => MethType::Unknown, // Fallback if parsing fails
+                };
+                
+                columns.push(ColumnDefinition {
+                    name: col_name,
+                    type: col_type, 
+                    is_nullable: true,
+                });
+
+                // Expect ',' or ')'
+                if tokens[cursor].is_operator(",") {
+                    cursor += 1; // Skip ','
+                } else if tokens[cursor].is_operator(")") {
+                    break; // End of column definitions
+                } else {
+                    return Err(format!("Expected ',' or ')' after defining column, found: {:?}", tokens[cursor]));
+                }
+            }
+            cursor += 1; // Skip ')'
+        } else {
+             return Err("CREATE TABLE expected '(' after table name.".to_string());
+        }
+
+        return Ok(SqlStatement::CreateTable(CreateTableNode {
+            table_name: table_name,
+            column_definitions: columns,
+        }));
+    } 
+    // Check for SELECT statement next
+    else if tokens[cursor].is_keyword("SELECT") {
+        cursor += 1; // Skip "SELECT"
+
+        // Expect '*' or column list
+        let cols = get_next_token_list(&tokens, &mut cursor)?;
+        var table_name: String = "".to_string();
+
+        if tokens[cursor].is_keyword("FROM") {
+            cursor += 1; // Skip "FROM"
+            table_name = get_next_identifier(&tokens, &mut cursor)?.to_string();
+        } else {
+            return Err("SELECT statement must be followed by FROM clause.".to_string());
+        }
+
+        return Ok(SqlStatement::SelectQuery(SelectQueryNode {
+            columns: cols,
+            table_name: table_name,
+        }));
+    }
+
+    Err("Could not parse SQL statement. Expected CREATE TABLE or SELECT query.".to_string())
+}
+
+
+// --- Helper Functions (Placeholders) ---
+
+fn get_next_identifier(tokens: &List<SqlToken>, cursor: &mut usize) -> Result<String, String> {
+    if tokens[*cursor].is_keyword("SELECT") || tokens[*cursor].is_keyword("FROM") {
+        return Err("Expected identifier but found keyword.".to_string());
+    }
+    let id = match tokens[*cursor] {
+        SqlToken::Identifier(s) => s,
+        _ => return Err("Expected an identifier.".to_string()),
+    };
+    *cursor += 1;
+    Ok(id)
+}
+
+fn get_next_token_list(tokens: &List<SqlToken>, cursor: &mut usize) -> Result<List<String>, String> {
+    // Placeholder for parsing column list (e.g., "col1, col2")
+    let mut cols = Vec::new();
+    if tokens[*cursor].is_literal("*".to_string()) {
+        cols.push("*" .to_string());
+        *cursor += 1;
+        return Ok(List::from(cols));
+    }
+    // Simplified: assume the next token is the first column name if not '*'
+    if tokens[*cursor].is_identifier("") { // Check for any identifier type
+         let id = match tokens[*cursor] {
+            SqlToken::Identifier(s) => s,
+            _ => return Err("Expected column identifier.".to_string()),
+        };
+        cols.push(id);
+        *cursor += 1;
+        return Ok(List::from(cols));
+    }
+    Err("Could not parse column list.".to_string())
+}
+
+// Use MethType from storage.meth directly.
+// MethType is now defined globally in storage.meth and should be used directly.
+
+// Placeholder implementations for token checking methods
+impl SqlToken {
+    fn is_keyword(&self, expected: &str) -> bool {
+        match self {
+            SqlToken::Keyword(s) => s == expected,
+            _ => false,
+        }
+    }
+    fn is_operator(&self, expected: &str) -> bool {
+        match self {
+            SqlToken::Operator(s) => s == expected,
+            _ => false,
+        }
+    }
+}
+
+// Placeholder for List/Map types if they aren't globally available
+struct List<T> { value: Vec<T> }
+impl From<Vec<String>> for List<String> { fn from(v: Vec<String>) -> Self { List { value: v } } }
+impl List<String> { fn is_keyword(&self, expected: &str) -> bool { false } } // Mocking check
+
+// Placeholder implementation details to satisfy compiler/linter checks for the initial pass.
+// In a real scenario, these would be fully fleshed out using Methlang's type system.

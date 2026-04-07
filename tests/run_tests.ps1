@@ -94,6 +94,7 @@ $tmpDir = Join-Path $env:TEMP "Methlang-test-artifacts"
 if (-not (Test-Path $tmpDir)) {
   New-Item -Path $tmpDir -ItemType Directory | Out-Null
 }
+$repoRoot = (Resolve-Path ".").Path
 
 $callManyArgsAsmMustMatch = @()
 $callManyArgsAsmMustNotMatch = @()
@@ -147,6 +148,54 @@ $cases = @(
   @{ Name = "nested_function_pointer_type_annotation"; Path = "tests/test_nested_function_pointer_type_annotation.meth"; ShouldSucceed = $true },
   @{ Name = "gc_alloc"; Path = "tests/test_gc_alloc.meth"; ShouldSucceed = $true },
   @{ Name = "gc_alloc_fixed"; Path = "tests/test_gc_alloc_fixed.meth"; ShouldSucceed = $true },
+  @{
+    Name          = "async_await"
+    Path          = "tests/test_async_await.meth"
+    ShouldSucceed = $true
+    AsmMustMatch  = @(
+      "global __meth_async_body_add_one_",
+      "global __meth_async_entry_add_one_",
+      "extern __meth_async_start",
+      "extern __meth_async_wait"
+    )
+  },
+  @{
+    Name          = "async_cancel"
+    Path          = "tests/test_async_cancel.meth"
+    ShouldSucceed = $true
+    AsmMustMatch  = @(
+      "extern __meth_async_cancel",
+      "extern __meth_async_current_cancelled",
+      "extern __meth_async_wait"
+    )
+  },
+  @{
+    Name          = "async_nested_await"
+    Path          = "tests/test_async_nested_await.meth"
+    ShouldSucceed = $true
+    AsmMustMatch  = @(
+      "extern __meth_async_start",
+      "extern __meth_async_wait"
+    )
+  },
+  @{
+    Name          = "async_coro_basic"
+    Path          = "tests/test_async_coro_basic.meth"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_coro_task_create",
+      "extern __meth_coro_task_schedule",
+      "global __meth_async_entry_add_one_"
+    )
+  },
+  @{
+    Name          = "err_async_coro_internal_await"
+    Path          = "tests/test_async_nested_await.meth"
+    ShouldSucceed = $false
+    Args          = @("--async-model", "coroutine")
+    Pattern       = "Coroutine async model currently supports async functions without internal await"
+  },
   @{ Name = "pointers"; Path = "tests/test_pointers.meth"; ShouldSucceed = $true },
   @{ Name = "pointer_null"; Path = "tests/test_pointer_null.meth"; ShouldSucceed = $true },
   @{
@@ -255,11 +304,25 @@ $cases = @(
     Args          = @("-I", "tests/lib")
   },
   @{
+    Name          = "import_namespaced"
+    Path          = "tests/test_import_namespaced.meth"
+    ShouldSucceed = $true
+    Args          = @("-I", "tests/lib")
+  },
+  @{ Name = "traits_generic_bound"; Path = "tests/test_traits_generic_bound.meth"; ShouldSucceed = $true },
+  @{
+    Name          = "import_trait_bound"
+    Path          = "tests/test_import_trait_bound.meth"
+    ShouldSucceed = $true
+    Args          = @("-I", "tests/lib")
+  },
+  @{
     Name          = "import_enum_switch"
     Path          = "tests/test_import_enum_switch.meth"
     ShouldSucceed = $true
     Args          = @("-I", "tests/lib")
   },
+  @{ Name = "tagged_enum_match"; Path = "tests/test_tagged_enum_match.meth"; ShouldSucceed = $true },
   @{ Name = "extern_signed_param"; Path = "tests/test_extern_signed_param.meth"; ShouldSucceed = $true },
   @{ Name = "extern_signed_return"; Path = "tests/test_extern_signed_return.meth"; ShouldSucceed = $true },
   @{ Name = "extern_cstring"; Path = "tests/test_extern_cstring.meth"; ShouldSucceed = $true },
@@ -589,10 +652,13 @@ $cases = @(
   @{ Name = "err_codegen_member_expr"; Path = "tests/err_codegen_member_expr.meth"; ShouldSucceed = $false },
   @{ Name = "err_function_arg_count"; Path = "tests/err_function_arg_count.meth"; ShouldSucceed = $false; Pattern = "expects .* arguments, got" },
   @{ Name = "err_function_arg_type"; Path = "tests/err_function_arg_type.meth"; ShouldSucceed = $false; Pattern = "Type mismatch" },
+  @{ Name = "err_match_non_exhaustive"; Path = "tests/err_match_non_exhaustive.meth"; ShouldSucceed = $false; Pattern = "Non-exhaustive match" },
+  @{ Name = "err_trait_bound_missing_impl"; Path = "tests/err_trait_bound_missing_impl.meth"; ShouldSucceed = $false; Pattern = "does not implement trait 'Addable'" },
   @{ Name = "err_member_on_non_struct"; Path = "tests/err_member_on_non_struct.meth"; ShouldSucceed = $false; Pattern = "Cannot access field on non-struct type" },
   @{ Name = "err_switch_multiple_default"; Path = "tests/err_switch_multiple_default.meth"; ShouldSucceed = $false; Pattern = "Only one default case is allowed|only contain one default clause" },
   @{ Name = "err_return_type_mismatch"; Path = "tests/err_return_type_mismatch.meth"; ShouldSucceed = $false; Pattern = "Type mismatch" },
   @{ Name = "err_defer_top_level"; Path = "tests/err_defer_top_level.meth"; ShouldSucceed = $false; Pattern = "Defer statement outside of a function" },
+  @{ Name = "err_await_non_future"; Path = "tests/err_await_non_future.meth"; ShouldSucceed = $false; Pattern = "Await operator requires a Future<T> operand" },
   @{
     Name          = "err_import_private"
     Path          = "tests/err_import_private.meth"
@@ -783,6 +849,98 @@ foreach ($case in $cases) {
   }
 }
 
+# Bundled stdlib resolution test: compile from a project directory with no local stdlib.
+$total++
+try {
+  $compilerFullPath = (Resolve-Path $CompilerPath).Path
+  $nativeStdlibDir = Join-Path $tmpDir "native-stdlib-project"
+  if (Test-Path $nativeStdlibDir) {
+    Remove-Item -Path $nativeStdlibDir -Recurse -Force
+  }
+  New-Item -Path $nativeStdlibDir -ItemType Directory | Out-Null
+
+  $nativeStdlibSource = Join-Path $nativeStdlibDir "main.meth"
+  $nativeStdlibAsm = Join-Path $nativeStdlibDir "main.s"
+  @'
+import "std/io";
+
+function main() -> int32 {
+  var msg: string = "Bundled stdlib works";
+  println(cstr(msg));
+  return 0;
+}
+'@ | Set-Content -Path $nativeStdlibSource -Encoding ASCII
+
+  Push-Location $nativeStdlibDir
+  try {
+    $nativeStdlibOut = & $compilerFullPath .\main.meth -o .\main.s 2>&1 | Out-String
+    $nativeStdlibExit = $LASTEXITCODE
+  }
+  finally {
+    Pop-Location
+  }
+
+  if ($nativeStdlibExit -ne 0) {
+    throw "Bundled stdlib compile failed outside the repo root: $nativeStdlibOut"
+  }
+  if (-not (Test-Path $nativeStdlibAsm)) {
+    throw "Bundled stdlib compile did not produce an assembly output"
+  }
+
+  Write-CaseResult -Name "bundled_stdlib_outside_project" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "bundled_stdlib_outside_project" -Passed $false -Reason $_.Exception.Message
+}
+
+# meth.deps package resolution test: compile from a temp project using a package alias.
+$total++
+try {
+  $compilerFullPath = (Resolve-Path $CompilerPath).Path
+  $depsProjectDir = Join-Path $tmpDir "meth-deps-project"
+  if (Test-Path $depsProjectDir) {
+    Remove-Item -Path $depsProjectDir -Recurse -Force
+  }
+  New-Item -Path $depsProjectDir -ItemType Directory | Out-Null
+
+  $depsSource = Join-Path $depsProjectDir "main.meth"
+  $depsAsm = Join-Path $depsProjectDir "main.s"
+  $depsFile = Join-Path $depsProjectDir "meth.deps"
+  $packageRoot = Join-Path $repoRoot "tests\lib"
+
+  "testpkg=$packageRoot" | Set-Content -Path $depsFile -Encoding ASCII
+  @'
+import "testpkg/shared_math";
+
+function main() -> int32 {
+  return forty_two();
+}
+'@ | Set-Content -Path $depsSource -Encoding ASCII
+
+  Push-Location $depsProjectDir
+  try {
+    $depsOut = & $compilerFullPath .\main.meth -o .\main.s 2>&1 | Out-String
+    $depsExit = $LASTEXITCODE
+  }
+  finally {
+    Pop-Location
+  }
+
+  if ($depsExit -ne 0) {
+    throw "meth.deps package compile failed: $depsOut"
+  }
+  if (-not (Test-Path $depsAsm)) {
+    throw "meth.deps package compile did not produce an assembly output"
+  }
+
+  Write-CaseResult -Name "meth_deps_package_resolution" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "meth_deps_package_resolution" -Passed $false -Reason $_.Exception.Message
+}
+
 # Function pointer test: compile, assemble, link, and run
 $total++
 try {
@@ -821,6 +979,146 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "function_pointer" -Passed $false -Reason $_.Exception.Message
+}
+
+# Struct new runtime test: verifies `new Struct` allocates full struct size.
+$total++
+try {
+  $structNewExe = Join-Path $tmpDir "test_struct_new_zeroed.exe"
+
+  $structNewOut = & $CompilerPath --build --linker internal tests\test_struct_new_zeroed.meth -o $structNewExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Struct new build failed: $structNewOut"
+  }
+  if (-not (Test-Path $structNewExe)) {
+    throw "Struct new build did not produce an executable"
+  }
+
+  & $structNewExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 1) {
+    throw "Struct new executable exited with $LASTEXITCODE (expected 1)"
+  }
+
+  Write-CaseResult -Name "struct_new_runtime" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "struct_new_runtime" -Passed $false -Reason $_.Exception.Message
+}
+
+# Async runtime test: build with the internal linker and await a worker result.
+$total++
+try {
+  $asyncExe = Join-Path $tmpDir "test_async_await.exe"
+
+  $asyncOut = & $CompilerPath --build --linker internal tests\test_async_await.meth -o $asyncExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Async await build failed: $asyncOut"
+  }
+  if (-not (Test-Path $asyncExe)) {
+    throw "Async await build did not produce an executable"
+  }
+
+  & $asyncExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Async await executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_build_await" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_build_await" -Passed $false -Reason $_.Exception.Message
+}
+
+# Async cancellation test: cancellation should propagate through the same Future contract.
+$total++
+try {
+  $asyncCancelExe = Join-Path $tmpDir "test_async_cancel.exe"
+
+  $asyncCancelOut = & $CompilerPath --build --linker internal tests\test_async_cancel.meth -o $asyncCancelExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Async cancellation build failed: $asyncCancelOut"
+  }
+  if (-not (Test-Path $asyncCancelExe)) {
+    throw "Async cancellation build did not produce an executable"
+  }
+
+  & $asyncCancelExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 17) {
+    throw "Async cancellation executable exited with $LASTEXITCODE (expected 17)"
+  }
+
+  Write-CaseResult -Name "async_build_cancel" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_build_cancel" -Passed $false -Reason $_.Exception.Message
+}
+
+# Async nested-await test: with a single worker, parent-await-child would deadlock
+# under naive pooling unless the runtime prevents worker starvation.
+$total++
+try {
+  $asyncNestedExe = Join-Path $tmpDir "test_async_nested_await.exe"
+
+  $asyncNestedOut = & $CompilerPath --build --linker internal tests\test_async_nested_await.meth -o $asyncNestedExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Async nested-await build failed: $asyncNestedOut"
+  }
+  if (-not (Test-Path $asyncNestedExe)) {
+    throw "Async nested-await build did not produce an executable"
+  }
+
+  $hadWorkersEnv = Test-Path Env:METH_ASYNC_WORKERS
+  $previousWorkersEnv = $env:METH_ASYNC_WORKERS
+  $env:METH_ASYNC_WORKERS = "1"
+  try {
+    & $asyncNestedExe 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 41) {
+      throw "Async nested-await executable exited with $LASTEXITCODE (expected 41)"
+    }
+  }
+  finally {
+    if ($hadWorkersEnv) {
+      $env:METH_ASYNC_WORKERS = $previousWorkersEnv
+    }
+    else {
+      Remove-Item Env:METH_ASYNC_WORKERS -ErrorAction SilentlyContinue
+    }
+  }
+
+  Write-CaseResult -Name "async_build_nested_await_single_worker" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_build_nested_await_single_worker" -Passed $false -Reason $_.Exception.Message
+}
+
+# Async direct-object test: Future<T> returns and async runtime helpers should
+# stay compatible with the COFF object backend too.
+$total++
+try {
+  $asyncDirectExe = Join-Path $tmpDir "test_async_direct_object.exe"
+
+  $asyncDirectOut = & $CompilerPath --build --emit-obj tests\test_async_await.meth -o $asyncDirectExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Async direct-object build failed: $asyncDirectOut"
+  }
+  if (-not (Test-Path $asyncDirectExe)) {
+    throw "Async direct-object build did not produce an executable"
+  }
+
+  & $asyncDirectExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Async direct-object executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "direct_object_async_await" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_async_await" -Passed $false -Reason $_.Exception.Message
 }
 
 # Direct object backend test: emit COFF object directly, then build and run
@@ -1991,6 +2289,54 @@ if (-not $SkipRuntime) {
   catch {
     $failed++
     Write-CaseResult -Name "gc_runtime" -Passed $false -Reason $_.Exception.Message
+  }
+
+  $total++
+  try {
+    $asyncRuntimeExe = "bin\async_runtime_test.exe"
+    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\async_runtime_test.c src\runtime\async_runtime.c src\runtime\gc.c -Isrc -o $asyncRuntimeExe
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to compile async runtime pool test"
+    }
+
+    $asyncRuntimeOutput = & $asyncRuntimeExe 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "Async runtime pool test exited with code $LASTEXITCODE"
+    }
+
+    if ($asyncRuntimeOutput -notmatch "Async runtime pool tests passed") {
+      throw "Async runtime pool test output did not contain pass marker"
+    }
+
+    Write-CaseResult -Name "async_runtime_pool" -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "async_runtime_pool" -Passed $false -Reason $_.Exception.Message
+  }
+
+  $total++
+  try {
+    $coroIocpRuntimeExe = "bin\coro_iocp_runtime_test.exe"
+    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\coro_iocp_runtime_test.c src\runtime\async_runtime.c src\runtime\gc.c -Isrc -o $coroIocpRuntimeExe
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to compile coroutine IOCP runtime test"
+    }
+
+    $coroIocpRuntimeOutput = & $coroIocpRuntimeExe 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "Coroutine IOCP runtime test exited with code $LASTEXITCODE"
+    }
+
+    if ($coroIocpRuntimeOutput -notmatch "Coroutine IOCP runtime tests passed") {
+      throw "Coroutine IOCP runtime test output did not contain pass marker"
+    }
+
+    Write-CaseResult -Name "coro_iocp_runtime" -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "coro_iocp_runtime" -Passed $false -Reason $_.Exception.Message
   }
 }
 

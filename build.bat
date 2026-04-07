@@ -9,6 +9,10 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+REM Start from a clean object tree so stale scratch objects cannot
+REM accidentally participate in the final link.
+if exist obj rmdir /S /Q obj
+
 REM Create directories
 if not exist obj mkdir obj
 if not exist obj\lexer mkdir obj\lexer
@@ -50,6 +54,9 @@ if %ERRORLEVEL% NEQ 0 exit /b 1
 gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\semantic\monomorphize.c -o obj\semantic\monomorphize.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
+gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\semantic\async_rewrite.c -o obj\semantic\async_rewrite.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+
 echo Compiling IR...
 for %%f in (src\ir\*.c) do (
     echo   %%~nxf
@@ -83,6 +90,10 @@ echo Compiling Methlang entry runtime...
 gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\runtime\methlang_entry.c -o obj\runtime\methlang_entry.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
+echo Compiling async runtime...
+gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\runtime\async_runtime.c -o obj\runtime\async_runtime.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+
 echo Compiling error reporter...
 gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\error\error_reporter.c -o obj\error\error_reporter.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
@@ -92,7 +103,7 @@ gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -Isrc -c src\main.c -o obj\main.
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Linking...
-gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\runtime\gc.o obj\error\error_reporter.o obj\main.o -o bin\methlang.exe
+gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\semantic\async_rewrite.o obj\ir\*.o obj\\codegen\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\runtime\gc.o obj\error\error_reporter.o obj\main.o -o bin\methlang.exe
 
 if %ERRORLEVEL% NEQ 0 (
     echo Build failed!
@@ -108,8 +119,10 @@ if exist bin\runtime rmdir /S /Q bin\runtime
 xcopy src\runtime bin\runtime\ /E /I /Y >nul
 copy /Y obj\runtime\gc.o bin\runtime\gc.o >nul
 copy /Y obj\runtime\methlang_entry.o bin\runtime\methlang_entry.o >nul
+copy /Y obj\runtime\async_runtime.o bin\runtime\async_runtime.o >nul
 copy /Y obj\runtime\gc.o bin\runtime\gc.obj >nul
 copy /Y obj\runtime\methlang_entry.o bin\runtime\methlang_entry.obj >nul
+copy /Y obj\runtime\async_runtime.o bin\runtime\async_runtime.obj >nul
 
 if exist installer\meth-build.bat copy /Y installer\meth-build.bat bin\meth-build.bat >nul
 

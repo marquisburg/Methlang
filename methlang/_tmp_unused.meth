@@ -1,0 +1,7 @@
+function unused() -> int32 {
+  return ghost;
+}
+
+function main() -> int32 {
+  return 0;
+}

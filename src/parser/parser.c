@@ -355,6 +355,7 @@ void parser_synchronize(Parser *parser) {
 
     switch (parser->peek_token.type) {
     case TOKEN_FUNCTION:
+    case TOKEN_ASYNC:
     case TOKEN_VAR:
     case TOKEN_STRUCT:
     case TOKEN_RETURN:
@@ -446,6 +447,7 @@ int parser_is_unary_operator(TokenType type) {
   case TOKEN_AMPERSAND:
   case TOKEN_TILDE:
   case TOKEN_NOT:
+  case TOKEN_AWAIT:
     return 1;
   default:
     return 0;
@@ -496,6 +498,8 @@ ASTNode *parser_parse_program(Parser *parser) {
 }
 
 static ASTNode *parser_parse_extern_var_declaration(Parser *parser);
+static ASTNode *parser_parse_function_declaration_with_async(Parser *parser,
+                                                             int is_async);
 
 ASTNode *parser_parse_declaration(Parser *parser) {
   if (!parser)
@@ -504,10 +508,32 @@ ASTNode *parser_parse_declaration(Parser *parser) {
   switch (parser->current_token.type) {
   case TOKEN_IMPORT:
     return parser_parse_import_declaration(parser);
+  case TOKEN_ASYNC: {
+    parser_advance(parser); // consume 'async'
+    if (parser->current_token.type != TOKEN_FUNCTION &&
+        parser->current_token.type != TOKEN_FN) {
+      parser_set_error(parser, "Expected 'function' or 'fn' after 'async'");
+      return NULL;
+    }
+    return parser_parse_function_declaration_with_async(parser, 1);
+  }
   case TOKEN_EXTERN: {
     parser_advance(parser); // consume 'extern'
-    if (parser->current_token.type == TOKEN_FUNCTION) {
-      ASTNode *decl = parser_parse_function_declaration(parser);
+    if (parser->current_token.type == TOKEN_FUNCTION ||
+        parser->current_token.type == TOKEN_ASYNC) {
+      ASTNode *decl = NULL;
+      if (parser->current_token.type == TOKEN_ASYNC) {
+        parser_advance(parser); // consume 'async'
+        if (parser->current_token.type != TOKEN_FUNCTION &&
+            parser->current_token.type != TOKEN_FN) {
+          parser_set_error(parser,
+                           "Expected 'function' or 'fn' after 'extern async'");
+          return NULL;
+        }
+        decl = parser_parse_function_declaration_with_async(parser, 1);
+      } else {
+        decl = parser_parse_function_declaration(parser);
+      }
       if (decl && decl->data) {
         FunctionDeclaration *func_data = (FunctionDeclaration *)decl->data;
         if (func_data->body != NULL) {
@@ -528,8 +554,20 @@ ASTNode *parser_parse_declaration(Parser *parser) {
   case TOKEN_EXPORT: {
     parser_advance(parser); // consume 'export'
     ASTNode *decl = NULL;
-    if (parser->current_token.type == TOKEN_FUNCTION) {
-      decl = parser_parse_function_declaration(parser);
+    if (parser->current_token.type == TOKEN_FUNCTION ||
+        parser->current_token.type == TOKEN_ASYNC) {
+      if (parser->current_token.type == TOKEN_ASYNC) {
+        parser_advance(parser); // consume 'async'
+        if (parser->current_token.type != TOKEN_FUNCTION &&
+            parser->current_token.type != TOKEN_FN) {
+          parser_set_error(parser,
+                           "Expected 'function' or 'fn' after 'export async'");
+          return NULL;
+        }
+        decl = parser_parse_function_declaration_with_async(parser, 1);
+      } else {
+        decl = parser_parse_function_declaration(parser);
+      }
       if (decl && decl->data) {
         ((FunctionDeclaration *)decl->data)->is_exported = 1;
       }
@@ -543,6 +581,11 @@ ASTNode *parser_parse_declaration(Parser *parser) {
       if (decl && decl->data) {
         ((EnumDeclaration *)decl->data)->is_exported = 1;
       }
+    } else if (parser->current_token.type == TOKEN_TRAIT) {
+      decl = parser_parse_trait_declaration(parser);
+      if (decl && decl->data) {
+        ((TraitDeclaration *)decl->data)->is_exported = 1;
+      }
     } else if (parser->current_token.type == TOKEN_VAR) {
       decl = parser_parse_var_declaration(parser);
       if (decl && decl->data) {
@@ -550,8 +593,21 @@ ASTNode *parser_parse_declaration(Parser *parser) {
       }
     } else if (parser->current_token.type == TOKEN_EXTERN) {
       parser_advance(parser); // consume 'extern'
-      if (parser->current_token.type == TOKEN_FUNCTION) {
-        decl = parser_parse_function_declaration(parser);
+      if (parser->current_token.type == TOKEN_FUNCTION ||
+          parser->current_token.type == TOKEN_ASYNC) {
+        if (parser->current_token.type == TOKEN_ASYNC) {
+          parser_advance(parser); // consume 'async'
+          if (parser->current_token.type != TOKEN_FUNCTION &&
+              parser->current_token.type != TOKEN_FN) {
+            parser_set_error(
+                parser,
+                "Expected 'function' or 'fn' after 'export extern async'");
+            return NULL;
+          }
+          decl = parser_parse_function_declaration_with_async(parser, 1);
+        } else {
+          decl = parser_parse_function_declaration(parser);
+        }
         if (decl && decl->data) {
           FunctionDeclaration *func_data = (FunctionDeclaration *)decl->data;
           if (func_data->body != NULL) {
@@ -574,7 +630,7 @@ ASTNode *parser_parse_declaration(Parser *parser) {
       }
     } else {
       parser_set_error(parser, "Expected 'function', 'var', 'struct', 'enum', "
-                               "or 'extern' after 'export'");
+                               "'trait', or 'extern' after 'export'");
       return NULL;
     }
     return decl;
@@ -591,6 +647,10 @@ ASTNode *parser_parse_declaration(Parser *parser) {
     return parser_parse_struct_declaration(parser);
   case TOKEN_ENUM:
     return parser_parse_enum_declaration(parser);
+  case TOKEN_TRAIT:
+    return parser_parse_trait_declaration(parser);
+  case TOKEN_IMPL:
+    return parser_parse_impl_declaration(parser);
   default:
     // Try to parse as a statement instead
     return parser_parse_statement(parser);
@@ -670,6 +730,8 @@ ASTNode *parser_parse_statement(Parser *parser) {
     return parser_parse_for_statement(parser);
   case TOKEN_SWITCH:
     return parser_parse_switch_statement(parser);
+  case TOKEN_MATCH:
+    return parser_parse_match_statement(parser);
   case TOKEN_BREAK:
     return parser_parse_break_statement(parser);
   case TOKEN_CONTINUE:
@@ -779,48 +841,123 @@ int parser_is_type_keyword(TokenType type) {
   return (type >= TOKEN_INT8 && type <= TOKEN_STRING_TYPE);
 }
 
-static char **parser_parse_type_param_list(Parser *parser, size_t *out_count) {
+static void parser_free_string_array(char **values, size_t count) {
+  if (!values) {
+    return;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    free(values[i]);
+  }
+  free(values);
+}
+
+static void parser_free_type_param_list(char **params, char **traits,
+                                        size_t count) {
+  parser_free_string_array(params, count);
+  parser_free_string_array(traits, count);
+}
+
+static char *parser_parse_qualified_name(Parser *parser, const char *expected) {
+  char *name = NULL;
+
+  if (!parser || !expected) {
+    return NULL;
+  }
+
+  if (!parser_is_identifier_like(parser->current_token.type) &&
+      !parser_is_type_keyword(parser->current_token.type)) {
+    parser_set_error(parser, expected);
+    return NULL;
+  }
+
+  name = strdup(parser->current_token.value);
+  if (!name) {
+    return NULL;
+  }
+  parser_advance(parser);
+
+  while (parser->current_token.type == TOKEN_DOT) {
+    char *qualified_name = NULL;
+    size_t qualified_len = 0;
+
+    parser_advance(parser);
+    if (!parser_is_identifier_like(parser->current_token.type) &&
+        !parser_is_type_keyword(parser->current_token.type)) {
+      parser_set_error(parser, expected);
+      free(name);
+      return NULL;
+    }
+
+    qualified_len = strlen(name) + 1 + strlen(parser->current_token.value) + 1;
+    qualified_name = malloc(qualified_len);
+    if (!qualified_name) {
+      free(name);
+      return NULL;
+    }
+
+    snprintf(qualified_name, qualified_len, "%s.%s", name,
+             parser->current_token.value);
+    free(name);
+    name = qualified_name;
+    parser_advance(parser);
+  }
+
+  return name;
+}
+
+static char **parser_parse_type_param_list(Parser *parser, char ***out_traits,
+                                           size_t *out_count) {
   *out_count = 0;
+  *out_traits = NULL;
   if (parser->current_token.type != TOKEN_LESS_THAN)
     return NULL;
   parser_advance(parser); // consume '<'
 
   char **params = NULL;
+  char **traits = NULL;
   size_t count = 0;
 
   while (parser->current_token.type != TOKEN_GREATER_THAN &&
          parser->current_token.type != TOKEN_EOF) {
     if (!parser_is_identifier_like(parser->current_token.type)) {
       parser_set_error(parser, "Expected type parameter name");
-      for (size_t i = 0; i < count; i++)
-        free(params[i]);
-      free(params);
+      parser_free_type_param_list(params, traits, count);
       return NULL;
     }
     params = realloc(params, (count + 1) * sizeof(char *));
+    traits = realloc(traits, (count + 1) * sizeof(char *));
     params[count] = strdup(parser->current_token.value);
+    traits[count] = NULL;
     count++;
     parser_advance(parser);
+
+    if (parser->current_token.type == TOKEN_COLON) {
+      parser_advance(parser);
+      traits[count - 1] =
+          parser_parse_qualified_name(parser, "Expected trait name after ':'");
+      if (!traits[count - 1]) {
+        parser_free_type_param_list(params, traits, count);
+        return NULL;
+      }
+    }
 
     if (parser->current_token.type == TOKEN_COMMA) {
       parser_advance(parser);
     } else if (parser->current_token.type != TOKEN_GREATER_THAN) {
       parser_set_error(parser, "Expected ',' or '>' in type parameter list");
-      for (size_t i = 0; i < count; i++)
-        free(params[i]);
-      free(params);
+      parser_free_type_param_list(params, traits, count);
       return NULL;
     }
   }
 
   if (!parser_expect(parser, TOKEN_GREATER_THAN)) {
-    for (size_t i = 0; i < count; i++)
-      free(params[i]);
-    free(params);
+    parser_free_type_param_list(params, traits, count);
     return NULL;
   }
 
   *out_count = count;
+  *out_traits = traits;
   return params;
 }
 
@@ -926,6 +1063,33 @@ static char *parser_parse_type_annotation(Parser *parser) {
     parser_advance(parser);
     if (!type_name)
       return NULL;
+  }
+
+  while (parser->current_token.type == TOKEN_DOT) {
+    char *qualified_type = NULL;
+    size_t qualified_len = 0;
+
+    parser_advance(parser); // consume '.'
+    if (!parser_is_identifier_like(parser->current_token.type) &&
+        !parser_is_type_keyword(parser->current_token.type)) {
+      parser_set_error(parser, "Expected type name after '.'");
+      free(type_name);
+      return NULL;
+    }
+
+    qualified_len =
+        strlen(type_name) + 1 + strlen(parser->current_token.value) + 1;
+    qualified_type = malloc(qualified_len);
+    if (!qualified_type) {
+      free(type_name);
+      return NULL;
+    }
+
+    snprintf(qualified_type, qualified_len, "%s.%s", type_name,
+             parser->current_token.value);
+    free(type_name);
+    type_name = qualified_type;
+    parser_advance(parser);
   }
 
   if (parser->current_token.type == TOKEN_LESS_THAN) {
@@ -1131,12 +1295,15 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
   case TOKEN_NEW: {
     parser_advance(parser); // Built-in memory alloc handling
     if (!parser_is_identifier_like(parser->current_token.type) &&
-        !parser_is_type_keyword(parser->current_token.type)) {
+        !parser_is_type_keyword(parser->current_token.type) &&
+        parser->current_token.type != TOKEN_FN) {
       parser_set_error(parser, "Expected type name after 'new'");
       return NULL;
     }
-    char *type_name = strdup(parser->current_token.value);
-    parser_advance(parser); // consume type name
+    char *type_name = parser_parse_type_annotation(parser);
+    if (!type_name) {
+      return NULL;
+    }
 
     ASTNode *new_expr = ast_create_new_expression(type_name, location);
     free(type_name);
@@ -1266,6 +1433,17 @@ ASTNode *parser_parse_unary_expression(Parser *parser) {
 
   SourceLocation location = {parser->current_token.line,
                              parser->current_token.column};
+
+  if (parser->current_token.type == TOKEN_AWAIT) {
+    parser_advance(parser);
+
+    ASTNode *operand = parser_parse_unary_expression(parser);
+    if (!operand) {
+      return NULL;
+    }
+
+    return ast_create_unary_expression("await", operand, location);
+  }
 
   if (parser->current_token.type == TOKEN_LPAREN) {
     ASTNode *cast = parser_parse_cast_expression(parser);
@@ -1491,6 +1669,9 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
         ASTNode *object = access->object;
         // Detach the object from the member access so it's not double-freed
         access->object = NULL;
+        free(expr->children);
+        expr->children = NULL;
+        expr->child_count = 0;
         ast_destroy_node(expr);
 
         expr = ast_create_method_call(object, method_name, arguments, arg_count,
@@ -1630,15 +1811,32 @@ ASTNode *parser_parse_import_declaration(Parser *parser) {
   }
 
   char *module_name = strdup(parser->current_token.value);
+  char *namespace_alias = NULL;
   parser_advance(parser); // consume string
+
+  if (parser_is_identifier_like(parser->current_token.type) &&
+      parser->current_token.value &&
+      strcmp(parser->current_token.value, "as") == 0) {
+    parser_advance(parser); // consume 'as'
+    if (!parser_is_identifier_like(parser->current_token.type)) {
+      free(module_name);
+      parser_set_error(parser, "Expected namespace alias after 'as'");
+      return NULL;
+    }
+    namespace_alias = strdup(parser->current_token.value);
+    parser_advance(parser); // consume alias
+  }
 
   if (!parser_expect_statement_end(parser)) {
     free(module_name);
+    free(namespace_alias);
     return NULL;
   }
 
-  ASTNode *node = ast_create_import_declaration(module_name, location);
+  ASTNode *node =
+      ast_create_import_declaration(module_name, namespace_alias, location);
   free(module_name);
+  free(namespace_alias);
 
   return node;
 }
@@ -1805,16 +2003,19 @@ ASTNode *parser_parse_var_declaration(Parser *parser) {
   return var_decl;
 }
 
-ASTNode *parser_parse_function_declaration(Parser *parser) {
+static ASTNode *parser_parse_function_declaration_with_async(Parser *parser,
+                                                             int is_async) {
   if (!parser)
     return NULL;
 
   SourceLocation location = {parser->current_token.line,
                              parser->current_token.column};
-  // Expect 'function' keyword
-  if (!parser_expect(parser, TOKEN_FUNCTION)) {
+  if (parser->current_token.type != TOKEN_FUNCTION &&
+      parser->current_token.type != TOKEN_FN) {
+    parser_set_error(parser, "Expected 'function' or 'fn'");
     return NULL;
   }
+  parser_advance(parser);
 
   // Expect function name
   if (!parser_is_identifier_like(parser->current_token.type)) {
@@ -1826,10 +2027,11 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
   parser_advance(parser);
 
   char **func_type_params = NULL;
+  char **func_type_param_traits = NULL;
   size_t func_type_param_count = 0;
   if (parser->current_token.type == TOKEN_LESS_THAN) {
-    func_type_params =
-        parser_parse_type_param_list(parser, &func_type_param_count);
+    func_type_params = parser_parse_type_param_list(
+        parser, &func_type_param_traits, &func_type_param_count);
     if (!func_type_params && parser->has_error) {
       free(func_name);
       return NULL;
@@ -1838,9 +2040,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
 
   // Expect '('
   if (!parser_expect(parser, TOKEN_LPAREN)) {
-    for (size_t i = 0; i < func_type_param_count; i++)
-      free(func_type_params[i]);
-    free(func_type_params);
+    parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                func_type_param_count);
     free(func_name);
     return NULL;
   }
@@ -1863,6 +2064,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
         }
         free(param_names);
         free(param_types);
+        parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                    func_type_param_count);
         free(func_name);
         return NULL;
       }
@@ -1884,6 +2087,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
         }
         free(param_names);
         free(param_types);
+        parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                    func_type_param_count);
         free(func_name);
         return NULL;
       }
@@ -1902,6 +2107,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
         }
         free(param_names);
         free(param_types);
+        parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                    func_type_param_count);
         free(func_name);
         return NULL;
       }
@@ -1921,6 +2128,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
         }
         free(param_names);
         free(param_types);
+        parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                    func_type_param_count);
         free(func_name);
         return NULL;
       }
@@ -1936,6 +2145,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
     }
     free(param_names);
     free(param_types);
+    parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                func_type_param_count);
     free(func_name);
     return NULL;
   }
@@ -1959,6 +2170,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
       }
       free(param_names);
       free(param_types);
+      parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                  func_type_param_count);
       free(func_name);
       free(link_name);
       return NULL;
@@ -1975,6 +2188,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
       }
       free(param_names);
       free(param_types);
+      parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                  func_type_param_count);
       free(func_name);
       free(return_type);
       return NULL;
@@ -2007,6 +2222,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
       }
       free(param_names);
       free(param_types);
+      parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                  func_type_param_count);
       free(func_name);
       free(return_type);
       free(link_name);
@@ -2025,6 +2242,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
     }
     free(param_names);
     free(param_types);
+    parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                func_type_param_count);
     free(func_name);
     free(return_type);
     free(link_name);
@@ -2034,26 +2253,33 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
   ASTNode *func_decl =
       ast_create_function_declaration(func_name, param_names, param_types,
                                       param_count, return_type, body, location);
-  if (func_decl && func_decl->data && link_name) {
+  if (func_decl && func_decl->data) {
     FunctionDeclaration *func_data = (FunctionDeclaration *)func_decl->data;
-    func_data->link_name = strdup(link_name);
-    if (!func_data->link_name) {
-      ast_destroy_node(func_decl);
-      func_decl = NULL;
-      parser_set_error(parser, "Memory allocation failed for link name");
+    func_data->is_async = is_async ? 1 : 0;
+    if (link_name) {
+      func_data->link_name = strdup(link_name);
+      if (!func_data->link_name) {
+        ast_destroy_node(func_decl);
+        func_decl = NULL;
+        parser_set_error(parser, "Memory allocation failed for link name");
+      }
     }
   }
   if (func_decl && func_decl->data && func_type_param_count > 0) {
     FunctionDeclaration *fd = (FunctionDeclaration *)func_decl->data;
     fd->type_params = malloc(func_type_param_count * sizeof(char *));
+    fd->type_param_traits = malloc(func_type_param_count * sizeof(char *));
     fd->type_param_count = func_type_param_count;
     for (size_t i = 0; i < func_type_param_count; i++) {
       fd->type_params[i] = (char *)string_intern(func_type_params[i]);
+      fd->type_param_traits[i] = func_type_param_traits[i]
+                                     ? (char *)string_intern(
+                                           func_type_param_traits[i])
+                                     : NULL;
     }
   }
-  for (size_t i = 0; i < func_type_param_count; i++)
-    free(func_type_params[i]);
-  free(func_type_params);
+  parser_free_type_param_list(func_type_params, func_type_param_traits,
+                              func_type_param_count);
 
   // Clean up temporary strings
   free(func_name);
@@ -2067,6 +2293,92 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
   free(param_types);
 
   return func_decl;
+}
+
+ASTNode *parser_parse_function_declaration(Parser *parser) {
+  return parser_parse_function_declaration_with_async(parser, 0);
+}
+
+ASTNode *parser_parse_trait_declaration(Parser *parser) {
+  if (!parser) {
+    return NULL;
+  }
+
+  SourceLocation location = {parser->current_token.line,
+                             parser->current_token.column};
+  if (!parser_expect(parser, TOKEN_TRAIT)) {
+    return NULL;
+  }
+
+  if (!parser_is_identifier_like(parser->current_token.type)) {
+    parser_set_error(parser, "Expected trait name after 'trait'");
+    return NULL;
+  }
+
+  char *trait_name = strdup(parser->current_token.value);
+  ASTNode *trait_decl = NULL;
+  parser_advance(parser);
+
+  if (!trait_name) {
+    return NULL;
+  }
+
+  if (!parser_expect_statement_end(parser)) {
+    free(trait_name);
+    return NULL;
+  }
+
+  trait_decl = ast_create_trait_declaration(trait_name, location);
+  free(trait_name);
+  return trait_decl;
+}
+
+ASTNode *parser_parse_impl_declaration(Parser *parser) {
+  if (!parser) {
+    return NULL;
+  }
+
+  SourceLocation location = {parser->current_token.line,
+                             parser->current_token.column};
+  char *trait_name = NULL;
+  char *for_type_name = NULL;
+  ASTNode *impl_decl = NULL;
+
+  if (!parser_expect(parser, TOKEN_IMPL)) {
+    return NULL;
+  }
+
+  trait_name =
+      parser_parse_qualified_name(parser, "Expected trait name after 'impl'");
+  if (!trait_name) {
+    return NULL;
+  }
+
+  if (!parser_expect(parser, TOKEN_FOR)) {
+    free(trait_name);
+    parser_set_error(parser, "Expected 'for' after trait name in impl");
+    return NULL;
+  }
+
+  for_type_name = parser_parse_type_annotation(parser);
+  if (!for_type_name) {
+    if (!parser->has_error) {
+      parser_set_error(parser, "Expected type name after 'for' in impl");
+    }
+    free(trait_name);
+    return NULL;
+  }
+
+  if (!parser_expect_statement_end(parser)) {
+    free(trait_name);
+    free(for_type_name);
+    return NULL;
+  }
+
+  impl_decl = ast_create_impl_declaration(trait_name, for_type_name, location);
+  free(trait_name);
+  free(for_type_name);
+  return impl_decl;
 }
 
 ASTNode *parser_parse_enum_declaration(Parser *parser) {
@@ -2085,7 +2397,44 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
   char *enum_name = strdup(parser->current_token.value);
   parser_advance(parser);
 
+  // Optional generic type parameters: enum Option<T> { ... }
+  char **type_params = NULL;
+  size_t type_param_count = 0;
+  if (parser->current_token.type == TOKEN_LESS_THAN) {
+    parser_advance(parser); // consume '<'
+    while (parser->current_token.type != TOKEN_GREATER_THAN &&
+           parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+      if (parser->current_token.type == TOKEN_COMMA ||
+          parser->current_token.type == TOKEN_NEWLINE) {
+        parser_advance(parser);
+        continue;
+      }
+      if (!parser_is_identifier_like(parser->current_token.type) &&
+          !parser_is_type_keyword(parser->current_token.type)) {
+        parser_set_error(parser, "Expected type parameter name");
+        break;
+      }
+      char **new_tp =
+          realloc(type_params, (type_param_count + 1) * sizeof(char *));
+      if (!new_tp) {
+        parser_set_error(parser, "Out of memory in enum type parameters");
+        break;
+      }
+      type_params = new_tp;
+      type_params[type_param_count++] = strdup(parser->current_token.value);
+      parser_advance(parser);
+    }
+    if (!parser->has_error && !parser_expect(parser, TOKEN_GREATER_THAN)) {
+      for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+      free(type_params);
+      free(enum_name);
+      return NULL;
+    }
+  }
+
   if (!parser_expect(parser, TOKEN_LBRACE)) {
+    for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+    free(type_params);
     free(enum_name);
     return NULL;
   }
@@ -2108,6 +2457,29 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
     char *variant_name = strdup(parser->current_token.value);
     parser_advance(parser);
 
+    // Optional payload type: Some(T)
+    char *payload_type = NULL;
+    if (parser->current_token.type == TOKEN_LPAREN) {
+      parser_advance(parser); // consume '('
+      if (!parser_is_identifier_like(parser->current_token.type) &&
+          !parser_is_type_keyword(parser->current_token.type)) {
+        parser_set_error(parser, "Expected payload type in variant");
+        free(variant_name);
+        break;
+      }
+      payload_type = parser_parse_type_annotation(parser);
+      if (!payload_type) {
+        parser_set_error(parser, "Expected payload type in variant");
+        free(variant_name);
+        break;
+      }
+      if (!parser_expect(parser, TOKEN_RPAREN)) {
+        free(payload_type);
+        free(variant_name);
+        break;
+      }
+    }
+
     ASTNode *value = NULL;
     if (parser->current_token.type == TOKEN_EQUALS) {
       parser_advance(parser);
@@ -2115,13 +2487,23 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
       if (!value) {
         if (!parser->has_error)
           parser_set_error(parser, "Expected expression after '='");
+        free(payload_type);
         free(variant_name);
         break;
       }
     }
 
-    variants = realloc(variants, (variant_count + 1) * sizeof(EnumVariant));
+    EnumVariant *new_v =
+        realloc(variants, (variant_count + 1) * sizeof(EnumVariant));
+    if (!new_v) {
+      parser_set_error(parser, "Out of memory");
+      free(payload_type);
+      free(variant_name);
+      break;
+    }
+    variants = new_v;
     variants[variant_count].name = variant_name;
+    variants[variant_count].payload_type = payload_type;
     variants[variant_count].value = value;
     variant_count++;
 
@@ -2134,9 +2516,12 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
   if (parser->has_error) {
     for (size_t i = 0; i < variant_count; i++) {
       free(variants[i].name);
+      free(variants[i].payload_type);
       ast_destroy_node(variants[i].value);
     }
     free(variants);
+    for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+    free(type_params);
     free(enum_name);
     return NULL;
   }
@@ -2144,9 +2529,12 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
   if (!parser_expect(parser, TOKEN_RBRACE)) {
     for (size_t i = 0; i < variant_count; i++) {
       free(variants[i].name);
+      free(variants[i].payload_type);
       ast_destroy_node(variants[i].value);
     }
     free(variants);
+    for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+    free(type_params);
     free(enum_name);
     return NULL;
   }
@@ -2154,11 +2542,23 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
   ASTNode *node =
       ast_create_enum_declaration(enum_name, variants, variant_count, location);
 
+  if (node) {
+    EnumDeclaration *decl = (EnumDeclaration *)node->data;
+    if (decl && type_param_count > 0) {
+      decl->type_params = type_params;
+      decl->type_param_count = type_param_count;
+      type_params = NULL; // ownership transferred
+    }
+  }
+
   free(enum_name);
   for (size_t i = 0; i < variant_count; i++) {
     free(variants[i].name);
+    free(variants[i].payload_type);
   }
   free(variants);
+  for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+  free(type_params);
 
   return node;
 }
@@ -2184,9 +2584,11 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   parser_advance(parser);
 
   char **type_params = NULL;
+  char **type_param_traits = NULL;
   size_t type_param_count = 0;
   if (parser->current_token.type == TOKEN_LESS_THAN) {
-    type_params = parser_parse_type_param_list(parser, &type_param_count);
+    type_params = parser_parse_type_param_list(parser, &type_param_traits,
+                                               &type_param_count);
     if (!type_params && parser->has_error) {
       free(struct_name);
       return NULL;
@@ -2195,9 +2597,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
 
   // Expect '{'
   if (!parser_expect(parser, TOKEN_LBRACE)) {
-    for (size_t i = 0; i < type_param_count; i++)
-      free(type_params[i]);
-    free(type_params);
+    parser_free_type_param_list(type_params, type_param_traits,
+                                type_param_count);
     free(struct_name);
     return NULL;
   }
@@ -2238,6 +2639,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
           ast_destroy_node(methods[i]);
         }
         free(methods);
+        parser_free_type_param_list(type_params, type_param_traits,
+                                    type_param_count);
         free(struct_name);
         return NULL;
       }
@@ -2256,6 +2659,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
           ast_destroy_node(methods[i]);
         }
         free(methods);
+        parser_free_type_param_list(type_params, type_param_traits,
+                                    type_param_count);
         free(struct_name);
         return NULL;
       }
@@ -2281,6 +2686,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
           ast_destroy_node(methods[i]);
         }
         free(methods);
+        parser_free_type_param_list(type_params, type_param_traits,
+                                    type_param_count);
         free(struct_name);
         return NULL;
       }
@@ -2303,6 +2710,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
           ast_destroy_node(methods[i]);
         }
         free(methods);
+        parser_free_type_param_list(type_params, type_param_traits,
+                                    type_param_count);
         free(struct_name);
         return NULL;
       }
@@ -2326,6 +2735,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
       ast_destroy_node(methods[i]);
     }
     free(methods);
+    parser_free_type_param_list(type_params, type_param_traits,
+                                type_param_count);
     free(struct_name);
     return NULL;
   }
@@ -2337,14 +2748,16 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   if (struct_decl && struct_decl->data && type_param_count > 0) {
     StructDeclaration *sd = (StructDeclaration *)struct_decl->data;
     sd->type_params = malloc(type_param_count * sizeof(char *));
+    sd->type_param_traits = malloc(type_param_count * sizeof(char *));
     sd->type_param_count = type_param_count;
     for (size_t i = 0; i < type_param_count; i++) {
       sd->type_params[i] = (char *)string_intern(type_params[i]);
+      sd->type_param_traits[i] =
+          type_param_traits[i] ? (char *)string_intern(type_param_traits[i])
+                               : NULL;
     }
   }
-  for (size_t i = 0; i < type_param_count; i++)
-    free(type_params[i]);
-  free(type_params);
+  parser_free_type_param_list(type_params, type_param_traits, type_param_count);
 
   // Keep a stable copy for debug output before freeing temporary buffers.
   char *debug_struct_name = strdup(struct_name);
@@ -2951,6 +3364,152 @@ ASTNode *parser_parse_switch_statement(Parser *parser) {
       ast_create_switch_statement(expression, cases, case_count, location);
   free(cases);
   return switch_node;
+}
+
+// Parse: match (expr) {
+//   case VariantName(binding): { body }
+//   case VariantName: { body }
+//   default: { body }
+// }
+ASTNode *parser_parse_match_statement(Parser *parser) {
+  if (!parser)
+    return NULL;
+
+  SourceLocation location = {parser->current_token.line,
+                             parser->current_token.column};
+  if (!parser_expect(parser, TOKEN_MATCH))
+    return NULL;
+
+  if (!parser_expect(parser, TOKEN_LPAREN)) {
+    parser_set_error(parser, "Expected '(' after 'match'");
+    return NULL;
+  }
+  ASTNode *expr = parser_parse_expression(parser);
+  if (!expr)
+    return NULL;
+  if (!parser_expect(parser, TOKEN_RPAREN)) {
+    ast_destroy_node(expr);
+    return NULL;
+  }
+  if (!parser_expect(parser, TOKEN_LBRACE)) {
+    ast_destroy_node(expr);
+    return NULL;
+  }
+
+  MatchArm *arms = NULL;
+  size_t arm_count = 0;
+  int seen_default = 0;
+
+  while (parser->current_token.type != TOKEN_RBRACE &&
+         parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+    while (parser->current_token.type == TOKEN_NEWLINE ||
+           parser->current_token.type == TOKEN_SEMICOLON)
+      parser_advance(parser);
+    if (parser->current_token.type == TOKEN_RBRACE)
+      break;
+
+    MatchArm arm = {0};
+
+    if (parser->current_token.type == TOKEN_DEFAULT) {
+      if (seen_default) {
+        parser_set_error(parser, "Only one default arm is allowed in match");
+        break;
+      }
+      seen_default = 1;
+      arm.is_default = 1;
+      arm.variant_name = strdup("default");
+      parser_advance(parser);
+    } else if (parser->current_token.type == TOKEN_CASE) {
+      parser_advance(parser); // consume 'case'
+      if (!parser_is_identifier_like(parser->current_token.type)) {
+        parser_set_error(parser, "Expected variant name after 'case' in match");
+        break;
+      }
+      arm.variant_name = strdup(parser->current_token.value);
+      parser_advance(parser);
+
+      // Optional binding: case Some(v)
+      if (parser->current_token.type == TOKEN_LPAREN) {
+        parser_advance(parser); // consume '('
+        if (!parser_is_identifier_like(parser->current_token.type)) {
+          parser_set_error(parser, "Expected binding name in match arm");
+          free(arm.variant_name);
+          break;
+        }
+        arm.binding_name = strdup(parser->current_token.value);
+        parser_advance(parser);
+        if (!parser_expect(parser, TOKEN_RPAREN)) {
+          free(arm.binding_name);
+          free(arm.variant_name);
+          break;
+        }
+      }
+    } else {
+      parser_set_error(parser, "Expected 'case' or 'default' in match");
+      break;
+    }
+
+    if (!parser_expect(parser, TOKEN_COLON)) {
+      free(arm.binding_name);
+      free(arm.variant_name);
+      break;
+    }
+
+    arm.body = parser_parse_block(parser);
+    if (!arm.body) {
+      if (!parser->has_error)
+        parser_set_error(parser, "Expected '{' block body in match arm");
+      free(arm.binding_name);
+      free(arm.variant_name);
+      break;
+    }
+
+    MatchArm *new_arms = realloc(arms, (arm_count + 1) * sizeof(MatchArm));
+    if (!new_arms) {
+      parser_set_error(parser, "Out of memory in match statement");
+      ast_destroy_node(arm.body);
+      free(arm.binding_name);
+      free(arm.variant_name);
+      break;
+    }
+    arms = new_arms;
+    arms[arm_count++] = arm;
+
+    while (parser->current_token.type == TOKEN_NEWLINE ||
+           parser->current_token.type == TOKEN_SEMICOLON)
+      parser_advance(parser);
+  }
+
+  if (parser->has_error) {
+    for (size_t i = 0; i < arm_count; i++) {
+      free(arms[i].variant_name);
+      free(arms[i].binding_name);
+      ast_destroy_node(arms[i].body);
+    }
+    free(arms);
+    ast_destroy_node(expr);
+    return NULL;
+  }
+
+  if (!parser_expect(parser, TOKEN_RBRACE)) {
+    for (size_t i = 0; i < arm_count; i++) {
+      free(arms[i].variant_name);
+      free(arms[i].binding_name);
+      ast_destroy_node(arms[i].body);
+    }
+    free(arms);
+    ast_destroy_node(expr);
+    return NULL;
+  }
+
+  ASTNode *node = ast_create_match_statement(expr, arms, arm_count, location);
+  for (size_t i = 0; i < arm_count; i++) {
+    free(arms[i].variant_name);
+    free(arms[i].binding_name);
+    // body nodes now owned by the match node
+  }
+  free(arms);
+  return node;
 }
 
 ASTNode *parser_parse_block(Parser *parser) {

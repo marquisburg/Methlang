@@ -8,28 +8,34 @@ Use `new` when you want managed heap allocation: struct instances, dynamic data 
 
 Use C `malloc` (from `std/mem`) when you need unmanaged memory: buffers for I/O, C interop, or when the GC runtime is intentionally omitted (simple CLI utilities can skip the GC). The Windows web server example links the bundled GC runtime because it uses GC-backed string concatenation for its responses, but it still mixes stack buffers and `malloc` where appropriate.
 
+Async functions also participate in the managed runtime model: the future/task context for an async call is allocated on the managed heap and the worker thread integrates with the GC runtime automatically. See [Async and Sync Execution](async.md).
+
 **Rule of thumb:** Use `new` for program-level data structures whose lifetime is tied to reachability (trees, graphs, long-lived caches). Use `malloc` for buffers and C interop where you control the lifetime explicitly (I/O buffers, structs passed to C APIs that expect manual free).
 
 ## Linking the GC
 
 ### Recommended Windows Flow
 
-When your program uses `new`, the default Windows flow is:
+When your program uses `new` or async features, the default Windows flow is:
 
 ```bat
 methlang --build main.meth -o main.exe
 ```
 
-This automatically assembles and links the bundled GC/runtime for you.
+This automatically assembles and links the bundled runtime objects for you.
 
 ### Manual Flow
 
-If you are using the manual assembly/link pipeline, link the bundled GC runtime object:
+If you are using the manual assembly/link pipeline, link the bundled GC runtime object. Async programs also need `async_runtime.o`:
 
 ```bash
 methlang main.meth -o main.s
 nasm -f win64 main.s -o main.o
 gcc -nostartfiles main.o path/to/runtime/gc.o -o main -lkernel32
+```
+
+```bash
+gcc -nostartfiles main.o path/to/runtime/gc.o path/to/runtime/async_runtime.o -o main -lkernel32
 ```
 
 The compiler emits calls to `gc_alloc` for `new` expressions. The entry point (`_start`) calls `gc_init` with the stack base before invoking `main`. See [Compilation](compilation.md) for the full pipeline.
@@ -143,6 +149,8 @@ The runtime supports cooperative multi-threaded collection:
 - Threads that allocate with GC should call `gc_thread_attach()` when they start and `gc_thread_detach()` before exit.
 - Attached threads should reach `gc_safepoint()` periodically so stop-the-world collection can capture thread stacks.
 - Collection is still stop-the-world (not concurrent/incremental), but allocation and collection are synchronized internally.
+
+Async worker threads created by Methlang's async runtime call `gc_thread_attach()` and `gc_thread_detach()` automatically. You only need to manage attach/detach yourself for threads you create manually through C interop or thread libraries.
 
 `gc_thread_detach()` now reclaims thread bookkeeping immediately. The detached thread record does not stay resident until `gc_shutdown`. Any TLAB chunks that still contain live objects remain tracked by the runtime and are reclaimed when fully dead (or at shutdown).
 

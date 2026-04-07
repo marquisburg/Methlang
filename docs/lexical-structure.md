@@ -27,9 +27,9 @@ Vector3
 
 The following words are reserved and cannot be used as identifiers.
 
-Declarations: `import`, `extern`, `export`, `var`, `function`, `struct`, `enum`, `method`. Control flow: `if`, `else`, `while`, `for`, `switch`, `case`, `default`, `break`, `continue`, `return`. Other: `asm`, `this`, `new`. Types: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`, `string`.
+Declarations: `import`, `extern`, `export`, `var`, `function`, `fn`, `async`, `struct`, `enum`, `method`. Control flow: `if`, `else`, `while`, `for`, `switch`, `case`, `default`, `break`, `continue`, `return`. Other: `asm`, `this`, `new`, `await`. Types: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`, `string`.
 
-`this` is only valid inside method bodies; it refers to the receiver. Using `this` as a variable name outside a method produces an error. `new` is an expression keyword, not a statement keyword; it appears in expressions like `var p: T* = new T` and cannot start a statement by itself. `cstring` is a type alias, not a keyword; it is available as a built-in name.
+`this` is only valid inside method bodies; it refers to the receiver. Using `this` as a variable name outside a method produces an error. `new` is an expression keyword, not a statement keyword; it appears in expressions like `var p: T* = new T` and cannot start a statement by itself. `await` is also an expression keyword; it appears in expressions such as `var x: int32 = await future`. `cstring` is a type alias, not a keyword; it is available as a built-in name.
 
 ## Numeric Literals
 

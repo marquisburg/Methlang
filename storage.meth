@@ -1,0 +1,86 @@
+// storage.meth
+/*
+ * Core data structures and persistence interface for SQL Server engine.
+ * Defines metadata and handles in-memory/persistent table registry.
+ */
+
+// --- Data Structures ---
+
+/// Represents a column within a table.
+struct ColumnDefinition {
+    name: String;
+    type: MethType; enum MethType { Int, String, Bool, Float, Unknown }
+    is_nullable: Bool;
+}
+
+/// Metadata for an entire SQL Table.
+struct TableMetadata {
+    table_name: String;
+    columns: List<ColumnDefinition>;
+    // Add other metadata like primary keys, indexes here later.
+}
+
+// --- Storage Registry ---
+
+/// Manages the in-memory registry of all known tables.
+struct StorageRegistry {
+    tables: Map<String, TableMetadata>; // Key: table_name
+    // Placeholder for connection/session context if needed.
+}
+
+impl StorageRegistry {
+    fn new() -> Self {
+        Self {
+            tables: Map::new(),
+        }
+    }
+
+    /// Registers a new table's metadata into the in-memory store.
+    fn register_table(&mut self, metadata: TableMetadata) -> Result<(), String> {
+        if self.tables.contains_key(&metadata.table_name) {
+            return Err(format!("Table '{}' already exists.", metadata.table_name));
+        }
+        self.tables.insert(metadata.table_name, metadata);
+        Ok(())
+    }
+
+    /// Retrieves table metadata by name.
+    fn get_metadata(&self, table_name: &str) -> Option<&TableMetadata> {
+        self.tables.get(table_name)
+    }
+
+    // Placeholder for persistence interface methods (e.g., save_to_disk).
+    fn persist(&self) -> Result<(), String> {
+        // TODO: Implement serialization logic to write the entire registry state to disk.
+        println!("StorageRegistry: Persisting {} tables...", self.tables.len());
+        Ok(())
+    }
+}
+
+// --- Persistence Interface Placeholder ---
+
+/// Defines the contract for saving and loading database state.
+trait Persistence {
+    fn load_state(path: &str) -> Result<StorageRegistry, String>;
+    fn save_state(&self, path: &str) -> Result<(), String>;
+}
+
+// Implementations will use C-interop placeholders where necessary for OS interaction.
+
+// Example usage placeholder:
+/*
+fn main() {
+    let mut registry = StorageRegistry::new();
+    let meta = TableMetadata {
+        table_name: "users".to_string(),
+        columns: vec![
+            ColumnDefinition { name: "id".to_string(), type: MethType::Int, is_nullable: false },
+            ColumnDefinition { name: "username".to_string(), type: MethType::String, is_nullable: true },
+        ],
+    };
+    registry.register_table(meta).unwrap();
+
+    // In a real scenario, we'd use the Persistence trait here.
+    println!("Successfully initialized in-memory storage.");
+}
+*/

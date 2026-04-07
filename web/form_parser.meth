@@ -11,13 +11,13 @@ export function extract_form_value(buf: cstring, body_start: int32, body_len: in
   var i: int32 = body_start;
   var end: int32 = body_start + body_len;
   while (i + key_len + 1 <= end) {
-    var match: int32 = 1;
+    var matched: int32 = 1;
     var k: int32 = 0;
     while (k < key_len) {
-      if (buf[i + k] != key[k]) { match = 0; break; }
+      if (buf[i + k] != key[k]) { matched = 0; break; }
       k = k + 1;
     }
-    if (match == 1 && buf[i + key_len] == 61) {
+    if (matched == 1 && buf[i + key_len] == 61) {
       i = i + key_len + 1;
       var out_len: int32 = 0;
       while (i < end && out_len < out_max - 1) {

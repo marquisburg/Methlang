@@ -13,14 +13,17 @@ typedef enum {
   TYPE_UINT16,
   TYPE_UINT32,
   TYPE_UINT64,
+  TYPE_BOOL,
   TYPE_FLOAT32,
   TYPE_FLOAT64,
   TYPE_STRING,
   TYPE_FUNCTION_POINTER,
+  TYPE_FUTURE,
   TYPE_POINTER,
   TYPE_ARRAY,
   TYPE_STRUCT,
   TYPE_ENUM,
+  TYPE_TAGGED_ENUM,
   TYPE_VOID
 } TypeKind;
 
@@ -40,6 +43,17 @@ typedef struct Type {
   struct Type **field_types; // For structs - field types
   size_t *field_offsets;     // For structs - field memory offsets
   size_t field_count;        // For structs - number of fields
+
+  // Tagged enum variant info (TYPE_TAGGED_ENUM only)
+  char **tagged_variant_names;
+  int *tagged_variant_tags;              // discriminant value per variant
+  struct Type **tagged_variant_payloads; // payload type per variant (NULL = none)
+  size_t tagged_variant_count;
+  size_t tagged_data_offset;   // byte offset of the data union inside the struct
+  size_t tagged_data_size;     // size of the data union
+
+  // Template info: for un-instantiated generic enum templates
+  char *generic_template_name; // base name e.g. "Option" (NULL if not generic)
 } Type;
 
 typedef enum { SCOPE_GLOBAL, SCOPE_FUNCTION, SCOPE_BLOCK } ScopeType;
@@ -58,7 +72,8 @@ typedef enum {
   SYMBOL_STRUCT,
   SYMBOL_ENUM,
   SYMBOL_CONSTANT,
-  SYMBOL_PARAMETER
+  SYMBOL_PARAMETER,
+  SYMBOL_TAGGED_ENUM_CONSTRUCTOR
 } SymbolKind;
 
 typedef struct Symbol {
@@ -85,6 +100,11 @@ typedef struct Symbol {
     struct {
       long long value;
     } constant;
+    struct {
+      Type *enum_type;    // The concrete tagged enum type this constructs
+      int tag_value;      // Discriminant value for this variant
+      Type *payload_type; // NULL if variant carries no payload
+    } constructor;
   } data;
 } Symbol;
 

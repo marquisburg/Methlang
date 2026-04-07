@@ -6,7 +6,11 @@ No block comments. Only line comments (`//`) are supported.
 
 No top-level constant expressions. Use functions that return constant values instead.
 
-Generic type parameters are unconstrained. Operations inside generic bodies must be valid for all possible type arguments; the type checker validates at instantiation time. No generic constraints or trait bounds.
+Traits and constrained generics currently support only marker-style bounds with explicit `impl Trait for Type;` declarations and a single inline bound per type parameter such as `T: Addable`. Trait methods, multiple bounds, and `where` clauses are not implemented yet.
+
+`match` is statement-only. There is no `match` expression form that yields a value.
+
+Tagged-enum constructors are currently function-like. Payload variants use `Some(x)`, and payloadless variants use empty call syntax such as `None()`.
 
 `switch` case values must be compile-time constant integer expressions. Range-style cases (e.g. `case 1..10`) are not supported.
 
@@ -27,6 +31,16 @@ No labeled `break` or `continue` (e.g. `break outer`). Use flags or restructure 
 Deferred calls capture variables by reference, not by value. In loops, copy the current value into a temporary first if the deferred call should see the declaration-time value.
 
 `errdefer` is function-only and convention-based. It is valid only inside functions, and any non-zero explicit return value is treated as an error.
+
+`await` is blocking. It waits on a worker thread and does not suspend the current function as a coroutine.
+
+Async uses a bounded worker-pool executor, not a coroutine scheduler. There is no built-in reactor/non-blocking event loop yet.
+
+Blocking `await` can still deadlock on cyclic wait patterns (for example, futures waiting on each other in a cycle). The runtime mitigates common nested-await starvation, but it is not a full deadlock-proof scheduler.
+
+Cancellation is cooperative only. `cancel(future)` sets a flag; the async task must poll `cancelled()` and exit on its own.
+
+Async runtime shutdown is explicit for embedders. Call `meth_async_runtime_shutdown(...)` before `gc_shutdown()`. If a task ignores cooperative cancellation forever, graceful drain/abort can time out instead of forcing unsafe thread termination.
 
 Unreachable code analysis is currently block-local and conservative; some dead paths in complex control-flow may not be diagnosed yet.
 

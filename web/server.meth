@@ -1,8 +1,10 @@
 // Methlang Demonstration Server
 //
 // Multi-threaded TCP server on port 5000. Accepts connections, spawns a worker
-// thread per connection. Workers read HTTP requests and respond with
-// comprehensive Methlang feature demonstrations.
+// thread per connection, and uses an async request-dispatch step inside each
+// worker. The outer accept loop stays explicit-threaded because detached
+// fire-and-forget async tasks would otherwise retain runtime thread handles
+// until awaited.
 //
 // Endpoints:
 //   GET /           -> Enhanced homepage with feature showcase
@@ -19,8 +21,6 @@
 //
 // Build: see web/build.bat
 // Run: server.exe, then open http://localhost:5000
-//
-// All strings are global to avoid compiler codegen ordering with literals in bodies.
 
 import "std/io";
 import "std/net";
@@ -31,11 +31,16 @@ extern function gc_init() = "gc_init";
 
 // Mutex for forum file I/O (threads.txt, posts_N.txt)
 var file_mutex: int64 = 0;
+// Mutex for request logging (prevents interleaved output)
+var log_mutex: int64 = 0;
 
 // Use Windows API for console output — CRT stdout is uninitialized with -nostartfiles
 extern function AllocConsole() -> int32 = "AllocConsole";
 extern function GetStdHandle(which: int32) -> int64 = "GetStdHandle";
 extern function WriteFile(h: int64, buf: cstring, len: int32, written: cstring, overlapped: cstring) -> int32 = "WriteFile";
+extern function GetModuleFileNameA(module: cstring, filename: cstring, size: int32) -> int32 = "GetModuleFileNameA";
+extern function getpeername(s: int64, name: cstring, namelen: cstring) -> int32 = "getpeername";
+extern function inet_ntop(af: int32, src: cstring, dst: cstring, size: int64) -> cstring = "inet_ntop";
 
 import "router";
 import "form_parser";
@@ -93,15 +98,6 @@ var REDIRECT_END: string = "\r\n\r\n";
 var fn_threads: string = "threads.txt";
 var fn_posts_prefix: string = "posts_";
 var fn_posts_suffix: string = ".txt";
-var mode_r: string = "r";
-var mode_a: string = "a";
-var nl: string = "\n";
-var key_title: string = "title";
-var key_body: string = "body";
-var hdr_content_length: string = "Content-Length:";
-var hdr_content_length_lo: string = "content-length:";
-var pat_crlf2: string = "\r\n\r\n";
-var pat_lf2: string = "\n\n";
 var html_amp: string = "&amp;";
 var html_lt: string = "&lt;";
 var html_gt: string = "&gt;";
@@ -110,21 +106,6 @@ var html_apos: string = "&#39;";
 
 // Debug (set to 1 to enable)
 var dbg_on: int32 = 0;
-var dbg_post: string = "[POST] ";
-var dbg_bs: string = " body_start=";
-var dbg_bl: string = " body_len=";
-var dbg_cl: string = " content_len=";
-var dbg_need: string = " need=";
-var dbg_n: string = " n=";
-var dbg_got: string = " got=";
-var dbg_title: string = " title_len=";
-var dbg_fopen_ok: string = " fopen_ok";
-var dbg_fopen_fail: string = " fopen_fail";
-var dbg_newline: string = "\n";
-var dbg_fbs_enter: string = "[fbs] enter n=";
-var dbg_fbs_exit: string = "[fbs] exit ret=";
-var dbg_fbs_ok: string = "[fbs] ok";
-var dbg_loop: string = "[fbs] loop i=";
 
 function dbg(label: cstring, val: int64) {
   if (dbg_on == 0) { return; }
@@ -148,7 +129,106 @@ var err_sockaddr: string = "sockaddr failed";
 var err_bind: string = "bind failed";
 var err_listen: string = "listen failed";
 var msg_ready: string = "Server: http://localhost:5000";
-var crlf: string = "\r\n";
+
+// Extract method and path from HTTP request line. Writes to out_buf, null-terminated.
+// Returns length written. Request line format: "METHOD SP Request-URI SP HTTP-Version"
+function extract_request_line(buf: cstring, n: int32, out_buf: cstring, out_max: int32) -> int32 {
+  if (n < 4 || out_max < 2) { out_buf[0] = 0; return 0; }
+  var i: int32 = 0;
+  while (i < n && buf[i] != 32 && buf[i] != 9 && buf[i] != 13 && buf[i] != 10) {
+    i = i + 1;
+  }
+  var method_end: int32 = i;
+  while (i < n && (buf[i] == 32 || buf[i] == 9)) { i = i + 1; }
+  var path_start: int32 = i;
+  while (i < n && buf[i] != 32 && buf[i] != 9 && buf[i] != 13 && buf[i] != 10) {
+    i = i + 1;
+  }
+  var path_end: int32 = i;
+  var method_len: int32 = method_end;
+  var path_len: int32 = path_end - path_start;
+  if (path_len > 64) { path_len = 64; }
+  var total: int32 = method_len + 1 + path_len;
+  if (total > out_max - 1) { total = out_max - 1; }
+  var dst: int32 = 0;
+  var k: int32 = 0;
+  while (k < method_len && dst < out_max - 1) {
+    out_buf[dst] = buf[k];
+    dst = dst + 1;
+    k = k + 1;
+  }
+  if (dst < out_max - 1) { out_buf[dst] = 32; dst = dst + 1; }
+  k = path_start;
+  while (k < path_end && dst < out_max - 1) {
+    out_buf[dst] = buf[k];
+    dst = dst + 1;
+    k = k + 1;
+  }
+  out_buf[dst] = 0;
+  return dst;
+}
+
+// Log request to console: "ip [status] METHOD path"
+function log_request(client: int64, buf: cstring, n: int32, status: int32) {
+  if (mutex_lock_infinite(log_mutex) != 1) { return; }
+  var h: int64 = GetStdHandle(-11);
+  if (h == -1 || h == 0) { mutex_unlock(log_mutex); return; }
+  var line: uint8[128];
+  var req_len: int32 = extract_request_line(buf, n, &line[0], 80);
+  if (req_len <= 0) { mutex_unlock(log_mutex); return; }
+  var out: uint8[200];
+  var pos: int32 = 0;
+  var addr: uint8[16];
+  var addrlen: uint8[4];
+  addrlen[0] = 16;
+  addrlen[1] = 0;
+  addrlen[2] = 0;
+  addrlen[3] = 0;
+  var ip_buf: uint8[20];
+  ip_buf[0] = 63;
+  ip_buf[1] = 63;
+  ip_buf[2] = 63;
+  ip_buf[3] = 0;
+  if (getpeername(client, &addr[0], &addrlen[0]) == 0) {
+    var p: cstring = inet_ntop(2, &addr[4], &ip_buf[0], 20);
+    if (p == 0) {
+      ip_buf[0] = 63;
+      ip_buf[1] = 63;
+      ip_buf[2] = 63;
+      ip_buf[3] = 0;
+    }
+  }
+  var ip_len: int32 = 0;
+  while (ip_buf[ip_len] != 0 && ip_len < 19) { ip_len = ip_len + 1; }
+  var k: int32 = 0;
+  while (k < ip_len && pos < 195) {
+    out[pos] = ip_buf[k];
+    pos = pos + 1;
+    k = k + 1;
+  }
+  if (pos < 195) { out[pos] = 32; pos = pos + 1; }
+  out[pos] = 91;
+  pos = pos + 1;
+  var dc: int32 = int_to_dec(&out[pos], status);
+  pos = pos + dc;
+  out[pos] = 93;
+  pos = pos + 1;
+  out[pos] = 32;
+  pos = pos + 1;
+  k = 0;
+  while (line[k] != 0 && pos < 195) {
+    out[pos] = line[k];
+    pos = pos + 1;
+    k = k + 1;
+  }
+  out[pos] = 13;
+  pos = pos + 1;
+  out[pos] = 10;
+  pos = pos + 1;
+  var written: uint8[4];
+  WriteFile(h, &out[0], pos, &written[0], 0);
+  mutex_unlock(log_mutex);
+}
 
 // Write string + newline via WriteFile to stdout (works with -nostartfiles)
 function con_writeln(s: string) {
@@ -156,24 +236,27 @@ function con_writeln(s: string) {
   if (h != -1 && h != 0) {
     var written: uint8[4];
     WriteFile(h, s.chars, s.length, &written[0], 0);
+    var crlf: string = "\r\n";
     WriteFile(h, crlf.chars, 2, &written[0], 0);
   }
 }
 
 // Parse Content-Length header. Returns value or 0 if not found. Case-insensitive. "Content-Length:" = 15 chars.
 function parse_content_length(buf: cstring, n: int32) -> int32 {
+  var hdr: string = "Content-Length:";
+  var hdr_lo: string = "content-length:";
   var i: int32 = 0;
   while (i + 15 <= n) {
-    var match: int32 = 1;
+    var matched: int32 = 1;
     var k: int32 = 0;
     while (k < 15) {
       var b: int32 = buf[i + k];
-      var h: int32 = hdr_content_length.chars[k];
-      var lo: int32 = hdr_content_length_lo.chars[k];
-      if (b != h && b != lo) { match = 0; break; }
+      var h: int32 = hdr.chars[k];
+      var lo: int32 = hdr_lo.chars[k];
+      if (b != h && b != lo) { matched = 0; break; }
       k = k + 1;
     }
-    if (match == 1) {
+    if (matched == 1) {
       i = i + 15;
       while (i < n && (buf[i] == 32 || buf[i] == 9)) {
         i = i + 1;
@@ -193,25 +276,25 @@ function parse_content_length(buf: cstring, n: int32) -> int32 {
 // Find start of HTTP body (after \r\n\r\n or \n\n). Returns offset or n if not found.
 // Uses memcmp to avoid potential codegen issues with manual byte loop.
 function find_body_start(buf: cstring, n: int32) -> int32 {
-  if (dbg_on != 0) { dbg_msg(cstr(dbg_fbs_ok)); }
-  if (dbg_on != 0) { dbg(cstr(dbg_fbs_enter), n); }
+  if (dbg_on != 0) { dbg_msg(cstr(" [fbs] ok")); }
+  if (dbg_on != 0) { dbg(cstr("[fbs] enter n="), n); }
   var i: int32 = 0;
   while (i + 4 <= n) {
-    if (memcmp(&buf[i], cstr(pat_crlf2), 4) == 0) {
-      if (dbg_on != 0) { dbg(cstr(dbg_fbs_exit), i + 4); }
+    if (memcmp(&buf[i], cstr("\r\n\r\n"), 4) == 0) {
+      if (dbg_on != 0) { dbg(cstr("[fbs] exit ret="), i + 4); }
       return i + 4;
     }
     i = i + 1;
   }
   i = 0;
   while (i + 2 <= n) {
-    if (memcmp(&buf[i], cstr(pat_lf2), 2) == 0) {
-      if (dbg_on != 0) { dbg(cstr(dbg_fbs_exit), i + 2); }
+    if (memcmp(&buf[i], cstr("\n\n"), 2) == 0) {
+      if (dbg_on != 0) { dbg(cstr("[fbs] exit ret="), i + 2); }
       return i + 2;
     }
     i = i + 1;
   }
-  if (dbg_on != 0) { dbg(cstr(dbg_fbs_exit), n); }
+  if (dbg_on != 0) { dbg(cstr("[fbs] exit ret="), n); }
   return n;
 }
 
@@ -249,27 +332,15 @@ function build_posts_filename(buf: cstring, id: int32) {
 
 // Build "/forum?thread=N" in buf (null-terminated). buf must be at least 32 bytes.
 function build_forum_thread_url(buf: cstring, thread_id: int32) {
-  buf[0] = 47;
-  buf[1] = 102;
-  buf[2] = 111;
-  buf[3] = 114;
-  buf[4] = 117;
-  buf[5] = 109;
-  buf[6] = 63;
-  buf[7] = 116;
-  buf[8] = 104;
-  buf[9] = 114;
-  buf[10] = 101;
-  buf[11] = 97;
-  buf[12] = 100;
-  buf[13] = 61;
-  var dc: int32 = int_to_dec(&buf[14], thread_id);
-  buf[14 + dc] = 0;
+  var prefix: string = "/forum?thread=";
+  memcpy(buf, prefix.chars, prefix.length);
+  var dc: int32 = int_to_dec(&buf[prefix.length], thread_id);
+  buf[prefix.length + dc] = 0;
 }
 
 // Count lines in threads.txt (no lock). Caller must hold file_mutex.
 function count_threads_impl() -> int32 {
-  var fp: cstring = fopen(cstr(fn_threads), cstr(mode_r));
+  var fp: cstring = fopen(fn_threads, "r");
   if (fp == 0) { return 0; }
   var count: int32 = 0;
   var line_buf: uint8[64];
@@ -288,45 +359,93 @@ function count_threads() -> int32 {
   return count;
 }
 
-// Serve static HTML file. Tries filename (CWD=web/) then web/filename (CWD=project root).
-// On success: sends header + file contents. On failure: sends 404.
-function serve_static_html(client: int64, filename: string, header: string) {
-  var fp: cstring = fopen(cstr(filename), cstr(mode_r));
+// Find last backslash or slash in null-terminated path; returns index or -1.
+function find_last_slash(path: cstring, len: int32) -> int32 {
+  var i: int32 = len - 1;
+  while (i >= 0) {
+    var c: int32 = path[i];
+    if (c == 92 || c == 47) { return i; }
+    i = i - 1;
+  }
+  return -1;
+}
+
+// Serve static HTML file. Tries: (1) filename (CWD=web/), (2) web/filename (CWD=project root),
+// (3) exe_dir/filename (when run from arbitrary CWD).
+// On success: sends header + file contents, returns 200. On failure: sends 404, returns 404.
+function serve_static_html(client: int64, filename: string, header: string) -> int32 {
+  var fp: cstring = fopen(filename, "r");
   if (fp == 0) {
     var alt: string = fn_web_prefix + filename;
-    fp = fopen(cstr(alt), cstr(mode_r));
+    fp = fopen(alt, "r");
+  }
+  if (fp == 0) {
+    var exe_path: uint8[272];
+    var got: int32 = GetModuleFileNameA(0, &exe_path[0], 260);
+    if (got > 0) {
+      var last: int32 = find_last_slash(&exe_path[0], got);
+      if (last >= 0) {
+        exe_path[last + 1] = 0;
+        var prefix_len: int32 = last + 1;
+        var copy_len: int32 = filename.length;
+        if (copy_len > 200) { copy_len = 200; }
+        if (prefix_len + copy_len < 270) {
+          memcpy(&exe_path[prefix_len], filename.chars, copy_len);
+          exe_path[prefix_len + copy_len] = 0;
+          fp = fopen(&exe_path[0], "r");
+        }
+      }
+    }
   }
   if (fp == 0) {
     send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
     send_all(client, HTTP_404_BODY.chars, 9);
-    return;
+    return 404;
   }
   defer fclose(fp);
   var buf: cstring = malloc(65536);
   if (buf == 0) {
     send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
     send_all(client, HTTP_404_BODY.chars, 9);
-    return;
+    return 404;
   }
   defer free(buf);
   var n: int64 = fread(buf, 1, 65536, fp);
   if (n <= 0) {
     send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
     send_all(client, HTTP_404_BODY.chars, 9);
-    return;
+    return 404;
   }
   var send_len: int32 = n;
   send_all(client, header.chars, header.length);
   send_all(client, buf, send_len);
+  return 200;
 }
 
 // Serve benchmarks.json (generated by tools/benchmark/run-benchmarks.ps1).
-// Tries "benchmarks.json" (CWD=web/) then "web/benchmarks.json" (CWD=project root).
+// Tries CWD, web/, then exe dir.
 function serve_benchmarks_json(client: int64) {
-  var fp: cstring = fopen(cstr(fn_benchmarks_json), cstr(mode_r));
+  var fp: cstring = fopen(fn_benchmarks_json, "r");
   if (fp == 0) {
-    var fn_alt: string = "web/benchmarks.json";
-    fp = fopen(cstr(fn_alt), cstr(mode_r));
+    fp = fopen("web/benchmarks.json", "r");
+  }
+  if (fp == 0) {
+    var exe_path: uint8[272];
+    var got: int32 = GetModuleFileNameA(0, &exe_path[0], 260);
+    if (got > 0) {
+      var last: int32 = find_last_slash(&exe_path[0], got);
+      if (last >= 0) {
+        exe_path[last + 1] = 0;
+        var prefix_len: int32 = last + 1;
+        var fname: string = "benchmarks.json";
+        var copy_len: int32 = fname.length;
+        if (prefix_len + copy_len < 270) {
+          memcpy(&exe_path[prefix_len], fname.chars, copy_len);
+          exe_path[prefix_len + copy_len] = 0;
+          fp = fopen(&exe_path[0], "r");
+        }
+      }
+    }
   }
   if (fp == 0) {
     var empty: string = "{\"benchmarks\":[],\"failed\":[],\"generated\":null}";
@@ -378,7 +497,7 @@ function serve_forum_index(client: int64, show_err_empty: int32) {
   send_all(client, out.chars, out.length);
 
   if (mutex_lock_infinite(file_mutex) != 1) { return; }
-  var fp: cstring = fopen(cstr(fn_threads), cstr(mode_r));
+  var fp: cstring = fopen(fn_threads, "r");
   if (fp != 0) {
     var line_buf: uint8[512];
     var line_num: int32 = 1;
@@ -428,7 +547,7 @@ function serve_forum_thread(client: int64, thread_id: int32) {
   title_buf[6] = 110;
   title_buf[7] = 0;
 
-  var fp: cstring = fopen(cstr(fn_threads), cstr(mode_r));
+  var fp: cstring = fopen(fn_threads, "r");
   if (fp != 0) {
     var line_buf: uint8[512];
     var line_num: int32 = 1;
@@ -463,7 +582,7 @@ function serve_forum_thread(client: int64, thread_id: int32) {
   var posts_fn: uint8[32];
   build_posts_filename(&posts_fn[0], thread_id);
   var had_posts: int32 = 0;
-  fp = fopen(&posts_fn[0], cstr(mode_r));
+  fp = fopen(&posts_fn[0], "r");
   if (fp != 0) {
     var line_buf: uint8[2048];
     while (fgets(&line_buf[0], 2048, fp) != 0) {
@@ -492,67 +611,68 @@ function serve_forum_thread(client: int64, thread_id: int32) {
   send_all(client, FORUM_THREAD_END2.chars, FORUM_THREAD_END2.length);
 }
 
-// Handle POST /forum (new thread): append title to threads.txt
-function handle_post_new_thread(client: int64, buf: cstring, n: int32) {
+// Handle POST /forum (new thread): append title to threads.txt. Returns 302 on redirect, 200 on form.
+function handle_post_new_thread(client: int64, buf: cstring, n: int32) -> int32 {
   var body_start: int32 = find_body_start(buf, n);
   var body_len: int32 = n - body_start;
   if (dbg_on != 0) {
-    dbg(cstr(dbg_bs), body_start);
-    dbg(cstr(dbg_bl), body_len);
+    dbg(cstr(" body_start="), body_start);
+    dbg(cstr(" body_len="), body_len);
   }
   var title_buf: uint8[256];
-  var got: int32 = extract_form_value(buf, body_start, body_len, cstr(key_title), 5, &title_buf[0], 256);
-  if (dbg_on != 0) { dbg(cstr(dbg_title), got); }
+  var got: int32 = extract_form_value(buf, body_start, body_len, cstr("title"), 5, &title_buf[0], 256);
+  if (dbg_on != 0) { dbg(cstr(" title_len="), got); }
   if (got > 0) {
-    if (mutex_lock_infinite(file_mutex) != 1) { serve_forum_index(client, got == 0); return; }
+    if (mutex_lock_infinite(file_mutex) != 1) { serve_forum_index(client, got == 0); return 200; }
     var count: int32 = count_threads_impl();
-    var fp: cstring = fopen(cstr(fn_threads), cstr(mode_a));
+    var fp: cstring = fopen(fn_threads, "a");
     if (dbg_on != 0) {
-      if (fp != 0) { dbg_msg(cstr(dbg_fopen_ok)); } else { dbg_msg(cstr(dbg_fopen_fail)); }
+      if (fp != 0) { dbg_msg(cstr(" fopen_ok")); } else { dbg_msg(cstr(" fopen_fail")); }
     }
     if (fp != 0) {
       fputs(&title_buf[0], fp);
-      fputs(cstr(nl), fp);
+      fputs("\n", fp);
       fclose(fp);
       mutex_unlock(file_mutex);
       var new_id: int32 = count + 1;
       var loc_buf: uint8[32];
       build_forum_thread_url(&loc_buf[0], new_id);
       send_redirect(client, &loc_buf[0]);
-      return;
+      return 302;
     }
     mutex_unlock(file_mutex);
   }
   serve_forum_index(client, got == 0);
+  return 200;
 }
 
-// Handle POST /forum?thread=N (reply): append body to posts_N.txt
-function handle_post_reply(client: int64, buf: cstring, n: int32, thread_id: int32) {
+// Handle POST /forum?thread=N (reply): append body to posts_N.txt. Returns 302.
+function handle_post_reply(client: int64, buf: cstring, n: int32, thread_id: int32) -> int32 {
   var body_start: int32 = find_body_start(buf, n);
   var body_len: int32 = n - body_start;
   if (dbg_on != 0) {
-    dbg(cstr(dbg_bs), body_start);
-    dbg(cstr(dbg_bl), body_len);
+    dbg(cstr(" body_start="), body_start);
+    dbg(cstr(" body_len="), body_len);
   }
   var post_buf: uint8[2048];
-  var got: int32 = extract_form_value(buf, body_start, body_len, cstr(key_body), 4, &post_buf[0], 2048);
-  if (dbg_on != 0) { dbg(cstr(dbg_title), got); }
+  var got: int32 = extract_form_value(buf, body_start, body_len, cstr("body"), 4, &post_buf[0], 2048);
+  if (dbg_on != 0) { dbg(cstr(" title_len="), got); }
   if (got > 0) {
     if (mutex_lock_infinite(file_mutex) != 1) {
       var loc_buf: uint8[32];
       build_forum_thread_url(&loc_buf[0], thread_id);
       send_redirect(client, &loc_buf[0]);
-      return;
+      return 302;
     }
     var posts_fn: uint8[32];
     build_posts_filename(&posts_fn[0], thread_id);
-    var fp: cstring = fopen(&posts_fn[0], cstr(mode_a));
+    var fp: cstring = fopen(&posts_fn[0], "a");
     if (dbg_on != 0) {
-      if (fp != 0) { dbg_msg(cstr(dbg_fopen_ok)); } else { dbg_msg(cstr(dbg_fopen_fail)); }
+      if (fp != 0) { dbg_msg(cstr(" fopen_ok")); } else { dbg_msg(cstr(" fopen_fail")); }
     }
     if (fp != 0) {
       fputs(&post_buf[0], fp);
-      fputs(cstr(nl), fp);
+      fputs("\n", fp);
       fclose(fp);
     }
     mutex_unlock(file_mutex);
@@ -560,38 +680,46 @@ function handle_post_reply(client: int64, buf: cstring, n: int32, thread_id: int
   var loc_buf: uint8[32];
   build_forum_thread_url(&loc_buf[0], thread_id);
   send_redirect(client, &loc_buf[0]);
+  return 302;
 }
 
-// Route and handle a single HTTP request. buf contains the full request, n = length.
-function handle_request(client: int64, buf: cstring, n: int32) {
+// Route and handle a single HTTP request asynchronously. buf contains the full
+// request, n = length. Returns HTTP status code (200, 302, 404).
+async fn handle_request_async(client: int64, buf: cstring, n: int32) -> int32 {
   if (is_get(buf, n) == 1) {
     if (is_health(buf, n) == 1) {
       send_all(client, HTTP_HEALTH_HEADER.chars, HTTP_HEALTH_HEADER.length);
       send_all(client, HTTP_HEALTH_BODY.chars, 2);
+      return 200;
     } else if (is_root(buf, n) == 1) {
-      serve_static_html(client, fn_index, HTTP_PAGE_HEADER);
+      return serve_static_html(client, fn_index, HTTP_PAGE_HEADER);
     } else if (is_benchmarks_json(buf, n) == 1) {
       serve_benchmarks_json(client);
+      return 200;
     } else if (is_benchmarks(buf, n) == 1) {
-      serve_static_html(client, fn_benchmarks_html, HTTP_BENCHMARKS_HEADER);
+      return serve_static_html(client, fn_benchmarks_html, HTTP_BENCHMARKS_HEADER);
     } else if (is_docs(buf, n) == 1) {
-      serve_static_html(client, fn_docs, HTTP_DOCS_HEADER);
+      return serve_static_html(client, fn_docs, HTTP_DOCS_HEADER);
     } else if (is_forum(buf, n, 4) == 1) {
       var tid: int32 = get_thread_id(buf, n, 4);
       if (tid > 0) {
         var max_tid: int32 = count_threads();
         if (tid <= max_tid) {
           serve_forum_thread(client, tid);
+          return 200;
         } else {
           send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
           send_all(client, HTTP_404_BODY.chars, 9);
+          return 404;
         }
       } else {
         serve_forum_index(client, 0);
+        return 200;
       }
     } else {
       send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
       send_all(client, HTTP_404_BODY.chars, 9);
+      return 404;
     }
   } else if (is_post(buf, n) == 1) {
     if (is_forum(buf, n, 5) == 1) {
@@ -599,21 +727,24 @@ function handle_request(client: int64, buf: cstring, n: int32) {
       if (tid > 0) {
         var max_tid: int32 = count_threads();
         if (tid <= max_tid) {
-          handle_post_reply(client, buf, n, tid);
+          return handle_post_reply(client, buf, n, tid);
         } else {
           send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
           send_all(client, HTTP_404_BODY.chars, 9);
+          return 404;
         }
       } else {
-        handle_post_new_thread(client, buf, n);
+        return handle_post_new_thread(client, buf, n);
       }
     } else {
       send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
       send_all(client, HTTP_404_BODY.chars, 9);
+      return 404;
     }
   } else {
     send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
     send_all(client, HTTP_404_BODY.chars, 9);
+    return 404;
   }
 }
 
@@ -641,7 +772,9 @@ function handle_connection(client: int64) {
     }
   }
   if (n > 0) {
-    handle_request(client, recv_buf, n);
+    var request_future: Future<int32> = handle_request_async(client, recv_buf, n);
+    var status: int32 = await request_future;
+    log_request(client, recv_buf, n, status);
   }
   free(recv_buf);
   closesocket(client);
@@ -726,7 +859,8 @@ function main() -> int32 {
   }
 
   file_mutex = mutex_create();
-  if (file_mutex == 0) {
+  log_mutex = mutex_create();
+  if (file_mutex == 0 || log_mutex == 0) {
     closesocket(sock);
     net_cleanup();
     return 1;

@@ -15,19 +15,53 @@ var buf: uint8[1024];
 
 ## Functions
 
-Functions are declared with `function`, a name, parameters in parentheses, an optional return type, and a body. The return type can use `->` or `:`. Omitting the return type indicates a void function (no return value).
+Functions are declared with `function` (or the shorthand `fn`), a name, parameters in parentheses, an optional return type, and a body. The return type can use `->` or `:`. Omitting the return type indicates a void function (no return value).
 
 ```meth
 function add(a: int32, b: int32) -> int32 {
   return a + b;
 }
 
-function greet() {  // void return
+fn greet() {  // void return
   // ...
 }
 ```
 
 A function named `main` with signature `() -> int32` serves as the program entry point when present. The compiler emits `_start` which calls `main` and passes its return value to the runtime.
+
+## Async Functions
+
+Async functions are declared with `async function` or `async fn`.
+
+```meth
+async function fetch_count() -> int32 {
+  return 42;
+}
+
+async fn fetch_value() -> int32 {
+  return 7;
+}
+```
+
+Important behavior:
+
+- The declared return type is the payload type.
+- Calling an async function returns `Future<payload>`.
+- `await` unwraps the future and yields the payload value.
+- Async functions use the runtime task model described in [Async and Sync Execution](async.md).
+
+Example:
+
+```meth
+async fn add_one(x: int32) -> int32 {
+  return x + 1;
+}
+
+function main() -> int32 {
+  var f: Future<int32> = add_one(41);
+  return await f;
+}
+```
 
 ## Generic Functions
 

@@ -37,10 +37,11 @@ The compiler runs these phases in order:
 2. **Parsing** - build AST
 3. **Import resolution** - resolve and inline `import` directives
 4. **Monomorphization** - expand generic functions and structs into concrete instantiations
-5. **Type checking** - semantic analysis and symbol resolution
-6. **IR lowering** - convert AST to intermediate representation
-7. **Optimization** (optional, `-O`) - copy/constant propagation, integer folding/simplification, branch cleanup, unreachable IR cleanup, and control-flow/codegen branch peepholes
-8. **Code generation** - emit x86-64 assembly or, on Windows with `--emit-obj`, a COFF object
+5. **Async rewrite** - transform `async function` / `async fn` bodies into runtime-backed future wrappers and worker entry functions
+6. **Type checking** - semantic analysis and symbol resolution
+7. **IR lowering** - convert AST to intermediate representation
+8. **Optimization** (optional, `-O`) - copy/constant propagation, integer folding/simplification, branch cleanup, unreachable IR cleanup, and control-flow/codegen branch peepholes
+9. **Code generation** - emit x86-64 assembly or, on Windows with `--emit-obj`, a COFF object
 
 `--release` uses the same optimization pipeline as `-O` and additionally lowers without runtime null/bounds trap checks. Use `-O` for optimized builds that still keep those generated checks.
 
@@ -62,13 +63,40 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 2. Optional extra libraries: `methlang --build --emit-obj --linker internal main.meth -o main.exe --link-arg -lws2_32`
 3. Assembly/auto path: `methlang --build main.meth -o main.exe`
 
-`--build --emit-obj --linker internal` keeps the target build inside Methlang's object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. `--build` with `--linker auto` tries the internal linker first and falls back to external linkers if needed. If you do not pass `--emit-obj`, the build still goes through assembly and requires `NASM`. The packaged GC/runtime is part of the Methlang installation/build output; you do not need to add `gc.c` to each project.
+`--build --emit-obj --linker internal` keeps the target build inside Methlang's object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. `--build` with `--linker auto` tries the internal linker first and falls back to external linkers if needed. If you do not pass `--emit-obj`, the build still goes through assembly and requires `NASM`. The packaged runtime is part of the Methlang installation/build output; you do not need to add `gc.c` or `async_runtime.c` to each project manually.
+
+### Async Executor Runtime Tuning
+
+The async runtime now uses a bounded worker-pool executor. You can tune it at runtime:
+
+- `METH_ASYNC_WORKERS=<N>` sets the pool worker count.
+- `METH_ASYNC_QUEUE_CAPACITY=<M>` sets bounded queue capacity.
+
+If neither is set, defaults are chosen by the runtime (worker count from logical CPUs, bounded queue capacity derived from worker count).
+
+For embedding or C interop, call `meth_async_runtime_configure(worker_count, queue_capacity)` before the first async task starts.
+
+For deterministic teardown in embedders/tests, use:
+
+- `meth_async_runtime_shutdown(METH_ASYNC_SHUTDOWN_DRAIN, timeout_ms)` for graceful completion.
+- `meth_async_runtime_shutdown(METH_ASYNC_SHUTDOWN_ABORT, timeout_ms)` for immediate stop/purge.
+- `meth_async_runtime_reset()` only if you intentionally need re-init after `STOPPED` in the same process lifetime.
+
+Call async shutdown before `gc_shutdown()` so worker threads are detached and joined before GC global state is released.
 
 ### Manual Assembly/Link Flow
 
 1. Compile: `methlang main.meth -o main.s`
 2. Assemble: `nasm -f win64 main.s -o main.o` (or `-f elf64` on Linux)
-3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, link bundled `runtime/gc.o` from your Methlang installation/build output. See [Garbage Collector](garbage-collector.md).
+3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, string concatenation, or async features, link the bundled runtime objects from your Methlang installation/build output. See [Garbage Collector](garbage-collector.md) and [Async and Sync Execution](async.md).
+
+Programs that use async features also need the bundled async runtime object:
+
+```bash
+gcc -nostartfiles main.o path/to/runtime/gc.o path/to/runtime/async_runtime.o -o main -lkernel32
+```
+
+On POSIX toolchains, the bundled async runtime uses a pthread-backed implementation. Add pthread linkage as required by your environment.
 
 **Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, you must also link bundled `runtime/methlang_entry.o` from your Methlang installation/build output. On Windows, link with `-lshell32` as well: `gcc -nostartfiles main.o gc.o methlang_entry.o -o main -lkernel32 -lshell32`.
 

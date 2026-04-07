@@ -76,11 +76,11 @@ for (var i: int32 = 0; i < 10; i = i + 1) {
 
 ## Switch
 
-The `switch` statement evaluates an expression and compares it to each `case` value. Case values must be compile-time constant integer expressions (including enum variants). When a case matches, its body runs. Use `break` to exit the switch. Use `continue` inside a loop that contains the switch to continue the loop. Only one `default` clause is allowed.
+The `switch` statement evaluates an expression and compares it to each `case` value. Case values must be compile-time constant integer expressions (including enum variants and `true`/`false`). When a case matches, its body runs. Use `break` to exit the switch. Use `continue` inside a loop that contains the switch to continue the loop. Only one `default` clause is allowed.
 
 **Fall-through:** Unlike some languages, Methlang does not enforce `break`. If you omit it, execution falls through to the next case (C-style behavior). To avoid accidental bugs, always end each case with `break` explicitly unless you intend fall-through.
 
-**No case matches, no default:** If no case matches and there is no `default` clause, execution continues silently after the switch. No error is raised.
+**Exhaustiveness:** `switch` over raw integers may omit matching cases and continue after the statement if no case matches. `switch` over `enum` or `bool` must be exhaustive unless a `default` clause is present.
 
 ```meth
 switch (expr) {
@@ -94,6 +94,29 @@ switch (expr) {
     // ...
 }
 ```
+
+## Match
+
+The `match` statement branches on a tagged enum and optionally binds the payload of a variant. The subject expression must have a tagged-enum type.
+
+```meth
+match (value) {
+  case Some(v): {
+    return v;
+  }
+  case None: {
+    return 0;
+  }
+}
+```
+
+**Arms:** Each `case` arm has a variant name and a block body. Use `case VariantName(binding):` when that variant carries a payload and you want to bind it to a local name. Use `case VariantName:` for payloadless variants.
+
+**Default arm:** `default:` is allowed. Without `default`, the match must cover every variant of the tagged enum.
+
+**No fall-through:** `match` arms do not fall through. Once an arm matches, its block runs and control continues after the `match`.
+
+**Statement-only:** `match` is currently a statement, not an expression. Use assignments or `return` inside the arm bodies when you want to produce a value.
 
 ## Break and Continue
 
@@ -125,6 +148,39 @@ while (1) {
 return;
 return value;
 ```
+
+## Async Waiting and Cancellation
+
+Async execution composes with ordinary control flow, but the current model is blocking and thread-backed rather than coroutine-based.
+
+```meth
+async fn worker() -> int32 {
+  while (cancelled() == 0) {
+    // do work
+  }
+  return 0;
+}
+
+function main() -> int32 {
+  var future: Future<int32> = worker();
+
+  if (should_stop) {
+    cancel(future);
+  }
+
+  return await future;
+}
+```
+
+Important control-flow consequences:
+
+- `await` blocks the current thread until the awaited future completes.
+- In a synchronous function, that means the caller thread blocks.
+- In an asynchronous function, that means the async worker thread blocks.
+- `cancel(future)` requests cancellation but does not force an immediate exit.
+- A cancelable async loop must poll `cancelled()` explicitly.
+
+See [Async and Sync Execution](async.md) and [Expressions](expressions.md#sync-vs-async-calls) for the full runtime model.
 
 ## Short-Circuit Evaluation
 

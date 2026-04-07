@@ -1,0 +1,17 @@
+async fn worker(): int32 {
+    while (cancelled() == 0) {
+    }
+
+    return 0;
+}
+
+function main(): int32 {
+    var future: Future<int32> = worker();
+    cancel(future);
+
+    if (await future == 0) {
+        return 17;
+    }
+
+    return 1;
+}

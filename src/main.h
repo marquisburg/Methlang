@@ -9,6 +9,7 @@
 #include "semantic/register_allocator.h"
 #include "semantic/symbol_table.h"
 #include "semantic/monomorphize.h"
+#include "semantic/async_rewrite.h"
 #include "semantic/type_checker.h"
 #include <stddef.h>
 
@@ -38,6 +39,7 @@ typedef struct {
   const char *stdlib_directory;
   int prelude;
   LinkerMode linker_mode;
+  AsyncRewriteModel async_model;
 } CompilerOptions;
 
 // Function declarations

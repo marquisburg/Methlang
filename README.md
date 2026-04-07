@@ -9,6 +9,7 @@ It is designed for systems-style control with stronger semantics than raw assemb
 - Compiles to x86-64 NASM assembly and Windows COFF objects
 - Strong typing with pointers, arrays, structs, enums, and function pointers
 - Control flow: `if`, `while`, `for`, `switch`, `defer`, `errdefer`
+- Async execution with `async`, `await`, `Future<T>`, and cooperative cancellation
 - C interop via `extern` and `cstring`
 - Optional conservative GC runtime for `new` and GC-backed string concatenation
 - Standard library modules for I/O, conversion, networking, process, threading, and more
@@ -96,6 +97,7 @@ Available topics: `build`, `gc`, `interop`, `stdlib`, `web`.
 - `methlang --build --emit-obj --linker internal` uses the bundled runtime objects plus Methlang's internal PE linker on Windows.
 - `methlang --build` in `auto` mode tries the internal linker first and falls back to external linkers if needed.
 - If you use the manual assembly/link flow, link bundled `runtime/gc.o` from your Methlang installation when using `new` or string concatenation.
+- If you use async features, also link bundled `runtime/async_runtime.o`.
 - Compile with `-s` to embed runtime crash traceback support, or use `-d` to enable it alongside normal debug output.
 - On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated runtime traps with Meth function/source frames.
 - Networking examples may require extra libraries (for example `--link-arg -lws2_32` on Windows).
@@ -149,6 +151,7 @@ See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](d
 - Types: [docs/types.md](docs/types.md)
 - Expressions: [docs/expressions.md](docs/expressions.md)
 - Control flow: [docs/control-flow.md](docs/control-flow.md)
+- Async and sync execution: [docs/async.md](docs/async.md)
 - C interop: [docs/c-interop.md](docs/c-interop.md)
 - Garbage collector: [docs/garbage-collector.md](docs/garbage-collector.md)
 - Standard library: [docs/standard-library.md](docs/standard-library.md)

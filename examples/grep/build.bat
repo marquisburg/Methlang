@@ -11,7 +11,7 @@ if not exist bin\methlang.exe (
 )
 
 echo Building grep.meth (native compiler backend)...
-bin\methlang.exe --build --emit-obj --linker internal --release examples\grep\grep.meth -o examples\grep\grep.exe --stdlib stdlib
+bin\methlang.exe --build --emit-obj --linker internal --release examples\grep\grep.meth -o examples\grep\grep.exe
 if %ERRORLEVEL% NEQ 0 (
     echo Methlang build failed.
     exit /b 1
