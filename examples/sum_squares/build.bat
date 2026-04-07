@@ -11,7 +11,7 @@ if not exist bin\methlang.exe (
 )
 
 echo Building sum_squares.meth (native compiler backend)...
-bin\methlang.exe --build --emit-obj --linker internal --release examples\sum_squares\sum_squares.meth -o examples\sum_squares\sum_squares.exe --stdlib stdlib
+bin\methlang.exe --build --emit-obj --linker internal --release examples\sum_squares\sum_squares.meth -o examples\sum_squares\sum_squares.exe
 if %ERRORLEVEL% NEQ 0 (
     echo Methlang build failed.
     exit /b 1

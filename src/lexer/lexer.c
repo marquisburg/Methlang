@@ -594,6 +594,12 @@ Token lexer_next_token(Lexer *lexer) {
       token.type = TOKEN_STRUCT;
     else if (strcmp(token.value, "enum") == 0)
       token.type = TOKEN_ENUM;
+    else if (strcmp(token.value, "trait") == 0)
+      token.type = TOKEN_TRAIT;
+    else if (strcmp(token.value, "impl") == 0)
+      token.type = TOKEN_IMPL;
+    else if (strcmp(token.value, "where") == 0)
+      token.type = TOKEN_WHERE;
     else if (strcmp(token.value, "method") == 0)
       token.type = TOKEN_METHOD;
     else if (strcmp(token.value, "return") == 0)
@@ -628,6 +634,12 @@ Token lexer_next_token(Lexer *lexer) {
       token.type = TOKEN_NEW;
     else if (strcmp(token.value, "fn") == 0)
       token.type = TOKEN_FN;
+    else if (strcmp(token.value, "match") == 0)
+      token.type = TOKEN_MATCH;
+    else if (strcmp(token.value, "async") == 0)
+      token.type = TOKEN_ASYNC;
+    else if (strcmp(token.value, "await") == 0)
+      token.type = TOKEN_AWAIT;
 
     // Type keywords
     else if (strcmp(token.value, "int8") == 0)

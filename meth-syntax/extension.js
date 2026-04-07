@@ -5,7 +5,9 @@
  * 1. Regex-based: unsupported operators, invalid literals, etc. (instant)
  * 2. Compiler-backed: run Methlang for real semantic errors (type, scope, etc.)
  *
- * Compiler diagnostics run on save (or configurable). Regex runs on every edit.
+ * Compiler diagnostics run on open, save, and when the extension activates with a .meth file open.
+ * Regex runs on every edit (debounced). Regex-only passes merge with cached compiler diagnostics
+ * (same document version) so they cannot wipe compiler results after save or focus changes.
  */
 
 const vscode = require('vscode');
@@ -16,9 +18,18 @@ const os = require('os');
 
 /** @type {vscode.DiagnosticCollection} */
 let diagnosticCollection;
+/** @type {vscode.OutputChannel | null} */
+let methOutputChannel = null;
 /** @type {NodeJS.Timeout | null} */
 let debounceTimer = null;
 const DEBOUNCE_MS = 150;
+
+/** Cached compiler diagnostics: invalidated when document version changes (any edit). */
+/** @type {Map<string, { version: number, diagnostics: vscode.Diagnostic[] }>} */
+const compilerDiagnosticsCache = new Map();
+/** URIs currently running methlang (regex-only updates skipped to avoid wiping results mid-compile). */
+/** @type {Set<string>} */
+const compilingUriKeys = new Set();
 
 /**
  * @param {vscode.ExtensionContext} context
@@ -27,10 +38,33 @@ function activate(context) {
   diagnosticCollection = vscode.languages.createDiagnosticCollection('meth');
   context.subscriptions.push(diagnosticCollection);
 
+  methOutputChannel = vscode.window.createOutputChannel('Methlang');
+  context.subscriptions.push(methOutputChannel);
+
   const lintDocument = async (doc, runCompiler = false) => {
     if (!doc || doc.languageId !== 'meth') return;
+    const uriKey = doc.uri.toString();
+
+    if (!runCompiler && compilingUriKeys.has(uriKey)) {
+      return;
+    }
+
     const regexDiags = lintRegex(doc);
-    const compilerDiags = runCompiler ? await lintCompiler(doc) : [];
+    let compilerDiags = [];
+
+    if (runCompiler) {
+      compilingUriKeys.add(uriKey);
+      try {
+        compilerDiags = await lintCompiler(doc);
+        compilerDiagnosticsCache.set(uriKey, { version: doc.version, diagnostics: compilerDiags });
+      } finally {
+        compilingUriKeys.delete(uriKey);
+      }
+    } else {
+      const cached = compilerDiagnosticsCache.get(uriKey);
+      compilerDiags = cached && cached.version === doc.version ? cached.diagnostics : [];
+    }
+
     const merged = mergeDiagnostics(regexDiags, compilerDiags);
     diagnosticCollection.set(doc.uri, merged);
   };
@@ -41,12 +75,18 @@ function activate(context) {
   };
 
   for (const doc of vscode.workspace.textDocuments) {
-    if (doc.languageId === 'meth') lintDocument(doc, false);
+    if (doc.languageId === 'meth') lintDocument(doc, true);
   }
 
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor((editor) => {
-      if (editor?.document?.languageId === 'meth') lintDocument(editor.document, false);
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      if (doc.languageId === 'meth') lintDocument(doc, true);
+    }),
+    vscode.workspace.onDidCloseTextDocument((doc) => {
+      if (doc.languageId !== 'meth') return;
+      const k = doc.uri.toString();
+      compilerDiagnosticsCache.delete(k);
+      compilingUriKeys.delete(k);
     }),
     vscode.workspace.onDidChangeTextDocument((e) => {
       if (e.document.languageId === 'meth') debouncedLint(e.document);
@@ -183,12 +223,38 @@ function getConfig() {
   };
 }
 
-function findCompiler(workspaceRoot) {
+/**
+ * Walk up from `startDir` looking for bin/methlang(.exe) so a workspace opened on a
+ * subfolder (e.g. only `methlang/`) still finds the repo compiler in `../bin/`.
+ * @param {string} startDir
+ * @returns {string | null}
+ */
+function findCompilerInAncestors(startDir) {
+  let dir = path.resolve(startDir);
+  for (let depth = 0; depth < 16; depth++) {
+    const win = path.join(dir, 'bin', 'methlang.exe');
+    const unix = path.join(dir, 'bin', 'methlang');
+    if (fs.existsSync(win)) return win;
+    if (fs.existsSync(unix)) return unix;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * @param {string} workspaceRoot
+ * @param {string} filePath - current .meth file path (used for ancestor search)
+ */
+function findCompiler(workspaceRoot, filePath) {
   const cfg = getConfig();
   if (cfg.compilerPath) {
     const p = path.isAbsolute(cfg.compilerPath) ? cfg.compilerPath : path.join(workspaceRoot, cfg.compilerPath);
-    return fs.existsSync(p) ? p : null;
+    if (fs.existsSync(p)) return p;
   }
+  const fromAncestors = findCompilerInAncestors(path.dirname(filePath));
+  if (fromAncestors) return fromAncestors;
   const candidates = [
     path.join(workspaceRoot, 'bin', 'methlang.exe'),
     path.join(workspaceRoot, 'bin', 'methlang'),
@@ -198,12 +264,14 @@ function findCompiler(workspaceRoot) {
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
-  return null;
+  return process.platform === 'win32' ? 'methlang.exe' : 'methlang';
 }
 
 /**
  * Run Methlang compiler and parse stderr/stdout for errors.
- * Compiler prints: "error: msg\n  --> line X, column Y"
+ * Compiler prints either:
+ *   error: msg\n  --> path:line:column  (when filename is known), or
+ *   error: msg\n  --> line N, column M  (when filename is absent)
  */
 async function lintCompiler(document) {
   const cfg = getConfig();
@@ -213,12 +281,9 @@ async function lintCompiler(document) {
   if (!filePath || !fs.existsSync(filePath)) return [];
 
   const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri?.fsPath || path.dirname(filePath);
-  const compiler = findCompiler(workspaceRoot);
+  const compiler = findCompiler(workspaceRoot, filePath);
   if (!compiler) return [];
 
-  const stdlib = cfg.stdlibPath
-    ? (path.isAbsolute(cfg.stdlibPath) ? cfg.stdlibPath : path.join(workspaceRoot, cfg.stdlibPath))
-    : path.join(workspaceRoot, 'stdlib');
   const tempOut = path.join(os.tmpdir(), `meth-lint-${Date.now()}.s`);
 
   const args = [
@@ -226,8 +291,13 @@ async function lintCompiler(document) {
     '-o', tempOut,
     '-I', path.dirname(filePath),
     '-I', workspaceRoot,
-    '--stdlib', fs.existsSync(stdlib) ? stdlib : path.join(workspaceRoot, 'stdlib'),
   ];
+  if (cfg.stdlibPath) {
+    const stdlib = path.isAbsolute(cfg.stdlibPath)
+      ? cfg.stdlibPath
+      : path.join(workspaceRoot, cfg.stdlibPath);
+    args.push('--stdlib', stdlib);
+  }
 
   return new Promise((resolve) => {
     execFile(compiler, args, {
@@ -238,27 +308,80 @@ async function lintCompiler(document) {
       try { fs.unlinkSync(tempOut); } catch (_) {}
 
       const output = (stdout || '') + (stderr || '');
-      const diagnostics = parseCompilerOutput(output, document);
+      const diagnostics = parseCompilerOutput(output, document, workspaceRoot);
+
+      if (diagnostics.length === 0 && err && /** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT') {
+        methOutputChannel?.appendLine(
+          `[Methlang] Compiler not found: ${compiler}\n` +
+            `Set meth.linter.compilerPath to your methlang executable, or add it to PATH.\n` +
+            `Tried repo bin/ by walking up from: ${path.dirname(filePath)}`
+        );
+        methOutputChannel?.show(true);
+      } else if (diagnostics.length === 0 && output.trim().length > 0 && /error:/i.test(output)) {
+        methOutputChannel?.appendLine(
+          `[Methlang] Could not parse compiler output for ${filePath}. First lines:\n${output.slice(0, 800)}`
+        );
+      }
 
       resolve(diagnostics);
     });
   });
 }
 
-/** Strip ANSI codes and parse "error: msg" / "  --> line X, column Y" */
-function parseCompilerOutput(output, document) {
+/**
+ * Strip ANSI codes and parse compiler diagnostics.
+ * @param {string} workspaceRoot - used to resolve relative paths in `path:line:column` locations
+ */
+function parseCompilerOutput(output, document, workspaceRoot) {
   const diagnostics = [];
   const stripped = output.replace(/\x1b\[[0-9;]*m/g, '');
+  const lines = stripped.split(/\r?\n/);
 
-  // Match: "error: message" or "warning: message" followed by "  --> line N, column M"
-  const errBlockRe = /(?:error|warning|note):\s*([^\n]+)\n\s*-->\s*line\s+(\d+),\s*column\s+(\d+)/g;
-  let m;
-  while ((m = errBlockRe.exec(stripped)) !== null) {
-    const msg = m[1].trim();
-    const line = Math.max(0, parseInt(m[2], 10) - 1);
-    const col = Math.max(0, parseInt(m[3], 10) - 1);
-    const blockStart = stripped.substring(m.index, m.index + 15);
-    const severity = blockStart.includes('warning') ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error;
+  const docPath = path.normalize(document.uri.fsPath);
+
+  /** @param {string} p */
+  function resolveReportedPath(p) {
+    const trimmed = p.trim();
+    if (path.isAbsolute(trimmed)) return path.normalize(trimmed);
+    return path.normalize(path.resolve(workspaceRoot, trimmed));
+  }
+
+  for (let i = 0; i < lines.length - 1; i++) {
+    const header = lines[i].match(/^(error|warning|note):\s*(.+)$/);
+    if (!header) continue;
+
+    const kind = header[1];
+    const msg = header[2].trim();
+    const locText = lines[i + 1];
+    if (!locText || !locText.includes('-->')) continue;
+
+    let line1Based;
+    let col1Based;
+
+    const lineColForm = locText.match(/^\s*-->\s*line\s+(\d+),\s*column\s+(\d+)/);
+    const pathForm = locText.match(/^\s*-->\s*(.+):(\d+):(\d+)\s*$/);
+
+    if (lineColForm) {
+      line1Based = parseInt(lineColForm[1], 10);
+      col1Based = parseInt(lineColForm[2], 10);
+    } else if (pathForm) {
+      const reportedPath = resolveReportedPath(pathForm[1]);
+      if (!pathsEqualish(reportedPath, docPath)) continue;
+      line1Based = parseInt(pathForm[2], 10);
+      col1Based = parseInt(pathForm[3], 10);
+    } else {
+      continue;
+    }
+
+    const severity =
+      kind === 'warning'
+        ? vscode.DiagnosticSeverity.Warning
+        : kind === 'note'
+          ? vscode.DiagnosticSeverity.Information
+          : vscode.DiagnosticSeverity.Error;
+
+    const line = Math.max(0, line1Based - 1);
+    const col = Math.max(0, col1Based - 1);
 
     const safeLine = document.lineCount > 0 ? Math.min(line, document.lineCount - 1) : 0;
     const lineText = document.lineCount > 0 ? document.lineAt(safeLine).text : '';
@@ -274,6 +397,20 @@ function parseCompilerOutput(output, document) {
   }
 
   return diagnostics;
+}
+
+/** Case-insensitive normalized path compare (Windows-friendly; resolves symlinks when possible). */
+function pathsEqualish(a, b) {
+  const na = path.normalize(a).toLowerCase();
+  const nb = path.normalize(b).toLowerCase();
+  if (na === nb) return true;
+  try {
+    const ra = fs.realpathSync(a);
+    const rb = fs.realpathSync(b);
+    return path.normalize(ra).toLowerCase() === path.normalize(rb).toLowerCase();
+  } catch {
+    return false;
+  }
 }
 
 module.exports = { activate, deactivate };

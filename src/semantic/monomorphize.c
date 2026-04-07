@@ -1,24 +1,42 @@
 #include "monomorphize.h"
+#include "../string_intern.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+typedef struct {
+  char *name;
+} TraitDef;
+
+typedef struct {
+  char *trait_name;
+  char *for_type_name;
+} TraitImpl;
 
 typedef struct {
   char *generic_name;
   char **type_args;
   size_t type_arg_count;
   char *mangled_name;
+  SourceLocation location;
 } Instantiation;
 
 typedef struct {
   char *name;
   ASTNode *node;
   char **type_params;
+  char **type_param_traits;
   size_t type_param_count;
   int is_struct; // 1 = struct, 0 = function
 } GenericDef;
 
 typedef struct {
+  ErrorReporter *reporter;
+  int had_error;
+  TraitDef *traits;
+  size_t trait_count;
+  TraitImpl *impls;
+  size_t impl_count;
   GenericDef *defs;
   size_t def_count;
   Instantiation *instances;
@@ -26,7 +44,7 @@ typedef struct {
 } MonoContext;
 
 static char *mangle_name(const char *base, char **type_args,
-                          size_t type_arg_count) {
+                           size_t type_arg_count) {
   size_t len = strlen(base);
   for (size_t i = 0; i < type_arg_count; i++) {
     len += 2 + strlen(type_args[i]);
@@ -55,6 +73,222 @@ static char *mangle_name(const char *base, char **type_args,
   }
 
   return result;
+}
+
+static void mono_report_error(MonoContext *ctx, SourceLocation location,
+                              const char *message) {
+  if (!ctx) {
+    return;
+  }
+
+  ctx->had_error = 1;
+  if (ctx->reporter) {
+    error_reporter_add_error(ctx->reporter, ERROR_SEMANTIC, location, message);
+  }
+}
+
+static void free_string_array(char **values, size_t count) {
+  if (!values) {
+    return;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    free(values[i]);
+  }
+  free(values);
+}
+
+static void mono_free_string(char *value) {
+  if (!value) {
+    return;
+  }
+
+  if (!string_is_interned(value)) {
+    free(value);
+  }
+}
+
+static int mono_has_trait(MonoContext *ctx, const char *trait_name) {
+  if (!ctx || !trait_name) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < ctx->trait_count; i++) {
+    if (strcmp(ctx->traits[i].name, trait_name) == 0) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int mono_add_trait(MonoContext *ctx, const char *trait_name,
+                          SourceLocation location) {
+  if (!ctx || !trait_name) {
+    return 0;
+  }
+
+  if (mono_has_trait(ctx, trait_name)) {
+    char message[512];
+    snprintf(message, sizeof(message), "Duplicate trait declaration '%s'",
+             trait_name);
+    mono_report_error(ctx, location, message);
+    return 0;
+  }
+
+  TraitDef *grown =
+      realloc(ctx->traits, (ctx->trait_count + 1) * sizeof(TraitDef));
+  if (!grown) {
+    mono_report_error(ctx, location,
+                      "Failed to allocate storage for trait declaration");
+    return 0;
+  }
+
+  ctx->traits = grown;
+  ctx->traits[ctx->trait_count].name = strdup(trait_name);
+  if (!ctx->traits[ctx->trait_count].name) {
+    mono_report_error(ctx, location,
+                      "Failed to allocate storage for trait declaration");
+    return 0;
+  }
+
+  ctx->trait_count++;
+  return 1;
+}
+
+static int mono_type_implements_trait(MonoContext *ctx, const char *trait_name,
+                                      const char *type_name) {
+  if (!ctx || !trait_name || !type_name) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < ctx->impl_count; i++) {
+    if (strcmp(ctx->impls[i].trait_name, trait_name) == 0 &&
+        strcmp(ctx->impls[i].for_type_name, type_name) == 0) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int mono_add_impl(MonoContext *ctx, const char *trait_name,
+                         const char *for_type_name, SourceLocation location) {
+  if (!ctx || !trait_name || !for_type_name) {
+    return 0;
+  }
+
+  if (!mono_has_trait(ctx, trait_name)) {
+    char message[512];
+    snprintf(message, sizeof(message),
+             "Unknown trait '%s' in impl declaration", trait_name);
+    mono_report_error(ctx, location, message);
+    return 0;
+  }
+
+  if (mono_type_implements_trait(ctx, trait_name, for_type_name)) {
+    char message[512];
+    snprintf(message, sizeof(message), "Duplicate impl '%s for %s'", trait_name,
+             for_type_name);
+    mono_report_error(ctx, location, message);
+    return 0;
+  }
+
+  TraitImpl *grown =
+      realloc(ctx->impls, (ctx->impl_count + 1) * sizeof(TraitImpl));
+  if (!grown) {
+    mono_report_error(ctx, location,
+                      "Failed to allocate storage for impl declaration");
+    return 0;
+  }
+
+  ctx->impls = grown;
+  ctx->impls[ctx->impl_count].trait_name = strdup(trait_name);
+  ctx->impls[ctx->impl_count].for_type_name = strdup(for_type_name);
+  if (!ctx->impls[ctx->impl_count].trait_name ||
+      !ctx->impls[ctx->impl_count].for_type_name) {
+    free(ctx->impls[ctx->impl_count].trait_name);
+    free(ctx->impls[ctx->impl_count].for_type_name);
+    mono_report_error(ctx, location,
+                      "Failed to allocate storage for impl declaration");
+    return 0;
+  }
+
+  ctx->impl_count++;
+  return 1;
+}
+
+static int mono_add_instantiation(MonoContext *ctx, const char *generic_name,
+                                  char **type_args, size_t type_arg_count,
+                                  SourceLocation location) {
+  char *mangled = NULL;
+  int found = 0;
+  Instantiation *inst = NULL;
+
+  if (!ctx || !generic_name || !type_args) {
+    return 0;
+  }
+
+  mangled = mangle_name(generic_name, type_args, type_arg_count);
+  if (!mangled) {
+    mono_report_error(ctx, location,
+                      "Failed to allocate storage for generic instantiation");
+    return 0;
+  }
+
+  for (size_t i = 0; i < ctx->instance_count; i++) {
+    if (strcmp(ctx->instances[i].mangled_name, mangled) == 0) {
+      found = 1;
+      break;
+    }
+  }
+
+  if (found) {
+    free(mangled);
+    return 1;
+  }
+
+  Instantiation *grown = realloc(ctx->instances,
+                                 (ctx->instance_count + 1) *
+                                     sizeof(Instantiation));
+  if (!grown) {
+    free(mangled);
+    mono_report_error(ctx, location,
+                      "Failed to allocate storage for generic instantiation");
+    return 0;
+  }
+
+  ctx->instances = grown;
+  inst = &ctx->instances[ctx->instance_count];
+  inst->generic_name = strdup(generic_name);
+  inst->type_arg_count = type_arg_count;
+  inst->type_args = malloc(type_arg_count * sizeof(char *));
+  inst->mangled_name = mangled;
+  inst->location = location;
+
+  if (!inst->generic_name || !inst->type_args) {
+    free(inst->generic_name);
+    free(inst->type_args);
+    free(inst->mangled_name);
+    mono_report_error(ctx, location,
+                      "Failed to allocate storage for generic instantiation");
+    return 0;
+  }
+
+  for (size_t i = 0; i < type_arg_count; i++) {
+    inst->type_args[i] = strdup(type_args[i]);
+    if (!inst->type_args[i]) {
+      free_string_array(inst->type_args, i);
+      free(inst->generic_name);
+      free(inst->mangled_name);
+      mono_report_error(ctx, location,
+                        "Failed to allocate storage for generic instantiation");
+      return 0;
+    }
+  }
+
+  ctx->instance_count++;
+  return 1;
 }
 
 static int parse_generic_type_name(const char *type_str, char **out_base,
@@ -143,6 +377,25 @@ static int parse_generic_type_name(const char *type_str, char **out_base,
   *out_args = args;
   *out_arg_count = count;
   return 1;
+}
+
+static void record_generic_type_use(MonoContext *ctx, const char *type_name,
+                                    SourceLocation location) {
+  char *base = NULL;
+  char **args = NULL;
+  size_t arg_count = 0;
+
+  if (!ctx || !type_name) {
+    return;
+  }
+
+  if (!parse_generic_type_name(type_name, &base, &args, &arg_count)) {
+    return;
+  }
+
+  mono_add_instantiation(ctx, base, args, arg_count, location);
+  free(base);
+  free_string_array(args, arg_count);
 }
 
 static char *substitute_type_string(const char *type_str, char **param_names,
@@ -234,18 +487,9 @@ static char *substitute_type_string(const char *type_str, char **param_names,
         }
       }
       if (!found) {
-        ctx->instances =
-            realloc(ctx->instances,
-                    (ctx->instance_count + 1) * sizeof(Instantiation));
-        Instantiation *inst = &ctx->instances[ctx->instance_count];
-        inst->generic_name = strdup(gen_base);
-        inst->type_arg_count = gen_arg_count;
-        inst->type_args = malloc(gen_arg_count * sizeof(char *));
-        for (size_t i = 0; i < gen_arg_count; i++) {
-          inst->type_args[i] = strdup(subst_args[i]);
-        }
-        inst->mangled_name = strdup(mangled);
-        ctx->instance_count++;
+        SourceLocation internal_location = {0, 0};
+        mono_add_instantiation(ctx, gen_base, subst_args, gen_arg_count,
+                               internal_location);
       }
     }
 
@@ -292,7 +536,7 @@ static void substitute_types_in_ast(ASTNode *node, char **param_names,
       char *new_type =
           substitute_type_string(vd->type_name, param_names, arg_names, count, ctx);
       if (new_type) {
-        free(vd->type_name);
+        mono_free_string(vd->type_name);
         vd->type_name = new_type;
       }
     }
@@ -307,7 +551,7 @@ static void substitute_types_in_ast(ASTNode *node, char **param_names,
       char *new_type =
           substitute_type_string(ne->type_name, param_names, arg_names, count, ctx);
       if (new_type) {
-        free(ne->type_name);
+        mono_free_string(ne->type_name);
         ne->type_name = new_type;
       }
     }
@@ -322,7 +566,7 @@ static void substitute_types_in_ast(ASTNode *node, char **param_names,
           char *new_arg = substitute_type_string(ce->type_args[i], param_names,
                                                  arg_names, count, ctx);
           if (new_arg) {
-            free(ce->type_args[i]);
+            mono_free_string(ce->type_args[i]);
             ce->type_args[i] = new_arg;
           }
         }
@@ -479,10 +723,26 @@ static void collect_generic_defs(ASTNode *program, MonoContext *ctx) {
 
   for (size_t i = 0; i < prog->declaration_count; i++) {
     ASTNode *decl = prog->declarations[i];
+    if (decl && decl->type == AST_TRAIT_DECLARATION) {
+      TraitDeclaration *td = (TraitDeclaration *)decl->data;
+      if (td && td->name) {
+        mono_add_trait(ctx, td->name, decl->location);
+      }
+    }
+  }
+
+  for (size_t i = 0; i < prog->declaration_count; i++) {
+    ASTNode *decl = prog->declarations[i];
     if (!decl)
       continue;
 
-    if (decl->type == AST_STRUCT_DECLARATION) {
+    if (decl->type == AST_IMPL_DECLARATION) {
+      ImplDeclaration *impl = (ImplDeclaration *)decl->data;
+      if (impl && impl->trait_name && impl->for_type_name) {
+        mono_add_impl(ctx, impl->trait_name, impl->for_type_name,
+                      decl->location);
+      }
+    } else if (decl->type == AST_STRUCT_DECLARATION) {
       StructDeclaration *sd = (StructDeclaration *)decl->data;
       if (sd && sd->type_param_count > 0) {
         ctx->defs =
@@ -492,8 +752,21 @@ static void collect_generic_defs(ASTNode *program, MonoContext *ctx) {
         def->node = decl;
         def->type_param_count = sd->type_param_count;
         def->type_params = malloc(sd->type_param_count * sizeof(char *));
+        def->type_param_traits = malloc(sd->type_param_count * sizeof(char *));
         for (size_t j = 0; j < sd->type_param_count; j++) {
           def->type_params[j] = strdup(sd->type_params[j]);
+          def->type_param_traits[j] =
+              sd->type_param_traits && sd->type_param_traits[j]
+                  ? strdup(sd->type_param_traits[j])
+                  : NULL;
+          if (def->type_param_traits[j] &&
+              !mono_has_trait(ctx, def->type_param_traits[j])) {
+            char message[512];
+            snprintf(message, sizeof(message),
+                     "Unknown trait '%s' in generic bound on '%s'",
+                     def->type_param_traits[j], sd->name);
+            mono_report_error(ctx, decl->location, message);
+          }
         }
         def->is_struct = 1;
         ctx->def_count++;
@@ -508,8 +781,21 @@ static void collect_generic_defs(ASTNode *program, MonoContext *ctx) {
         def->node = decl;
         def->type_param_count = fd->type_param_count;
         def->type_params = malloc(fd->type_param_count * sizeof(char *));
+        def->type_param_traits = malloc(fd->type_param_count * sizeof(char *));
         for (size_t j = 0; j < fd->type_param_count; j++) {
           def->type_params[j] = strdup(fd->type_params[j]);
+          def->type_param_traits[j] =
+              fd->type_param_traits && fd->type_param_traits[j]
+                  ? strdup(fd->type_param_traits[j])
+                  : NULL;
+          if (def->type_param_traits[j] &&
+              !mono_has_trait(ctx, def->type_param_traits[j])) {
+            char message[512];
+            snprintf(message, sizeof(message),
+                     "Unknown trait '%s' in generic bound on '%s'",
+                     def->type_param_traits[j], fd->name);
+            mono_report_error(ctx, decl->location, message);
+          }
         }
         def->is_struct = 0;
         ctx->def_count++;
@@ -526,38 +812,7 @@ static void collect_type_instantiations(ASTNode *node, MonoContext *ctx) {
   case AST_VAR_DECLARATION: {
     VarDeclaration *vd = (VarDeclaration *)node->data;
     if (vd && vd->type_name) {
-      char *base = NULL;
-      char **args = NULL;
-      size_t arg_count = 0;
-      if (parse_generic_type_name(vd->type_name, &base, &args, &arg_count)) {
-        int found = 0;
-        char *mangled = mangle_name(base, args, arg_count);
-        for (size_t i = 0; i < ctx->instance_count; i++) {
-          if (strcmp(ctx->instances[i].mangled_name, mangled) == 0) {
-            found = 1;
-            break;
-          }
-        }
-        if (!found) {
-          ctx->instances = realloc(
-              ctx->instances,
-              (ctx->instance_count + 1) * sizeof(Instantiation));
-          Instantiation *inst = &ctx->instances[ctx->instance_count];
-          inst->generic_name = strdup(base);
-          inst->type_arg_count = arg_count;
-          inst->type_args = malloc(arg_count * sizeof(char *));
-          for (size_t i = 0; i < arg_count; i++) {
-            inst->type_args[i] = strdup(args[i]);
-          }
-          inst->mangled_name = strdup(mangled);
-          ctx->instance_count++;
-        }
-        free(mangled);
-        free(base);
-        for (size_t i = 0; i < arg_count; i++)
-          free(args[i]);
-        free(args);
-      }
+      record_generic_type_use(ctx, vd->type_name, node->location);
     }
     if (vd && vd->initializer)
       collect_type_instantiations(vd->initializer, ctx);
@@ -566,68 +821,15 @@ static void collect_type_instantiations(ASTNode *node, MonoContext *ctx) {
   case AST_NEW_EXPRESSION: {
     NewExpression *ne = (NewExpression *)node->data;
     if (ne && ne->type_name) {
-      char *base = NULL;
-      char **args = NULL;
-      size_t arg_count = 0;
-      if (parse_generic_type_name(ne->type_name, &base, &args, &arg_count)) {
-        int found = 0;
-        char *mangled = mangle_name(base, args, arg_count);
-        for (size_t i = 0; i < ctx->instance_count; i++) {
-          if (strcmp(ctx->instances[i].mangled_name, mangled) == 0) {
-            found = 1;
-            break;
-          }
-        }
-        if (!found) {
-          ctx->instances = realloc(
-              ctx->instances,
-              (ctx->instance_count + 1) * sizeof(Instantiation));
-          Instantiation *inst = &ctx->instances[ctx->instance_count];
-          inst->generic_name = strdup(base);
-          inst->type_arg_count = arg_count;
-          inst->type_args = malloc(arg_count * sizeof(char *));
-          for (size_t i = 0; i < arg_count; i++) {
-            inst->type_args[i] = strdup(args[i]);
-          }
-          inst->mangled_name = strdup(mangled);
-          ctx->instance_count++;
-        }
-        free(mangled);
-        free(base);
-        for (size_t i = 0; i < arg_count; i++)
-          free(args[i]);
-        free(args);
-      }
+      record_generic_type_use(ctx, ne->type_name, node->location);
     }
     break;
   }
   case AST_FUNCTION_CALL: {
     CallExpression *ce = (CallExpression *)node->data;
     if (ce && ce->type_arg_count > 0 && ce->function_name) {
-      int found = 0;
-      char *mangled =
-          mangle_name(ce->function_name, ce->type_args, ce->type_arg_count);
-      for (size_t i = 0; i < ctx->instance_count; i++) {
-        if (strcmp(ctx->instances[i].mangled_name, mangled) == 0) {
-          found = 1;
-          break;
-        }
-      }
-      if (!found) {
-        ctx->instances =
-            realloc(ctx->instances,
-                    (ctx->instance_count + 1) * sizeof(Instantiation));
-        Instantiation *inst = &ctx->instances[ctx->instance_count];
-        inst->generic_name = strdup(ce->function_name);
-        inst->type_arg_count = ce->type_arg_count;
-        inst->type_args = malloc(ce->type_arg_count * sizeof(char *));
-        for (size_t i = 0; i < ce->type_arg_count; i++) {
-          inst->type_args[i] = strdup(ce->type_args[i]);
-        }
-        inst->mangled_name = strdup(mangled);
-        ctx->instance_count++;
-      }
-      free(mangled);
+      mono_add_instantiation(ctx, ce->function_name, ce->type_args,
+                             ce->type_arg_count, node->location);
     }
     if (ce) {
       for (size_t i = 0; i < ce->argument_count; i++)
@@ -645,73 +847,11 @@ static void collect_type_instantiations(ASTNode *node, MonoContext *ctx) {
     if (fd && fd->type_param_count == 0) {
       for (size_t i = 0; i < fd->parameter_count; i++) {
         if (fd->parameter_types[i]) {
-          char *base = NULL;
-          char **args = NULL;
-          size_t arg_count = 0;
-          if (parse_generic_type_name(fd->parameter_types[i], &base, &args,
-                                      &arg_count)) {
-            int found = 0;
-            char *mangled = mangle_name(base, args, arg_count);
-            for (size_t j = 0; j < ctx->instance_count; j++) {
-              if (strcmp(ctx->instances[j].mangled_name, mangled) == 0) {
-                found = 1;
-                break;
-              }
-            }
-            if (!found) {
-              ctx->instances = realloc(
-                  ctx->instances,
-                  (ctx->instance_count + 1) * sizeof(Instantiation));
-              Instantiation *inst = &ctx->instances[ctx->instance_count];
-              inst->generic_name = strdup(base);
-              inst->type_arg_count = arg_count;
-              inst->type_args = malloc(arg_count * sizeof(char *));
-              for (size_t k = 0; k < arg_count; k++)
-                inst->type_args[k] = strdup(args[k]);
-              inst->mangled_name = strdup(mangled);
-              ctx->instance_count++;
-            }
-            free(mangled);
-            free(base);
-            for (size_t k = 0; k < arg_count; k++)
-              free(args[k]);
-            free(args);
-          }
+          record_generic_type_use(ctx, fd->parameter_types[i], node->location);
         }
       }
       if (fd->return_type) {
-        char *base = NULL;
-        char **args = NULL;
-        size_t arg_count = 0;
-        if (parse_generic_type_name(fd->return_type, &base, &args,
-                                    &arg_count)) {
-          int found = 0;
-          char *mangled = mangle_name(base, args, arg_count);
-          for (size_t j = 0; j < ctx->instance_count; j++) {
-            if (strcmp(ctx->instances[j].mangled_name, mangled) == 0) {
-              found = 1;
-              break;
-            }
-          }
-          if (!found) {
-            ctx->instances = realloc(
-                ctx->instances,
-                (ctx->instance_count + 1) * sizeof(Instantiation));
-            Instantiation *inst = &ctx->instances[ctx->instance_count];
-            inst->generic_name = strdup(base);
-            inst->type_arg_count = arg_count;
-            inst->type_args = malloc(arg_count * sizeof(char *));
-            for (size_t k = 0; k < arg_count; k++)
-              inst->type_args[k] = strdup(args[k]);
-            inst->mangled_name = strdup(mangled);
-            ctx->instance_count++;
-          }
-          free(mangled);
-          free(base);
-          for (size_t k = 0; k < arg_count; k++)
-            free(args[k]);
-          free(args);
-        }
+        record_generic_type_use(ctx, fd->return_type, node->location);
       }
     }
     break;
@@ -871,7 +1011,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
         strcpy(new_type, mangled);
         for (size_t i = 0; i < ptr_count; i++)
           strcat(new_type, "*");
-        free(vd->type_name);
+        mono_free_string(vd->type_name);
         vd->type_name = new_type;
         free(mangled);
         free(base);
@@ -893,7 +1033,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
       size_t arg_count = 0;
       if (parse_generic_type_name(ne->type_name, &base, &args, &arg_count)) {
         char *mangled = mangle_name(base, args, arg_count);
-        free(ne->type_name);
+        mono_free_string(ne->type_name);
         ne->type_name = mangled;
         free(base);
         for (size_t i = 0; i < arg_count; i++)
@@ -908,10 +1048,10 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
     if (ce && ce->type_arg_count > 0 && ce->function_name) {
       char *mangled =
           mangle_name(ce->function_name, ce->type_args, ce->type_arg_count);
-      free(ce->function_name);
+      mono_free_string(ce->function_name);
       ce->function_name = mangled;
       for (size_t i = 0; i < ce->type_arg_count; i++)
-        free(ce->type_args[i]);
+        mono_free_string(ce->type_args[i]);
       free(ce->type_args);
       ce->type_args = NULL;
       ce->type_arg_count = 0;
@@ -949,7 +1089,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
             strcpy(new_type, mangled);
             for (size_t j = 0; j < ptr_count; j++)
               strcat(new_type, "*");
-            free(fd->parameter_types[i]);
+            mono_free_string(fd->parameter_types[i]);
             fd->parameter_types[i] = new_type;
             free(mangled);
             free(base);
@@ -967,7 +1107,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
         if (parse_generic_type_name(fd->return_type, &base, &args,
                                     &arg_count)) {
           char *mangled = mangle_name(base, args, arg_count);
-          free(fd->return_type);
+          mono_free_string(fd->return_type);
           fd->return_type = mangled;
           free(base);
           for (size_t i = 0; i < arg_count; i++)
@@ -1005,7 +1145,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
             strcpy(new_type, mangled);
             for (size_t j = 0; j < ptr_count; j++)
               strcat(new_type, "*");
-            free(sd->field_types[i]);
+            mono_free_string(sd->field_types[i]);
             sd->field_types[i] = new_type;
             free(mangled);
             free(base);
@@ -1148,6 +1288,50 @@ static GenericDef *find_generic_def(MonoContext *ctx, const char *name) {
   return NULL;
 }
 
+static int validate_instantiation(GenericDef *def, Instantiation *inst,
+                                  MonoContext *ctx) {
+  if (!def || !inst || !ctx) {
+    return 0;
+  }
+
+  if (def->type_param_count != inst->type_arg_count) {
+    char message[512];
+    snprintf(message, sizeof(message),
+             "Generic '%s' expects %zu type arguments but got %zu", def->name,
+             def->type_param_count, inst->type_arg_count);
+    mono_report_error(ctx, inst->location, message);
+    return 0;
+  }
+
+  for (size_t i = 0; i < def->type_param_count; i++) {
+    const char *trait_name =
+        def->type_param_traits ? def->type_param_traits[i] : NULL;
+    if (!trait_name) {
+      continue;
+    }
+
+    if (!mono_has_trait(ctx, trait_name)) {
+      char message[512];
+      snprintf(message, sizeof(message),
+               "Generic '%s' requires unknown trait '%s'", def->name,
+               trait_name);
+      mono_report_error(ctx, inst->location, message);
+      return 0;
+    }
+
+    if (!mono_type_implements_trait(ctx, trait_name, inst->type_args[i])) {
+      char message[512];
+      snprintf(message, sizeof(message),
+               "Type '%s' does not implement trait '%s' required by '%s'",
+               inst->type_args[i], trait_name, def->name);
+      mono_report_error(ctx, inst->location, message);
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
 static ASTNode *create_monomorphized_struct(GenericDef *def,
                                             Instantiation *inst,
                                             MonoContext *ctx) {
@@ -1158,14 +1342,18 @@ static ASTNode *create_monomorphized_struct(GenericDef *def,
   StructDeclaration *sd = (StructDeclaration *)clone->data;
 
   // Set the mangled name
-  free(sd->name);
+  mono_free_string(sd->name);
   sd->name = strdup(inst->mangled_name);
 
   // Clear type params (this is now a concrete type)
   for (size_t i = 0; i < sd->type_param_count; i++)
-    free(sd->type_params[i]);
+    mono_free_string(sd->type_params[i]);
   free(sd->type_params);
+  for (size_t i = 0; i < sd->type_param_count; i++)
+    mono_free_string(sd->type_param_traits[i]);
+  free(sd->type_param_traits);
   sd->type_params = NULL;
+  sd->type_param_traits = NULL;
   sd->type_param_count = 0;
 
   // Substitute type params in field types
@@ -1174,7 +1362,7 @@ static ASTNode *create_monomorphized_struct(GenericDef *def,
         sd->field_types[i], def->type_params, inst->type_args,
         inst->type_arg_count, ctx);
     if (new_type) {
-      free(sd->field_types[i]);
+      mono_free_string(sd->field_types[i]);
       sd->field_types[i] = new_type;
     }
   }
@@ -1192,14 +1380,18 @@ static ASTNode *create_monomorphized_function(GenericDef *def,
   FunctionDeclaration *fd = (FunctionDeclaration *)clone->data;
 
   // Set the mangled name
-  free(fd->name);
+  mono_free_string(fd->name);
   fd->name = strdup(inst->mangled_name);
 
   // Clear type params
   for (size_t i = 0; i < fd->type_param_count; i++)
-    free(fd->type_params[i]);
+    mono_free_string(fd->type_params[i]);
   free(fd->type_params);
+  for (size_t i = 0; i < fd->type_param_count; i++)
+    mono_free_string(fd->type_param_traits[i]);
+  free(fd->type_param_traits);
   fd->type_params = NULL;
+  fd->type_param_traits = NULL;
   fd->type_param_count = 0;
 
   // Substitute type params in parameter types
@@ -1208,7 +1400,7 @@ static ASTNode *create_monomorphized_function(GenericDef *def,
         fd->parameter_types[i], def->type_params, inst->type_args,
         inst->type_arg_count, ctx);
     if (new_type) {
-      free(fd->parameter_types[i]);
+      mono_free_string(fd->parameter_types[i]);
       fd->parameter_types[i] = new_type;
     }
   }
@@ -1219,7 +1411,7 @@ static ASTNode *create_monomorphized_function(GenericDef *def,
         fd->return_type, def->type_params, inst->type_args,
         inst->type_arg_count, ctx);
     if (new_type) {
-      free(fd->return_type);
+      mono_free_string(fd->return_type);
       fd->return_type = new_type;
     }
   }
@@ -1233,7 +1425,7 @@ static ASTNode *create_monomorphized_function(GenericDef *def,
   return clone;
 }
 
-int monomorphize_program(ASTNode *program) {
+int monomorphize_program(ASTNode *program, ErrorReporter *reporter) {
   if (!program || program->type != AST_PROGRAM)
     return 1;
 
@@ -1242,58 +1434,69 @@ int monomorphize_program(ASTNode *program) {
     return 1;
 
   MonoContext ctx = {0};
+  int success = 1;
+  ctx.reporter = reporter;
 
   // Step 1: Collect generic definitions
   collect_generic_defs(program, &ctx);
-  if (ctx.def_count == 0) {
-    return 1; // No generics to process
+  if (ctx.had_error) {
+    success = 0;
+    goto cleanup;
   }
 
-  // Step 2: Collect all instantiations from non-generic code
-  collect_type_instantiations(program, &ctx);
+  if (ctx.def_count > 0) {
+    // Step 2: Collect all instantiations from non-generic code
+    collect_type_instantiations(program, &ctx);
 
-  // Step 3: Generate monomorphized definitions, iterating until no new
-  // instantiations are discovered (handles transitive generic usage).
-  size_t processed = 0;
-  while (processed < ctx.instance_count) {
-    size_t current_count = ctx.instance_count;
-    for (size_t i = processed; i < current_count; i++) {
-      Instantiation *inst = &ctx.instances[i];
-      GenericDef *def = find_generic_def(&ctx, inst->generic_name);
-      if (!def)
-        continue;
+    // Step 3: Generate monomorphized definitions, iterating until no new
+    // instantiations are discovered (handles transitive generic usage).
+    size_t processed = 0;
+    while (processed < ctx.instance_count) {
+      size_t current_count = ctx.instance_count;
+      for (size_t i = processed; i < current_count; i++) {
+        Instantiation *inst = &ctx.instances[i];
+        GenericDef *def = find_generic_def(&ctx, inst->generic_name);
+        if (!def)
+          continue;
 
-      ASTNode *mono_node = NULL;
-      if (def->is_struct) {
-        mono_node = create_monomorphized_struct(def, inst, &ctx);
-      } else {
-        mono_node = create_monomorphized_function(def, inst, &ctx);
+        if (!validate_instantiation(def, inst, &ctx)) {
+          success = 0;
+          goto cleanup;
+        }
+
+        ASTNode *mono_node = NULL;
+        if (def->is_struct) {
+          mono_node = create_monomorphized_struct(def, inst, &ctx);
+        } else {
+          mono_node = create_monomorphized_function(def, inst, &ctx);
+        }
+
+        if (mono_node) {
+          prog->declarations =
+              realloc(prog->declarations,
+                      (prog->declaration_count + 1) * sizeof(ASTNode *));
+          prog->declarations[prog->declaration_count] = mono_node;
+          prog->declaration_count++;
+          ast_add_child(program, mono_node);
+
+          // Scan the new node for additional generic instantiations
+          // (e.g., a monomorphized function calling another generic function)
+          collect_type_instantiations(mono_node, &ctx);
+        }
       }
-
-      if (mono_node) {
-        prog->declarations =
-            realloc(prog->declarations,
-                    (prog->declaration_count + 1) * sizeof(ASTNode *));
-        prog->declarations[prog->declaration_count] = mono_node;
-        prog->declaration_count++;
-        ast_add_child(program, mono_node);
-
-        // Scan the new node for additional generic instantiations
-        // (e.g., a monomorphized function calling another generic function)
-        collect_type_instantiations(mono_node, &ctx);
-      }
+      processed = current_count;
     }
-    processed = current_count;
-  }
 
-  // Step 4: Rewrite all generic references to use mangled names
-  rewrite_generic_references(program, &ctx);
+    // Step 4: Rewrite all generic references to use mangled names
+    rewrite_generic_references(program, &ctx);
+  }
 
   // Step 5: Remove generic (template) definitions from the program
   size_t write_idx = 0;
   for (size_t i = 0; i < prog->declaration_count; i++) {
     ASTNode *decl = prog->declarations[i];
     int is_generic = 0;
+    int is_compile_time_trait_decl = 0;
 
     if (decl && decl->type == AST_STRUCT_DECLARATION) {
       StructDeclaration *sd = (StructDeclaration *)decl->data;
@@ -1303,20 +1506,39 @@ int monomorphize_program(ASTNode *program) {
       FunctionDeclaration *fd = (FunctionDeclaration *)decl->data;
       if (fd && fd->type_param_count > 0)
         is_generic = 1;
+    } else if (decl &&
+               (decl->type == AST_TRAIT_DECLARATION ||
+                decl->type == AST_IMPL_DECLARATION)) {
+      is_compile_time_trait_decl = 1;
     }
 
-    if (!is_generic) {
+    if (!is_generic && !is_compile_time_trait_decl) {
       prog->declarations[write_idx++] = decl;
     }
   }
   prog->declaration_count = write_idx;
 
+cleanup:
   // Clean up context
+  for (size_t i = 0; i < ctx.trait_count; i++) {
+    free(ctx.traits[i].name);
+  }
+  free(ctx.traits);
+
+  for (size_t i = 0; i < ctx.impl_count; i++) {
+    free(ctx.impls[i].trait_name);
+    free(ctx.impls[i].for_type_name);
+  }
+  free(ctx.impls);
+
   for (size_t i = 0; i < ctx.def_count; i++) {
     free(ctx.defs[i].name);
     for (size_t j = 0; j < ctx.defs[i].type_param_count; j++)
       free(ctx.defs[i].type_params[j]);
     free(ctx.defs[i].type_params);
+    for (size_t j = 0; j < ctx.defs[i].type_param_count; j++)
+      free(ctx.defs[i].type_param_traits[j]);
+    free(ctx.defs[i].type_param_traits);
   }
   free(ctx.defs);
 
@@ -1329,5 +1551,5 @@ int monomorphize_program(ASTNode *program) {
   }
   free(ctx.instances);
 
-  return 1;
+  return success && !ctx.had_error;
 }

@@ -11,7 +11,7 @@ if not exist bin\methlang.exe (
 )
 
 echo Compiling guessing_game.meth...
-bin\methlang.exe examples\guessing-game\guessing_game.meth -o examples\guessing-game\guessing_game.s --stdlib stdlib
+bin\methlang.exe examples\guessing-game\guessing_game.meth -o examples\guessing-game\guessing_game.s
 if %ERRORLEVEL% NEQ 0 (
     echo Methlang compilation failed.
     exit /b 1

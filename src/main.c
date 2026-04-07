@@ -465,6 +465,32 @@ static int parse_linker_mode(const char *text, LinkerMode *mode_out) {
   return 0;
 }
 
+static const char *async_model_name(AsyncRewriteModel model) {
+  switch (model) {
+  case ASYNC_REWRITE_MODEL_COROUTINE:
+    return "coroutine";
+  case ASYNC_REWRITE_MODEL_POOL:
+  default:
+    return "pool";
+  }
+}
+
+static int parse_async_model(const char *text, AsyncRewriteModel *model_out) {
+  if (!text || !model_out) {
+    return 0;
+  }
+
+  if (strcmp(text, "pool") == 0) {
+    *model_out = ASYNC_REWRITE_MODEL_POOL;
+    return 1;
+  }
+  if (strcmp(text, "coroutine") == 0 || strcmp(text, "coro") == 0) {
+    *model_out = ASYNC_REWRITE_MODEL_COROUTINE;
+    return 1;
+  }
+  return 0;
+}
+
 #ifdef _WIN32
 typedef struct {
   char **items;
@@ -783,7 +809,9 @@ static int object_has_undefined_symbol_prefix(const char *object_path,
 
 static int object_needs_gc_runtime(const char *object_path) {
   return object_has_undefined_symbol_prefix(object_path, "gc_") ||
-         object_has_undefined_symbol_prefix(object_path, "meth_runtime_");
+         object_has_undefined_symbol_prefix(object_path, "meth_runtime_") ||
+         object_has_undefined_symbol_prefix(object_path, "meth_async_") ||
+         object_has_undefined_symbol_prefix(object_path, "meth_coro_");
 }
 
 static int object_needs_methlang_entry(const char *object_path) {
@@ -937,12 +965,18 @@ static int run_nasm_assemble(const char *asm_filename,
 static int methlang_build_with_gcc(const char *object_filename,
                                    const char *executable_filename,
                                    const char *gc_object,
+                                   const char *async_object,
                                    const char *entry_object,
                                    const CompilerOptions *options) {
-  size_t gcc_len = strlen(object_filename) + strlen(gc_object) +
-                   strlen(executable_filename) + 160;
+  size_t gcc_len = strlen(object_filename) + strlen(executable_filename) + 192;
+  if (gc_object && gc_object[0] != '\0') {
+    gcc_len += strlen(gc_object) + 1;
+  }
+  if (async_object && async_object[0] != '\0') {
+    gcc_len += strlen(async_object) + 1;
+  }
   if (entry_object && entry_object[0] != '\0') {
-    gcc_len += strlen(entry_object);
+    gcc_len += strlen(entry_object) + 1;
   }
   if (options) {
     for (size_t i = 0; i < options->link_argument_count; i++) {
@@ -963,8 +997,12 @@ static int methlang_build_with_gcc(const char *object_filename,
     if (!append_argument_text(gcc_command, gcc_len, &offset,
                               "gcc -nostartfiles ") ||
         !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
-        !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object) ||
+        ((gc_object && gc_object[0] != '\0') &&
+         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+          !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object))) ||
+        ((async_object && async_object[0] != '\0') &&
+         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+          !append_quoted_argument(gcc_command, gcc_len, &offset, async_object))) ||
         !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
         !append_quoted_argument(gcc_command, gcc_len, &offset, entry_object) ||
         !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
@@ -981,8 +1019,12 @@ static int methlang_build_with_gcc(const char *object_filename,
     if (!append_argument_text(gcc_command, gcc_len, &offset,
                               "gcc -nostartfiles ") ||
         !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
-        !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object) ||
+        ((gc_object && gc_object[0] != '\0') &&
+         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+          !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object))) ||
+        ((async_object && async_object[0] != '\0') &&
+         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+          !append_quoted_argument(gcc_command, gcc_len, &offset, async_object))) ||
         !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
         !append_quoted_argument(gcc_command, gcc_len, &offset,
                                 executable_filename) ||
@@ -1006,10 +1048,16 @@ static int methlang_build_with_gcc(const char *object_filename,
 static int methlang_build_with_link(const char *object_filename,
                                     const char *executable_filename,
                                     const char *gc_object,
+                                    const char *async_object,
                                     const char *entry_object,
                                     const CompilerOptions *options) {
-  size_t link_len = strlen(object_filename) + strlen(executable_filename) +
-                    strlen(gc_object) + 256;
+  size_t link_len = strlen(object_filename) + strlen(executable_filename) + 320;
+  if (gc_object && gc_object[0] != '\0') {
+    link_len += strlen(gc_object) + 16;
+  }
+  if (async_object && async_object[0] != '\0') {
+    link_len += strlen(async_object) + 16;
+  }
   if (entry_object && entry_object[0] != '\0') {
     link_len += strlen(entry_object) + 16;
   }
@@ -1036,8 +1084,12 @@ static int methlang_build_with_link(const char *object_filename,
                                 executable_filename) ||
         !append_argument_text(link_command, link_len, &offset, " ") ||
         !append_quoted_argument(link_command, link_len, &offset, object_filename) ||
-        !append_argument_text(link_command, link_len, &offset, " ") ||
-        !append_quoted_argument(link_command, link_len, &offset, gc_object) ||
+        ((gc_object && gc_object[0] != '\0') &&
+         (!append_argument_text(link_command, link_len, &offset, " ") ||
+          !append_quoted_argument(link_command, link_len, &offset, gc_object))) ||
+        ((async_object && async_object[0] != '\0') &&
+         (!append_argument_text(link_command, link_len, &offset, " ") ||
+          !append_quoted_argument(link_command, link_len, &offset, async_object))) ||
         !append_argument_text(link_command, link_len, &offset, " ") ||
         !append_quoted_argument(link_command, link_len, &offset, entry_object) ||
         !append_argument_text(link_command, link_len, &offset,
@@ -1055,8 +1107,12 @@ static int methlang_build_with_link(const char *object_filename,
                                 executable_filename) ||
         !append_argument_text(link_command, link_len, &offset, " ") ||
         !append_quoted_argument(link_command, link_len, &offset, object_filename) ||
-        !append_argument_text(link_command, link_len, &offset, " ") ||
-        !append_quoted_argument(link_command, link_len, &offset, gc_object) ||
+        ((gc_object && gc_object[0] != '\0') &&
+         (!append_argument_text(link_command, link_len, &offset, " ") ||
+          !append_quoted_argument(link_command, link_len, &offset, gc_object))) ||
+        ((async_object && async_object[0] != '\0') &&
+         (!append_argument_text(link_command, link_len, &offset, " ") ||
+          !append_quoted_argument(link_command, link_len, &offset, async_object))) ||
         !append_argument_text(link_command, link_len, &offset,
                               " kernel32.lib msvcrt.lib") ||
         !append_msvc_link_arguments(link_command, link_len, &offset, options)) {
@@ -1173,9 +1229,15 @@ cleanup:
 static int methlang_link_object_with_gcc(const char *object_filename,
                                          const char *executable_filename,
                                          const char *gc_object,
+                                         const char *async_object,
                                          const CompilerOptions *options) {
-  size_t gcc_len = strlen(object_filename) + strlen(gc_object) +
-                   strlen(executable_filename) + 160;
+  size_t gcc_len = strlen(object_filename) + strlen(executable_filename) + 192;
+  if (gc_object && gc_object[0] != '\0') {
+    gcc_len += strlen(gc_object) + 1;
+  }
+  if (async_object && async_object[0] != '\0') {
+    gcc_len += strlen(async_object) + 1;
+  }
   if (options) {
     for (size_t i = 0; i < options->link_argument_count; i++) {
       if (options->link_arguments[i]) {
@@ -1193,8 +1255,12 @@ static int methlang_link_object_with_gcc(const char *object_filename,
   size_t offset = 0;
   if (!append_argument_text(gcc_command, gcc_len, &offset, "gcc ") ||
       !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
-      !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-      !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object) ||
+      ((gc_object && gc_object[0] != '\0') &&
+       (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object))) ||
+      ((async_object && async_object[0] != '\0') &&
+       (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset, async_object))) ||
       !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
       !append_quoted_argument(gcc_command, gcc_len, &offset,
                               executable_filename) ||
@@ -1218,9 +1284,15 @@ static int methlang_link_object_with_gcc(const char *object_filename,
 static int methlang_link_object_with_link(const char *object_filename,
                                           const char *executable_filename,
                                           const char *gc_object,
+                                          const char *async_object,
                                           const CompilerOptions *options) {
-  size_t link_len = strlen(object_filename) + strlen(executable_filename) +
-                    strlen(gc_object) + 256;
+  size_t link_len = strlen(object_filename) + strlen(executable_filename) + 320;
+  if (gc_object && gc_object[0] != '\0') {
+    link_len += strlen(gc_object) + 16;
+  }
+  if (async_object && async_object[0] != '\0') {
+    link_len += strlen(async_object) + 16;
+  }
   if (options) {
     for (size_t i = 0; i < options->link_argument_count; i++) {
       if (options->link_arguments[i]) {
@@ -1242,8 +1314,12 @@ static int methlang_link_object_with_link(const char *object_filename,
                               executable_filename) ||
       !append_argument_text(link_command, link_len, &offset, " ") ||
       !append_quoted_argument(link_command, link_len, &offset, object_filename) ||
-      !append_argument_text(link_command, link_len, &offset, " ") ||
-      !append_quoted_argument(link_command, link_len, &offset, gc_object) ||
+      ((gc_object && gc_object[0] != '\0') &&
+       (!append_argument_text(link_command, link_len, &offset, " ") ||
+        !append_quoted_argument(link_command, link_len, &offset, gc_object))) ||
+      ((async_object && async_object[0] != '\0') &&
+       (!append_argument_text(link_command, link_len, &offset, " ") ||
+        !append_quoted_argument(link_command, link_len, &offset, async_object))) ||
       !append_argument_text(link_command, link_len, &offset,
                             " kernel32.lib msvcrt.lib") ||
       !append_msvc_link_arguments(link_command, link_len, &offset, options)) {
@@ -1299,17 +1375,22 @@ static int methlang_build_executable(const char *asm_filename,
   char *gcc_object_filename = replace_extension(executable_filename, ".o");
   char *msvc_object_filename = replace_extension(executable_filename, ".obj");
   char *gc_gcc_object = join_paths(runtime_directory, "gc.o");
+  char *async_gcc_object = join_paths(runtime_directory, "async_runtime.o");
   char *entry_gcc_object = join_paths(runtime_directory, "methlang_entry.o");
   char *gc_msvc_object = join_paths(runtime_directory, "gc.obj");
+  char *async_msvc_object = join_paths(runtime_directory, "async_runtime.obj");
   char *entry_msvc_object = join_paths(runtime_directory, "methlang_entry.obj");
   if (!gcc_object_filename || !msvc_object_filename || !gc_gcc_object ||
-      !entry_gcc_object || !gc_msvc_object || !entry_msvc_object) {
+      !async_gcc_object || !entry_gcc_object || !gc_msvc_object ||
+      !async_msvc_object || !entry_msvc_object) {
     fprintf(stderr, "Error: Failed to allocate build paths\n");
     free(gcc_object_filename);
     free(msvc_object_filename);
     free(gc_gcc_object);
+    free(async_gcc_object);
     free(entry_gcc_object);
     free(gc_msvc_object);
+    free(async_msvc_object);
     free(entry_msvc_object);
     return 1;
   }
@@ -1321,8 +1402,10 @@ static int methlang_build_executable(const char *asm_filename,
     free(gcc_object_filename);
     free(msvc_object_filename);
     free(gc_gcc_object);
+    free(async_gcc_object);
     free(entry_gcc_object);
     free(gc_msvc_object);
+    free(async_msvc_object);
     free(entry_msvc_object);
     return 1;
   }
@@ -1330,9 +1413,10 @@ static int methlang_build_executable(const char *asm_filename,
   int build_result = 1;
 
   if (linker_mode == LINKER_MODE_INTERNAL || linker_mode == LINKER_MODE_AUTO) {
-    const char *object_paths[3];
+    const char *object_paths[4];
     size_t object_count = 0u;
     const char *gc_object = NULL;
+    const char *async_object = NULL;
     const char *entry_object = NULL;
     int needs_gc = 0;
     int needs_entry = 0;
@@ -1344,6 +1428,11 @@ static int methlang_build_executable(const char *asm_filename,
     needs_entry = object_needs_methlang_entry(msvc_object_filename);
     if (needs_gc) {
       gc_object = (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
+      async_object = (_access(async_msvc_object, 0) == 0)
+                         ? async_msvc_object
+                         : ((_access(async_gcc_object, 0) == 0)
+                                ? async_gcc_object
+                                : NULL);
     }
     if (needs_entry) {
       entry_object =
@@ -1355,6 +1444,9 @@ static int methlang_build_executable(const char *asm_filename,
     object_paths[object_count++] = msvc_object_filename;
     if (gc_object) {
       object_paths[object_count++] = gc_object;
+    }
+    if (async_object) {
+      object_paths[object_count++] = async_object;
     }
     if (entry_object) {
       object_paths[object_count++] = entry_object;
@@ -1386,7 +1478,8 @@ static int methlang_build_executable(const char *asm_filename,
       const char *entry_object =
           (_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL;
       if (methlang_build_with_gcc(gcc_object_filename, executable_filename,
-                                  gc_gcc_object, entry_object, options) == 0) {
+                                  gc_gcc_object, async_gcc_object,
+                                  entry_object, options) == 0) {
         build_result = 0;
         goto cleanup;
       }
@@ -1397,12 +1490,17 @@ static int methlang_build_executable(const char *asm_filename,
     if (run_nasm_assemble(asm_filename, msvc_object_filename) == 0) {
       const char *gc_object =
           (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
+      const char *async_object =
+          (_access(async_msvc_object, 0) == 0)
+              ? async_msvc_object
+              : ((_access(async_gcc_object, 0) == 0) ? async_gcc_object : NULL);
       const char *entry_object =
           (_access(entry_msvc_object, 0) == 0)
               ? entry_msvc_object
               : ((_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL);
       if (methlang_build_with_link(msvc_object_filename, executable_filename,
-                                   gc_object, entry_object, options) == 0) {
+                                   gc_object, async_object, entry_object,
+                                   options) == 0) {
         build_result = 0;
         goto cleanup;
       }
@@ -1416,8 +1514,10 @@ cleanup:
   free(gcc_object_filename);
   free(msvc_object_filename);
   free(gc_gcc_object);
+  free(async_gcc_object);
   free(entry_gcc_object);
   free(gc_msvc_object);
+  free(async_msvc_object);
   free(entry_msvc_object);
   return build_result;
 }
@@ -1453,11 +1553,16 @@ static int methlang_link_object_file(const char *object_filename,
     return 1;
   }
   char *gc_gcc_object = join_paths(runtime_directory, "gc.o");
+  char *async_gcc_object = join_paths(runtime_directory, "async_runtime.o");
   char *gc_msvc_object = join_paths(runtime_directory, "gc.obj");
-  if (!gc_gcc_object || !gc_msvc_object) {
+  char *async_msvc_object = join_paths(runtime_directory, "async_runtime.obj");
+  if (!gc_gcc_object || !async_gcc_object || !gc_msvc_object ||
+      !async_msvc_object) {
     fprintf(stderr, "Error: Failed to allocate build paths\n");
     free(gc_gcc_object);
+    free(async_gcc_object);
     free(gc_msvc_object);
+    free(async_msvc_object);
     return 1;
   }
 
@@ -1466,15 +1571,18 @@ static int methlang_link_object_file(const char *object_filename,
             "Error: Bundled GC runtime object not found in '%s'\n",
             runtime_directory);
     free(gc_gcc_object);
+    free(async_gcc_object);
     free(gc_msvc_object);
+    free(async_msvc_object);
     return 1;
   }
 
   int build_result = 1;
 
   if (linker_mode == LINKER_MODE_INTERNAL || linker_mode == LINKER_MODE_AUTO) {
-    const char *object_paths[3];
+    const char *object_paths[4];
     const char *gc_object = NULL;
+    const char *async_object = NULL;
     char *startup_object = replace_extension(executable_filename, ".startup.obj");
     size_t object_count = 0u;
     int needs_gc = object_needs_gc_runtime(object_filename);
@@ -1507,12 +1615,20 @@ static int methlang_link_object_file(const char *object_filename,
       if (needs_gc) {
         gc_object =
             (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
+        async_object = (_access(async_msvc_object, 0) == 0)
+                           ? async_msvc_object
+                           : ((_access(async_gcc_object, 0) == 0)
+                                  ? async_gcc_object
+                                  : NULL);
       }
 
       object_paths[object_count++] = startup_object;
       object_paths[object_count++] = object_filename;
       if (gc_object) {
         object_paths[object_count++] = gc_object;
+      }
+      if (async_object) {
+        object_paths[object_count++] = async_object;
       }
 
       if (methlang_link_internal(object_paths, object_count, executable_filename, 0,
@@ -1546,7 +1662,8 @@ static int methlang_link_object_file(const char *object_filename,
 
   if (has_gcc && linker_mode != LINKER_MODE_MSVC) {
     if (methlang_link_object_with_gcc(object_filename, executable_filename,
-                                      gc_gcc_object, options) == 0) {
+                                      gc_gcc_object, async_gcc_object,
+                                      options) == 0) {
       build_result = 0;
       goto cleanup;
     }
@@ -1555,8 +1672,12 @@ static int methlang_link_object_file(const char *object_filename,
   if (has_link && linker_mode != LINKER_MODE_GCC) {
     const char *gc_object =
         (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
+    const char *async_object =
+        (_access(async_msvc_object, 0) == 0)
+            ? async_msvc_object
+            : ((_access(async_gcc_object, 0) == 0) ? async_gcc_object : NULL);
     if (methlang_link_object_with_link(object_filename, executable_filename,
-                                       gc_object, options) == 0) {
+                                       gc_object, async_object, options) == 0) {
       build_result = 0;
       goto cleanup;
     }
@@ -1567,7 +1688,9 @@ static int methlang_link_object_file(const char *object_filename,
 
 cleanup:
   free(gc_gcc_object);
+  free(async_gcc_object);
   free(gc_msvc_object);
+  free(async_msvc_object);
   return build_result;
 }
 #endif
@@ -1619,6 +1742,7 @@ int main(int argc, char *argv[]) {
   int output_filename_explicit = 0;
   options.output_filename = "output.s"; // Default output filename
   options.debug_format = "dwarf";
+  options.async_model = ASYNC_REWRITE_MODEL_POOL;
 
   if (argc >= 2) {
     if (strcmp(argv[1], "help") == 0) {
@@ -1678,6 +1802,16 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error: Failed to add linker argument\n");
         return 1;
       }
+    } else if (strcmp(argv[i], "--async-model") == 0 && i + 1 < argc) {
+      if (!parse_async_model(argv[++i], &options.async_model)) {
+        fprintf(stderr,
+                "Error: Unknown async model '%s' (expected pool or coroutine)\n",
+                argv[i]);
+        return 1;
+      }
+    } else if (strcmp(argv[i], "--async-model") == 0) {
+      fprintf(stderr, "Error: Missing async model after '--async-model'\n");
+      return 1;
     } else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--debug") == 0) {
       options.debug_mode = 1;
       options.generate_debug_symbols = 1;
@@ -2002,7 +2136,7 @@ int compile_file(const char *input_filename, const char *output_filename,
     Program *prog_data = (Program *)program->data;
     SourceLocation prelude_loc = {0, 0};
     ASTNode *prelude_import =
-        ast_create_import_declaration("std/prelude", prelude_loc);
+        ast_create_import_declaration("std/prelude", NULL, prelude_loc);
     if (prelude_import) {
       // Prepend the prelude import before all user declarations.
       ASTNode **grown =
@@ -2033,7 +2167,27 @@ int compile_file(const char *input_filename, const char *output_filename,
   }
 
   // Monomorphize generics (before type checking)
-  monomorphize_program(program);
+  if (!monomorphize_program(program, error_reporter)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Generic monomorphization error\n");
+    }
+    result = 1;
+    goto cleanup;
+  }
+
+  if (!async_rewrite_program(
+          program, error_reporter,
+          options ? options->async_model : ASYNC_REWRITE_MODEL_POOL)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Async rewrite error\n");
+    }
+    result = 1;
+    goto cleanup;
+  }
 
   // Type checking
   if (!type_checker_check_program(type_checker, program)) {
@@ -2233,6 +2387,9 @@ void print_usage(const char *program_name) {
          linker_mode_name(LINKER_MODE_AUTO));
   printf("  --link-arg <arg>    Pass an extra linker argument (repeatable; "
          "use with --build)\n");
+  printf("  --async-model <m>   Async lowering model: pool or coroutine "
+         "(default: %s)\n",
+         async_model_name(ASYNC_REWRITE_MODEL_POOL));
   printf("  -d, --debug         Enable debug output and symbols\n");
   printf("  -g, --debug-symbols Generate debug symbols\n");
   printf("  -l, --line-mapping  Generate source line mapping\n");

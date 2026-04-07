@@ -7,7 +7,7 @@ Expressions produce values. They appear in initializers, assignments, function a
 | Precedence | Operators | Example |
 |------------|-----------|---------|
 | 1 | Member access `.`, `->` | `obj.field`, `ptr->x` |
-| 2 | Unary `-`, `!`, `*`, `&` | `-x`, `!y`, `*p`, `&v` |
+| 2 | Unary `-`, `!`, `*`, `&`, `await` | `-x`, `!y`, `*p`, `&v`, `await f` |
 | 3 | Multiplicative `*`, `/` | `a * b`, `a / b` |
 | 4 | Additive `+`, `-` | `a + b`, `a - b` |
 | 5 | Relational `<`, `<=`, `>`, `>=` | `a < b` |
@@ -66,18 +66,21 @@ a >= b
 
 ## Unary Operators
 
-Negation `-x`. Logical NOT `!x` (returns 1 if x is 0, otherwise 0). Dereference `*p` (loads the value at the pointer). Address-of `&x` (produces a pointer to x). Address-of requires an assignable expression (lvalue).
+Negation `-x`. Logical NOT `!x` (returns 1 if x is 0, otherwise 0). Dereference `*p` (loads the value at the pointer). Address-of `&x` (produces a pointer to x). `await x` waits on a future and yields its payload. Address-of requires an assignable expression (lvalue).
 
 ```meth
 -x       // negation
 !x       // logical NOT
 *p       // dereference
 &x       // address-of
+await f  // wait for a Future<T>
 ```
 
 **Null dereference:** In normal builds, the compiler emits runtime null checks for dynamic pointer dereference/indexing and traps with a fatal message on null. In `--release`, those generated checks are disabled; dereferencing a null pointer is undefined behavior and typically crashes. See [Types](types.md#pointer-types).
 
 **Address-of on non-lvalues:** Taking the address of a temporary or non-assignable expression is a compile error. For example, `&(x + 1)` and `&42` are invalid—the operand must be a variable, struct field, array element, or dereferenced pointer. The error message is "Address-of operator requires an assignable expression".
+
+**Await:** `await` requires a `Future<T>` operand. It blocks until the future completes and yields a value of type `T`. `await` is valid in both synchronous and asynchronous functions. It does not suspend the caller as a coroutine; it blocks the current OS thread. See [Async and Sync Execution](async.md).
 
 ## Indexing
 
@@ -117,6 +120,48 @@ obj.method(args)
 
 **Function pointers:** Use the `fn(param_types) -> return_type` type to store and pass function addresses. Take the address with `&func` and call like a normal function: `fp(args)`. See [Types](types.md#function-pointer-type) for details.
 
+### Sync vs Async Calls
+
+Synchronous and asynchronous calls look similar at the surface but differ in both type and runtime behavior.
+
+```meth
+function inc(x: int32) -> int32 {
+  return x + 1;
+}
+
+async fn add_one_async(x: int32) -> int32 {
+  return x + 1;
+}
+
+var a: int32 = inc(41);                    // immediate int32
+var f: Future<int32> = add_one_async(41); // immediate Future<int32>
+var b: int32 = await f;                   // waits, then yields int32
+```
+
+Current behavior:
+
+- A sync call runs on the caller thread and returns its payload directly.
+- An async call returns immediately with a future handle.
+- `await` turns that future back into its payload type.
+- Awaiting blocks the current thread until the worker finishes.
+
+### Cancellation Helpers
+
+The compiler recognizes these async-runtime helpers:
+
+- `cancel(future)` requests cooperative cancellation of a future.
+- `cancelled()` reports whether the current async task has been asked to stop.
+
+```meth
+async fn worker() -> int32 {
+  while (cancelled() == 0) {
+  }
+  return 0;
+}
+```
+
+`cancelled()` returns `0` outside an active async task. `cancel(future)` and `await future` are still meaningful in synchronous code because they operate on a future handle rather than on the current execution context.
+
 
 ## Allocation
 
@@ -152,6 +197,8 @@ Valid cast conversions include:
 - Any numeric type (integer or float) to any other numeric type.
 - Any pointer type to any other pointer type.
 - Any integer type to any pointer type, and vice versa.
+- `Future<T>` to/from pointers and integers.
+- `Future<A>` to `Future<B>` with an explicit cast.
 - Function pointers to other function pointers, or to/from regular pointers and integers.
 
 Casting across different sizes might result in zero-extension, sign-extension, or truncation, depending on the target type and the sign of the source type. Floating-point to integer conversions truncate towards zero.

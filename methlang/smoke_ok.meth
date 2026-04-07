@@ -1,0 +1,6 @@
+// Valid Methlang — use this to verify meth-syntax compiler diagnostics are clean on save.
+// Expect no Problems when `meth.linter.compilerEnabled` is true and `methlang` resolves.
+
+function main() -> int32 {
+  return 0;
+}

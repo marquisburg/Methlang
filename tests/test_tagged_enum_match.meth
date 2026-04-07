@@ -1,0 +1,28 @@
+enum Option {
+    Some(int32),
+    None
+}
+
+function main() -> int32 {
+    var total: int32 = 0;
+
+    match (Some(40)) {
+        case Some(value): {
+            total = value;
+        }
+        case None: {
+            total = -1;
+        }
+    }
+
+    match (None()) {
+        case Some(value): {
+            total = total + value;
+        }
+        case None: {
+            total = total + 2;
+        }
+    }
+
+    return total;
+}

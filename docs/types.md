@@ -11,10 +11,10 @@ The following sizes and alignments apply on x86-64. Use these when laying out st
 | `int8`, `uint8` | 1 | 1 |
 | `int16`, `uint16` | 2 | 2 |
 | `int32`, `uint32`, `float32` | 4 | 4 |
-| `int64`, `uint64`, `float64`, pointers, enums | 8 | 8 |
+| `int64`, `uint64`, `float64`, pointers, `Future<T>`, plain enums | 8 | 8 |
 | `string` | 16 | 8 |
 
-Struct and array sizes are derived from their fields and element types. Pointers and enums are 8 bytes.
+Struct and array sizes are derived from their fields and element types. Pointers, futures, and plain integer-valued enums are 8 bytes. Tagged enums are sized from their tag and largest payload.
 
 ## Primitive Types
 
@@ -91,6 +91,28 @@ function main() -> int32 {
 
 **Type equality:** Two function pointer types are equal if they have the same parameter types and return type. `fn(int32) -> int32` is compatible with `fn(int32) -> int32` but not with `fn(int32, int32) -> int32`.
 
+## Future Types
+
+`Future<T>` is the built-in type produced by async function calls. It represents an in-flight asynchronous computation that will eventually produce a payload of type `T`.
+
+```meth
+async fn load() -> int32 {
+  return 42;
+}
+
+var future: Future<int32> = load();
+var value: int32 = await future;
+```
+
+Key properties:
+
+- Calling `async fn f(...) -> T` yields `Future<T>`.
+- `await future` yields `T`.
+- `Future<void>` is valid for async functions with no payload result.
+- `Future<T>` is pointer-sized on x86-64 and should be treated as an opaque runtime handle.
+
+Futures are first-class values: they can be stored, passed to functions, and returned from functions. See [Async and Sync Execution](async.md) for the execution and threading contract behind them.
+
 ## Array Types
 
 Fixed-size arrays use `[N]` where N is a constant. Arrays are value types; the elements are laid out contiguously. Indexing is zero-based.
@@ -158,6 +180,35 @@ var b: Direction = East;
 
 Enums can be compared with integers and used in `switch` cases. They can be exported for use in other modules (see [Declarations](declarations.md)).
 
+## Tagged Enum Types
+
+Tagged enums associate a payload type with some variants. They are useful for values such as `Option`, `Result`, or message unions where each variant may carry different data.
+
+```meth
+enum Option {
+  Some(int32),
+  None
+}
+
+var a: Option = Some(42);
+var b: Option = None();
+```
+
+**Constructors:** Each variant is constructed with function-call syntax. Payload variants take one argument, such as `Some(42)`. Payloadless variants are currently written with empty call syntax, such as `None()`.
+
+**Payload binding:** Use `match` to branch on a tagged enum and bind the payload from a specific variant. See [Control Flow](control-flow.md#match).
+
+**Representation:** A tagged enum stores a discriminant tag plus storage for the largest payload among its variants. Its size is not fixed like a plain enum, so avoid assuming it is 8 bytes in C interop or manual layout code.
+
+Tagged enums can also be generic:
+
+```meth
+enum Result<T> {
+  Ok(T),
+  Err
+}
+```
+
 ## Generic Type Parameters
 
 Functions and structs can be generic. Type parameters are declared in angle brackets: `function f<T>(...)` or `struct S<T> { ... }`. Instantiation uses the same syntax: `f<int32>(args)` or `var x: Pair<int32, float64>`.
@@ -178,7 +229,18 @@ var n: int32 = identity<int32>(42);  // function call with type args
 
 The compiler performs **monomorphization** before type checking: each unique instantiation becomes a concrete type or function. There is no runtime generics; all type parameters are resolved at compile time.
 
-**Constraints:** Type parameters are unconstrained. Operations inside generic bodies must be valid for all possible type arguments. For example, `a + b` in `function add<T>(a: T, b: T) -> T` requires that `T` supports `+`; the type checker validates this when the generic is instantiated.
+**Constraints:** A single inline marker-trait bound per type parameter is supported. Declare a trait with `trait Name;`, satisfy it with `impl Name for Type;`, and use it in a generic parameter as `T: Name`.
+
+```meth
+trait Addable;
+impl Addable for int32;
+
+function identity_addable<T: Addable>(x: T) -> T {
+  return x;
+}
+```
+
+Trait bounds are currently marker-only: there are no trait methods, no multiple bounds, and no `where` clauses yet.
 
 ## Type Conversions
 
@@ -193,5 +255,16 @@ var bytes: uint8* = (uint8*)p;
 var f: float64 = 3.14;
 var i: int32 = (int32)f;
 ```
+
+Valid cast conversions include:
+
+- Any numeric type (integer or float) to any other numeric type.
+- Any pointer type to any other pointer type.
+- Any integer type to any pointer type, and vice versa.
+- `Future<T>` to/from pointers and integers.
+- `Future<A>` to `Future<B>` with an explicit cast.
+- Function pointers to other function pointers, or to/from regular pointers and integers.
+
+Casting across different sizes might result in zero-extension, sign-extension, or truncation, depending on the target type and the sign of the source type. Floating-point to integer conversions truncate towards zero.
 
 See [Expressions](expressions.md) for more details on cast conversions and evaluation behavior.

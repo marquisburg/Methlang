@@ -39,6 +39,9 @@ typedef enum {
   TOKEN_IMPL,
   TOKEN_WHERE,
   TOKEN_FN,
+  TOKEN_MATCH,
+  TOKEN_ASYNC,
+  TOKEN_AWAIT,
 
   // Type keywords
   TOKEN_INT8,

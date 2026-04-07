@@ -1,0 +1,18 @@
+import "namespaced_math" as math;
+
+function main() -> int32 {
+  var kind: math.Magic = math.FortyTwo;
+  var pair: math.Pair* = math.make_pair(math.answer(), math.FortyTwo - 40);
+
+  if (kind != math.FortyTwo) {
+    return 0;
+  }
+  if (math.seed != 40) {
+    return 0;
+  }
+  if (math.total(pair) != 44) {
+    return 0;
+  }
+
+  return 1;
+}

@@ -11,7 +11,7 @@ if not exist bin\methlang.exe (
 )
 
 echo Compiling bfinterpreter.meth...
-bin\methlang.exe brainfuck-interpreter\bfinterpreter.meth -o brainfuck-interpreter\bfinterpreter.s --stdlib stdlib
+bin\methlang.exe brainfuck-interpreter\bfinterpreter.meth -o brainfuck-interpreter\bfinterpreter.s
 if %ERRORLEVEL% NEQ 0 (
     echo Methlang compilation failed.
     exit /b 1

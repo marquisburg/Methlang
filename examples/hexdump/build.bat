@@ -12,7 +12,7 @@ if not exist bin\methlang.exe (
 )
 
 echo Compiling hexdump.meth...
-bin\methlang.exe examples\hexdump\hexdump.meth -o examples\hexdump\hexdump.s --stdlib stdlib
+bin\methlang.exe examples\hexdump\hexdump.meth -o examples\hexdump\hexdump.s
 if %ERRORLEVEL% NEQ 0 (
     echo Methlang compilation failed.
     exit /b 1

@@ -1,57 +1,102 @@
 # Methlang Syntax Highlighting
 
-Syntax highlighting and basic linting for Methlang (`.meth`) files in VS Code and Cursor.
+VS Code / Cursor extension for **Methlang** (`.meth`) files: grammar-based highlighting, sensible editing defaults (brackets, indentation, folding), and a two-stage linter (fast regex rules + optional compiler diagnostics).
 
-## Linter
+## What is Methlang?
 
-Two diagnostic layers:
+Methlang is a **typed, assembly-inspired language** that compiles to **x86-64** assembly. Programs use explicit types, structs, pointers, control flow familiar from C-family languages, and a standard library for I/O, math, and more. The full language reference lives in the main repository under [`docs/`](../docs/LANGUAGE.md).
 
-### 1. Regex-based (instant)
-Pattern checks for common issues based on the Methlang language reference:
+| Topic | Document |
+|--------|----------|
+| Comments, identifiers, keywords, literals, operators | [Lexical structure](../docs/lexical-structure.md) |
+| Integer/float/pointer/string types, generics | [Types](../docs/types.md) |
+| Functions, structs, enums, methods, `extern` | [Declarations](../docs/declarations.md) |
+| Operators, casts, calls | [Expressions](../docs/expressions.md) |
+| `if`, loops, `switch`, `defer` / `errdefer` | [Control flow](../docs/control-flow.md) |
+| Files, visibility | [Modules](../docs/modules.md) |
+| `import`, search paths, `import_str` | [Imports](../docs/imports.md) |
+| `std/...` modules | [Standard library](../docs/standard-library.md) |
+| Heap, `new`, roots | [Garbage collector](../docs/garbage-collector.md) |
+| `extern`, C strings | [C interoperability](../docs/c-interop.md) |
+| `methlang` CLI, `-I`, `--stdlib`, `--build` | [Compilation](../docs/compilation.md) |
+| Cheat sheet | [Quick reference](../docs/quick-reference.md) |
+| Gaps vs other languages | [Known limitations](../docs/known-limitations.md) |
 
-**Unsupported operators:**
-- **Compound assignment `+=`, `-=`, `*=`, `/=`** — Use `x = x + 1` instead of `x += 1`
+From the compiler you can also run **`methlang docs`** (and **`methlang help`**) for bundled topic lists and paths.
 
-**Invalid literals:**
-- **`0x` / `0X`** without hex digits
-- **`0b` / `0B`** without 0/1 digits
-- **Underscores in numbers** (`1_000_000`) — Not supported
+## Extension features
 
-**Other:**
-- **Block comments `/* */`** — Only `//` line comments are supported
-- **Labeled `break` / `continue`** — Use flags or restructure nested loops
-- **Unterminated strings** — Missing closing double quote
+### Syntax highlighting
 
-### 2. Compiler-backed (on save)
-Runs the Methlang compiler (`bin/methlang.exe`) for **semantic diagnostics**: type errors, scope errors, use-before-init, undefined symbols, etc. Requires the compiler to be built and available at `bin/methlang.exe` (or configured path).
+The TextMate grammar (`syntaxes/meth.tmLanguage.json`) scopes Methlang source as `source.meth` so themes can color keywords, types, strings, comments, and assembly blocks consistently.
 
-**Settings** (Methlang in Settings):
-- `meth.linter.compilerEnabled` — Enable compiler diagnostics (default: true)
-- `meth.linter.compilerPath` — Path to Methlang (default: auto-detect `bin/methlang.exe`)
-- `meth.linter.stdlibPath` — Path to stdlib (default: `stdlib`)
+### Editor behavior (`language-configuration.json`)
 
-Diagnostics run on open, edit (debounced), and save. See `test-lint.meth` for regex examples.
+- **Line comments** — `//` (toggle with your editor’s line-comment command).
+- **Bracket matching** — `{ }`, `[ ]`, `( )`.
+- **Auto-closing / surrounding** — braces, brackets, parentheses, and string quotes.
+- **Folding** — brace-region folding using `{` / `}` markers.
+- **Indentation** — increases after `{` or `(` when the line looks incomplete; decreases on lines starting with `}` or `)`.
+
+### Diagnostics (linter)
+
+1. **Regex-based (on open and while typing, debounced)**  
+   Fast checks aligned with [known limitations](../docs/known-limitations.md) and the lexer:
+   - No compound assignment (`+=`, `-=`, `*=`, `/=`)
+   - Invalid `0x` / `0b` literals, underscores inside numbers
+   - Block comments `/* */` (only `//` is valid)
+   - Labeled `break` / `continue`
+   - Unterminated double-quoted strings  
+
+2. **Compiler-backed (on save)**  
+   Invokes the **Methlang** executable for real semantic diagnostics: types, scopes, undefined symbols, use-before-init, etc.
+
+Regex diagnostics refresh as you edit; **compiler diagnostics run when you save** the file (if enabled).
+
+### Settings (Methlang)
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `meth.linter.compilerEnabled` | `true` | Run the compiler for semantic diagnostics on save. |
+| `meth.linter.compilerPath` | *(empty)* | Path to `methlang` (relative to workspace or absolute). Empty: try workspace `bin/methlang(.exe)`, then `methlang` on `PATH`. |
+| `meth.linter.stdlibPath` | *(empty)* | Optional `--stdlib` override; empty uses the compiler’s normal stdlib resolution. |
+
+The linter invokes the compiler similarly to a check build, e.g. `-i <file> -o <temp> -I <file-dir> -I <workspace>` and optional `--stdlib`. See [Compilation](../docs/compilation.md) for CLI details.
 
 ## Installation (local)
 
 ### Option 1: Install from folder (recommended)
 
-1. Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
-2. Run **Developer: Install Extension from Location...**
-3. Select the `meth-syntax` folder (this directory)
+1. Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
+2. **Developer: Install Extension from Location...**
+3. Choose this `meth-syntax` directory
 
 ### Option 2: Copy to extensions directory
 
-- **Windows**: `%USERPROFILE%\.vscode\extensions\`
-- **macOS/Linux**: `~/.vscode/extensions/`
+- **Windows:** `%USERPROFILE%\.vscode\extensions\`
+- **macOS/Linux:** `~/.vscode/extensions/`
 
-Copy the entire `meth-syntax` folder there, then reload the window.
+Copy the whole `meth-syntax` folder, then reload the window.
 
 ### Option 3: Symlink (development)
 
 ```powershell
-# From project root
+# From repo root
 New-Item -ItemType Junction -Path "$env:USERPROFILE\.vscode\extensions\meth-syntax" -Target "$PWD\meth-syntax"
 ```
 
-Reload Cursor/VS Code after installing.
+Reload the editor after installing.
+
+## Trying the linter
+
+Open [`test-lint.meth`](test-lint.meth) to see regex rules in action. For compiler diagnostics, save a `.meth` file with the Methlang binary available (workspace build or `PATH`).
+
+## Minimal Methlang program
+
+```meth
+function main() -> int32 {
+  return 0;
+}
+```
+
+More examples: [Quick reference](../docs/quick-reference.md).

@@ -767,8 +767,11 @@ int binary_emitter_write_object_file(BinaryEmitter *emitter,
       int symbol_index =
           binary_emitter_find_symbol_index(emitter, relocation->symbol_name);
       if (symbol_index < 0) {
-        binary_emitter_set_error(emitter,
-                                 "Relocation refers to an undefined symbol");
+        char error_buffer[256];
+        snprintf(error_buffer, sizeof(error_buffer),
+                 "Relocation refers to an undefined symbol '%s'",
+                 relocation->symbol_name ? relocation->symbol_name : "<null>");
+        binary_emitter_set_error(emitter, error_buffer);
         goto cleanup;
       }
 

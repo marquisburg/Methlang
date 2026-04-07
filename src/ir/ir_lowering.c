@@ -1,4 +1,5 @@
 #include "ir.h"
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,8 +91,23 @@ static int ir_emit_condition_true_branch(IRLoweringContext *context,
                                          IRFunction *function,
                                          ASTNode *expression,
                                          const char *true_label);
+static Type *ir_infer_expression_type(IRLoweringContext *context,
+                                      ASTNode *expression);
+static int ir_emit_address_of_symbol(IRLoweringContext *context,
+                                     IRFunction *function, const char *name,
+                                     SourceLocation location,
+                                     IROperand *out_address);
+static int ir_type_storage_size(Type *type);
 static int ir_lower_switch_statement(IRLoweringContext *context,
                                      IRFunction *function, ASTNode *statement);
+static int ir_lower_match_statement(IRLoweringContext *context,
+                                    IRFunction *function, ASTNode *statement,
+                                    IRDeferScope *defers);
+static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
+                                                 IRFunction *function,
+                                                 ASTNode *expression,
+                                                 Symbol *constructor_symbol,
+                                                 IROperand *out_value);
 
 static char *ir_strdup_local(const char *text) {
   if (!text) {
@@ -148,6 +164,7 @@ static int ir_lower_statement_or_expression(IRLoweringContext *context,
   case AST_WHILE_STATEMENT:
   case AST_FOR_STATEMENT:
   case AST_SWITCH_STATEMENT:
+  case AST_MATCH_STATEMENT:
   case AST_BREAK_STATEMENT:
   case AST_CONTINUE_STATEMENT:
   case AST_DEFER_STATEMENT:
@@ -162,6 +179,121 @@ static int ir_lower_statement_or_expression(IRLoweringContext *context,
     return ok;
   }
   }
+}
+
+static int ir_emit_local_declaration(IRLoweringContext *context,
+                                     IRFunction *function,
+                                     const char *name, const char *type_name,
+                                     SourceLocation location) {
+  if (!context || !function || !name || !type_name) {
+    return 0;
+  }
+
+  IRInstruction local = {0};
+  local.op = IR_OP_DECLARE_LOCAL;
+  local.location = location;
+  local.dest = ir_operand_symbol(name);
+  local.text = (char *)type_name;
+  if (!local.dest.name) {
+    ir_set_error(context, "Out of memory while declaring IR local '%s'", name);
+    return 0;
+  }
+
+  if (!ir_emit(context, function, &local)) {
+    ir_operand_destroy(&local.dest);
+    return 0;
+  }
+
+  ir_operand_destroy(&local.dest);
+  return 1;
+}
+
+static IROperand ir_clone_operand_local(const IROperand *operand) {
+  if (!operand) {
+    return ir_operand_none();
+  }
+
+  switch (operand->kind) {
+  case IR_OPERAND_TEMP:
+    return ir_operand_temp(operand->name);
+  case IR_OPERAND_SYMBOL:
+    return ir_operand_symbol(operand->name);
+  case IR_OPERAND_INT:
+    return ir_operand_int(operand->int_value);
+  case IR_OPERAND_FLOAT:
+    return ir_operand_float(operand->float_value);
+  case IR_OPERAND_STRING:
+    return ir_operand_string(operand->name);
+  case IR_OPERAND_LABEL:
+    return ir_operand_label(operand->name);
+  case IR_OPERAND_NONE:
+  default:
+    return ir_operand_none();
+  }
+}
+
+static int ir_emit_symbol_assignment(IRLoweringContext *context,
+                                     IRFunction *function,
+                                     const char *name,
+                                     const IROperand *value,
+                                     SourceLocation location) {
+  if (!context || !function || !name || !value) {
+    return 0;
+  }
+
+  IRInstruction assign = {0};
+  assign.op = IR_OP_ASSIGN;
+  assign.location = location;
+  assign.dest = ir_operand_symbol(name);
+  assign.lhs = *value;
+  if (!assign.dest.name) {
+    ir_set_error(context, "Out of memory while assigning IR local '%s'", name);
+    return 0;
+  }
+
+  if (!ir_emit(context, function, &assign)) {
+    ir_operand_destroy(&assign.dest);
+    return 0;
+  }
+
+  ir_operand_destroy(&assign.dest);
+  return 1;
+}
+
+static int ir_emit_address_with_offset(IRLoweringContext *context,
+                                       IRFunction *function,
+                                       const IROperand *base_address,
+                                       size_t offset,
+                                       SourceLocation location,
+                                       IROperand *out_address) {
+  if (!context || !function || !base_address || !out_address) {
+    return 0;
+  }
+
+  if (offset == 0) {
+    *out_address = ir_clone_operand_local(base_address);
+    return 1;
+  }
+
+  IROperand address = ir_operand_none();
+  if (!ir_make_temp_operand(context, &address)) {
+    return 0;
+  }
+
+  IRInstruction add = {0};
+  add.op = IR_OP_BINARY;
+  add.location = location;
+  add.dest = address;
+  add.lhs = *base_address;
+  add.rhs = ir_operand_int((long long)offset);
+  add.text = "+";
+  if (!ir_emit(context, function, &add)) {
+    ir_operand_destroy(&address);
+    return 0;
+  }
+
+  *out_address = address;
+  return 1;
 }
 
 static int ir_lower_switch_statement(IRLoweringContext *context,
@@ -351,6 +483,418 @@ static int ir_lower_switch_statement(IRLoweringContext *context,
   free(case_labels);
   ir_operand_destroy(&switch_value);
   free(end_label);
+  return 1;
+}
+
+static int ir_lower_match_statement(IRLoweringContext *context,
+                                    IRFunction *function, ASTNode *statement,
+                                    IRDeferScope *defers) {
+  MatchStatement *match = NULL;
+  Type *subject_type = NULL;
+  IROperand subject_value = ir_operand_none();
+  IROperand subject_address = ir_operand_none();
+  IROperand tag_value = ir_operand_none();
+  char *owned_subject_name = NULL;
+  const char *subject_name = NULL;
+  char *end_label = NULL;
+  char **arm_labels = NULL;
+  char *default_label = NULL;
+  int ok = 0;
+
+  if (!context || !function || !statement ||
+      statement->type != AST_MATCH_STATEMENT) {
+    return 0;
+  }
+
+  match = (MatchStatement *)statement->data;
+  if (!match || !match->expression) {
+    ir_set_error(context, "Malformed match statement");
+    return 0;
+  }
+
+  subject_type = ir_infer_expression_type(context, match->expression);
+  if (!subject_type || subject_type->kind != TYPE_TAGGED_ENUM ||
+      !subject_type->name) {
+    ir_set_error(context, "IR match lowering requires a tagged-enum subject");
+    return 0;
+  }
+
+  if (!ir_lower_expression(context, function, match->expression,
+                           &subject_value)) {
+    return 0;
+  }
+
+  if (subject_value.kind == IR_OPERAND_SYMBOL && subject_value.name) {
+    subject_name = subject_value.name;
+  } else {
+    owned_subject_name = ir_new_label_name(context, "match_subject");
+    if (!owned_subject_name) {
+      ir_set_error(context,
+                   "Out of memory while allocating match subject storage");
+      goto cleanup;
+    }
+    if (!ir_emit_local_declaration(context, function, owned_subject_name,
+                                   subject_type->name, statement->location) ||
+        !ir_emit_symbol_assignment(context, function, owned_subject_name,
+                                   &subject_value, statement->location)) {
+      goto cleanup;
+    }
+    subject_name = owned_subject_name;
+  }
+
+  if (!ir_emit_address_of_symbol(context, function, subject_name,
+                                 match->expression->location,
+                                 &subject_address)) {
+    goto cleanup;
+  }
+
+  if (!ir_make_temp_operand(context, &tag_value)) {
+    goto cleanup;
+  }
+
+  {
+    IRInstruction load_tag = {0};
+    load_tag.op = IR_OP_LOAD;
+    load_tag.location = match->expression->location;
+    load_tag.dest = tag_value;
+    load_tag.lhs = subject_address;
+    load_tag.rhs = ir_operand_int(4);
+    if (!ir_emit(context, function, &load_tag)) {
+      goto cleanup;
+    }
+  }
+
+  end_label = ir_new_label_name(context, "match_end");
+  if (!end_label) {
+    ir_set_error(context, "Out of memory while allocating match labels");
+    goto cleanup;
+  }
+
+  if (match->arm_count > 0) {
+    arm_labels = calloc(match->arm_count, sizeof(char *));
+    if (!arm_labels) {
+      ir_set_error(context, "Out of memory while allocating match labels");
+      goto cleanup;
+    }
+    for (size_t i = 0; i < match->arm_count; i++) {
+      arm_labels[i] = ir_new_label_name(context, "match_arm");
+      if (!arm_labels[i]) {
+        ir_set_error(context, "Out of memory while allocating match labels");
+        goto cleanup;
+      }
+      if (match->arms[i].is_default) {
+        default_label = arm_labels[i];
+      }
+    }
+  }
+  if (!default_label) {
+    default_label = end_label;
+  }
+
+  for (size_t i = 0; i < match->arm_count; i++) {
+    MatchArm *arm = &match->arms[i];
+    int variant_idx = -1;
+
+    if (!arm || arm->is_default) {
+      continue;
+    }
+
+    for (size_t v = 0; v < subject_type->tagged_variant_count; v++) {
+      if (subject_type->tagged_variant_names[v] &&
+          strcmp(subject_type->tagged_variant_names[v], arm->variant_name) ==
+              0) {
+        variant_idx = (int)v;
+        break;
+      }
+    }
+
+    if (variant_idx < 0) {
+      ir_set_error(context, "Unknown tagged-enum variant '%s' in match",
+                   arm->variant_name ? arm->variant_name : "<unnamed>");
+      goto cleanup;
+    }
+
+    IRInstruction cmp = {0};
+    cmp.op = IR_OP_BRANCH_EQ;
+    cmp.location = statement->location;
+    cmp.lhs = tag_value;
+    cmp.rhs =
+        ir_operand_int((long long)subject_type->tagged_variant_tags[variant_idx]);
+    cmp.text = arm_labels[i];
+    if (!ir_emit(context, function, &cmp)) {
+      goto cleanup;
+    }
+  }
+
+  if (!ir_emit_jump_instruction(context, function, default_label,
+                                statement->location)) {
+    goto cleanup;
+  }
+
+  for (size_t i = 0; i < match->arm_count; i++) {
+    MatchArm *arm = &match->arms[i];
+    int variant_idx = -1;
+
+    if (!arm) {
+      continue;
+    }
+
+    if (!ir_emit_label_instruction(context, function, arm_labels[i],
+                                   arm->body ? arm->body->location
+                                             : statement->location)) {
+      goto cleanup;
+    }
+
+    if (!arm->is_default) {
+      for (size_t v = 0; v < subject_type->tagged_variant_count; v++) {
+        if (subject_type->tagged_variant_names[v] &&
+            strcmp(subject_type->tagged_variant_names[v], arm->variant_name) ==
+                0) {
+          variant_idx = (int)v;
+          break;
+        }
+      }
+    }
+
+    if (arm->binding_name && variant_idx >= 0) {
+      Type *payload_type = subject_type->tagged_variant_payloads[variant_idx];
+      int payload_size = 0;
+      IROperand payload_address = ir_operand_none();
+
+      if (!payload_type || !payload_type->name) {
+        ir_set_error(context, "Match binding '%s' has no payload to bind",
+                     arm->binding_name);
+        goto cleanup;
+      }
+
+      payload_size = (payload_type->size > 0) ? (int)payload_type->size
+                                              : ir_type_storage_size(payload_type);
+      if (!ir_emit_local_declaration(context, function, arm->binding_name,
+                                     payload_type->name, statement->location) ||
+          !ir_emit_address_with_offset(context, function, &subject_address,
+                                       subject_type->tagged_data_offset,
+                                       statement->location, &payload_address)) {
+        ir_operand_destroy(&payload_address);
+        goto cleanup;
+      }
+
+      if (payload_size > 8) {
+        IROperand binding_address = ir_operand_none();
+        IRInstruction copy = {0};
+
+        if (!ir_emit_address_of_symbol(context, function, arm->binding_name,
+                                       statement->location,
+                                       &binding_address)) {
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        copy.op = IR_OP_STORE;
+        copy.location = statement->location;
+        copy.dest = binding_address;
+        copy.lhs = payload_address;
+        copy.rhs = ir_operand_int(payload_size);
+        if (!ir_emit(context, function, &copy)) {
+          ir_operand_destroy(&binding_address);
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        ir_operand_destroy(&binding_address);
+      } else {
+        IROperand payload_value = ir_operand_none();
+        IRInstruction load = {0};
+
+        if (!ir_make_temp_operand(context, &payload_value)) {
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        load.op = IR_OP_LOAD;
+        load.location = statement->location;
+        load.dest = payload_value;
+        load.lhs = payload_address;
+        load.rhs = ir_operand_int(payload_size);
+        if (!ir_emit(context, function, &load) ||
+            !ir_emit_symbol_assignment(context, function, arm->binding_name,
+                                       &payload_value, statement->location)) {
+          ir_operand_destroy(&payload_value);
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        ir_operand_destroy(&payload_value);
+      }
+
+      ir_operand_destroy(&payload_address);
+    }
+
+    if (arm->body &&
+        !ir_lower_statement_with_defers(context, function, arm->body, defers)) {
+      goto cleanup;
+    }
+
+    if (!ir_emit_jump_instruction(context, function, end_label,
+                                  statement->location)) {
+      goto cleanup;
+    }
+  }
+
+  if (!ir_emit_label_instruction(context, function, end_label,
+                                 statement->location)) {
+    goto cleanup;
+  }
+
+  ok = 1;
+
+cleanup:
+  if (arm_labels) {
+    for (size_t i = 0; i < match->arm_count; i++) {
+      free(arm_labels[i]);
+    }
+    free(arm_labels);
+  }
+  free(end_label);
+  free(owned_subject_name);
+  ir_operand_destroy(&tag_value);
+  ir_operand_destroy(&subject_address);
+  ir_operand_destroy(&subject_value);
+  return ok;
+}
+
+static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
+                                                 IRFunction *function,
+                                                 ASTNode *expression,
+                                                 Symbol *constructor_symbol,
+                                                 IROperand *out_value) {
+  CallExpression *call = NULL;
+  Type *enum_type = NULL;
+  Type *payload_type = NULL;
+  char *local_name = NULL;
+  IROperand enum_address = ir_operand_none();
+
+  if (!context || !function || !expression || !constructor_symbol ||
+      !out_value) {
+    return 0;
+  }
+
+  call = (CallExpression *)expression->data;
+  enum_type = constructor_symbol->data.constructor.enum_type;
+  payload_type = constructor_symbol->data.constructor.payload_type;
+  if (!call || !enum_type || !enum_type->name) {
+    ir_set_error(context, "Malformed tagged-enum constructor call");
+    return 0;
+  }
+
+  local_name = ir_new_label_name(context, "tagged_ctor");
+  if (!local_name) {
+    ir_set_error(context,
+                 "Out of memory while allocating tagged-enum constructor");
+    return 0;
+  }
+
+  if (!ir_emit_local_declaration(context, function, local_name, enum_type->name,
+                                 expression->location) ||
+      !ir_emit_address_of_symbol(context, function, local_name,
+                                 expression->location, &enum_address)) {
+    ir_operand_destroy(&enum_address);
+    free(local_name);
+    return 0;
+  }
+
+  {
+    IRInstruction store_tag = {0};
+    store_tag.op = IR_OP_STORE;
+    store_tag.location = expression->location;
+    store_tag.dest = enum_address;
+    store_tag.lhs =
+        ir_operand_int((long long)constructor_symbol->data.constructor.tag_value);
+    store_tag.rhs = ir_operand_int(4);
+    if (!ir_emit(context, function, &store_tag)) {
+      ir_operand_destroy(&enum_address);
+      free(local_name);
+      return 0;
+    }
+  }
+
+  if (payload_type) {
+    int payload_size =
+        (payload_type->size > 0) ? (int)payload_type->size
+                                 : ir_type_storage_size(payload_type);
+    IROperand payload_value = ir_operand_none();
+    IROperand payload_address = ir_operand_none();
+    IROperand payload_source = ir_operand_none();
+    char *payload_temp_name = NULL;
+
+    if (call->argument_count != 1 ||
+        !ir_lower_expression(context, function, call->arguments[0],
+                             &payload_value) ||
+        !ir_emit_address_with_offset(context, function, &enum_address,
+                                     enum_type->tagged_data_offset,
+                                     expression->location, &payload_address)) {
+      ir_operand_destroy(&payload_address);
+      ir_operand_destroy(&payload_value);
+      ir_operand_destroy(&enum_address);
+      free(local_name);
+      return 0;
+    }
+
+    if (payload_size > 8) {
+      payload_temp_name = ir_new_label_name(context, "tagged_payload");
+      if (!payload_temp_name ||
+          !ir_emit_local_declaration(context, function, payload_temp_name,
+                                     payload_type->name, expression->location) ||
+          !ir_emit_symbol_assignment(context, function, payload_temp_name,
+                                     &payload_value, expression->location) ||
+          !ir_emit_address_of_symbol(context, function, payload_temp_name,
+                                     expression->location, &payload_source)) {
+        free(payload_temp_name);
+        ir_operand_destroy(&payload_source);
+        ir_operand_destroy(&payload_address);
+        ir_operand_destroy(&payload_value);
+        ir_operand_destroy(&enum_address);
+        free(local_name);
+        return 0;
+      }
+    } else {
+      payload_source = payload_value;
+    }
+
+    {
+      IRInstruction store_payload = {0};
+      store_payload.op = IR_OP_STORE;
+      store_payload.location = expression->location;
+      store_payload.dest = payload_address;
+      store_payload.lhs = payload_source;
+      store_payload.rhs = ir_operand_int(payload_size);
+      if (!ir_emit(context, function, &store_payload)) {
+        free(payload_temp_name);
+        ir_operand_destroy(&payload_source);
+        ir_operand_destroy(&payload_address);
+        ir_operand_destroy(&payload_value);
+        ir_operand_destroy(&enum_address);
+        free(local_name);
+        return 0;
+      }
+    }
+
+    free(payload_temp_name);
+    if (payload_size > 8) {
+      ir_operand_destroy(&payload_source);
+    }
+    ir_operand_destroy(&payload_address);
+    ir_operand_destroy(&payload_value);
+  }
+
+  ir_operand_destroy(&enum_address);
+  *out_value = ir_operand_symbol(local_name);
+  free(local_name);
+  if (out_value->kind != IR_OPERAND_SYMBOL || !out_value->name) {
+    ir_set_error(context,
+                 "Out of memory while returning tagged-enum constructor");
+    return 0;
+  }
+
   return 1;
 }
 
@@ -1013,6 +1557,8 @@ static int ir_lower_call_expression(IRLoweringContext *context,
                                     IRFunction *function, ASTNode *expression,
                                     IROperand *out_value) {
   CallExpression *call = (CallExpression *)expression->data;
+  Symbol *callee_symbol = NULL;
+  const char *runtime_builtin_name = NULL;
   if (!call || !call->function_name) {
     ir_set_error(context, "Malformed call expression");
     return 0;
@@ -1021,6 +1567,82 @@ static int ir_lower_call_expression(IRLoweringContext *context,
     ir_set_error(context, "Method calls should be mangled directly, unresolved "
                           "method object in lower pass");
     return 0;
+  }
+
+  if (strcmp(call->function_name, "cancelled") == 0) {
+    runtime_builtin_name = "__meth_async_current_cancelled";
+  } else if (strcmp(call->function_name, "cancel") == 0) {
+    runtime_builtin_name = "__meth_async_cancel";
+  } else if (strcmp(call->function_name, "__meth_async_start") == 0 ||
+             strcmp(call->function_name, "__meth_async_finish") == 0 ||
+             strcmp(call->function_name, "__meth_async_wait") == 0 ||
+             strcmp(call->function_name, "__meth_async_cancel") == 0 ||
+             strcmp(call->function_name,
+                    "__meth_async_current_cancelled") == 0) {
+    runtime_builtin_name = call->function_name;
+  }
+
+  if (runtime_builtin_name) {
+    IROperand destination = ir_operand_none();
+    if (!ir_make_temp_operand(context, &destination)) {
+      return 0;
+    }
+
+    IROperand *arguments = NULL;
+    if (call->argument_count > 0) {
+      arguments = calloc(call->argument_count, sizeof(IROperand));
+      if (!arguments) {
+        ir_operand_destroy(&destination);
+        ir_set_error(context,
+                     "Out of memory while lowering async runtime call");
+        return 0;
+      }
+    }
+
+    for (size_t i = 0; i < call->argument_count; i++) {
+      if (!ir_lower_expression(context, function, call->arguments[i],
+                               &arguments[i])) {
+        for (size_t j = 0; j < i; j++) {
+          ir_operand_destroy(&arguments[j]);
+        }
+        free(arguments);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+    }
+
+    IRInstruction instruction = {0};
+    instruction.op = IR_OP_CALL;
+    instruction.location = expression->location;
+    instruction.dest = destination;
+    instruction.text = (char *)runtime_builtin_name;
+    instruction.arguments = arguments;
+    instruction.argument_count = call->argument_count;
+    if (!ir_emit(context, function, &instruction)) {
+      for (size_t i = 0; i < call->argument_count; i++) {
+        ir_operand_destroy(&arguments[i]);
+      }
+      free(arguments);
+      ir_operand_destroy(&destination);
+      return 0;
+    }
+
+    for (size_t i = 0; i < call->argument_count; i++) {
+      ir_operand_destroy(&arguments[i]);
+    }
+    free(arguments);
+    *out_value = destination;
+    return 1;
+  }
+
+  callee_symbol = context->symbol_table
+                      ? symbol_table_lookup(context->symbol_table,
+                                            call->function_name)
+                      : NULL;
+  if (callee_symbol &&
+      callee_symbol->kind == SYMBOL_TAGGED_ENUM_CONSTRUCTOR) {
+    return ir_lower_tagged_enum_constructor_call(
+        context, function, expression, callee_symbol, out_value);
   }
 
   int is_func_ptr_var = call->is_indirect_call;
@@ -1798,6 +2420,143 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       return 0;
     }
 
+    if (strcmp(unary->operator, "await") == 0) {
+      Type *future_type = ir_infer_expression_type(context, unary->operand);
+      Type *payload_type = future_type ? future_type->base_type : NULL;
+      IROperand future_value = ir_operand_none();
+      if (!future_type || future_type->kind != TYPE_FUTURE || !payload_type ||
+          !ir_lower_expression(context, function, unary->operand,
+                               &future_value)) {
+        ir_operand_destroy(&future_value);
+        ir_set_error(context, "Await requires a lowered Future<T> operand");
+        return 0;
+      }
+
+      IROperand wait_result = ir_operand_none();
+      if (!ir_make_temp_operand(context, &wait_result)) {
+        ir_operand_destroy(&future_value);
+        return 0;
+      }
+
+      IROperand *wait_args = calloc(1, sizeof(IROperand));
+      if (!wait_args) {
+        ir_operand_destroy(&wait_result);
+        ir_operand_destroy(&future_value);
+        ir_set_error(context, "Out of memory while lowering await");
+        return 0;
+      }
+      wait_args[0] = ir_clone_operand_local(&future_value);
+
+      IRInstruction wait_call = {0};
+      wait_call.op = IR_OP_CALL;
+      wait_call.location = expression->location;
+      wait_call.dest = wait_result;
+      wait_call.text = "__meth_async_wait";
+      wait_call.arguments = wait_args;
+      wait_call.argument_count = 1;
+      if (!ir_emit(context, function, &wait_call)) {
+        ir_operand_destroy(&wait_args[0]);
+        free(wait_args);
+        ir_operand_destroy(&wait_result);
+        return 0;
+      }
+      ir_operand_destroy(&wait_args[0]);
+      free(wait_args);
+      ir_operand_destroy(&wait_result);
+
+      if (payload_type->kind == TYPE_VOID) {
+        ir_operand_destroy(&future_value);
+        *out_value = ir_operand_none();
+        return 1;
+      }
+
+      IROperand offset_address = ir_operand_none();
+      IROperand result_offset = ir_operand_none();
+      IROperand result_address = ir_operand_none();
+      IROperand loaded_value = ir_operand_none();
+
+      if (!ir_make_temp_operand(context, &offset_address) ||
+          !ir_make_temp_operand(context, &result_offset) ||
+          !ir_make_temp_operand(context, &result_address) ||
+          !ir_make_temp_operand(context, &loaded_value)) {
+        ir_operand_destroy(&future_value);
+        ir_operand_destroy(&offset_address);
+        ir_operand_destroy(&result_offset);
+        ir_operand_destroy(&result_address);
+        ir_operand_destroy(&loaded_value);
+        return 0;
+      }
+
+      IRInstruction add_offset_address = {0};
+      add_offset_address.op = IR_OP_BINARY;
+      add_offset_address.location = expression->location;
+      add_offset_address.dest = offset_address;
+      add_offset_address.lhs = future_value;
+      add_offset_address.rhs = ir_operand_int(16);
+      add_offset_address.text = "+";
+      if (!ir_emit(context, function, &add_offset_address)) {
+        ir_operand_destroy(&future_value);
+        ir_operand_destroy(&offset_address);
+        ir_operand_destroy(&result_offset);
+        ir_operand_destroy(&result_address);
+        ir_operand_destroy(&loaded_value);
+        return 0;
+      }
+
+      IRInstruction load_offset = {0};
+      load_offset.op = IR_OP_LOAD;
+      load_offset.location = expression->location;
+      load_offset.dest = result_offset;
+      load_offset.lhs = offset_address;
+      load_offset.rhs = ir_operand_int(8);
+      if (!ir_emit(context, function, &load_offset)) {
+        ir_operand_destroy(&future_value);
+        ir_operand_destroy(&offset_address);
+        ir_operand_destroy(&result_offset);
+        ir_operand_destroy(&result_address);
+        ir_operand_destroy(&loaded_value);
+        return 0;
+      }
+
+      IRInstruction add_result_address = {0};
+      add_result_address.op = IR_OP_BINARY;
+      add_result_address.location = expression->location;
+      add_result_address.dest = result_address;
+      add_result_address.lhs = future_value;
+      add_result_address.rhs = result_offset;
+      add_result_address.text = "+";
+      if (!ir_emit(context, function, &add_result_address)) {
+        ir_operand_destroy(&future_value);
+        ir_operand_destroy(&offset_address);
+        ir_operand_destroy(&result_offset);
+        ir_operand_destroy(&result_address);
+        ir_operand_destroy(&loaded_value);
+        return 0;
+      }
+
+      IRInstruction load_result = {0};
+      load_result.op = IR_OP_LOAD;
+      load_result.location = expression->location;
+      load_result.dest = loaded_value;
+      load_result.lhs = result_address;
+      load_result.rhs = ir_operand_int(ir_type_storage_size(payload_type));
+      if (!ir_emit(context, function, &load_result)) {
+        ir_operand_destroy(&future_value);
+        ir_operand_destroy(&offset_address);
+        ir_operand_destroy(&result_offset);
+        ir_operand_destroy(&result_address);
+        ir_operand_destroy(&loaded_value);
+        return 0;
+      }
+
+      ir_operand_destroy(&future_value);
+      ir_operand_destroy(&offset_address);
+      ir_operand_destroy(&result_offset);
+      ir_operand_destroy(&result_address);
+      *out_value = loaded_value;
+      return 1;
+    }
+
     if (strcmp(unary->operator, "&") == 0) {
       Type *target_type = NULL;
       if (!ir_lower_lvalue_address(context, function, unary->operand, out_value,
@@ -1917,12 +2676,32 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       return 0;
     }
 
-    Type *allocated_type =
-        context->type_checker
-            ? type_checker_get_type_by_name(context->type_checker,
-                                            new_expression->type_name)
-            : NULL;
-    int allocation_size = ir_type_storage_size(allocated_type);
+    Type *allocated_type = NULL;
+    if (context->type_checker) {
+      /*
+       * Prefer the already-resolved expression type: `new T` infers to `T*`,
+       * and using that avoids scope-sensitive type-name lookups here.
+       */
+      Type *new_expr_type =
+          type_checker_infer_type(context->type_checker, expression);
+      if (new_expr_type && new_expr_type->kind == TYPE_POINTER) {
+        allocated_type = new_expr_type->base_type;
+      }
+      if (!allocated_type) {
+        allocated_type = type_checker_get_type_by_name(context->type_checker,
+                                                       new_expression->type_name);
+      }
+    }
+    /*
+     * Allocation must use the full concrete type size.
+     * ir_type_storage_size() intentionally normalizes many operations to
+     * register-width storage, which is incorrect for `new` on structs/arrays.
+     */
+    int allocation_size =
+        (allocated_type && allocated_type->size > 0 &&
+         allocated_type->size <= (size_t)INT_MAX)
+            ? (int)allocated_type->size
+            : 8;
 
     IROperand destination = ir_operand_none();
     if (!ir_make_temp_operand(context, &destination)) {
@@ -2496,6 +3275,9 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
 
   case AST_SWITCH_STATEMENT:
     return ir_lower_switch_statement(context, function, statement);
+
+  case AST_MATCH_STATEMENT:
+    return ir_lower_match_statement(context, function, statement, defers);
 
   case AST_BREAK_STATEMENT: {
     const char *target = ir_current_break_label(context);

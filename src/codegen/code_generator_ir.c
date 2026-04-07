@@ -318,6 +318,7 @@ static int ir_is_integer_or_pointer_promotable(Type *type) {
   }
 
   switch (type->kind) {
+  case TYPE_BOOL:
   case TYPE_INT8:
   case TYPE_INT16:
   case TYPE_INT32:
@@ -329,6 +330,7 @@ static int ir_is_integer_or_pointer_promotable(Type *type) {
   case TYPE_POINTER:
   case TYPE_FUNCTION_POINTER:
   case TYPE_ENUM:
+  case TYPE_FUTURE:
     return 1;
   default:
     return 0;
@@ -1884,7 +1886,8 @@ static int code_generator_emit_ir_cast(CodeGenerator *generator,
   if (target_size <= 0)
     target_size = 8;
   if (target_type && (target_type->kind == TYPE_POINTER ||
-                      target_type->kind == TYPE_FUNCTION_POINTER)) {
+                      target_type->kind == TYPE_FUNCTION_POINTER ||
+                      target_type->kind == TYPE_FUTURE)) {
     target_size = 8;
   }
 

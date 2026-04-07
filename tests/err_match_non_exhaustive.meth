@@ -1,0 +1,14 @@
+enum Option {
+    Some(int32),
+    None
+}
+
+function main() -> int32 {
+    match (Some(7)) {
+        case Some(value): {
+            return value;
+        }
+    }
+
+    return 0;
+}

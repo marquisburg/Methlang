@@ -1,0 +1,6 @@
+export trait Addable;
+impl Addable for int32;
+
+export function plus_one<T: Addable>(value: T) -> T {
+    return value + 1;
+}

@@ -75,6 +75,7 @@ static int symbol_table_types_compatible(const Type *lhs, const Type *rhs) {
     return lhs->array_size == rhs->array_size &&
            symbol_table_types_compatible(lhs->base_type, rhs->base_type);
   case TYPE_POINTER:
+  case TYPE_FUTURE:
     return symbol_table_types_compatible(lhs->base_type, rhs->base_type);
   case TYPE_STRUCT:
     if (lhs->name && rhs->name) {
@@ -333,6 +334,13 @@ Type *type_create(TypeKind kind, const char *name) {
   type->field_types = NULL;
   type->field_offsets = NULL;
   type->field_count = 0;
+  type->tagged_variant_names = NULL;
+  type->tagged_variant_tags = NULL;
+  type->tagged_variant_payloads = NULL;
+  type->tagged_variant_count = 0;
+  type->tagged_data_offset = 0;
+  type->tagged_data_size = 0;
+  type->generic_template_name = NULL;
 
   // Set default sizes
   switch (kind) {
@@ -356,6 +364,7 @@ Type *type_create(TypeKind kind, const char *name) {
   case TYPE_UINT64:
   case TYPE_FLOAT64:
   case TYPE_POINTER:
+  case TYPE_FUTURE:
   case TYPE_ENUM:
     type->size = 8;
     type->alignment = 8;
@@ -388,6 +397,21 @@ void type_destroy(Type *type) {
     }
     if (type->fn_param_types) {
       free(type->fn_param_types);
+    }
+    if (type->tagged_variant_names) {
+      for (size_t i = 0; i < type->tagged_variant_count; i++) {
+        symbol_table_free_string(type->tagged_variant_names[i]);
+      }
+      free(type->tagged_variant_names);
+    }
+    if (type->tagged_variant_tags) {
+      free(type->tagged_variant_tags);
+    }
+    if (type->tagged_variant_payloads) {
+      free(type->tagged_variant_payloads);
+    }
+    if (type->generic_template_name) {
+      symbol_table_free_string(type->generic_template_name);
     }
 
     symbol_table_free_string(type->name);
@@ -469,6 +493,11 @@ Symbol *symbol_create(const char *name, SymbolKind kind, Type *type) {
     break;
   case SYMBOL_CONSTANT:
     symbol->data.constant.value = 0;
+    break;
+  case SYMBOL_TAGGED_ENUM_CONSTRUCTOR:
+    symbol->data.constructor.enum_type = NULL;
+    symbol->data.constructor.tag_value = 0;
+    symbol->data.constructor.payload_type = NULL;
     break;
   }
 

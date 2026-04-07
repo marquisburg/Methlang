@@ -12,6 +12,8 @@ typedef enum {
   AST_FUNCTION_DECLARATION,
   AST_STRUCT_DECLARATION,
   AST_ENUM_DECLARATION,
+  AST_TRAIT_DECLARATION,
+  AST_IMPL_DECLARATION,
   AST_METHOD_DECLARATION,
   AST_ASSIGNMENT,
   AST_FUNCTION_CALL,
@@ -22,6 +24,7 @@ typedef enum {
   AST_FOR_STATEMENT,
   AST_SWITCH_STATEMENT,
   AST_CASE_CLAUSE,
+  AST_MATCH_STATEMENT,
   AST_BREAK_STATEMENT,
   AST_CONTINUE_STATEMENT,
   AST_DEFER_STATEMENT,
@@ -54,6 +57,7 @@ typedef struct ASTNode {
 
 typedef struct {
   char *module_name;
+  char *namespace_alias;
 } ImportDeclaration;
 
 typedef struct {
@@ -78,8 +82,10 @@ typedef struct {
   ASTNode *body;
   int is_exported;
   int is_extern;
+  int is_async;
   char *link_name;
   char **type_params;
+  char **type_param_traits;
   size_t type_param_count;
 } FunctionDeclaration;
 
@@ -92,12 +98,15 @@ typedef struct {
   size_t method_count;
   int is_exported;
   char **type_params;
+  char **type_param_traits;
   size_t type_param_count;
 } StructDeclaration;
 
 typedef struct {
   char *name;
-  ASTNode *value; // Initializer expression, evaluating to constant
+  ASTNode *value;       // Initializer expression (for plain integer enums)
+  char *payload_type;   // Associated data type name, e.g. "T" or "int32"
+                        // NULL means this variant carries no payload
 } EnumVariant;
 
 typedef struct {
@@ -105,7 +114,34 @@ typedef struct {
   EnumVariant *variants;
   size_t variant_count;
   int is_exported;
+  // Generic type parameters e.g. enum Option<T> { Some(T), None }
+  char **type_params;
+  size_t type_param_count;
 } EnumDeclaration;
+
+// Match arm: case Some(v): body  or  case None: body
+typedef struct {
+  char *variant_name;   // "Some", "None", "Ok", "Err"
+  char *binding_name;   // variable bound to payload, NULL if no binding/payload
+  ASTNode *body;
+  int is_default;       // 1 for a wildcard default arm
+} MatchArm;
+
+typedef struct {
+  ASTNode *expression;  // Value being matched
+  MatchArm *arms;
+  size_t arm_count;
+} MatchStatement;
+
+typedef struct {
+  char *name;
+  int is_exported;
+} TraitDeclaration;
+
+typedef struct {
+  char *trait_name;
+  char *for_type_name;
+} ImplDeclaration;
 
 typedef struct {
   char *assembly_code;
@@ -238,6 +274,7 @@ void ast_add_child(ASTNode *parent, ASTNode *child);
 // Specific node creation functions
 ASTNode *ast_create_program();
 ASTNode *ast_create_import_declaration(const char *module_name,
+                                       const char *namespace_alias,
                                        SourceLocation location);
 ASTNode *ast_create_import_str(const char *file_path, SourceLocation location);
 ASTNode *ast_create_var_declaration(const char *name, const char *type_name,
@@ -253,6 +290,11 @@ ASTNode *ast_create_struct_declaration(const char *name, char **field_names,
                                        SourceLocation location);
 ASTNode *ast_create_enum_declaration(const char *name, EnumVariant *variants,
                                      size_t variant_count,
+                                     SourceLocation location);
+ASTNode *ast_create_trait_declaration(const char *name,
+                                      SourceLocation location);
+ASTNode *ast_create_impl_declaration(const char *trait_name,
+                                     const char *for_type_name,
                                      SourceLocation location);
 ASTNode *ast_create_call_expression(const char *function_name,
                                     ASTNode **arguments, size_t argument_count,
@@ -300,5 +342,7 @@ ASTNode *ast_create_defer_statement(ASTNode *statement,
                                     SourceLocation location);
 ASTNode *ast_create_errdefer_statement(ASTNode *statement,
                                        SourceLocation location);
+ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
+                                    size_t arm_count, SourceLocation location);
 
 #endif // AST_H

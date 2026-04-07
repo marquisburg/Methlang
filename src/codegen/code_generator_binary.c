@@ -1466,7 +1466,8 @@ static int code_generator_binary_resolved_type_scalar_size(Type *type) {
     return 8;
   }
 
-  if (type->kind == TYPE_POINTER || type->kind == TYPE_FUNCTION_POINTER) {
+  if (type->kind == TYPE_POINTER || type->kind == TYPE_FUNCTION_POINTER ||
+      type->kind == TYPE_FUTURE) {
     return 8;
   }
 
@@ -1496,6 +1497,7 @@ static int code_generator_binary_resolved_type_is_supported(Type *type,
   case TYPE_POINTER:
   case TYPE_ENUM:
   case TYPE_FUNCTION_POINTER:
+  case TYPE_FUTURE:
     return type->size <= 8;
   case TYPE_VOID:
     return allow_void;
@@ -1507,6 +1509,10 @@ static int code_generator_binary_resolved_type_is_supported(Type *type,
 static int code_generator_binary_type_is_abi_supported(CodeGenerator *generator,
                                                        const char *type_name,
                                                        int allow_void) {
+  if (type_name && strncmp(type_name, "Future<", 7) == 0) {
+    return 1;
+  }
+
   if (!generator || !generator->type_checker) {
     return 1;
   }
@@ -3225,7 +3231,8 @@ static int code_generator_binary_emit_cast(CodeGenerator *generator,
                          target_type->kind == TYPE_UINT64;
     target_size = (int)target_type->size;
     if (target_type->kind == TYPE_POINTER ||
-        target_type->kind == TYPE_FUNCTION_POINTER) {
+        target_type->kind == TYPE_FUNCTION_POINTER ||
+        target_type->kind == TYPE_FUTURE) {
       target_size = 8;
     }
   }
@@ -3352,6 +3359,7 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
                                            BinaryFunctionContext *context,
                                            const IRInstruction *instruction) {
   Symbol *function_symbol = NULL;
+  IRFunction *target_ir_function = NULL;
 
   if (!generator || !context || !instruction || !instruction->text ||
       instruction->text[0] == '\0') {
@@ -3371,6 +3379,8 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
                         ? symbol_table_lookup(generator->symbol_table,
                                               instruction->text)
                         : NULL;
+  target_ir_function =
+      code_generator_find_ir_function_binary(generator, instruction->text);
 
   size_t stack_argument_count =
       instruction->argument_count > BINARY_WIN64_REGISTER_ARG_COUNT
@@ -3460,6 +3470,11 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
   if (!link_target || link_target[0] == '\0') {
     code_generator_set_error(generator, "Invalid call target '%s'",
                              instruction->text);
+    return 0;
+  }
+
+  if (!target_ir_function &&
+      !code_generator_binary_declare_external_symbol(generator, link_target)) {
     return 0;
   }
 

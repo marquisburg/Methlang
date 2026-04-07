@@ -1,11 +1,12 @@
 {
   "name": "meth-syntax",
   "displayName": "Methlang Syntax Highlighting",
-  "description": "Syntax highlighting, folding, editor support, and basic linting for Methlang (.meth) files",
-  "version": "0.4.0",
+  "description": "Syntax highlighting, folding, bracket matching, and linting for Methlang (.meth) — a typed language that compiles to x86-64 assembly. See README for links to the language docs.",
+  "version": "0.4.3",
   "publisher": "Methlang",
   "engines": { "vscode": "^1.74.0" },
   "categories": ["Programming Languages"],
+  "keywords": ["methlang", "meth", "assembly", "x86-64"],
   "activationEvents": ["onLanguage:meth"],
   "main": "extension.js",
   "contributes": {
@@ -34,17 +35,20 @@
         "meth.linter.compilerEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Run the Methlang compiler for semantic diagnostics (type errors, scope, etc.)"
+          "description": "Run the Methlang compiler on save for semantic diagnostics (types, scope, undefined symbols).",
+          "markdownDescription": "When enabled, the extension runs the `methlang` compiler **on save** and shows real compiler errors and warnings in the Problems panel. Regex-based checks still run while you type.\n\nRequires a `methlang` binary (workspace `bin/` or `PATH`)."
         },
         "meth.linter.compilerPath": {
           "type": "string",
           "default": "",
-          "description": "Path to Methlang executable (relative to workspace or absolute)"
+          "description": "Path to the methlang executable. Empty: auto-detect workspace bin/, then PATH.",
+          "markdownDescription": "Path to the Methlang executable. Can be relative to the workspace folder or absolute.\n\nIf empty, the extension looks for `bin/methlang` or `bin/methlang.exe` (and a few fallbacks) under the workspace, then uses `methlang` / `methlang.exe` on your `PATH`.\n\nSee the repo `docs/compilation.md` for how to build or install the compiler."
         },
         "meth.linter.stdlibPath": {
           "type": "string",
           "default": "",
-          "description": "Path to stdlib directory"
+          "description": "Optional --stdlib directory override for the linter invocation.",
+          "markdownDescription": "If set, passed to the compiler as `--stdlib <dir>` when linting. Use when you maintain a custom standard library layout.\n\nLeave empty to use the compiler’s default bundled stdlib resolution (see `docs/compilation.md`)."
         }
       }
     }

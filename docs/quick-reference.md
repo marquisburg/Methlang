@@ -44,6 +44,21 @@ function main() -> int32 {
 }
 ```
 
+## With Async and Await
+
+`async` calls return `Future<T>`. `await` blocks until the future completes and yields the payload value. See [Async and Sync Execution](async.md).
+
+```meth
+async fn add_one(x: int32) -> int32 {
+  return x + 1;
+}
+
+function main() -> int32 {
+  var future: Future<int32> = add_one(41);
+  return await future;
+}
+```
+
 ## With Enum and Switch
 
 ```meth
@@ -76,7 +91,7 @@ function main() -> int32 {
 
 ## With GC and Structs
 
-Uses `new` for heap allocation. `methlang --build` links the bundled GC/runtime automatically on Windows. See [Garbage Collector](garbage-collector.md).
+Uses `new` for heap allocation. `methlang --build` links the bundled GC/runtime automatically on Windows. Async programs use the same bundled runtime flow. See [Garbage Collector](garbage-collector.md) and [Async and Sync Execution](async.md).
 
 ```meth
 struct Point {
