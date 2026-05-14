@@ -1,0 +1,22 @@
+struct Box {
+    value: int32
+}
+
+async fn make_box(v: int32) -> Box* {
+    var b: Box* = new Box;
+    b->value = v;
+    return b;
+}
+
+async fn read_box(b: Box*) -> int32 {
+    return b->value + 1;
+}
+
+async fn parent(v: int32) -> int32 {
+    var kept: Box* = await make_box(v);
+    return await read_box(kept);
+}
+
+function main() -> int32 {
+    return await parent(41);
+}

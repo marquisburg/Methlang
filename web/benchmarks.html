@@ -193,7 +193,7 @@
 
     <header class="header">
       <h1>Methlang vs C Benchmarks</h1>
-      <p class="subtitle">Real-world performance comparison: Methlang (--release) vs C (gcc -O2). Run the benchmark script to regenerate results.</p>
+      <p class="subtitle">Real-world performance comparison: Methlang (--release) vs C (gcc -O2). Data is produced by the dedicated harness and refreshed by the server.</p>
     </header>
 
     <div id="summary-bar" style="display: none;"></div>
@@ -214,7 +214,8 @@
           <li><strong>Methlang:</strong> <code>--release</code> (optimizations, no runtime checks)</li>
           <li><strong>C:</strong> <code>gcc -O2</code></li>
           <li><strong>Timing:</strong> GetTickCount64 (Windows) or gettimeofday (Linux)</li>
-          <li><strong>Output:</strong> <code>web/benchmarks.json</code> (served at /benchmarks.json)</li>
+          <li><strong>Harness Config:</strong> <code>docs/benchmarks/harness.json</code></li>
+          <li><strong>Output:</strong> <code>docs/benchmarks/latest.json</code> (mirrored to <code>web/benchmarks.json</code>)</li>
         </ul>
       </div>
     </div>

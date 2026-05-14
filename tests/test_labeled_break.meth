@@ -1,0 +1,14 @@
+function main() -> int32 {
+  var found: int32 = 0;
+  outer: for (var i: int32 = 0; i < 10; i += 1) {
+    for (var j: int32 = 0; j < 10; j += 1) {
+      if (i == 3) {
+        if (j == 5) {
+          found = i * 10 + j;
+          break outer;
+        }
+      }
+    }
+  }
+  return found; // 35
+}

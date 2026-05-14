@@ -1,0 +1,260 @@
+// Forum handlers for Methlang HTTP Server
+//
+// Endpoints:
+//   GET  /forum          -> thread list + new-thread form
+//   GET  /forum?thread=N -> thread view (posts + reply form); 404 if invalid N
+//   POST /forum          -> create thread (form: title=...) -> 302 to new thread
+//   POST /forum?thread=N -> add post    (form: body=...)  -> 302 to thread
+//
+// Storage: threads.txt (one title per line), posts_N.txt (one post per line).
+// All file I/O is serialised through the caller-supplied file_mutex.
+
+import "http_util";
+import "form_parser";
+
+// ── Forum HTML constants ──────────────────────────────────────────────────────
+
+export var FORUM_HEADER: string = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n";
+export var FORUM_CSS: string = import_str "templates/forum.css";
+export var FORUM_STYLE_OPEN: string = "<style>";
+export var FORUM_STYLE_CLOSE: string = "</style>";
+export var FORUM_INDEX_START: string = "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Community Forum</title><link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' rel='stylesheet'>";
+export var FORUM_INDEX_BODY: string = "</head><body><div class='container'><h1>Community Forum</h1><a href='/' class='back'>Back to Website</a><h2>Threads</h2><ul>";
+export var FORUM_INDEX_END: string = "</ul><h2>Start a Discussion</h2>";
+export var FORUM_FORM: string = "<form method='POST' action='/forum'><input name='title' placeholder='Thread title...' required maxlength='200'><button type='submit'>Create Thread</button></form></div></body></html>";
+export var FORUM_THREAD_START: string = "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Discussion Thread</title><link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' rel='stylesheet'>";
+export var FORUM_THREAD_HEAD_END: string = "</head><body><div class='container'><h1>";
+export var FORUM_THREAD_MID: string = "</h1><a href='/forum' class='back'>Back to Forum</a><h2>Replies</h2>";
+export var FORUM_THREAD_END: string = "<h2>Post a Reply</h2><form method='POST' action='/forum?thread=";
+export var FORUM_THREAD_END2: string = "'><textarea name='body' placeholder='Write your reply here...' required></textarea><button type='submit'>Post Reply</button></form></div></body></html>";
+export var FORUM_NO_POSTS: string = "<p class='empty'>No posts yet. Be the first to reply!</p>";
+export var FORUM_ERR_EMPTY: string = "<p class='err'>Thread title cannot be empty.</p>";
+export var FORUM_LI_OPEN: string = "<li><a href='/forum?thread=";
+export var FORUM_LI_MID: string = "'>";
+export var FORUM_LI_CLOSE: string = "</a></li>";
+export var FORUM_POST_OPEN: string = "<div class='post'>";
+export var FORUM_POST_CLOSE: string = "</div>";
+
+var fn_threads: string = "threads.txt";
+var fn_posts_prefix: string = "posts_";
+var fn_posts_suffix: string = ".txt";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Build "posts_N.txt" in buf (null-terminated). buf must be >= 32 bytes.
+export function build_posts_filename(buf: cstring, id: int32) {
+  memcpy(buf, fn_posts_prefix.chars, fn_posts_prefix.length);
+  var dc: int32 = int_to_dec(&buf[fn_posts_prefix.length], id);
+  memcpy(&buf[fn_posts_prefix.length + dc], fn_posts_suffix.chars, fn_posts_suffix.length);
+  buf[fn_posts_prefix.length + dc + fn_posts_suffix.length] = 0;
+}
+
+// Build "/forum?thread=N" in buf (null-terminated). buf must be >= 32 bytes.
+export function build_forum_thread_url(buf: cstring, thread_id: int32) {
+  var prefix: string = "/forum?thread=";
+  memcpy(buf, prefix.chars, prefix.length);
+  var dc: int32 = int_to_dec(&buf[prefix.length], thread_id);
+  buf[prefix.length + dc] = 0;
+}
+
+// Count lines in threads.txt (no lock). Caller must hold file_mutex.
+export function count_threads_impl() -> int32 {
+  var fp: cstring = fopen(fn_threads, "r");
+  if (fp == 0) { return 0; }
+  var count: int32 = 0;
+  var line_buf: uint8[64];
+  while (fgets(&line_buf[0], 64, fp) != 0) {
+    count = count + 1;
+  }
+  fclose(fp);
+  return count;
+}
+
+// Count lines in threads.txt. Thread-safe; takes file_mutex internally.
+export function count_threads(file_mutex: int64) -> int32 {
+  if (mutex_lock_infinite(file_mutex) != 1) { return 0; }
+  var count: int32 = count_threads_impl();
+  mutex_unlock(file_mutex);
+  return count;
+}
+
+// ── Serve forum index ─────────────────────────────────────────────────────────
+
+export function serve_forum_index(client: int64, show_err_empty: int32, file_mutex: int64) {
+  var out: string = FORUM_HEADER + FORUM_INDEX_START + FORUM_STYLE_OPEN + FORUM_CSS + FORUM_STYLE_CLOSE + FORUM_INDEX_BODY;
+  send_all(client, out.chars, out.length);
+
+  if (mutex_lock_infinite(file_mutex) != 1) { return; }
+  var fp: cstring = fopen(fn_threads, "r");
+  if (fp != 0) {
+    var line_buf: uint8[512];
+    var line_num: int32 = 1;
+    while (fgets(&line_buf[0], 512, fp) != 0) {
+      var len: int32 = 0;
+      while (line_buf[len] != 0 && line_buf[len] != 10 && line_buf[len] != 13) {
+        len = len + 1;
+      }
+      if (len > 0) {
+        var item_buf: uint8[600];
+        memcpy(&item_buf[0], FORUM_LI_OPEN.chars, FORUM_LI_OPEN.length);
+        var dc: int32 = int_to_dec(&item_buf[FORUM_LI_OPEN.length], line_num);
+        memcpy(&item_buf[FORUM_LI_OPEN.length + dc], FORUM_LI_MID.chars, FORUM_LI_MID.length);
+        var mid: int32 = FORUM_LI_OPEN.length + dc + FORUM_LI_MID.length;
+        var copy_len: int32 = len;
+        if (copy_len > 200) { copy_len = 200; }
+        send_all(client, &item_buf[0], mid);
+        send_html_escaped(client, &line_buf[0], copy_len);
+        send_all(client, FORUM_LI_CLOSE.chars, FORUM_LI_CLOSE.length);
+      }
+      line_num = line_num + 1;
+    }
+    fclose(fp);
+  }
+  mutex_unlock(file_mutex);
+
+  send_all(client, FORUM_INDEX_END.chars, FORUM_INDEX_END.length);
+  if (show_err_empty != 0) {
+    send_all(client, FORUM_ERR_EMPTY.chars, FORUM_ERR_EMPTY.length);
+  }
+  send_all(client, FORUM_FORM.chars, FORUM_FORM.length);
+}
+
+// ── Serve thread view ─────────────────────────────────────────────────────────
+
+export function serve_forum_thread(client: int64, thread_id: int32, file_mutex: int64) {
+  var out: string = FORUM_HEADER + FORUM_THREAD_START + FORUM_STYLE_OPEN + FORUM_CSS + FORUM_STYLE_CLOSE + FORUM_THREAD_HEAD_END;
+  send_all(client, out.chars, out.length);
+
+  if (mutex_lock_infinite(file_mutex) != 1) { return; }
+  var title_buf: uint8[256];
+  title_buf[0] = 85;
+  title_buf[1] = 110;
+  title_buf[2] = 107;
+  title_buf[3] = 110;
+  title_buf[4] = 111;
+  title_buf[5] = 119;
+  title_buf[6] = 110;
+  title_buf[7] = 0;
+
+  var fp: cstring = fopen(fn_threads, "r");
+  if (fp != 0) {
+    var line_buf: uint8[512];
+    var line_num: int32 = 1;
+    while (fgets(&line_buf[0], 512, fp) != 0) {
+      if (line_num == thread_id) {
+        var len: int32 = 0;
+        while (line_buf[len] != 0 && line_buf[len] != 10 && line_buf[len] != 13) {
+          if (len < 255) {
+            title_buf[len] = line_buf[len];
+          }
+          len = len + 1;
+        }
+        if (len < 256) {
+          title_buf[len] = 0;
+        } else {
+          title_buf[255] = 0;
+        }
+        break;
+      }
+      line_num = line_num + 1;
+    }
+    fclose(fp);
+  }
+
+  var title_len: int32 = 0;
+  while (title_buf[title_len] != 0) {
+    title_len = title_len + 1;
+  }
+  send_html_escaped(client, &title_buf[0], title_len);
+  send_all(client, FORUM_THREAD_MID.chars, FORUM_THREAD_MID.length);
+
+  var posts_fn: uint8[32];
+  build_posts_filename(&posts_fn[0], thread_id);
+  var had_posts: int32 = 0;
+  fp = fopen(&posts_fn[0], "r");
+  if (fp != 0) {
+    var line_buf: uint8[2048];
+    while (fgets(&line_buf[0], 2048, fp) != 0) {
+      var len: int32 = 0;
+      while (line_buf[len] != 0 && line_buf[len] != 10 && line_buf[len] != 13) {
+        len = len + 1;
+      }
+      if (len > 0) {
+        had_posts = 1;
+        send_all(client, FORUM_POST_OPEN.chars, FORUM_POST_OPEN.length);
+        send_html_escaped(client, &line_buf[0], len);
+        send_all(client, FORUM_POST_CLOSE.chars, FORUM_POST_CLOSE.length);
+      }
+    }
+    fclose(fp);
+  }
+  mutex_unlock(file_mutex);
+  if (had_posts == 0) {
+    send_all(client, FORUM_NO_POSTS.chars, FORUM_NO_POSTS.length);
+  }
+
+  send_all(client, FORUM_THREAD_END.chars, FORUM_THREAD_END.length);
+  var id_buf: uint8[16];
+  var dc: int32 = int_to_dec(&id_buf[0], thread_id);
+  send_all(client, &id_buf[0], dc);
+  send_all(client, FORUM_THREAD_END2.chars, FORUM_THREAD_END2.length);
+}
+
+// ── POST handlers ─────────────────────────────────────────────────────────────
+
+// Handle POST /forum (new thread): append title to threads.txt.
+// Returns 302 on redirect, 200 if showing the form again.
+export function handle_post_new_thread(client: int64, buf: cstring, n: int32, file_mutex: int64) -> int32 {
+  var body_start: int32 = find_body_start(buf, n);
+  var body_len: int32 = n - body_start;
+  var title_buf: uint8[256];
+  var got: int32 = extract_form_value(buf, body_start, body_len, cstr("title"), 5, &title_buf[0], 256);
+  if (got > 0) {
+    if (mutex_lock_infinite(file_mutex) != 1) { serve_forum_index(client, got == 0, file_mutex); return 200; }
+    var count: int32 = count_threads_impl();
+    var fp: cstring = fopen(fn_threads, "a");
+    if (fp != 0) {
+      fputs(&title_buf[0], fp);
+      fputs("\n", fp);
+      fclose(fp);
+      mutex_unlock(file_mutex);
+      var new_id: int32 = count + 1;
+      var loc_buf: uint8[32];
+      build_forum_thread_url(&loc_buf[0], new_id);
+      send_redirect(client, &loc_buf[0]);
+      return 302;
+    }
+    mutex_unlock(file_mutex);
+  }
+  serve_forum_index(client, got == 0, file_mutex);
+  return 200;
+}
+
+// Handle POST /forum?thread=N (reply): append body to posts_N.txt. Returns 302.
+export function handle_post_reply(client: int64, buf: cstring, n: int32, thread_id: int32, file_mutex: int64) -> int32 {
+  var body_start: int32 = find_body_start(buf, n);
+  var body_len: int32 = n - body_start;
+  var post_buf: uint8[2048];
+  var got: int32 = extract_form_value(buf, body_start, body_len, cstr("body"), 4, &post_buf[0], 2048);
+  if (got > 0) {
+    if (mutex_lock_infinite(file_mutex) != 1) {
+      var loc_buf: uint8[32];
+      build_forum_thread_url(&loc_buf[0], thread_id);
+      send_redirect(client, &loc_buf[0]);
+      return 302;
+    }
+    var posts_fn: uint8[32];
+    build_posts_filename(&posts_fn[0], thread_id);
+    var fp: cstring = fopen(&posts_fn[0], "a");
+    if (fp != 0) {
+      fputs(&post_buf[0], fp);
+      fputs("\n", fp);
+      fclose(fp);
+    }
+    mutex_unlock(file_mutex);
+  }
+  var loc_buf: uint8[32];
+  build_forum_thread_url(&loc_buf[0], thread_id);
+  send_redirect(client, &loc_buf[0]);
+  return 302;
+}

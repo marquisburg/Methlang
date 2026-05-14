@@ -8,6 +8,7 @@
 typedef struct {
   char *break_label;
   char *continue_label;
+  char *user_label; // optional source-level label for labeled break/continue
 } IRControlFrame;
 
 typedef struct {
@@ -57,6 +58,10 @@ static int ir_emit_bounds_check(IRLoweringContext *context,
 static int ir_push_control_frame(IRLoweringContext *context,
                                  const char *break_label,
                                  const char *continue_label);
+static int ir_push_labeled_control_frame(IRLoweringContext *context,
+                                         const char *break_label,
+                                         const char *continue_label,
+                                         const char *user_label);
 static void ir_pop_control_frame(IRLoweringContext *context);
 static int ir_emit_deferred_calls_filtered(IRLoweringContext *context,
                                            IRFunction *function,
@@ -108,6 +113,16 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
                                                  ASTNode *expression,
                                                  Symbol *constructor_symbol,
                                                  IROperand *out_value);
+static int ir_lower_thread_method_call(IRLoweringContext *context,
+                                       IRFunction *function,
+                                       ASTNode *expression,
+                                       CallExpression *call,
+                                       Type *obj_type,
+                                       IROperand *out_value);
+static int ir_lower_spawn_expression(IRLoweringContext *context,
+                                     IRFunction *function,
+                                     ASTNode *expression,
+                                     IROperand *out_value);
 
 static char *ir_strdup_local(const char *text) {
   if (!text) {
@@ -1238,9 +1253,10 @@ static int ir_emit_bounds_check(IRLoweringContext *context,
   return 1;
 }
 
-static int ir_push_control_frame(IRLoweringContext *context,
-                                 const char *break_label,
-                                 const char *continue_label) {
+static int ir_push_labeled_control_frame(IRLoweringContext *context,
+                                         const char *break_label,
+                                         const char *continue_label,
+                                         const char *user_label) {
   if (!context) {
     return 0;
   }
@@ -1262,7 +1278,15 @@ static int ir_push_control_frame(IRLoweringContext *context,
   IRControlFrame *frame = &context->control_stack[context->control_count++];
   frame->break_label = ir_strdup_local(break_label);
   frame->continue_label = ir_strdup_local(continue_label);
+  frame->user_label = ir_strdup_local(user_label);
   return 1;
+}
+
+static int ir_push_control_frame(IRLoweringContext *context,
+                                 const char *break_label,
+                                 const char *continue_label) {
+  return ir_push_labeled_control_frame(context, break_label, continue_label,
+                                       NULL);
 }
 
 static void ir_pop_control_frame(IRLoweringContext *context) {
@@ -1273,8 +1297,10 @@ static void ir_pop_control_frame(IRLoweringContext *context) {
   IRControlFrame *frame = &context->control_stack[context->control_count - 1];
   free(frame->break_label);
   free(frame->continue_label);
+  free(frame->user_label);
   frame->break_label = NULL;
   frame->continue_label = NULL;
+  frame->user_label = NULL;
   context->control_count--;
 }
 
@@ -1294,6 +1320,34 @@ static const char *ir_current_continue_label(IRLoweringContext *context) {
     const char *label = context->control_stack[i - 1].continue_label;
     if (label) {
       return label;
+    }
+  }
+  return NULL;
+}
+
+static const char *ir_find_labeled_break(IRLoweringContext *context,
+                                         const char *user_label) {
+  if (!context || !user_label) {
+    return NULL;
+  }
+  for (size_t i = context->control_count; i > 0; i--) {
+    const IRControlFrame *frame = &context->control_stack[i - 1];
+    if (frame->user_label && strcmp(frame->user_label, user_label) == 0) {
+      return frame->break_label;
+    }
+  }
+  return NULL;
+}
+
+static const char *ir_find_labeled_continue(IRLoweringContext *context,
+                                            const char *user_label) {
+  if (!context || !user_label) {
+    return NULL;
+  }
+  for (size_t i = context->control_count; i > 0; i--) {
+    const IRControlFrame *frame = &context->control_stack[i - 1];
+    if (frame->user_label && strcmp(frame->user_label, user_label) == 0) {
+      return frame->continue_label;
     }
   }
   return NULL;
@@ -1553,6 +1607,231 @@ static int ir_emit_condition_true_branch(IRLoweringContext *context,
   return 1;
 }
 
+// Emit a call to a runtime thread helper with N operand args, returning dest.
+// args[] ownership is consumed (cleared to NONE after emit).
+static int ir_emit_thread_runtime_call(IRLoweringContext *context,
+                                       IRFunction *function,
+                                       SourceLocation loc,
+                                       const char *runtime_fn,
+                                       IROperand *args, size_t arg_count,
+                                       IROperand *out_dest) {
+  IROperand dest = ir_operand_none();
+  if (!ir_make_temp_operand(context, &dest))
+    return 0;
+
+  IROperand *arg_copy = NULL;
+  if (arg_count > 0) {
+    arg_copy = calloc(arg_count, sizeof(IROperand));
+    if (!arg_copy) {
+      ir_operand_destroy(&dest);
+      return 0;
+    }
+    for (size_t i = 0; i < arg_count; i++)
+      arg_copy[i] = ir_clone_operand_local(&args[i]);
+  }
+
+  IRInstruction instr = {0};
+  instr.op = IR_OP_CALL;
+  instr.location = loc;
+  instr.dest = dest;
+  instr.text = (char *)runtime_fn;
+  instr.arguments = arg_copy;
+  instr.argument_count = arg_count;
+
+  if (!ir_emit(context, function, &instr)) {
+    for (size_t i = 0; i < arg_count; i++) ir_operand_destroy(&arg_copy[i]);
+    free(arg_copy);
+    ir_operand_destroy(&dest);
+    return 0;
+  }
+
+  for (size_t i = 0; i < arg_count; i++) ir_operand_destroy(&arg_copy[i]);
+  free(arg_copy);
+  *out_dest = dest;
+  return 1;
+}
+
+// Lower method calls on threading types: thread.join(), mutex.lock(),
+// atomic.load/store/fetch_add/fetch_sub/cas(), tx.send(), rx.recv()
+static int ir_lower_thread_method_call(IRLoweringContext *context,
+                                       IRFunction *function,
+                                       ASTNode *expression,
+                                       CallExpression *call,
+                                       Type *obj_type,
+                                       IROperand *out_value) {
+  SourceLocation loc = expression->location;
+
+  // Evaluate the receiver object
+  IROperand receiver = ir_operand_none();
+  if (!ir_lower_expression(context, function, call->object, &receiver))
+    return 0;
+
+  IROperand arg1 = ir_operand_none();
+  IROperand arg2 = ir_operand_none();
+
+  if (call->argument_count >= 1) {
+    if (!ir_lower_expression(context, function, call->arguments[0], &arg1)) {
+      ir_operand_destroy(&receiver);
+      return 0;
+    }
+  }
+  if (call->argument_count >= 2) {
+    if (!ir_lower_expression(context, function, call->arguments[1], &arg2)) {
+      ir_operand_destroy(&receiver);
+      ir_operand_destroy(&arg1);
+      return 0;
+    }
+  }
+
+  const char *runtime_fn = NULL;
+  IROpcode opcode = IR_OP_NOP;
+  (void)opcode;
+
+  if (obj_type->kind == TYPE_THREAD &&
+      strcmp(call->function_name, "join") == 0) {
+    runtime_fn = "__meth_thread_join";
+  } else if (obj_type->kind == TYPE_MUTEX &&
+             strcmp(call->function_name, "lock") == 0) {
+    runtime_fn = "__meth_mutex_lock";
+  } else if (obj_type->kind == TYPE_ATOMIC) {
+    if (strcmp(call->function_name, "load") == 0)
+      runtime_fn = "__meth_atomic_load";
+    else if (strcmp(call->function_name, "store") == 0)
+      runtime_fn = "__meth_atomic_store";
+    else if (strcmp(call->function_name, "fetch_add") == 0)
+      runtime_fn = "__meth_atomic_fetch_add";
+    else if (strcmp(call->function_name, "fetch_sub") == 0)
+      runtime_fn = "__meth_atomic_fetch_sub";
+    else if (strcmp(call->function_name, "cas") == 0)
+      runtime_fn = "__meth_atomic_cas";
+  } else if (obj_type->kind == TYPE_SENDER &&
+             strcmp(call->function_name, "send") == 0) {
+    runtime_fn = "__meth_chan_send";
+  } else if (obj_type->kind == TYPE_RECEIVER) {
+    if (strcmp(call->function_name, "recv") == 0)
+      runtime_fn = "__meth_chan_recv";
+    else if (strcmp(call->function_name, "try_recv") == 0)
+      runtime_fn = "__meth_chan_try_recv";
+  }
+
+  if (!runtime_fn) {
+    ir_set_error(context, "Unknown method on threading type: '%s'",
+                 call->function_name);
+    ir_operand_destroy(&receiver);
+    ir_operand_destroy(&arg1);
+    ir_operand_destroy(&arg2);
+    return 0;
+  }
+
+  // Build args array: receiver [, arg1 [, arg2]]
+  IROperand args[3];
+  size_t nargs = 0;
+  args[nargs++] = receiver;
+  if (call->argument_count >= 1) args[nargs++] = arg1;
+  if (call->argument_count >= 2) args[nargs++] = arg2;
+
+  IROperand dest = ir_operand_none();
+  int ok = ir_emit_thread_runtime_call(context, function, loc, runtime_fn,
+                                       args, nargs, &dest);
+
+  ir_operand_destroy(&receiver);
+  ir_operand_destroy(&arg1);
+  ir_operand_destroy(&arg2);
+
+  if (!ok) return 0;
+  *out_value = dest;
+  return 1;
+}
+
+// Lower: spawn fn(args)  →  IR_OP_THREAD_SPAWN dest, fn_name, [args]
+static int ir_lower_spawn_expression(IRLoweringContext *context,
+                                     IRFunction *function,
+                                     ASTNode *expression,
+                                     IROperand *out_value) {
+  SpawnExpression *spawn = (SpawnExpression *)expression->data;
+  if (!spawn || !spawn->call) {
+    ir_set_error(context, "Invalid spawn expression");
+    return 0;
+  }
+
+  // The inner node must be a function call
+  ASTNode *call_node = spawn->call;
+  if (call_node->type != AST_FUNCTION_CALL) {
+    ir_set_error(context, "spawn requires a direct function call");
+    return 0;
+  }
+  CallExpression *call = (CallExpression *)call_node->data;
+  if (!call || !call->function_name) {
+    ir_set_error(context, "spawn: malformed inner call");
+    return 0;
+  }
+
+  // Lower each argument
+  IROperand *args = NULL;
+  if (call->argument_count > 0) {
+    args = calloc(call->argument_count, sizeof(IROperand));
+    if (!args) {
+      ir_set_error(context, "Out of memory in spawn argument lowering");
+      return 0;
+    }
+  }
+  for (size_t i = 0; i < call->argument_count; i++) {
+    if (!ir_lower_expression(context, function, call->arguments[i], &args[i])) {
+      for (size_t j = 0; j < i; j++) ir_operand_destroy(&args[j]);
+      free(args);
+      return 0;
+    }
+  }
+
+  IROperand dest = ir_operand_none();
+  if (!ir_make_temp_operand(context, &dest)) {
+    for (size_t i = 0; i < call->argument_count; i++) ir_operand_destroy(&args[i]);
+    free(args);
+    return 0;
+  }
+
+  // Clone args for instruction ownership
+  IROperand *arg_copy = NULL;
+  if (call->argument_count > 0) {
+    arg_copy = calloc(call->argument_count, sizeof(IROperand));
+    if (!arg_copy) {
+      for (size_t i = 0; i < call->argument_count; i++) ir_operand_destroy(&args[i]);
+      free(args);
+      ir_operand_destroy(&dest);
+      return 0;
+    }
+    for (size_t i = 0; i < call->argument_count; i++)
+      arg_copy[i] = ir_clone_operand_local(&args[i]);
+  }
+
+  IRInstruction instr = {0};
+  instr.op = IR_OP_THREAD_SPAWN;
+  instr.location = expression->location;
+  instr.dest = dest;
+  instr.text = call->function_name; // function name to spawn
+  instr.arguments = arg_copy;
+  instr.argument_count = call->argument_count;
+
+  if (!ir_emit(context, function, &instr)) {
+    for (size_t i = 0; i < call->argument_count; i++) {
+      ir_operand_destroy(&args[i]);
+      if (arg_copy) ir_operand_destroy(&arg_copy[i]);
+    }
+    free(args);
+    free(arg_copy);
+    ir_operand_destroy(&dest);
+    return 0;
+  }
+
+  for (size_t i = 0; i < call->argument_count; i++) ir_operand_destroy(&args[i]);
+  free(args);
+  for (size_t i = 0; i < call->argument_count; i++) ir_operand_destroy(&arg_copy[i]);
+  free(arg_copy);
+
+  *out_value = dest;
+  return 1;
+}
+
 static int ir_lower_call_expression(IRLoweringContext *context,
                                     IRFunction *function, ASTNode *expression,
                                     IROperand *out_value) {
@@ -1564,6 +1843,17 @@ static int ir_lower_call_expression(IRLoweringContext *context,
     return 0;
   }
   if (call->object) {
+    // Threading method calls — handled natively here, not name-mangled
+    Type *obj_type = ir_infer_expression_type(context, call->object);
+    if (obj_type && (obj_type->kind == TYPE_THREAD ||
+                     obj_type->kind == TYPE_MUTEX  ||
+                     obj_type->kind == TYPE_GUARD  ||
+                     obj_type->kind == TYPE_ATOMIC ||
+                     obj_type->kind == TYPE_SENDER ||
+                     obj_type->kind == TYPE_RECEIVER)) {
+      return ir_lower_thread_method_call(context, function, expression,
+                                        call, obj_type, out_value);
+    }
     ir_set_error(context, "Method calls should be mangled directly, unresolved "
                           "method object in lower pass");
     return 0;
@@ -1580,6 +1870,65 @@ static int ir_lower_call_expression(IRLoweringContext *context,
              strcmp(call->function_name,
                     "__meth_async_current_cancelled") == 0) {
     runtime_builtin_name = call->function_name;
+  } else if (strcmp(call->function_name, "channel") == 0) {
+    // channel() or channel(N) — emit IR_OP_CHAN_NEW
+    IROperand cap = (call->argument_count == 1)
+                    ? ir_operand_none() : ir_operand_none();
+    if (call->argument_count == 1) {
+      if (!ir_lower_expression(context, function, call->arguments[0], &cap))
+        return 0;
+    } else {
+      cap = ir_operand_int(0); // 0 = unbounded
+    }
+    IROperand dest = ir_operand_none();
+    if (!ir_make_temp_operand(context, &dest)) {
+      ir_operand_destroy(&cap);
+      return 0;
+    }
+    IRInstruction instr = {0};
+    instr.op = IR_OP_CHAN_NEW;
+    instr.location = expression->location;
+    instr.dest = dest;
+    instr.lhs = cap;
+    if (!ir_emit(context, function, &instr)) {
+      ir_operand_destroy(&cap);
+      ir_operand_destroy(&dest);
+      return 0;
+    }
+    ir_operand_destroy(&cap);
+    *out_value = dest;
+    return 1;
+  } else if (strcmp(call->function_name, "new") == 0 && call->object) {
+    // Mutex.new() / Atomic.new(val)
+    Type *static_type = ir_infer_expression_type(context, call->object);
+    if (static_type) {
+      const char *runtime_new = NULL;
+      if (static_type->kind == TYPE_MUTEX ||
+          (call->object->type == AST_IDENTIFIER &&
+           strcmp(((Identifier *)call->object->data)->name, "Mutex") == 0))
+        runtime_new = "__meth_mutex_new";
+      else if (static_type->kind == TYPE_ATOMIC ||
+               (call->object->type == AST_IDENTIFIER &&
+                strcmp(((Identifier *)call->object->data)->name, "Atomic") == 0))
+        runtime_new = "__meth_atomic_new";
+      if (runtime_new) {
+        IROperand init = ir_operand_none();
+        size_t nargs = 0;
+        if (call->argument_count == 1) {
+          if (!ir_lower_expression(context, function, call->arguments[0], &init))
+            return 0;
+          nargs = 1;
+        }
+        IROperand dest = ir_operand_none();
+        int ok = ir_emit_thread_runtime_call(context, function,
+                                             expression->location, runtime_new,
+                                             nargs ? &init : NULL, nargs, &dest);
+        ir_operand_destroy(&init);
+        if (!ok) return 0;
+        *out_value = dest;
+        return 1;
+      }
+    }
   }
 
   if (runtime_builtin_name) {
@@ -2761,6 +3110,9 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     return 1;
   }
 
+  case AST_SPAWN_EXPRESSION:
+    return ir_lower_spawn_expression(context, function, expression, out_value);
+
   case AST_FUNCTION_CALL:
     return ir_lower_call_expression(context, function, expression, out_value);
 
@@ -3009,7 +3361,8 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     return 1;
   }
 
-  case AST_FUNCTION_CALL: {
+  case AST_FUNCTION_CALL:
+  case AST_SPAWN_EXPRESSION: {
     IROperand ignored = ir_operand_none();
     int ok = ir_lower_expression(context, function, statement, &ignored);
     ir_operand_destroy(&ignored);
@@ -3151,7 +3504,8 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
       return 0;
     }
 
-    if (!ir_push_control_frame(context, loop_end, loop_start)) {
+    if (!ir_push_labeled_control_frame(context, loop_end, loop_start,
+                                       while_data->label)) {
       free(loop_start);
       free(loop_end);
       return 0;
@@ -3224,7 +3578,8 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
       }
     }
 
-    if (!ir_push_control_frame(context, end_label, step_label)) {
+    if (!ir_push_labeled_control_frame(context, end_label, step_label,
+                                       for_data->label)) {
       free(condition_label);
       free(step_label);
       free(end_label);
@@ -3280,9 +3635,17 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     return ir_lower_match_statement(context, function, statement, defers);
 
   case AST_BREAK_STATEMENT: {
-    const char *target = ir_current_break_label(context);
+    LoopControlStatement *ctrl = (LoopControlStatement *)statement->data;
+    const char *user_label = ctrl ? ctrl->target_label : NULL;
+    const char *target = user_label ? ir_find_labeled_break(context, user_label)
+                                    : ir_current_break_label(context);
     if (!target) {
-      ir_set_error(context, "'break' used outside loop/switch");
+      if (user_label) {
+        ir_set_error(context, "'break %s' has no matching labeled loop",
+                     user_label);
+      } else {
+        ir_set_error(context, "'break' used outside loop/switch");
+      }
       return 0;
     }
     return ir_emit_jump_instruction(context, function, target,
@@ -3290,9 +3653,18 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
   }
 
   case AST_CONTINUE_STATEMENT: {
-    const char *target = ir_current_continue_label(context);
+    LoopControlStatement *ctrl = (LoopControlStatement *)statement->data;
+    const char *user_label = ctrl ? ctrl->target_label : NULL;
+    const char *target = user_label
+                             ? ir_find_labeled_continue(context, user_label)
+                             : ir_current_continue_label(context);
     if (!target) {
-      ir_set_error(context, "'continue' used outside loop");
+      if (user_label) {
+        ir_set_error(context, "'continue %s' has no matching labeled loop",
+                     user_label);
+      } else {
+        ir_set_error(context, "'continue' used outside loop");
+      }
       return 0;
     }
     return ir_emit_jump_instruction(context, function, target,
@@ -3452,6 +3824,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       for (size_t j = 0; j < context.control_count; j++) {
         free(context.control_stack[j].break_label);
         free(context.control_stack[j].continue_label);
+        free(context.control_stack[j].user_label);
       }
       free(context.control_stack);
       if (error_message) {
@@ -3476,6 +3849,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       for (size_t j = 0; j < context.control_count; j++) {
         free(context.control_stack[j].break_label);
         free(context.control_stack[j].continue_label);
+        free(context.control_stack[j].user_label);
       }
       free(context.control_stack);
       if (error_message) {
@@ -3495,6 +3869,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       for (size_t j = 0; j < context.control_count; j++) {
         free(context.control_stack[j].break_label);
         free(context.control_stack[j].continue_label);
+        free(context.control_stack[j].user_label);
       }
       free(context.control_stack);
       if (error_message) {
@@ -3511,6 +3886,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
   for (size_t j = 0; j < context.control_count; j++) {
     free(context.control_stack[j].break_label);
     free(context.control_stack[j].continue_label);
+    free(context.control_stack[j].user_label);
   }
   free(context.control_stack);
 

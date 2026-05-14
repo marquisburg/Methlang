@@ -392,6 +392,19 @@ ASTNode *ast_clone_node(ASTNode *node) {
     clone->data = dst;
     break;
   }
+  case AST_SPAWN_EXPRESSION: {
+    SpawnExpression *src = (SpawnExpression *)node->data;
+    SpawnExpression *dst = malloc(sizeof(SpawnExpression));
+    if (!dst) {
+      free(clone);
+      return NULL;
+    }
+    dst->call = src->call ? ast_clone_node(src->call) : NULL;
+    if (dst->call)
+      ast_add_child(clone, dst->call);
+    clone->data = dst;
+    break;
+  }
   case AST_RETURN_STATEMENT: {
     ReturnStatement *src = (ReturnStatement *)node->data;
     if (src) {
@@ -453,6 +466,7 @@ ASTNode *ast_clone_node(ASTNode *node) {
     }
     dst->condition = src->condition ? ast_clone_node(src->condition) : NULL;
     dst->body = src->body ? ast_clone_node(src->body) : NULL;
+    dst->label = ast_copy_string(src->label);
     if (dst->condition)
       ast_add_child(clone, dst->condition);
     if (dst->body)
@@ -472,6 +486,7 @@ ASTNode *ast_clone_node(ASTNode *node) {
     dst->condition = src->condition ? ast_clone_node(src->condition) : NULL;
     dst->increment = src->increment ? ast_clone_node(src->increment) : NULL;
     dst->body = src->body ? ast_clone_node(src->body) : NULL;
+    dst->label = ast_copy_string(src->label);
     if (dst->initializer)
       ast_add_child(clone, dst->initializer);
     if (dst->condition)
@@ -558,6 +573,17 @@ ASTNode *ast_clone_node(ASTNode *node) {
     }
     dst->module_name = ast_copy_string(src->module_name);
     dst->namespace_alias = ast_copy_string(src->namespace_alias);
+    dst->selected_names = NULL;
+    dst->selected_count = 0;
+    if (src->selected_names && src->selected_count > 0) {
+      dst->selected_names = malloc(src->selected_count * sizeof(char *));
+      if (dst->selected_names) {
+        for (size_t i = 0; i < src->selected_count; i++) {
+          dst->selected_names[i] = ast_copy_string(src->selected_names[i]);
+        }
+        dst->selected_count = src->selected_count;
+      }
+    }
     clone->data = dst;
     break;
   }
@@ -573,8 +599,19 @@ ASTNode *ast_clone_node(ASTNode *node) {
     break;
   }
   case AST_BREAK_STATEMENT:
-  case AST_CONTINUE_STATEMENT:
+  case AST_CONTINUE_STATEMENT: {
+    LoopControlStatement *src = (LoopControlStatement *)node->data;
+    if (src) {
+      LoopControlStatement *dst = malloc(sizeof(LoopControlStatement));
+      if (!dst) {
+        free(clone);
+        return NULL;
+      }
+      dst->target_label = ast_copy_string(src->target_label);
+      clone->data = dst;
+    }
     break;
+  }
   default:
     break;
   }
@@ -631,6 +668,10 @@ void ast_destroy_node(ASTNode *node) {
     if (import_decl) {
       ast_free_string(import_decl->module_name);
       ast_free_string(import_decl->namespace_alias);
+      for (size_t i = 0; i < import_decl->selected_count; i++) {
+        ast_free_string(import_decl->selected_names[i]);
+      }
+      free(import_decl->selected_names);
       free(import_decl);
     }
     break;
@@ -865,10 +906,35 @@ void ast_destroy_node(ASTNode *node) {
     }
     break;
   }
+  case AST_SPAWN_EXPRESSION: {
+    SpawnExpression *spawn = (SpawnExpression *)node->data;
+    if (spawn) {
+      free(spawn);
+    }
+    break;
+  }
   case AST_FOR_STATEMENT: {
     ForStatement *for_stmt = (ForStatement *)node->data;
     if (for_stmt) {
+      ast_free_string(for_stmt->label);
       free(for_stmt);
+    }
+    break;
+  }
+  case AST_WHILE_STATEMENT: {
+    WhileStatement *while_stmt = (WhileStatement *)node->data;
+    if (while_stmt) {
+      ast_free_string(while_stmt->label);
+      free(while_stmt);
+    }
+    break;
+  }
+  case AST_BREAK_STATEMENT:
+  case AST_CONTINUE_STATEMENT: {
+    LoopControlStatement *ctrl = (LoopControlStatement *)node->data;
+    if (ctrl) {
+      ast_free_string(ctrl->target_label);
+      free(ctrl);
     }
     break;
   }
@@ -940,6 +1006,8 @@ ASTNode *ast_create_program() {
 
 ASTNode *ast_create_import_declaration(const char *module_name,
                                        const char *namespace_alias,
+                                       const char **selected_names,
+                                       size_t selected_count,
                                        SourceLocation location) {
   ASTNode *node = ast_create_node(AST_IMPORT, location);
   if (!node)
@@ -953,8 +1021,25 @@ ASTNode *ast_create_import_declaration(const char *module_name,
 
   import_decl->module_name = ast_copy_string(module_name);
   import_decl->namespace_alias = ast_copy_string(namespace_alias);
-  node->data = import_decl;
+  import_decl->selected_names = NULL;
+  import_decl->selected_count = 0;
 
+  if (selected_names && selected_count > 0) {
+    import_decl->selected_names = malloc(selected_count * sizeof(char *));
+    if (!import_decl->selected_names) {
+      ast_free_string(import_decl->module_name);
+      ast_free_string(import_decl->namespace_alias);
+      free(import_decl);
+      free(node);
+      return NULL;
+    }
+    for (size_t i = 0; i < selected_count; i++) {
+      import_decl->selected_names[i] = ast_copy_string(selected_names[i]);
+    }
+    import_decl->selected_count = selected_count;
+  }
+
+  node->data = import_decl;
   return node;
 }
 
@@ -1618,6 +1703,7 @@ ASTNode *ast_create_for_statement(ASTNode *initializer, ASTNode *condition,
   for_stmt->condition = condition;
   for_stmt->increment = increment;
   for_stmt->body = body;
+  for_stmt->label = NULL;
   node->data = for_stmt;
 
   if (initializer)
@@ -1698,11 +1784,41 @@ ASTNode *ast_create_switch_statement(ASTNode *expression, ASTNode **cases,
 }
 
 ASTNode *ast_create_break_statement(SourceLocation location) {
-  return ast_create_node(AST_BREAK_STATEMENT, location);
+  return ast_create_labeled_break_statement(NULL, location);
 }
 
 ASTNode *ast_create_continue_statement(SourceLocation location) {
-  return ast_create_node(AST_CONTINUE_STATEMENT, location);
+  return ast_create_labeled_continue_statement(NULL, location);
+}
+
+ASTNode *ast_create_labeled_break_statement(const char *label,
+                                            SourceLocation location) {
+  ASTNode *node = ast_create_node(AST_BREAK_STATEMENT, location);
+  if (!node)
+    return NULL;
+  LoopControlStatement *data = malloc(sizeof(LoopControlStatement));
+  if (!data) {
+    free(node);
+    return NULL;
+  }
+  data->target_label = ast_copy_string(label);
+  node->data = data;
+  return node;
+}
+
+ASTNode *ast_create_labeled_continue_statement(const char *label,
+                                               SourceLocation location) {
+  ASTNode *node = ast_create_node(AST_CONTINUE_STATEMENT, location);
+  if (!node)
+    return NULL;
+  LoopControlStatement *data = malloc(sizeof(LoopControlStatement));
+  if (!data) {
+    free(node);
+    return NULL;
+  }
+  data->target_label = ast_copy_string(label);
+  node->data = data;
+  return node;
 }
 
 ASTNode *ast_create_defer_statement(ASTNode *statement,
@@ -1743,6 +1859,27 @@ ASTNode *ast_create_cast_expression(const char *type_name, ASTNode *operand,
 
   if (operand) {
     ast_add_child(node, operand);
+  }
+
+  return node;
+}
+
+ASTNode *ast_create_spawn_expression(ASTNode *call, SourceLocation location) {
+  ASTNode *node = ast_create_node(AST_SPAWN_EXPRESSION, location);
+  if (!node)
+    return NULL;
+
+  SpawnExpression *spawn = malloc(sizeof(SpawnExpression));
+  if (!spawn) {
+    free(node);
+    return NULL;
+  }
+
+  spawn->call = call;
+  node->data = spawn;
+
+  if (call) {
+    ast_add_child(node, call);
   }
 
   return node;

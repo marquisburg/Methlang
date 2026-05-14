@@ -1,8 +1,13 @@
 # Async and Sync Execution
 
-Methlang supports both ordinary synchronous functions and runtime-backed asynchronous functions. The current model is deliberately pragmatic: `async` creates a `Future<T>` handle backed by a runtime task context, enqueues it on a bounded executor, and `await` blocks until that task finishes.
+Methlang supports both ordinary synchronous functions and asynchronous functions. **Async lowering is selectable** at compile time:
 
-This is not a coroutine/event-loop model. It is a language-plus-runtime contract built around explicit futures, blocking waits, cooperative cancellation, and a bounded pool of long-lived worker threads.
+- **`pool` (default)** — `async` creates a `Future<T>` handle, work runs on a **bounded worker-pool executor**, and `await` **blocks an OS thread** until the future completes. This is the **stable** model described throughout most of this document.
+- **`coroutine` (experimental)** — the compiler rewrites `async`/`await` toward **stackless task frames** and the **`meth_coro_*` runtime** (see [Coroutine reactor preview](#coroutine-reactor-preview-c-runtime-api)). Scope, semantics, and ergonomics are still evolving; use **`--async-model coroutine`** only when you intentionally need this path.
+
+Pass **`--async-model pool`** or **`--async-model coroutine`** to the compiler (`methlang`). Omitting the flag is equivalent to **`pool`**.
+
+The **`pool`** model is **not** a coroutine/event-loop model: it is explicit futures, blocking waits, cooperative cancellation, and a bounded pool of long-lived worker threads.
 
 ## Quick Comparison
 
@@ -12,7 +17,7 @@ This is not a coroutine/event-loop model. It is a language-plus-runtime contract
 | Call result | `T` | `Future<T>` |
 | Execution start | Runs immediately on the caller thread | Evaluates arguments, allocates task context, enqueues task on the async executor |
 | Wait behavior | Caller stays inside the call until return | Caller gets a future immediately; `await` waits later |
-| Runtime requirement | None beyond normal program/runtime needs | Requires the bundled async runtime and GC runtime |
+| Runtime requirement | None beyond normal program/runtime needs | Requires the bundled async runtime and GC runtime (coroutine model also relies on coroutine/IOCP pieces in the same async runtime object where applicable) |
 
 ## Declaring Functions
 
@@ -67,6 +72,8 @@ function main() -> int32 {
 ```
 
 ## Async Call Semantics
+
+The following describes the **`pool`** lowering model (default). The **`coroutine`** model uses a different rewrite (stackless tasks); see [Coroutine reactor preview](#coroutine-reactor-preview-c-runtime-api).
 
 An async call still evaluates its arguments at the call site, but instead of returning the payload immediately it:
 
@@ -140,19 +147,21 @@ function main() -> int32 {
 }
 ```
 
-Behavior:
+Behavior (**`pool`** model):
 
 - `await future` blocks until the future completes on the executor.
 - The expression result is the future payload type `T`.
 - `await` is valid in both synchronous and asynchronous functions.
-- `await` does not suspend the current function in a coroutine sense; it blocks the current OS thread.
+- Under **`pool`**, `await` does **not** suspend the current function as a stackless coroutine; it **blocks the current OS thread** (caller thread in sync functions, executor worker thread in async functions).
 
-That last point is the most important distinction from many async languages:
+That last point is the most important distinction from many async languages when using **`pool`**:
 
 - in a synchronous function, `await` blocks the caller thread;
 - in an async function, `await` blocks that async worker thread.
 
-There is no central reactor, no cooperative resumption of the caller stack, and no promise chaining hidden behind the scenes.
+There is no central reactor and no cooperative resumption of the caller stack in the **`pool`** model, and no promise chaining hidden behind the scenes.
+
+With **`--async-model coroutine`**, lowering targets the stackless task runtime instead; consult tests and runtime APIs for current capabilities.
 
 ## Call Combinations
 
@@ -290,9 +299,9 @@ The current threading story is:
 This implies several practical consequences:
 
 - Async work is parallel-capable up to `N` workers.
-- Async is heavier than a coroutine model; one async call is not "just a suspended stack frame".
+- Under **`pool`**, async is heavier than a stackless coroutine model; one async call is not "just a suspended stack frame".
 - Awaiting from an async function can still tie up a worker thread.
-- There is no built-in async I/O reactor.
+- The **`pool`** model does not include a built-in async I/O reactor in the language runtime (see [Coroutine reactor preview](#coroutine-reactor-preview-c-runtime-api) for Windows IOCP primitives used with the coroutine path).
 
 ### Blocking `await` Deadlock Hazard
 
@@ -302,10 +311,10 @@ During shutdown (`DRAINING`/`STOPPING`), this assist behavior is disabled so tea
 
 This mitigation makes typical parent-await-child patterns safe even with `METH_ASYNC_WORKERS=1`.
 
-Still forbidden/unsafe patterns:
+Still forbidden/unsafe patterns (**`pool`**):
 
 - Cyclic waits (for example task A waits on B while B waits on A) can still deadlock.
-- Designs that rely on non-blocking coroutine suspension are not supported; `await` remains blocking.
+- Under **`pool`**, designs that need **non-blocking** suspension are not supported; **`await` remains blocking** on an OS thread.
 
 ### Sendability and Cross-Thread Use
 
@@ -335,9 +344,11 @@ This means:
 
 Worker teardown always runs `gc_thread_detach()` on worker-thread exit paths. For embedding, shut down async runtime before `gc_shutdown()` so worker detach/join is complete before GC global teardown.
 
-## Coroutine Reactor Preview (C Runtime API)
+## Coroutine reactor preview (C runtime API)
 
-An initial Windows IOCP reactor API is available for embedders as a foundation for stackless coroutine scheduling:
+These symbols live in the bundled async runtime. They back the **experimental** **`coroutine`** async lowering (`--async-model coroutine`) and are also available to **embedders** driving IOCP and stackless tasks from C.
+
+An initial Windows IOCP reactor API is available as a foundation for stackless scheduling:
 
 - `meth_coro_iocp_runtime_init()`
 - `meth_coro_iocp_runtime_shutdown()`
@@ -351,8 +362,6 @@ Event kinds are:
 - `METH_CORO_IOCP_EVENT_IO`
 - `METH_CORO_IOCP_EVENT_IO_ERROR`
 
-This is a runtime-level primitive layer; source-level `async`/`await` is still the existing future+worker-pool model until coroutine lowering lands in the compiler pipeline.
-
 An experimental stackless task-frame scheduler API is also available:
 
 - `meth_coro_task_create(step_fn, state)`
@@ -362,7 +371,7 @@ An experimental stackless task-frame scheduler API is also available:
 - `meth_coro_task_is_done(task_handle)`
 - `meth_coro_task_destroy(task_handle)`
 
-The scheduler is resumable-state based (no per-task native thread stack) and interoperates with IOCP wake tokens. The current compiler pipeline does not yet auto-lower Meth `async`/`await` into these task frames; this API is a runtime foundation for that next stage.
+The scheduler is resumable-state based (no per-task native thread stack) and interoperates with IOCP wake tokens. With **`--async-model coroutine`**, the compiler **does** rewrite Meth `async`/`await` to use this machinery (experimental). You can also call these APIs directly from C without going through Meth `async`.
 
 Current scheduling semantics:
 
@@ -442,17 +451,35 @@ async fn service() -> int32 {
 }
 ```
 
-## What the Current Model Is Not
+## What each model is (and is not)
 
-The current async implementation is intentionally simple. It is **not**:
+### `pool` (default)
+
+The **`pool`** implementation is intentionally simple. It is **not**:
 
 - a non-blocking event loop,
-- a stackless coroutine system,
+- stackless coroutine suspension for Meth `async`/`await` (use **`coroutine`** lowering for that direction),
 - a full green-thread/work-stealing coroutine scheduler,
 - a preemptive cancellation system,
 - a typed cancellation/error propagation system.
 
-You should think of it as "typed futures + bounded worker pool + blocking await + cooperative cancel".
+Think of **`pool`** as **typed futures + bounded worker pool + blocking await + cooperative cancel**.
+
+### `coroutine` (experimental)
+
+The **`coroutine`** path **is** a stackless-style lowering tied to **`meth_coro_*`** and (on Windows) IOCP primitives. It is **not** a finished, language-level non-blocking `await` story for all I/O; coverage and ergonomics are still growing.
+
+Treat **`coroutine`** as **preview**: expect rough edges compared to **`pool`**.
+
+Current internal lowering behavior:
+
+- Coroutine mode uses a generic CFG-level async rewrite path for arbitrary async bodies (not a pattern-only matrix).
+- Suspend points are collected from `await` sites and persisted as coroutine-frame metadata (`resume_state`, `suspend_count`) in the generated async context.
+- Locals that must survive suspension are carried via the heap async context, so values remain available across resumes.
+
+GC/root visibility note:
+
+- Coroutine-frame visibility still relies on the generated context-object field layout and current runtime scanning behavior; a separate standalone root-map artifact is not exposed as a user-facing format yet.
 
 ## See Also
 

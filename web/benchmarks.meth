@@ -1,0 +1,115 @@
+// Benchmark serving for Methlang HTTP Server
+//
+// Serves GET /benchmarks.json from the harness output file, refreshing at most
+// every 5 minutes by re-running the benchmark script.
+
+import "http_util";
+
+extern function GetModuleFileNameA(module: cstring, filename: cstring, size: int32) -> int32 = "GetModuleFileNameA";
+extern function GetTickCount64() -> int64 = "GetTickCount64";
+extern function system(cmd: cstring) -> int32 = "system";
+
+export var benchmark_refresh_interval_ms: int64 = 300000;
+export var benchmark_last_refresh_ms: int64 = 0;
+export var benchmark_mutex: int64 = 0;
+
+var fn_benchmarks_json: string = "benchmarks.json";
+var fn_benchmarks_json_harness: string = "docs/benchmarks/latest.json";
+var fn_benchmarks_json_harness_alt: string = "../docs/benchmarks/latest.json";
+var cmd_refresh_bench_root: string = "powershell -NoProfile -ExecutionPolicy Bypass -File tools\\benchmark\\run-benchmarks.ps1 -Quiet";
+var cmd_refresh_bench_web: string = "powershell -NoProfile -ExecutionPolicy Bypass -File ..\\tools\\benchmark\\run-benchmarks.ps1 -Quiet";
+
+// Find last backslash or slash in null-terminated path; returns index or -1.
+function find_last_slash_bench(path: cstring, len: int32) -> int32 {
+  var i: int32 = len - 1;
+  while (i >= 0) {
+    var c: int32 = path[i];
+    if (c == 92 || c == 47) { return i; }
+    i = i - 1;
+  }
+  return -1;
+}
+
+// Refresh benchmark harness at most every 5 minutes.
+export function maybe_refresh_benchmarks() {
+  if (benchmark_mutex == 0) { return; }
+  var now: int64 = GetTickCount64();
+  if (benchmark_last_refresh_ms != 0 && now - benchmark_last_refresh_ms < benchmark_refresh_interval_ms) {
+    return;
+  }
+  if (mutex_lock_infinite(benchmark_mutex) != 1) { return; }
+  now = GetTickCount64();
+  if (benchmark_last_refresh_ms == 0 || now - benchmark_last_refresh_ms >= benchmark_refresh_interval_ms) {
+    var rc: int32 = system(cmd_refresh_bench_root.chars);
+    if (rc != 0) {
+      rc = system(cmd_refresh_bench_web.chars);
+    }
+    benchmark_last_refresh_ms = now;
+  }
+  mutex_unlock(benchmark_mutex);
+}
+
+// Serve benchmark JSON from the dedicated harness output, with legacy fallbacks.
+export function serve_benchmarks_json(client: int64) {
+  maybe_refresh_benchmarks();
+  var fp: cstring = fopen(fn_benchmarks_json_harness, "r");
+  if (fp == 0) {
+    fp = fopen(fn_benchmarks_json_harness_alt, "r");
+  }
+  if (fp == 0) {
+    fp = fopen(fn_benchmarks_json, "r");
+  }
+  if (fp == 0) {
+    fp = fopen("web/benchmarks.json", "r");
+  }
+  if (fp == 0) {
+    var exe_path: uint8[272];
+    var got: int32 = GetModuleFileNameA(0, &exe_path[0], 260);
+    if (got > 0) {
+      var last: int32 = find_last_slash_bench(&exe_path[0], got);
+      if (last >= 0) {
+        exe_path[last + 1] = 0;
+        var prefix_len: int32 = last + 1;
+        var fname: string = "benchmarks.json";
+        var copy_len: int32 = fname.length;
+        if (prefix_len + copy_len < 270) {
+          memcpy(&exe_path[prefix_len], fname.chars, copy_len);
+          exe_path[prefix_len + copy_len] = 0;
+          fp = fopen(&exe_path[0], "r");
+        }
+      }
+    }
+  }
+  if (fp == 0) {
+    var empty: string = "{\"benchmarks\":[],\"failed\":[],\"generated\":null}";
+    var hdr: string = "Content-Length: 45\r\n\r\n";
+    send_all(client, HTTP_JSON_HEADER.chars, HTTP_JSON_HEADER.length);
+    send_all(client, hdr.chars, hdr.length);
+    send_all(client, empty.chars, empty.length);
+    return;
+  }
+  defer fclose(fp);
+  var buf: cstring = malloc(65536);
+  if (buf == 0) {
+    send_404(client);
+    return;
+  }
+  defer free(buf);
+  var n: int64 = fread(buf, 1, 65536, fp);
+  if (n <= 0) {
+    var empty: string = "{\"benchmarks\":[],\"failed\":[],\"generated\":null}";
+    var hdr: string = "Content-Length: 45\r\n\r\n";
+    send_all(client, HTTP_JSON_HEADER.chars, HTTP_JSON_HEADER.length);
+    send_all(client, hdr.chars, hdr.length);
+    send_all(client, empty.chars, empty.length);
+    return;
+  }
+  var len_buf: uint8[24];
+  var dc: int32 = int_to_dec(&len_buf[0], n);
+  var send_len: int32 = n;
+  send_all(client, HTTP_JSON_HEADER.chars, HTTP_JSON_HEADER.length);
+  send_all(client, cstr("Content-Length: "), 16);
+  send_all(client, &len_buf[0], dc);
+  send_all(client, cstr("\r\n\r\n"), 4);
+  send_all(client, buf, send_len);
+}

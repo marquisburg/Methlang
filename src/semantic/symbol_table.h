@@ -24,7 +24,14 @@ typedef enum {
   TYPE_STRUCT,
   TYPE_ENUM,
   TYPE_TAGGED_ENUM,
-  TYPE_VOID
+  TYPE_VOID,
+  // Threading types — base_type holds the inner/payload type
+  TYPE_THREAD,   // Thread<T>  — base_type = T (return type of the spawned fn)
+  TYPE_MUTEX,    // Mutex<T>   — base_type = T (guarded value type)
+  TYPE_GUARD,    // Guard<T>   — base_type = T (returned by Mutex.lock())
+  TYPE_ATOMIC,   // Atomic<T>  — base_type = T (must be integer/pointer)
+  TYPE_SENDER,   // Sender<T>  — base_type = T
+  TYPE_RECEIVER  // Receiver<T> — base_type = T
 } TypeKind;
 
 typedef struct Type {

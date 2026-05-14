@@ -4297,6 +4297,63 @@ static int code_generator_binary_emit_instruction(
   case IR_OP_CAST:
     return code_generator_binary_emit_cast(generator, context, instruction);
 
+  // Threading opcodes that reach codegen are lowered as plain calls to
+  // the runtime. IR_OP_THREAD_SPAWN emits a call to __meth_thread_spawn
+  // passing a function pointer (address-of the named function) followed by
+  // the user-supplied arguments, then the arg count as the final argument.
+  // All other thread opcodes are already lowered to IR_OP_CALL by
+  // ir_emit_thread_runtime_call / ir_lower_thread_method_call.
+  case IR_OP_THREAD_SPAWN: {
+    // Synthesize: __meth_thread_spawn(fn_ptr, arg0..argN, arg_count)
+    // args layout: [symbol(fn_name), original_args..., int(arg_count)]
+    size_t orig_argc = instruction->argument_count;
+    size_t new_argc = 1 + orig_argc + 1;
+    IROperand *new_args = (IROperand *)calloc(new_argc, sizeof(IROperand));
+    if (!new_args) {
+      code_generator_set_error(generator, "OOM in IR_OP_THREAD_SPAWN lowering");
+      return 0;
+    }
+    new_args[0] = ir_operand_symbol(instruction->text); // fn ptr
+    for (size_t i = 0; i < orig_argc; i++)
+      new_args[1 + i] = instruction->arguments[i]; // shallow copy — names are interned
+    new_args[1 + orig_argc] = ir_operand_int((long long)orig_argc);
+
+    IRInstruction synth = *instruction;
+    synth.op = IR_OP_CALL;
+    synth.text = "__meth_thread_spawn";
+    synth.arguments = new_args;
+    synth.argument_count = new_argc;
+
+    int ok = code_generator_binary_emit_call(generator, context, &synth);
+
+    // Only free the wrapper array and the two operands we allocated;
+    // the shallow-copied slots share names with the original instruction.
+    ir_operand_destroy(&new_args[0]);
+    ir_operand_destroy(&new_args[1 + orig_argc]);
+    free(new_args);
+    return ok;
+  }
+
+  case IR_OP_CHAN_NEW:
+  case IR_OP_MUTEX_NEW:
+  case IR_OP_MUTEX_LOCK:
+  case IR_OP_MUTEX_UNLOCK:
+  case IR_OP_ATOMIC_LOAD:
+  case IR_OP_ATOMIC_STORE:
+  case IR_OP_ATOMIC_FETCH_ADD:
+  case IR_OP_ATOMIC_FETCH_SUB:
+  case IR_OP_ATOMIC_CAS:
+  case IR_OP_CHAN_SEND:
+  case IR_OP_CHAN_RECV:
+  case IR_OP_THREAD_JOIN: {
+    // These are emitted as IR_OP_CALL by the lowering pass. If they somehow
+    // arrive here directly (e.g. future optimization passes), synthesize a
+    // plain call using instruction->text as the runtime function name.
+    IRInstruction synth = *instruction;
+    synth.op = IR_OP_CALL;
+    return code_generator_binary_emit_call(generator, context, &synth);
+  }
+
   case IR_OP_RETURN: {
     size_t displacement_offset = 0;
     if (instruction->lhs.kind != IR_OPERAND_NONE &&

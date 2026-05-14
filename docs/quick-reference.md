@@ -46,7 +46,7 @@ function main() -> int32 {
 
 ## With Async and Await
 
-`async` calls return `Future<T>`. `await` blocks until the future completes and yields the payload value. See [Async and Sync Execution](async.md).
+By default (`--async-model pool` or omitted), `async` calls return `Future<T>` and `await` blocks until the payload is ready. Use `--async-model coroutine` for experimental stackless lowering (see [Async and Sync Execution](async.md)).
 
 ```meth
 async fn add_one(x: int32) -> int32 {

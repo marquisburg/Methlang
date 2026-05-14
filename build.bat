@@ -94,6 +94,10 @@ echo Compiling async runtime...
 gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\runtime\async_runtime.c -o obj\runtime\async_runtime.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
+echo Compiling thread runtime...
+gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\runtime\meth_thread.c -o obj\runtime\meth_thread.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+
 echo Compiling error reporter...
 gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\error\error_reporter.c -o obj\error\error_reporter.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
@@ -103,7 +107,7 @@ gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -Isrc -c src\main.c -o obj\main.
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Linking...
-gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\semantic\async_rewrite.o obj\ir\*.o obj\\codegen\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\runtime\gc.o obj\error\error_reporter.o obj\main.o -o bin\methlang.exe
+gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\semantic\async_rewrite.o obj\ir\*.o obj\\codegen\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\runtime\gc.o obj\runtime\meth_thread.o obj\error\error_reporter.o obj\main.o -o bin\methlang.exe
 
 if %ERRORLEVEL% NEQ 0 (
     echo Build failed!
@@ -120,9 +124,11 @@ xcopy src\runtime bin\runtime\ /E /I /Y >nul
 copy /Y obj\runtime\gc.o bin\runtime\gc.o >nul
 copy /Y obj\runtime\methlang_entry.o bin\runtime\methlang_entry.o >nul
 copy /Y obj\runtime\async_runtime.o bin\runtime\async_runtime.o >nul
+copy /Y obj\runtime\meth_thread.o bin\runtime\meth_thread.o >nul
 copy /Y obj\runtime\gc.o bin\runtime\gc.obj >nul
 copy /Y obj\runtime\methlang_entry.o bin\runtime\methlang_entry.obj >nul
 copy /Y obj\runtime\async_runtime.o bin\runtime\async_runtime.obj >nul
+copy /Y obj\runtime\meth_thread.o bin\runtime\meth_thread.obj >nul
 
 if exist installer\meth-build.bat copy /Y installer\meth-build.bat bin\meth-build.bat >nul
 

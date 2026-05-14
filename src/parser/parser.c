@@ -356,6 +356,7 @@ void parser_synchronize(Parser *parser) {
     switch (parser->peek_token.type) {
     case TOKEN_FUNCTION:
     case TOKEN_ASYNC:
+    case TOKEN_SPAWN:
     case TOKEN_VAR:
     case TOKEN_STRUCT:
     case TOKEN_RETURN:
@@ -675,6 +676,26 @@ static int parser_is_assignment_target(ASTNode *target) {
   return 0;
 }
 
+static const char *parser_compound_assign_op(TokenType type) {
+  switch (type) {
+  case TOKEN_PLUS_EQUALS:    return "+";
+  case TOKEN_MINUS_EQUALS:   return "-";
+  case TOKEN_STAR_EQUALS:    return "*";
+  case TOKEN_SLASH_EQUALS:   return "/";
+  case TOKEN_PERCENT_EQUALS: return "%";
+  case TOKEN_AMP_EQUALS:     return "&";
+  case TOKEN_PIPE_EQUALS:    return "|";
+  case TOKEN_CARET_EQUALS:   return "^";
+  case TOKEN_LSHIFT_EQUALS:  return "<<";
+  case TOKEN_RSHIFT_EQUALS:  return ">>";
+  default:                   return NULL;
+  }
+}
+
+int parser_is_assignment_token(TokenType type) {
+  return type == TOKEN_EQUALS || parser_compound_assign_op(type) != NULL;
+}
+
 static ASTNode *parser_parse_assignment_from_target(Parser *parser,
                                                     ASTNode *target) {
   if (!parser || !target) {
@@ -687,11 +708,34 @@ static ASTNode *parser_parse_assignment_from_target(Parser *parser,
     return NULL;
   }
 
-  parser_advance(parser); // consume '='
+  TokenType assign_token = parser->current_token.type;
+  const char *compound_op = parser_compound_assign_op(assign_token);
+
+  parser_advance(parser); // consume '=' or compound assignment operator
   ASTNode *value = parser_parse_expression(parser);
   if (!value) {
     ast_destroy_node(target);
     return NULL;
+  }
+
+  // Desugar `target OP= value` into `target = target OP value`.
+  if (compound_op) {
+    ASTNode *target_clone = ast_clone_node(target);
+    if (!target_clone) {
+      ast_destroy_node(target);
+      ast_destroy_node(value);
+      parser_set_error(parser, "Out of memory cloning compound assignment target");
+      return NULL;
+    }
+    ASTNode *combined = ast_create_binary_expression(target_clone, compound_op,
+                                                     value, target->location);
+    if (!combined) {
+      ast_destroy_node(target);
+      ast_destroy_node(target_clone);
+      ast_destroy_node(value);
+      return NULL;
+    }
+    value = combined;
   }
 
   if (target->type == AST_IDENTIFIER) {
@@ -714,6 +758,46 @@ static ASTNode *parser_parse_assignment_from_target(Parser *parser,
 ASTNode *parser_parse_statement(Parser *parser) {
   if (!parser)
     return NULL;
+
+  // Labeled loop: IDENT ':' (while | for | switch)
+  if (parser->current_token.type == TOKEN_IDENTIFIER &&
+      parser->peek_token.type == TOKEN_COLON) {
+    char *label = strdup(parser->current_token.value);
+    Token saved_current = parser->current_token;
+    Token saved_peek = parser->peek_token;
+    parser_advance(parser); // consume IDENT
+    parser_advance(parser); // consume ':'
+
+    ASTNode *loop = NULL;
+    if (parser->current_token.type == TOKEN_WHILE) {
+      loop = parser_parse_while_statement(parser);
+      if (loop && loop->data) {
+        WhileStatement *w = (WhileStatement *)loop->data;
+        w->label = label;
+        label = NULL;
+      }
+    } else if (parser->current_token.type == TOKEN_FOR) {
+      loop = parser_parse_for_statement(parser);
+      if (loop && loop->data) {
+        ForStatement *f = (ForStatement *)loop->data;
+        f->label = label;
+        label = NULL;
+      }
+    } else {
+      // Not a labeled loop; rewind. Because we already consumed two tokens
+      // and the lexer is one-token-lookahead, we cannot fully unwind. Treat
+      // this as a parse error explaining the constraint.
+      free(label);
+      (void)saved_current;
+      (void)saved_peek;
+      parser_set_error(parser,
+                       "Labels may only be applied to 'while' or 'for' loops");
+      return NULL;
+    }
+
+    free(label);
+    return loop;
+  }
 
   switch (parser->current_token.type) {
   case TOKEN_EXTERN:
@@ -753,7 +837,7 @@ ASTNode *parser_parse_statement(Parser *parser) {
     return NULL;
   }
 
-  if (parser->current_token.type == TOKEN_EQUALS) {
+  if (parser_is_assignment_token(parser->current_token.type)) {
     return parser_parse_assignment_from_target(parser, expr);
   }
 
@@ -830,6 +914,8 @@ ASTNode *parser_parse_expression(Parser *parser) {
 int parser_is_identifier_like(TokenType type) {
   // Check if token can be used as an identifier in expression context
   return type == TOKEN_IDENTIFIER ||
+         // threading keywords that can also appear as type/function names
+         type == TOKEN_CHANNEL ||
          // x86 mnemonics can be used as function names
          (type >= TOKEN_MOV && type <= TOKEN_SYSCALL) ||
          // x86 registers can be used as identifiers in high-level context
@@ -1225,7 +1311,7 @@ static ASTNode *parser_parse_for_initializer(Parser *parser) {
   if (!expr)
     return NULL;
 
-  if (parser->current_token.type == TOKEN_EQUALS) {
+  if (parser_is_assignment_token(parser->current_token.type)) {
     return parser_parse_assignment_from_target(parser, expr);
   }
 
@@ -1443,6 +1529,24 @@ ASTNode *parser_parse_unary_expression(Parser *parser) {
     }
 
     return ast_create_unary_expression("await", operand, location);
+  }
+
+  if (parser->current_token.type == TOKEN_SPAWN) {
+    parser_advance(parser);
+
+    ASTNode *call = parser_parse_postfix_expression(parser);
+    if (!call) {
+      if (!parser->has_error)
+        parser_set_error(parser, "Expected function call after 'spawn'");
+      return NULL;
+    }
+    if (call->type != AST_FUNCTION_CALL && call->type != AST_FUNC_PTR_CALL) {
+      parser_set_error(parser, "'spawn' requires a function call expression");
+      ast_destroy_node(call);
+      return NULL;
+    }
+
+    return ast_create_spawn_expression(call, location);
   }
 
   if (parser->current_token.type == TOKEN_LPAREN) {
@@ -1805,6 +1909,91 @@ ASTNode *parser_parse_import_declaration(Parser *parser) {
                              parser->current_token.column};
   parser_advance(parser); // consume 'import'
 
+  // Selective import: import { a, b } from "mod"
+  if (parser->current_token.type == TOKEN_LBRACE) {
+    parser_advance(parser); // consume '{'
+
+    char **selected = NULL;
+    size_t selected_count = 0;
+    size_t selected_capacity = 0;
+
+    while (parser->current_token.type != TOKEN_RBRACE &&
+           parser->current_token.type != TOKEN_EOF) {
+      if (!parser_is_identifier_like(parser->current_token.type)) {
+        parser_set_error(parser, "Expected identifier in import list");
+        for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+        free(selected);
+        return NULL;
+      }
+
+      if (selected_count >= selected_capacity) {
+        size_t new_cap = selected_capacity == 0 ? 8 : selected_capacity * 2;
+        char **grown = realloc(selected, new_cap * sizeof(char *));
+        if (!grown) {
+          for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+          free(selected);
+          parser_set_error(parser, "Out of memory parsing import list");
+          return NULL;
+        }
+        selected = grown;
+        selected_capacity = new_cap;
+      }
+
+      selected[selected_count++] = strdup(parser->current_token.value);
+      parser_advance(parser); // consume name
+
+      if (parser->current_token.type == TOKEN_COMMA) {
+        parser_advance(parser); // consume ','
+      } else {
+        break;
+      }
+    }
+
+    if (parser->current_token.type != TOKEN_RBRACE) {
+      parser_set_error(parser, "Expected '}' after import list");
+      for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+      free(selected);
+      return NULL;
+    }
+    parser_advance(parser); // consume '}'
+
+    // expect 'from'
+    if (!parser_is_identifier_like(parser->current_token.type) ||
+        !parser->current_token.value ||
+        strcmp(parser->current_token.value, "from") != 0) {
+      parser_set_error(parser, "Expected 'from' after import list");
+      for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+      free(selected);
+      return NULL;
+    }
+    parser_advance(parser); // consume 'from'
+
+    if (parser->current_token.type != TOKEN_STRING) {
+      parser_set_error(parser, "Expected string literal after 'from'");
+      for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+      free(selected);
+      return NULL;
+    }
+
+    char *module_name = strdup(parser->current_token.value);
+    parser_advance(parser); // consume string
+
+    if (!parser_expect_statement_end(parser)) {
+      free(module_name);
+      for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+      free(selected);
+      return NULL;
+    }
+
+    ASTNode *node = ast_create_import_declaration(
+        module_name, NULL, (const char **)selected, selected_count, location);
+    free(module_name);
+    for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+    free(selected);
+    return node;
+  }
+
+  // Plain import or namespaced import
   if (parser->current_token.type != TOKEN_STRING) {
     parser_set_error(parser, "Expected string literal after 'import'");
     return NULL;
@@ -1834,7 +2023,7 @@ ASTNode *parser_parse_import_declaration(Parser *parser) {
   }
 
   ASTNode *node =
-      ast_create_import_declaration(module_name, namespace_alias, location);
+      ast_create_import_declaration(module_name, namespace_alias, NULL, 0, location);
   free(module_name);
   free(namespace_alias);
 
@@ -3087,6 +3276,7 @@ ASTNode *parser_parse_while_statement(Parser *parser) {
 
   while_data->condition = condition;
   while_data->body = body;
+  while_data->label = NULL;
   while_node->data = while_data;
 
   ast_add_child(while_node, condition);
@@ -3105,8 +3295,16 @@ ASTNode *parser_parse_break_statement(Parser *parser) {
     return NULL;
   }
 
+  char *target_label = NULL;
+  if (parser->current_token.type == TOKEN_IDENTIFIER) {
+    target_label = strdup(parser->current_token.value);
+    parser_advance(parser);
+  }
+
   parser_expect_statement_end(parser);
-  return ast_create_break_statement(location);
+  ASTNode *node = ast_create_labeled_break_statement(target_label, location);
+  free(target_label);
+  return node;
 }
 
 ASTNode *parser_parse_continue_statement(Parser *parser) {
@@ -3119,8 +3317,16 @@ ASTNode *parser_parse_continue_statement(Parser *parser) {
     return NULL;
   }
 
+  char *target_label = NULL;
+  if (parser->current_token.type == TOKEN_IDENTIFIER) {
+    target_label = strdup(parser->current_token.value);
+    parser_advance(parser);
+  }
+
   parser_expect_statement_end(parser);
-  return ast_create_continue_statement(location);
+  ASTNode *node = ast_create_labeled_continue_statement(target_label, location);
+  free(target_label);
+  return node;
 }
 
 ASTNode *parser_parse_for_statement(Parser *parser) {
@@ -3183,7 +3389,7 @@ ASTNode *parser_parse_for_statement(Parser *parser) {
       return NULL;
     }
 
-    if (parser->current_token.type == TOKEN_EQUALS) {
+    if (parser_is_assignment_token(parser->current_token.type)) {
       increment = parser_parse_assignment_from_target(parser, expr);
       if (!increment) {
         if (initializer)

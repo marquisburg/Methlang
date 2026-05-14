@@ -32,6 +32,10 @@ int32_t __meth_async_wait(const char *ctx) {
   return meth_async_wait(ctx);
 }
 
+int32_t __meth_async_state(const char *ctx) {
+  return meth_async_state(ctx);
+}
+
 int32_t __meth_async_cancel(const char *ctx) {
   return meth_async_cancel(ctx);
 }
@@ -1581,5 +1585,13 @@ int32_t meth_async_wait(const char *ctx) {
     meth_async_executor_unlock();
     meth_async_execute_task(assist);
   }
+}
+
+int32_t meth_async_state(const char *ctx) {
+  MethAsyncHeader *header = (MethAsyncHeader *)ctx;
+  if (!header) {
+    return 0;
+  }
+  return meth_async_atomic_load_i32((volatile int32_t *)&header->state);
 }
 
