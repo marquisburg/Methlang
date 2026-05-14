@@ -6,9 +6,9 @@ No block comments. Only line comments (`//`) are supported.
 
 No top-level constant expressions. Use functions that return constant values instead.
 
-Traits and constrained generics currently support only marker-style bounds with explicit `impl Trait for Type;` declarations and a single inline bound per type parameter such as `T: Addable`. Trait methods, multiple bounds, and `where` clauses are not implemented yet.
+Traits and constrained generics currently support only marker-style bounds with explicit `impl Trait for Type;` declarations and a single inline bound per type parameter such as `T: Addable`. Trait methods, multiple bounds, and `where` clauses are not implemented yet. The keyword `where` is reserved by the lexer but is not accepted in the grammar.
 
-`match` is statement-only. There is no `match` expression form that yields a value.
+`match` on tagged enums is implemented as a **statement** only. There is no `match` expression form that yields a value.
 
 Tagged-enum constructors are currently function-like. Payload variants use `Some(x)`, and payloadless variants use empty call syntax such as `None()`.
 
@@ -32,15 +32,19 @@ Deferred calls capture variables by reference, not by value. In loops, copy the 
 
 `errdefer` is function-only and convention-based. It is valid only inside functions, and any non-zero explicit return value is treated as an error.
 
-`await` is blocking. It waits on a worker thread and does not suspend the current function as a coroutine.
+`await` is blocking under the default **`pool`** async model (`--async-model pool` or omitted): it waits on an executor worker thread and does not suspend the current function as a stackless coroutine. The experimental **`coroutine`** model (`--async-model coroutine`) lowers to the stackless `meth_coro_*` runtime; it is not a complete language-level non-blocking I/O story yet.
 
-Async uses a bounded worker-pool executor, not a coroutine scheduler. There is no built-in reactor/non-blocking event loop yet.
+`coroutine` lowering now uses a generic CFG-level async rewrite path and no longer depends on pattern-specific/fallback branches for internal `await` bodies. The coroutine path is still experimental and evolving, especially around optimization quality and diagnostics.
+
+By default, async uses a bounded worker-pool executor, not a user-facing coroutine scheduler. Optional **`coroutine`** lowering targets stackless tasks and can use Windows IOCP primitives from the bundled runtime; there is still no full portable reactor in the language for all I/O.
 
 Blocking `await` can still deadlock on cyclic wait patterns (for example, futures waiting on each other in a cycle). The runtime mitigates common nested-await starvation, but it is not a full deadlock-proof scheduler.
 
 Cancellation is cooperative only. `cancel(future)` sets a flag; the async task must poll `cancelled()` and exit on its own.
 
 Async runtime shutdown is explicit for embedders. Call `meth_async_runtime_shutdown(...)` before `gc_shutdown()`. If a task ignores cooperative cancellation forever, graceful drain/abort can time out instead of forcing unsafe thread termination.
+
+Coroutine frame GC visibility currently comes from lifted frame locals stored as fields on the heap async context plus conservative scanning. A separate precise coroutine root-map format is not implemented yet.
 
 Unreachable code analysis is currently block-local and conservative; some dead paths in complex control-flow may not be diagnosed yet.
 

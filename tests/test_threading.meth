@@ -1,0 +1,46 @@
+function double_it(n: int32): int32 {
+    return n * 2;
+}
+
+function add_to_counter(counter: Atomic<int64>, amount: int64): int64 {
+    counter.fetch_add(amount);
+    return counter.load();
+}
+
+function producer(tx: Sender<int32>, value: int32): int32 {
+    tx.send(value);
+    return 0;
+}
+
+function main(): int32 {
+    // spawn / join
+    var t: Thread<int32> = spawn double_it(21);
+    var result: int32 = t.join();
+    if (result != 42) {
+        return 1;
+    }
+
+    // Atomic fetch_add and load
+    var counter: Atomic<int64> = Atomic.new(0);
+    var t2: Thread<int64> = spawn add_to_counter(counter, 10);
+    var t3: Thread<int64> = spawn add_to_counter(counter, 32);
+    t2.join();
+    t3.join();
+    var total: int64 = counter.load();
+    if (total != 42) {
+        return 2;
+    }
+
+    // channel send / recv
+    var ch: (Sender<int32>, Receiver<int32>) = channel();
+    var tx: Sender<int32> = ch.0;
+    var rx: Receiver<int32> = ch.1;
+    var t4: Thread<int32> = spawn producer(tx, 42);
+    var received: int32 = rx.recv();
+    t4.join();
+    if (received != 42) {
+        return 3;
+    }
+
+    return 0;
+}

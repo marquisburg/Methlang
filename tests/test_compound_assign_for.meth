@@ -1,0 +1,7 @@
+function main() -> int32 {
+  var sum: int32 = 0;
+  for (var i: int32 = 0; i < 10; i += 1) {
+    sum += i;
+  }
+  return sum; // 45
+}

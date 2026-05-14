@@ -122,6 +122,12 @@ $cases = @(
   @{ Name = "elseif_chaining"; Path = "tests/test_elseif.meth"; ShouldSucceed = $true },
   @{ Name = "switch_const_expr"; Path = "tests/test_switch_const_expr.meth"; ShouldSucceed = $true },
   @{ Name = "switch_continue_loop"; Path = "tests/test_switch_continue_loop.meth"; ShouldSucceed = $true },
+  @{ Name = "block_comment"; Path = "tests/test_block_comment.meth"; ShouldSucceed = $true },
+  @{ Name = "compound_assign"; Path = "tests/test_compound_assign.meth"; ShouldSucceed = $true },
+  @{ Name = "compound_assign_for"; Path = "tests/test_compound_assign_for.meth"; ShouldSucceed = $true },
+  @{ Name = "labeled_break"; Path = "tests/test_labeled_break.meth"; ShouldSucceed = $true },
+  @{ Name = "labeled_continue"; Path = "tests/test_labeled_continue.meth"; ShouldSucceed = $true },
+  @{ Name = "labeled_while"; Path = "tests/test_labeled_while.meth"; ShouldSucceed = $true },
   @{
     Name            = "forward_decl"
     Path            = "tests/test_forward_decl.meth"
@@ -190,11 +196,74 @@ $cases = @(
     )
   },
   @{
-    Name          = "err_async_coro_internal_await"
-    Path          = "tests/test_async_nested_await.meth"
-    ShouldSucceed = $false
+    Name          = "async_coro_internal_await_return"
+    Path          = "tests/test_async_coro_internal_await_return.meth"
+    ShouldSucceed = $true
     Args          = @("--async-model", "coroutine")
-    Pattern       = "Coroutine async model currently supports async functions without internal await"
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_internal_await_var_return"
+    Path          = "tests/test_async_coro_internal_await_var_return.meth"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_future_var_return_await"
+    Path          = "tests/test_async_coro_future_var_return_await.meth"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_future_var_await_var_return"
+    Path          = "tests/test_async_coro_future_var_await_var_return.meth"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_two_await_chain"
+    Path          = "tests/test_async_coro_two_await_chain.meth"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_two_await_pointer_chain"
+    Path          = "tests/test_async_coro_two_await_pointer_chain.meth"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_nested_expr_await"
+    Path          = "tests/test_async_nested_await.meth"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_coro_task_create",
+      "extern __meth_coro_task_schedule"
+    )
   },
   @{ Name = "pointers"; Path = "tests/test_pointers.meth"; ShouldSucceed = $true },
   @{ Name = "pointer_null"; Path = "tests/test_pointer_null.meth"; ShouldSucceed = $true },
@@ -452,7 +521,7 @@ $cases = @(
     Args           = @("-O")
     AsmMustNotMatch = @("\bcall cold_path\b")
     IrMustMatch    = @("ASSIGN .* <- 42")
-    IrMustNotMatch = @("BRANCH_ZERO 0 ->", "CALL .*cold_path\(")
+    IrMustNotMatch = @("BRANCH_ZERO 0 ->", "CALL .*cold_path\(", "ASSIGN @result <- @result", "BRANCH_EQ @same, @same")
   },
   @{
     Name          = "opt_dead_temp"
@@ -468,6 +537,38 @@ $cases = @(
     Args          = @("-O")
     IrMustNotMatch = @("ASSIGN %t[0-9]+ <- @x")
     IrMustMatch   = @("BRANCH_ZERO @x ->")
+  },
+  @{
+    Name          = "opt_strength_cse"
+    Path          = "tests/test_optimize_strength_cse.meth"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustMatch   = @("BINARY @x = @a << 3", "ASSIGN @y <- @x")
+    IrMustNotMatch = @("BINARY @y = 8 \\* @a", "BINARY @w = @b \\+ @a")
+  },
+  @{
+    Name          = "opt_mod_even_check"
+    Path          = "tests/test_opt_mod_even_check.meth"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustMatch   = @("BINARY %t[0-9]+ = @n & 1")
+    IrMustNotMatch = @("BINARY %t[0-9]+ = @n % 2")
+  },
+  @{
+    Name          = "opt_branch_notzero_forward"
+    Path          = "tests/test_opt_branch_notzero_forward.meth"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustMatch   = @("BRANCH_ZERO @x ->")
+    IrMustNotMatch = @("BINARY %t[0-9]+ = @x != 0")
+  },
+  @{
+    Name          = "opt_branch_eq_chain"
+    Path          = "tests/test_opt_branch_eq_chain.meth"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustMatch   = @("BRANCH_EQ @x, 1 ->", "BRANCH_EQ @x, 2 ->")
+    IrMustNotMatch = @("BINARY %t[0-9]+ = @x == 1", "BINARY %t[0-9]+ = @x == 2")
   },
   @{
     Name            = "release_size_mode"
@@ -633,6 +734,7 @@ $cases = @(
   @{ Name = "err_undefined_var"; Path = "tests/err_undefined_var.meth"; ShouldSucceed = $false; Pattern = "Undefined variable" },
   @{ Name = "err_top_level_return"; Path = "tests/err_top_level_return.meth"; ShouldSucceed = $false; Pattern = "Return statement outside of a function|Unsupported top-level construct in declaration context" },
   @{ Name = "err_break_outside_loop"; Path = "tests/err_break_outside_loop.meth"; ShouldSucceed = $false; Pattern = "'break' can only be used inside a loop or switch" },
+  @{ Name = "err_break_unknown_label"; Path = "tests/err_break_unknown_label.meth"; ShouldSucceed = $false; Pattern = "no matching labeled loop" },
   @{ Name = "err_continue_in_switch"; Path = "tests/err_continue_in_switch.meth"; ShouldSucceed = $false; Pattern = "'continue' can only be used inside a loop" },
   @{ Name = "err_switch_duplicate_case"; Path = "tests/err_switch_duplicate_case.meth"; ShouldSucceed = $false; Pattern = "Duplicate case value|duplicate case" },
   @{ Name = "err_switch_nonconst_case"; Path = "tests/err_switch_nonconst_case.meth"; ShouldSucceed = $false; Pattern = "compile-time integer constant expression" },
@@ -1054,6 +1156,188 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "async_build_cancel" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async internal-await test: single 'return await expr;' should lower
+# into resumable coroutine entry logic and complete with expected value.
+$total++
+try {
+  $asyncCoroAwaitExe = Join-Path $tmpDir "test_async_coro_internal_await_return.exe"
+
+  $asyncCoroAwaitOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_internal_await_return.meth -o $asyncCoroAwaitExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine internal-await build failed: $asyncCoroAwaitOut"
+  }
+  if (-not (Test-Path $asyncCoroAwaitExe)) {
+    throw "Coroutine internal-await build did not produce an executable"
+  }
+
+  & $asyncCoroAwaitExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine internal-await executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_internal_await_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_internal_await_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async internal-await test: single 'var x = await expr; return x;'
+# should lower into the same resumable coroutine pattern.
+$total++
+try {
+  $asyncCoroAwaitVarExe = Join-Path $tmpDir "test_async_coro_internal_await_var_return.exe"
+
+  $asyncCoroAwaitVarOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_internal_await_var_return.meth -o $asyncCoroAwaitVarExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine internal-await(var-return) build failed: $asyncCoroAwaitVarOut"
+  }
+  if (-not (Test-Path $asyncCoroAwaitVarExe)) {
+    throw "Coroutine internal-await(var-return) build did not produce an executable"
+  }
+
+  & $asyncCoroAwaitVarExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine internal-await(var-return) executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_internal_await_var_return_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_internal_await_var_return_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async internal-await test: single 'var fut = future_expr; return await fut;'
+# should lower into the same resumable coroutine pattern.
+$total++
+try {
+  $asyncCoroFutureVarAwaitExe = Join-Path $tmpDir "test_async_coro_future_var_return_await.exe"
+
+  $asyncCoroFutureVarAwaitOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_future_var_return_await.meth -o $asyncCoroFutureVarAwaitExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine internal-await(future-var-return-await) build failed: $asyncCoroFutureVarAwaitOut"
+  }
+  if (-not (Test-Path $asyncCoroFutureVarAwaitExe)) {
+    throw "Coroutine internal-await(future-var-return-await) build did not produce an executable"
+  }
+
+  & $asyncCoroFutureVarAwaitExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine internal-await(future-var-return-await) executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_future_var_return_await_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_future_var_return_await_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async internal-await test: single 'var fut = future_expr; var x = await fut; return x;'
+# should lower into the same resumable coroutine pattern.
+$total++
+try {
+  $asyncCoroFutureVarAwaitVarExe = Join-Path $tmpDir "test_async_coro_future_var_await_var_return.exe"
+
+  $asyncCoroFutureVarAwaitVarOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_future_var_await_var_return.meth -o $asyncCoroFutureVarAwaitVarExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine internal-await(future-var-await-var-return) build failed: $asyncCoroFutureVarAwaitVarOut"
+  }
+  if (-not (Test-Path $asyncCoroFutureVarAwaitVarExe)) {
+    throw "Coroutine internal-await(future-var-await-var-return) build did not produce an executable"
+  }
+
+  & $asyncCoroFutureVarAwaitVarExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine internal-await(future-var-await-var-return) executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_future_var_await_var_return_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_future_var_await_var_return_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async two-await test: 'var x = await a(); return await b(x);'
+# should lower into a multi-state coroutine entry machine.
+$total++
+try {
+  $asyncCoroTwoAwaitExe = Join-Path $tmpDir "test_async_coro_two_await_chain.exe"
+
+  $asyncCoroTwoAwaitOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_two_await_chain.meth -o $asyncCoroTwoAwaitExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine two-await(chain) build failed: $asyncCoroTwoAwaitOut"
+  }
+  if (-not (Test-Path $asyncCoroTwoAwaitExe)) {
+    throw "Coroutine two-await(chain) build did not produce an executable"
+  }
+
+  & $asyncCoroTwoAwaitExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine two-await(chain) executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_two_await_chain_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_two_await_chain_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async two-await pointer test: lifted pointer local from first await
+# must remain available through the resumed state machine when building second await.
+$total++
+try {
+  $asyncCoroTwoAwaitPtrExe = Join-Path $tmpDir "test_async_coro_two_await_pointer_chain.exe"
+
+  $asyncCoroTwoAwaitPtrOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_two_await_pointer_chain.meth -o $asyncCoroTwoAwaitPtrExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine two-await(pointer-chain) build failed: $asyncCoroTwoAwaitPtrOut"
+  }
+  if (-not (Test-Path $asyncCoroTwoAwaitPtrExe)) {
+    throw "Coroutine two-await(pointer-chain) build did not produce an executable"
+  }
+
+  & $asyncCoroTwoAwaitPtrExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine two-await(pointer-chain) executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_two_await_pointer_chain_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_two_await_pointer_chain_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async generic-body test: non-linear internal await expression
+# should compile and execute through the unified coroutine lowering path.
+$total++
+try {
+  $asyncCoroNestedExprExe = Join-Path $tmpDir "test_async_coro_nested_expr_await.exe"
+
+  $asyncCoroNestedExprOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_nested_await.meth -o $asyncCoroNestedExprExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine nested-expr-await build failed: $asyncCoroNestedExprOut"
+  }
+  if (-not (Test-Path $asyncCoroNestedExprExe)) {
+    throw "Coroutine nested-expr-await build did not produce an executable"
+  }
+
+  & $asyncCoroNestedExprExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 41) {
+    throw "Coroutine nested-expr-await executable exited with $LASTEXITCODE (expected 41)"
+  }
+
+  Write-CaseResult -Name "async_coro_nested_expr_await_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_nested_expr_await_build" -Passed $false -Reason $_.Exception.Message
 }
 
 # Async nested-await test: with a single worker, parent-await-child would deadlock

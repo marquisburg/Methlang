@@ -14,11 +14,42 @@ import "shared_math";   // .meth added if omitted
 
 - **Path format:** A string literal. Forward slashes (`/`) or backslashes (`\`) are accepted on Windows.
 - **Extension:** If the path has no extension, `.meth` is appended automatically. `"std/io"` resolves to `std/io.meth`.
-- **Scope:** Imported declarations are flattened into the **global scope**. There are no namespaces; use distinct names to avoid collisions.
+- **Scope:** Imported declarations are flattened into the **global scope** by default. Use `import "…" as alias` or `import { … } from "…"` (see below) to control the namespace and the set of names brought in.
+
+### Namespaced Imports
+
+`import "…" as alias` prefixes every exported name from the module with `alias.`, keeping your global scope clean:
+
+```meth
+import "router" as router;
+import "http_util" as http;
+
+// Call site
+if (router.is_get(buf, n) == 1) {
+  http.send_404(client);
+}
+```
+
+Names from a namespaced import are accessed only through the alias — they are not added to the global scope directly.
+
+### Selective Imports
+
+`import { name1, name2 } from "mod"` pulls exactly the named declarations (plus any internal helpers they depend on) into the global scope — no alias, no extra names:
+
+```meth
+import { send_404, send_all } from "http_util";
+import { serve_forum_index, count_threads } from "forum";
+
+// Use directly — only the listed names land in scope
+send_404(client);
+var n: int32 = count_threads(mutex);
+```
+
+Selective imports work regardless of whether the module uses `export`. When the module does use `export`, only exported names may be selected (private helpers are still excluded unless they are transitively required by a selected name).
 
 ### What Can Be Imported
 
-Only **exported** declarations are visible when a module uses `export`. If a module does not use `export`, all of its declarations are visible (backward compatibility). See [Modules](modules.md) for export rules.
+For plain `import "…"` and `import "…" as alias`, only **exported** declarations are visible when a module uses `export`. If a module does not use `export`, all of its declarations are visible (backward compatibility). See [Modules](modules.md) for export rules.
 
 ## Embedded File Import: `import_str`
 

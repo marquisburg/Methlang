@@ -1,0 +1,14 @@
+function main() -> int32 {
+  var x: int32 = 10;
+  x += 5;    // 15
+  x -= 2;    // 13
+  x *= 2;    // 26
+  x /= 4;    // 6 (integer division)
+  x %= 4;    // 2
+  x <<= 3;   // 16
+  x >>= 1;   // 8
+  x &= 0x0F; // 8
+  x |= 0x20; // 40
+  x ^= 0x08; // 32
+  return x;
+}

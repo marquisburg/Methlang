@@ -13,10 +13,23 @@ typedef enum {
   ERROR_INTERNAL
 } ErrorType;
 
+/* Short labels printed in diagnostic header, e.g. [E0002].
+   Stable across compiler versions — useful for test grep and docs. */
+#define ERROR_CODE_LEXICAL   "E0001"
+#define ERROR_CODE_SYNTAX    "E0002"
+#define ERROR_CODE_SEMANTIC  "E0003"
+#define ERROR_CODE_TYPE      "E0004"
+#define ERROR_CODE_SCOPE     "E0005"
+#define ERROR_CODE_IO        "E0006"
+#define ERROR_CODE_INTERNAL  "E0007"
+
 typedef enum {
-  ERROR_SEVERITY_ERROR,
-  ERROR_SEVERITY_WARNING,
-  ERROR_SEVERITY_NOTE
+  DIAG_SEVERITY_ERROR,
+  DIAG_SEVERITY_WARNING,
+  /* Standalone informational message */
+  DIAG_SEVERITY_NOTE,
+  /* Note attached to the preceding diagnostic (printed inline) */
+  DIAG_SEVERITY_NOTE_OF
 } ErrorSeverity;
 
 #include "../parser/ast.h"
@@ -84,9 +97,14 @@ char *error_reporter_get_line_from_source(const char *source,
                                           size_t line_number);
 char *error_reporter_create_caret_line(size_t column, size_t length);
 
+// Note API: attach a follow-up note to the most recently added diagnostic.
+// The note appears immediately after its parent when printed.
+void error_reporter_add_note(ErrorReporter *reporter, const char *message);
+
 // Common error suggestions
 const char *error_reporter_suggest_for_token(const char *token);
-const char *error_reporter_suggest_for_type_mismatch(const char *expected,
-                                                     const char *actual);
+// Returns a heap-allocated suggestion string (caller must free), or NULL.
+char *error_reporter_suggest_for_type_mismatch(const char *expected,
+                                               const char *actual);
 
 #endif // ERROR_REPORTER_H

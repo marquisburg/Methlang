@@ -38,7 +38,8 @@ typedef enum {
   AST_MEMBER_ACCESS,
   AST_INDEX_EXPRESSION,
   AST_NEW_EXPRESSION,
-  AST_CAST_EXPRESSION
+  AST_CAST_EXPRESSION,
+  AST_SPAWN_EXPRESSION
 } ASTNodeType;
 
 typedef struct {
@@ -58,6 +59,8 @@ typedef struct ASTNode {
 typedef struct {
   char *module_name;
   char *namespace_alias;
+  char **selected_names;   // non-NULL when import { a, b } from "mod"
+  size_t selected_count;
 } ImportDeclaration;
 
 typedef struct {
@@ -236,6 +239,7 @@ typedef struct {
 typedef struct {
   ASTNode *condition;
   ASTNode *body;
+  char *label; // Optional label for labeled break/continue; NULL if unlabeled
 } WhileStatement;
 
 typedef struct {
@@ -243,6 +247,7 @@ typedef struct {
   ASTNode *condition;
   ASTNode *increment;
   ASTNode *body;
+  char *label; // Optional label
 } ForStatement;
 
 typedef struct {
@@ -262,8 +267,16 @@ typedef struct {
 } ReturnStatement;
 
 typedef struct {
+  char *target_label; // Optional label name; NULL for unlabeled break/continue
+} LoopControlStatement;
+
+typedef struct {
   ASTNode *statement;
 } DeferStatement;
+
+typedef struct {
+  ASTNode *call; // The function call expression being spawned
+} SpawnExpression;
 
 // Function declarations
 ASTNode *ast_create_node(ASTNodeType type, SourceLocation location);
@@ -275,6 +288,8 @@ void ast_add_child(ASTNode *parent, ASTNode *child);
 ASTNode *ast_create_program();
 ASTNode *ast_create_import_declaration(const char *module_name,
                                        const char *namespace_alias,
+                                       const char **selected_names,
+                                       size_t selected_count,
                                        SourceLocation location);
 ASTNode *ast_create_import_str(const char *file_path, SourceLocation location);
 ASTNode *ast_create_var_declaration(const char *name, const char *type_name,
@@ -338,11 +353,16 @@ ASTNode *ast_create_switch_statement(ASTNode *expression, ASTNode **cases,
                                      SourceLocation location);
 ASTNode *ast_create_break_statement(SourceLocation location);
 ASTNode *ast_create_continue_statement(SourceLocation location);
+ASTNode *ast_create_labeled_break_statement(const char *label,
+                                            SourceLocation location);
+ASTNode *ast_create_labeled_continue_statement(const char *label,
+                                               SourceLocation location);
 ASTNode *ast_create_defer_statement(ASTNode *statement,
                                     SourceLocation location);
 ASTNode *ast_create_errdefer_statement(ASTNode *statement,
                                        SourceLocation location);
 ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
                                     size_t arm_count, SourceLocation location);
+ASTNode *ast_create_spawn_expression(ASTNode *call, SourceLocation location);
 
 #endif // AST_H

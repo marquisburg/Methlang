@@ -45,6 +45,7 @@ int32_t meth_atomic_dec_i32(int32_t *target);
 int32_t meth_async_start(const char *ctx);
 int32_t meth_async_finish(const char *ctx);
 int32_t meth_async_wait(const char *ctx);
+int32_t meth_async_state(const char *ctx);
 int32_t meth_async_cancel(const char *ctx);
 int32_t meth_async_current_cancelled(void);
 int32_t meth_async_runtime_configure(int32_t worker_count,

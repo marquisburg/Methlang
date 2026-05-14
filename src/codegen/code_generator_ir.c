@@ -2420,6 +2420,23 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
     code_generator_restore_registers_after_inline_asm(generator);
     code_generator_emit(generator, "    ; End inline assembly block\n");
     return 1;
+  case IR_OP_THREAD_SPAWN:
+  case IR_OP_THREAD_JOIN:
+  case IR_OP_MUTEX_NEW:
+  case IR_OP_MUTEX_LOCK:
+  case IR_OP_MUTEX_UNLOCK:
+  case IR_OP_ATOMIC_LOAD:
+  case IR_OP_ATOMIC_STORE:
+  case IR_OP_ATOMIC_FETCH_ADD:
+  case IR_OP_ATOMIC_FETCH_SUB:
+  case IR_OP_ATOMIC_CAS:
+  case IR_OP_CHAN_NEW:
+  case IR_OP_CHAN_SEND:
+  case IR_OP_CHAN_RECV:
+    // All thread opcodes are lowered to IR_OP_CALL in the lowering pass.
+    // If they arrive here, emit as a call using instruction->text as target.
+    return code_generator_emit_ir_call(generator, instruction, temp_table);
+
   default:
     code_generator_set_error(generator, "Unhandled IR opcode: %d",
                              instruction->op);

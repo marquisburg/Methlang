@@ -1,0 +1,116 @@
+// HTTP utility functions and response constants for Methlang HTTP Server
+
+// ── Response headers ──────────────────────────────────────────────────────────
+
+export var HTTP_PAGE_HEADER: string = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
+export var HTTP_BENCHMARKS_HEADER: string = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: max-age=300\r\nConnection: close\r\n\r\n";
+export var HTTP_JSON_HEADER: string = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: max-age=60\r\nConnection: close\r\n";
+export var HTTP_DOCS_HEADER: string = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: max-age=600\r\nConnection: close\r\n\r\n";
+export var HTTP_HEALTH_HEADER: string = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\n";
+export var HTTP_HEALTH_BODY: string = "OK";
+export var HTTP_404_HEADER: string = "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\n";
+export var HTTP_404_BODY: string = "Not Found";
+export var REDIRECT_302: string = "HTTP/1.1 302 Found\r\nLocation: ";
+export var REDIRECT_END: string = "\r\n\r\n";
+
+// HTML escaping constants
+export var html_amp: string = "&amp;";
+export var html_lt: string = "&lt;";
+export var html_gt: string = "&gt;";
+export var html_quot: string = "&quot;";
+export var html_apos: string = "&#39;";
+
+// ── Parse Content-Length header ───────────────────────────────────────────────
+
+// Returns value or 0 if not found. Case-insensitive. "Content-Length:" = 15 chars.
+export function parse_content_length(buf: cstring, n: int32) -> int32 {
+  var hdr: string = "Content-Length:";
+  var hdr_lo: string = "content-length:";
+  var i: int32 = 0;
+  while (i + 15 <= n) {
+    var matched: int32 = 1;
+    var k: int32 = 0;
+    while (k < 15) {
+      var b: int32 = buf[i + k];
+      var h: int32 = hdr.chars[k];
+      var lo: int32 = hdr_lo.chars[k];
+      if (b != h && b != lo) { matched = 0; break; }
+      k = k + 1;
+    }
+    if (matched == 1) {
+      i = i + 15;
+      while (i < n && (buf[i] == 32 || buf[i] == 9)) {
+        i = i + 1;
+      }
+      var val: int32 = 0;
+      while (i < n && buf[i] >= 48 && buf[i] <= 57) {
+        val = val * 10 + (buf[i] - 48);
+        i = i + 1;
+      }
+      return val;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+// Find start of HTTP body (after \r\n\r\n or \n\n). Returns offset or n if not found.
+export function find_body_start(buf: cstring, n: int32) -> int32 {
+  var i: int32 = 0;
+  while (i + 4 <= n) {
+    if (memcmp(&buf[i], cstr("\r\n\r\n"), 4) == 0) {
+      return i + 4;
+    }
+    i = i + 1;
+  }
+  i = 0;
+  while (i + 2 <= n) {
+    if (memcmp(&buf[i], cstr("\n\n"), 2) == 0) {
+      return i + 2;
+    }
+    i = i + 1;
+  }
+  return n;
+}
+
+// ── HTML escaping ─────────────────────────────────────────────────────────────
+
+// Write HTML-escaped text to client.
+export function send_html_escaped(client: int64, src: cstring, len: int32) {
+  var i: int32 = 0;
+  while (i < len) {
+    var ch: int32 = src[i];
+    if (ch == 38) {
+      send_all(client, html_amp.chars, html_amp.length);
+    } else if (ch == 60) {
+      send_all(client, html_lt.chars, html_lt.length);
+    } else if (ch == 62) {
+      send_all(client, html_gt.chars, html_gt.length);
+    } else if (ch == 34) {
+      send_all(client, html_quot.chars, html_quot.length);
+    } else if (ch == 39) {
+      send_all(client, html_apos.chars, html_apos.length);
+    } else {
+      send_all(client, &src[i], 1);
+    }
+    i = i + 1;
+  }
+}
+
+// ── Redirect ──────────────────────────────────────────────────────────────────
+
+// Send 302 redirect. location must be null-terminated.
+export function send_redirect(client: int64, location: cstring) {
+  send_all(client, REDIRECT_302.chars, REDIRECT_302.length);
+  var len: int32 = 0;
+  while (location[len] != 0) { len = len + 1; }
+  send_all(client, location, len);
+  send_all(client, REDIRECT_END.chars, REDIRECT_END.length);
+}
+
+// ── Send 404 ──────────────────────────────────────────────────────────────────
+
+export function send_404(client: int64) {
+  send_all(client, HTTP_404_HEADER.chars, HTTP_404_HEADER.length);
+  send_all(client, HTTP_404_BODY.chars, 9);
+}

@@ -1767,6 +1767,13 @@ static void collect_called_function_names(ASTNode *node, char ***names,
     }
     return;
   }
+  case AST_IDENTIFIER: {
+    Identifier *id = (Identifier *)node->data;
+    if (id && id->name && id->name[0] != '\0') {
+      (void)path_set_add(names, count, capacity, id->name);
+    }
+    return;
+  }
   case AST_FUNCTION_DECLARATION: {
     FunctionDeclaration *func = (FunctionDeclaration *)node->data;
     if (func && func->body) {
@@ -2256,10 +2263,10 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
         continue;
       }
 
-      if (!import_decl->namespace_alias &&
+      if (!import_decl->namespace_alias && import_decl->selected_count == 0 &&
           path_set_contains(ctx->resolved_files, ctx->resolved_count,
                             full_path)) {
-        // Duplicate import of an already-resolved module is a no-op.
+        // Duplicate plain import of an already-resolved module is a no-op.
         free(full_path);
         ast_destroy_node(decl);
         continue;
@@ -2370,15 +2377,9 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
           size_t name_rewrite_count = 0;
           size_t name_rewrite_capacity = 0;
 
-          // Check if the module uses export at all
-          for (size_t j = 0; j < imported_prog_data->declaration_count; j++) {
-            if (is_declaration_exported(imported_prog_data->declarations[j])) {
-              has_any_export = 1;
-              break;
-            }
-          }
-
-          if (has_any_export) {
+          if (import_decl->selected_count > 0) {
+            // Selective import: include only the named declarations plus their
+            // transitive internal dependencies.
             include_flags =
                 calloc(imported_prog_data->declaration_count, sizeof(int));
             if (!include_flags) {
@@ -2387,13 +2388,20 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
               if (ctx->reporter) {
                 error_reporter_add_error(
                     ctx->reporter, ERROR_INTERNAL, decl->location,
-                    "Failed to process exports (out of memory)");
+                    "Failed to process selective import (out of memory)");
               }
             } else {
-              for (size_t j = 0; j < imported_prog_data->declaration_count;
-                   j++) {
+              // Seed required_names from the explicit list.
+              for (size_t s = 0; s < import_decl->selected_count; s++) {
+                path_set_add(&required_names, &required_count,
+                             &required_capacity, import_decl->selected_names[s]);
+              }
+              // Mark seed declarations and collect their dependencies.
+              for (size_t j = 0; j < imported_prog_data->declaration_count; j++) {
                 ASTNode *imp_decl = imported_prog_data->declarations[j];
-                if (!is_declaration_exported(imp_decl)) {
+                const char *name = get_declaration_name(imp_decl);
+                if (!name || !path_set_contains(required_names, required_count,
+                                                name)) {
                   continue;
                 }
                 include_flags[j] = 1;
@@ -2401,7 +2409,7 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
                                               &required_count,
                                               &required_capacity);
               }
-
+              // Propagate to transitive dependencies.
               int changed = 1;
               while (changed) {
                 changed = 0;
@@ -2425,7 +2433,63 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
               }
             }
           } else {
-            include_all = 1;
+            // Check if the module uses export at all
+            for (size_t j = 0; j < imported_prog_data->declaration_count; j++) {
+              if (is_declaration_exported(imported_prog_data->declarations[j])) {
+                has_any_export = 1;
+                break;
+              }
+            }
+
+            if (has_any_export) {
+              include_flags =
+                  calloc(imported_prog_data->declaration_count, sizeof(int));
+              if (!include_flags) {
+                include_all = 1;
+                *had_error = 1;
+                if (ctx->reporter) {
+                  error_reporter_add_error(
+                      ctx->reporter, ERROR_INTERNAL, decl->location,
+                      "Failed to process exports (out of memory)");
+                }
+              } else {
+                for (size_t j = 0; j < imported_prog_data->declaration_count;
+                     j++) {
+                  ASTNode *imp_decl = imported_prog_data->declarations[j];
+                  if (!is_declaration_exported(imp_decl)) {
+                    continue;
+                  }
+                  include_flags[j] = 1;
+                  collect_called_function_names(imp_decl, &required_names,
+                                                &required_count,
+                                                &required_capacity);
+                }
+
+                int changed = 1;
+                while (changed) {
+                  changed = 0;
+                  for (size_t j = 0; j < imported_prog_data->declaration_count;
+                       j++) {
+                    if (include_flags[j]) {
+                      continue;
+                    }
+                    ASTNode *imp_decl = imported_prog_data->declarations[j];
+                    const char *name = get_declaration_name(imp_decl);
+                    if (!name || !path_set_contains(required_names, required_count,
+                                                    name)) {
+                      continue;
+                    }
+                    include_flags[j] = 1;
+                    changed = 1;
+                    collect_called_function_names(imp_decl, &required_names,
+                                                  &required_count,
+                                                  &required_capacity);
+                  }
+                }
+              }
+            } else {
+              include_all = 1;
+            }
           }
 
           if (import_decl->namespace_alias) {
@@ -2519,7 +2583,8 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
       lexer_destroy(lexer);
       free(source);
       path_set_remove(ctx->active_files, &ctx->active_count, full_path);
-      if (import_succeeded && !import_decl->namespace_alias) {
+      if (import_succeeded && !import_decl->namespace_alias &&
+          import_decl->selected_count == 0) {
         int add_resolved_status = path_set_add(
             &ctx->resolved_files, &ctx->resolved_count, &ctx->resolved_capacity,
             full_path);

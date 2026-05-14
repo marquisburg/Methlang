@@ -15,6 +15,12 @@ typedef struct {
   ASTNode *entry_decl;
 } AsyncGeneratedDecls;
 
+typedef struct {
+  ASTNode **await_operands;
+  size_t count;
+  size_t capacity;
+} AsyncSuspendPointList;
+
 static void async_rewrite_report(ErrorReporter *reporter, SourceLocation location,
                                  const char *format, ...) {
   if (!reporter || !format) {
@@ -263,6 +269,67 @@ static int async_node_contains_await(ASTNode *node) {
   return 0;
 }
 
+static void async_suspend_points_destroy(AsyncSuspendPointList *list) {
+  if (!list) {
+    return;
+  }
+  free(list->await_operands);
+  memset(list, 0, sizeof(*list));
+}
+
+static int async_suspend_points_append(AsyncSuspendPointList *list,
+                                       ASTNode *await_operand) {
+  if (!list || !await_operand) {
+    return 0;
+  }
+  if (list->count == list->capacity) {
+    size_t next_capacity = (list->capacity == 0) ? 8 : list->capacity * 2;
+    ASTNode **grown = realloc(list->await_operands,
+                              next_capacity * sizeof(ASTNode *));
+    if (!grown) {
+      return 0;
+    }
+    list->await_operands = grown;
+    list->capacity = next_capacity;
+  }
+  list->await_operands[list->count++] = await_operand;
+  return 1;
+}
+
+static int async_collect_suspend_points_in_expr(ASTNode *node,
+                                                AsyncSuspendPointList *list) {
+  if (!node || !list) {
+    return 1;
+  }
+
+  if (node->type == AST_UNARY_EXPRESSION && node->data) {
+    UnaryExpression *unary = (UnaryExpression *)node->data;
+    if (unary->operator && strcmp(unary->operator, "await") == 0 &&
+        unary->operand) {
+      ASTNode *await_operand = ast_clone_node(unary->operand);
+      if (!await_operand || !async_suspend_points_append(list, await_operand)) {
+        ast_destroy_node(await_operand);
+        return 0;
+      }
+    }
+  }
+
+  for (size_t i = 0; i < node->child_count; i++) {
+    if (!async_collect_suspend_points_in_expr(node->children[i], list)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int async_collect_suspend_points_in_body(ASTNode *body,
+                                                AsyncSuspendPointList *list) {
+  if (!body || !list) {
+    return 0;
+  }
+  return async_collect_suspend_points_in_expr(body, list);
+}
+
 static int async_build_generated_decls(ASTNode *function_node,
                                        size_t ordinal,
                                        AsyncGeneratedDecls *out_generated,
@@ -279,15 +346,18 @@ static int async_build_generated_decls(ASTNode *function_node,
   }
 
   SourceLocation location = function_node->location;
-
+  size_t coro_suspend_count = 0;
   if (model == ASYNC_REWRITE_MODEL_COROUTINE &&
       async_node_contains_await(function->body)) {
-    async_rewrite_report(
-        reporter, location,
-        "Coroutine async model currently supports async functions without "
-        "internal await (function '%s')",
-        function->name);
-    return 0;
+    AsyncSuspendPointList suspend_points = {0};
+    if (!async_collect_suspend_points_in_body(function->body, &suspend_points)) {
+      async_suspend_points_destroy(&suspend_points);
+      async_rewrite_report(reporter, location,
+                           "Out of memory while collecting coroutine suspend points");
+      return 0;
+    }
+    coro_suspend_count = suspend_points.count;
+    async_suspend_points_destroy(&suspend_points);
   }
   const char *payload_type = function->return_type ? function->return_type : "void";
   const char *stored_result_type =
@@ -310,7 +380,9 @@ static int async_build_generated_decls(ASTNode *function_node,
     return 0;
   }
 
-  size_t extra_fields = function->parameter_count + 8;
+  size_t extra_fields =
+      function->parameter_count + 8 +
+      ((model == ASYNC_REWRITE_MODEL_COROUTINE && coro_suspend_count > 0) ? 2 : 0);
   char **field_names = calloc(extra_fields, sizeof(char *));
   char **field_types = calloc(extra_fields, sizeof(char *));
   if (!field_names || !field_types) {
@@ -366,6 +438,12 @@ static int async_build_generated_decls(ASTNode *function_node,
   field_types[field_count++] = (char *)stored_result_type;
   field_names[field_count] = "result_end";
   field_types[field_count++] = "int8";
+  if (model == ASYNC_REWRITE_MODEL_COROUTINE && coro_suspend_count > 0) {
+    field_names[field_count] = "resume_state";
+    field_types[field_count++] = "int32";
+    field_names[field_count] = "suspend_count";
+    field_types[field_count++] = "int32";
+  }
 
   ASTNode *context_decl = ast_create_struct_declaration(
       ctx_name, field_names, field_types, field_count, NULL, 0, location);
@@ -559,8 +637,7 @@ static int async_build_generated_decls(ASTNode *function_node,
                          function->name);
     return 0;
   }
-
-  if (async_is_void_type_name(payload_type)) {
+  if (async_is_void_type_name(payload_type)) {
     if (!async_block_append(entry_block, body_call)) {
       ast_destroy_node(body_call);
       ast_destroy_node(entry_block);
@@ -724,6 +801,33 @@ static int async_build_generated_decls(ASTNode *function_node,
       free(future_return_type);
       async_rewrite_report(reporter, location,
                            "Failed to initialize async wrapper header for '%s'",
+                           function->name);
+      return 0;
+    }
+  }
+
+  if (model == ASYNC_REWRITE_MODEL_COROUTINE && coro_suspend_count > 0) {
+    ASTNode *resume_zero_init = async_make_field_assignment(
+        "__meth_async_ctx", "resume_state", ast_create_number_literal(0, location),
+        location);
+    ASTNode *suspend_count_init = async_make_field_assignment(
+        "__meth_async_ctx", "suspend_count",
+        ast_create_number_literal((long long)coro_suspend_count, location), location);
+    if (!resume_zero_init || !suspend_count_init ||
+        !async_block_append(wrapper_block, resume_zero_init) ||
+        !async_block_append(wrapper_block, suspend_count_init)) {
+      ast_destroy_node(resume_zero_init);
+      ast_destroy_node(suspend_count_init);
+      ast_destroy_node(wrapper_block);
+      ast_destroy_node(entry_decl);
+      ast_destroy_node(context_decl);
+      ast_destroy_node(body_decl);
+      free(ctx_name);
+      free(body_name);
+      free(entry_name);
+      free(future_return_type);
+      async_rewrite_report(reporter, location,
+                           "Failed to initialize coroutine state labels for '%s'",
                            function->name);
       return 0;
     }
@@ -979,3 +1083,5 @@ int async_rewrite_program(ASTNode *program, ErrorReporter *reporter,
   program->child_count = new_count;
   return 1;
 }
+
+
