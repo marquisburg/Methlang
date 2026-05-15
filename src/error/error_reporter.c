@@ -578,6 +578,95 @@ const char *error_reporter_suggest_for_token(const char *token) {
   return NULL;
 }
 
+static char er_lower(char c) {
+  if (c >= 'A' && c <= 'Z')
+    return (char)(c - 'A' + 'a');
+  return c;
+}
+
+/* Standard iterative Levenshtein distance (insert/delete/substitute = 1),
+   computed case-insensitively so "Print"/"print" count as distance 0.
+   Returns SIZE_MAX on allocation failure so callers treat it as "no match". */
+size_t error_reporter_edit_distance(const char *a, const char *b) {
+  if (!a || !b)
+    return (size_t)-1;
+
+  size_t la = strlen(a);
+  size_t lb = strlen(b);
+  if (la == 0)
+    return lb;
+  if (lb == 0)
+    return la;
+
+  /* Single rolling row of size lb+1. */
+  size_t *row = malloc((lb + 1) * sizeof(size_t));
+  if (!row)
+    return (size_t)-1;
+
+  for (size_t j = 0; j <= lb; j++)
+    row[j] = j;
+
+  for (size_t i = 1; i <= la; i++) {
+    size_t prev_diag = row[0];
+    row[0] = i;
+    for (size_t j = 1; j <= lb; j++) {
+      size_t prev = row[j];
+      size_t cost = (er_lower(a[i - 1]) == er_lower(b[j - 1])) ? 0 : 1;
+      size_t del = row[j] + 1;
+      size_t ins = row[j - 1] + 1;
+      size_t sub = prev_diag + cost;
+      size_t best = del < ins ? del : ins;
+      if (sub < best)
+        best = sub;
+      row[j] = best;
+      prev_diag = prev;
+    }
+  }
+
+  size_t result = row[lb];
+  free(row);
+  return result;
+}
+
+char *error_reporter_closest_candidate(const char *name,
+                                       const char *const *candidates,
+                                       size_t count) {
+  if (!name || !candidates || count == 0)
+    return NULL;
+
+  size_t name_len = strlen(name);
+  if (name_len == 0)
+    return NULL;
+
+  /* Tolerate roughly one third of the name being wrong, with a floor of 1
+     (catches single-character typos in short names like "i"/"j") and a cap
+     so unrelated long names don't get spuriously matched. */
+  size_t threshold = name_len / 3;
+  if (threshold < 1)
+    threshold = 1;
+  if (threshold > 3)
+    threshold = 3;
+
+  const char *best = NULL;
+  size_t best_distance = (size_t)-1;
+
+  for (size_t i = 0; i < count; i++) {
+    const char *cand = candidates[i];
+    if (!cand || cand[0] == '\0')
+      continue;
+    if (strcmp(cand, name) == 0)
+      continue; /* exact match isn't a useful "did you mean" */
+
+    size_t d = error_reporter_edit_distance(name, cand);
+    if (d <= threshold && d < best_distance) {
+      best_distance = d;
+      best = cand;
+    }
+  }
+
+  return best ? er_strdup(best) : NULL;
+}
+
 /* Returns a heap-allocated suggestion string the caller must free, or NULL. */
 char *error_reporter_suggest_for_type_mismatch(const char *expected,
                                                const char *actual) {

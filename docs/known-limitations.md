@@ -2,8 +2,6 @@
 
 This document lists current limitations of the Methlang language and compiler.
 
-No block comments. Only line comments (`//`) are supported.
-
 No top-level constant expressions. Use functions that return constant values instead.
 
 Traits and constrained generics currently support only marker-style bounds with explicit `impl Trait for Type;` declarations and a single inline bound per type parameter such as `T: Addable`. Trait methods, multiple bounds, and `where` clauses are not implemented yet. The keyword `where` is reserved by the lexer but is not accepted in the grammar.
@@ -24,10 +22,6 @@ Null pointer dereference is diagnosed for constant nulls such as `*0`. Runtime n
 
 Fixed-size array indexing is checked at compile time for constant indices and guarded at runtime for dynamic indices in normal builds; those runtime guards are disabled in `--release`. Pointer indexing is still unchecked for bounds because the compiler does not know the pointee extent.
 
-No compound assignment (`+=`, `-=`, `*=`, `/=`). Use `x = x + 1` instead of `x += 1`.
-
-No labeled `break` or `continue` (e.g. `break outer`). Use flags or restructure nested loops.
-
 Deferred calls capture variables by reference, not by value. In loops, copy the current value into a temporary first if the deferred call should see the declaration-time value.
 
 `errdefer` is function-only and convention-based. It is valid only inside functions, and any non-zero explicit return value is treated as an error.
@@ -36,7 +30,7 @@ Deferred calls capture variables by reference, not by value. In loops, copy the 
 
 `coroutine` lowering now uses a generic CFG-level async rewrite path and no longer depends on pattern-specific/fallback branches for internal `await` bodies. The coroutine path is still experimental and evolving, especially around optimization quality and diagnostics.
 
-By default, async uses a bounded worker-pool executor, not a user-facing coroutine scheduler. Optional **`coroutine`** lowering targets stackless tasks and can use Windows IOCP primitives from the bundled runtime; there is still no full portable reactor in the language for all I/O.
+By default, async uses a bounded worker-pool executor, not a user-facing coroutine scheduler. Optional **`coroutine`** lowering targets stackless tasks on a **portable reactor** (IOCP on Windows, `poll(2)` + self-pipe on POSIX), with identical API and event semantics on both and runtime-level test coverage on each. The remaining gap is at the **language level**: there is not yet a complete, ergonomic non-blocking `await` story across all I/O kinds built on top of that reactor.
 
 Blocking `await` can still deadlock on cyclic wait patterns (for example, futures waiting on each other in a cycle). The runtime mitigates common nested-await starvation, but it is not a full deadlock-proof scheduler.
 

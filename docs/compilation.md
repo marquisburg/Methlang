@@ -27,7 +27,7 @@ Available topics: `build`, `gc`, `interop`, `stdlib`, `web`.
 
 ## Options
 
-`-o <file>` output assembly/object file (default `output.s`, or executable path when used with `--build`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`). `--async-model <pool|coroutine>` choose async lowering (**default: `pool`**). See [Async and Sync Execution](async.md). `--emit-obj` emit a COFF object on Windows instead of assembly. `--build` build an executable on Windows. `--linker <auto|internal|gcc|msvc>` choose the Windows linker path. `--link-arg <arg>` pass an extra linker argument in `--build` mode (repeatable; for example `--link-arg -lws2_32`). `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode and embedded runtime crash traceback support. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-s`/`--stack-trace` embeds runtime crash traceback support without the rest of debug mode. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
+`-o <file>` output assembly/object file (default `output.s`, or executable path when used with `--build`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`). `--async-model <pool|coroutine>` choose async lowering (**default: `pool`**). See [Async and Sync Execution](async.md). `--emit-obj` emit a COFF object on Windows instead of assembly. `--build` build an executable on Windows. `--linker <auto|internal|gcc|msvc>` choose the Windows linker path. `--link-arg <arg>` pass an extra linker argument in `--build` mode for additional DLLs/import libraries. `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode and embedded runtime crash traceback support. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-s`/`--stack-trace` embeds runtime crash traceback support without the rest of debug mode. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
 
 ## Compilation Pipeline
 
@@ -60,10 +60,10 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 ### Recommended Windows Flow
 
 1. Native object/internal-link build: `methlang --build --emit-obj --linker internal main.meth -o main.exe`
-2. Optional extra libraries: `methlang --build --emit-obj --linker internal main.meth -o main.exe --link-arg -lws2_32`
+2. Optional extra libraries: `methlang --build --emit-obj --linker internal main.meth -o main.exe --link-arg -lcustomdll`
 3. Assembly/auto path: `methlang --build main.meth -o main.exe`
 
-`--build --emit-obj --linker internal` keeps the target build inside Methlang's object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. `--build` with `--linker auto` tries the internal linker first and falls back to external linkers if needed. If you do not pass `--emit-obj`, the build still goes through assembly and requires `NASM`. The packaged runtime is part of the Methlang installation/build output; you do not need to add `gc.c` or `async_runtime.c` to each project manually.
+`--build --emit-obj --linker internal` keeps the target build inside Methlang's object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. The internal linker probes common Win32 DLLs directly (`kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, `ucrtbase`, and `msvcrt`), so `std/win32`, `std/thread`, and `std/net` work without hand-written C bridge objects or default import-library flags. `--build` with `--linker auto` tries the internal linker first and falls back to external linkers if needed. If you do not pass `--emit-obj`, the build still goes through assembly and requires `NASM`. The packaged runtime is part of the Methlang installation/build output; you do not need to add `gc.c` or `async_runtime.c` to each project manually.
 
 ### Async Executor Runtime Tuning
 
@@ -102,17 +102,53 @@ On POSIX toolchains, the bundled async runtime uses a pthread-backed implementat
 
 The output format depends on the target. Use `-f win64` for Windows, `-f elf64` for Linux. NASM is required for assembly; install from https://www.nasm.us/ if needed. On Linux and macOS, use `make` to build the compiler and run tests. The web server example in `web/` is Windows-only (Winsock). See [Standard Library](standard-library.md#platform-support) for Linux support details.
 
+## Compiler Diagnostics
+
+Compile-time errors and warnings are printed with a stable error code, the
+source location, a code snippet with a caret pointing at the offending span
+(plus one line of surrounding context), and — where possible — a `help:`
+suggestion. Output is colorized on a TTY and respects `NO_COLOR`,
+`CLICOLOR`/`CLICOLOR_FORCE`, and `TERM=dumb`. Up to 100 diagnostics are
+reported per run rather than stopping at the first.
+
+Error codes: `E0001` lexical, `E0002` syntax, `E0003` semantic, `E0004`
+type, `E0005` scope, `E0006` I/O, `E0007` internal. They are stable across
+versions and useful for `grep` and documentation.
+
+### "Did you mean?" suggestions
+
+When you reference an undefined variable or function, the compiler searches
+every name visible in the current scope chain and, if one is a close match
+(case-insensitive Levenshtein distance within a length-scaled threshold),
+suggests it:
+
+```text
+error[E0003]: Undefined variable 'countr'
+  --> app.meth:5:10
+  |
+4 |   var counter: int32 = 41;
+5 |   return countr + 1;
+  |          ^^^^^^
+6 | }
+   = help: did you mean 'counter'? (or declare 'countr' before using it)
+```
+
+The suggestion is scope-aware: only symbols actually reachable from the
+error site are considered. If nothing is close enough, the diagnostic falls
+back to the generic "declare it before using it" guidance, so unrelated
+names never produce a misleading suggestion.
+
 ## Runtime Crash Tracebacks
 
-Compile with `-s` or `-d` to embed runtime crash traceback support in the generated program. This adds failure-path-only metadata for Meth function names and source locations and installs a crash handler at program startup on Windows.
+Compile with `-s` or `-d` to embed runtime crash traceback support in the generated program. This adds failure-path-only metadata for Meth function names and source locations and installs a crash handler at program startup. The crash handler is **cross-platform**: Windows uses a Structured Exception Handler, and POSIX (Linux/macOS) uses a `sigaction` handler running on an alternate signal stack. Both produce the same symbolized stack-trace format from the same embedded debug-info tables.
 
 - `-s` enables embedded runtime crash tracebacks without the rest of debug mode.
 - `-d` enables debug output and also implies embedded runtime crash tracebacks.
 - `--release` still disables generated null/bounds runtime checks, so only native crashes remain traceable there.
 
-On Windows, native exceptions are printed with their exception code and decoded name when available. Compiler-generated null dereference and array-bounds traps also print the same traceback shape.
+A fatal fault prints the exception/signal, the faulting address (with a hint when it is a null-pointer dereference), and a symbolized stack trace. Compiler-generated null-dereference and array-bounds traps print the same traceback shape. Frames without registered Meth debug info (libc/CRT) show as `<unknown>`, the same on both platforms.
 
-Example:
+Windows example (native access violation):
 
 ```text
 Unhandled runtime exception 0xC0000005 (access violation)
@@ -124,13 +160,26 @@ Stack trace:
   #2 main at app.meth:10:3 (0x00007FF7DFD710A0)
 ```
 
-Compiler-generated runtime traps are formatted as:
+POSIX example (null dereference via SIGSEGV):
+
+```text
+Unhandled runtime signal 11 (segmentation fault (invalid memory access))
+Faulting address: 0x0000000000000000  (null pointer dereference)
+Fault instruction: 0x000057AD4388733D
+Stack trace:
+  #0 compute_total at app.meth:12:5 (0x000057AD4388733D)
+  #1 main at app.meth:20:3 (0x000057AD438873CE)
+```
+
+Compiler-generated runtime traps are formatted the same on both platforms:
 
 ```text
 Fatal error: Null pointer dereference
 Stack trace:
   #0 main at app.meth:9:10 (0x00007FF7DFD71046)
 ```
+
+The signal handler runs on a dedicated alternate stack so that a stack-overflow `SIGSEGV` can still be reported rather than silently re-faulting, and uses only async-signal-safe primitives.
 
 ## Web Server Example
 

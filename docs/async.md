@@ -3,7 +3,7 @@
 Methlang supports both ordinary synchronous functions and asynchronous functions. **Async lowering is selectable** at compile time:
 
 - **`pool` (default)** — `async` creates a `Future<T>` handle, work runs on a **bounded worker-pool executor**, and `await` **blocks an OS thread** until the future completes. This is the **stable** model described throughout most of this document.
-- **`coroutine` (experimental)** — the compiler rewrites `async`/`await` toward **stackless task frames** and the **`meth_coro_*` runtime** (see [Coroutine reactor preview](#coroutine-reactor-preview-c-runtime-api)). Scope, semantics, and ergonomics are still evolving; use **`--async-model coroutine`** only when you intentionally need this path.
+- **`coroutine` (experimental)** — the compiler rewrites `async`/`await` toward **stackless task frames** and the **`meth_coro_*` runtime** (see [Coroutine reactor preview](#coroutine-reactor-preview-c-runtime-api)). The reactor is now **portable**: Windows uses IOCP and POSIX (Linux/macOS) uses a `poll(2)` + self-pipe backend exposing the **same API and `EVENT_WAKE`/`EVENT_IO`/`EVENT_IO_ERROR` semantics**, so the stackless lowering behaves identically on both. Scope, language-level ergonomics, optimization, and diagnostics are still evolving; use **`--async-model coroutine`** only when you intentionally need this path.
 
 Pass **`--async-model pool`** or **`--async-model coroutine`** to the compiler (`methlang`). Omitting the flag is equivalent to **`pool`**.
 
@@ -301,7 +301,7 @@ This implies several practical consequences:
 - Async work is parallel-capable up to `N` workers.
 - Under **`pool`**, async is heavier than a stackless coroutine model; one async call is not "just a suspended stack frame".
 - Awaiting from an async function can still tie up a worker thread.
-- The **`pool`** model does not include a built-in async I/O reactor in the language runtime (see [Coroutine reactor preview](#coroutine-reactor-preview-c-runtime-api) for Windows IOCP primitives used with the coroutine path).
+- The **`pool`** model does not include a built-in async I/O reactor in the language runtime (see [Coroutine reactor preview](#coroutine-reactor-preview-c-runtime-api) for the portable reactor primitives used with the coroutine path).
 
 ### Blocking `await` Deadlock Hazard
 
@@ -346,13 +346,23 @@ Worker teardown always runs `gc_thread_detach()` on worker-thread exit paths. Fo
 
 ## Coroutine reactor preview (C runtime API)
 
-These symbols live in the bundled async runtime. They back the **experimental** **`coroutine`** async lowering (`--async-model coroutine`) and are also available to **embedders** driving IOCP and stackless tasks from C.
+These symbols live in the bundled async runtime. They back the **experimental** **`coroutine`** async lowering (`--async-model coroutine`) and are also available to **embedders** driving the reactor and stackless tasks from C.
 
-An initial Windows IOCP reactor API is available as a foundation for stackless scheduling:
+A **portable** reactor API is the foundation for stackless scheduling. The
+same functions and event semantics are implemented on every platform; only
+the OS mechanism underneath differs:
+
+- **Windows** — backed by an I/O completion port (IOCP).
+- **POSIX (Linux/macOS)** — backed by `poll(2)` with a self-pipe for
+  cross-thread wakes.
+
+The `meth_coro_iocp_runtime_*` names are kept for source/ABI compatibility
+even though the implementation is no longer IOCP-specific:
 
 - `meth_coro_iocp_runtime_init()`
 - `meth_coro_iocp_runtime_shutdown()`
-- `meth_coro_iocp_runtime_register_socket(socket_handle, token)`
+- `meth_coro_iocp_runtime_register_socket(socket_handle, token)` — on POSIX,
+  `socket_handle` is any pollable file descriptor cast to int64.
 - `meth_coro_iocp_runtime_post_wake(token, result)`
 - `meth_coro_iocp_runtime_poll(timeout_ms, out_token, out_kind, out_result)`
 
@@ -371,13 +381,13 @@ An experimental stackless task-frame scheduler API is also available:
 - `meth_coro_task_is_done(task_handle)`
 - `meth_coro_task_destroy(task_handle)`
 
-The scheduler is resumable-state based (no per-task native thread stack) and interoperates with IOCP wake tokens. With **`--async-model coroutine`**, the compiler **does** rewrite Meth `async`/`await` to use this machinery (experimental). You can also call these APIs directly from C without going through Meth `async`.
+The scheduler is resumable-state based (no per-task native thread stack) and interoperates with reactor wake tokens. The scheduler is itself portable (Windows uses an SRW lock, POSIX a pthread mutex; behaviour is identical). With **`--async-model coroutine`**, the compiler **does** rewrite Meth `async`/`await` to use this machinery (experimental). You can also call these APIs directly from C without going through Meth `async`.
 
 Current scheduling semantics:
 
 - `meth_coro_task_schedule` is level-triggered per task queue slot; if a task is already queued, wake metadata is updated in place (latest wake wins).
-- `meth_coro_task_run_one` dispatches explicit queue first, then polls IOCP.
-- IOCP token dispatch resolves via `meth_coro_task_bind_token`; if no binding exists, token value is interpreted as a direct task handle for compatibility.
+- `meth_coro_task_run_one` dispatches the explicit ready queue first, then polls the reactor.
+- Reactor token dispatch resolves via `meth_coro_task_bind_token`; if no binding exists, the token value is interpreted as a direct task handle for compatibility.
 
 ## Build and Link Requirements
 
@@ -409,7 +419,7 @@ gcc -nostartfiles app.o path/to/runtime/gc.o path/to/runtime/async_runtime.o -o 
 
 If your entry point is `main(argc, argv)`, also link `methlang_entry.o` as documented in [Compilation](compilation.md).
 
-On POSIX toolchains, the bundled async runtime uses a pthread-backed implementation. Link pthread support as required by your system toolchain.
+On POSIX toolchains, the bundled async runtime uses a pthread-backed implementation for **both** the `pool` executor and the `coroutine` reactor/scheduler. Link pthread support (`-lpthread`, or as required by your system toolchain). The coroutine reactor additionally relies only on standard POSIX `poll(2)`, `pipe(2)`, and `fcntl(2)` — no `epoll`/`kqueue` dependency, so it builds unmodified on Linux and macOS.
 
 ## Common Patterns
 
@@ -467,7 +477,7 @@ Think of **`pool`** as **typed futures + bounded worker pool + blocking await + 
 
 ### `coroutine` (experimental)
 
-The **`coroutine`** path **is** a stackless-style lowering tied to **`meth_coro_*`** and (on Windows) IOCP primitives. It is **not** a finished, language-level non-blocking `await` story for all I/O; coverage and ergonomics are still growing.
+The **`coroutine`** path **is** a stackless-style lowering tied to **`meth_coro_*`** and a portable reactor (IOCP on Windows, `poll(2)` on POSIX). The runtime layer is now cross-platform and test-covered on both backends. It is still **not** a finished, language-level non-blocking `await` story for all I/O; the runtime is portable, but higher-level coverage, ergonomics, optimization, and diagnostics are still growing.
 
 Treat **`coroutine`** as **preview**: expect rough edges compared to **`pool`**.
 

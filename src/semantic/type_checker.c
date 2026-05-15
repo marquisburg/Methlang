@@ -4531,8 +4531,17 @@ void type_checker_report_undefined_symbol(TypeChecker *checker,
 
   if (checker->error_reporter) {
     char suggestion[256];
-    snprintf(suggestion, sizeof(suggestion), "declare '%s' before using it",
-             symbol_name);
+    char *closest = symbol_table_suggest_similar(checker->symbol_table,
+                                                 symbol_name, NULL, 0);
+    if (closest) {
+      snprintf(suggestion, sizeof(suggestion),
+               "did you mean '%s'? (or declare '%s' before using it)", closest,
+               symbol_name);
+      free(closest);
+    } else {
+      snprintf(suggestion, sizeof(suggestion), "declare '%s' before using it",
+               symbol_name);
+    }
     SourceSpan span = source_span_from_location(location, strlen(symbol_name));
     error_reporter_add_error_with_span_and_suggestion(
         checker->error_reporter, ERROR_SEMANTIC, span, error_msg, suggestion);

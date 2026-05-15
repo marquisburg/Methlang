@@ -14,6 +14,8 @@
 #include <windows.h>
 #else
 #include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <time.h>
@@ -485,70 +487,639 @@ int32_t meth_coro_task_is_done(int64_t task_handle) {
   return done;
 }
 #else
+/*
+ * POSIX reactor (Linux/macOS).
+ *
+ * This is the portable counterpart to the Windows IOCP reactor. It is built
+ * on poll(2) plus a self-pipe so that meth_coro_iocp_runtime_post_wake() can
+ * be called from any thread and observed by a blocking poll() in the runner
+ * thread. The public API and the EVENT_WAKE/EVENT_IO/EVENT_IO_ERROR semantics
+ * intentionally match the IOCP backend so the language-level coroutine
+ * lowering is platform agnostic.
+ *
+ * Registered "sockets" are arbitrary readable/writable file descriptors; a
+ * delivered event reports EVENT_IO when the fd is ready and EVENT_IO_ERROR
+ * (with errno-style result) when poll reports POLLERR/POLLNVAL/POLLHUP.
+ */
+
+typedef struct MethPosixWakeNode {
+  uintptr_t token;
+  int32_t result;
+  struct MethPosixWakeNode *next;
+} MethPosixWakeNode;
+
+typedef struct MethPosixRegistration {
+  int fd;
+  uintptr_t token;
+  struct MethPosixRegistration *next;
+} MethPosixRegistration;
+
+typedef struct MethPosixReactor {
+  pthread_mutex_t lock;
+  int initialized;
+  int wake_pipe[2]; /* [0] read end, [1] write end */
+  MethPosixWakeNode *wake_head;
+  MethPosixWakeNode *wake_tail;
+  MethPosixRegistration *registrations;
+} MethPosixReactor;
+
+static MethPosixReactor g_meth_posix_reactor = {
+    PTHREAD_MUTEX_INITIALIZER, 0, {-1, -1}, NULL, NULL, NULL};
+
+static int meth_posix_set_nonblocking(int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags < 0) {
+    return 0;
+  }
+  return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
+}
+
 int32_t meth_coro_iocp_runtime_init(void) {
-  return 0;
+  pthread_mutex_lock(&g_meth_posix_reactor.lock);
+  if (g_meth_posix_reactor.initialized) {
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+    return 1;
+  }
+
+  if (pipe(g_meth_posix_reactor.wake_pipe) != 0) {
+    g_meth_posix_reactor.wake_pipe[0] = -1;
+    g_meth_posix_reactor.wake_pipe[1] = -1;
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+    return 0;
+  }
+
+  /*
+   * The read end must be non-blocking so the runner can drain it without
+   * stalling; the write end stays blocking so a wake is never silently lost
+   * under pressure (a brief write stall is acceptable and bounded).
+   */
+  if (!meth_posix_set_nonblocking(g_meth_posix_reactor.wake_pipe[0])) {
+    (void)close(g_meth_posix_reactor.wake_pipe[0]);
+    (void)close(g_meth_posix_reactor.wake_pipe[1]);
+    g_meth_posix_reactor.wake_pipe[0] = -1;
+    g_meth_posix_reactor.wake_pipe[1] = -1;
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+    return 0;
+  }
+
+  g_meth_posix_reactor.wake_head = NULL;
+  g_meth_posix_reactor.wake_tail = NULL;
+  g_meth_posix_reactor.registrations = NULL;
+  g_meth_posix_reactor.initialized = 1;
+  pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+  return 1;
 }
 
 int32_t meth_coro_iocp_runtime_shutdown(void) {
+  pthread_mutex_lock(&g_meth_posix_reactor.lock);
+  if (!g_meth_posix_reactor.initialized) {
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+    return 1;
+  }
+
+  if (g_meth_posix_reactor.wake_pipe[0] >= 0) {
+    (void)close(g_meth_posix_reactor.wake_pipe[0]);
+  }
+  if (g_meth_posix_reactor.wake_pipe[1] >= 0) {
+    (void)close(g_meth_posix_reactor.wake_pipe[1]);
+  }
+  g_meth_posix_reactor.wake_pipe[0] = -1;
+  g_meth_posix_reactor.wake_pipe[1] = -1;
+
+  MethPosixWakeNode *wake = g_meth_posix_reactor.wake_head;
+  while (wake) {
+    MethPosixWakeNode *next = wake->next;
+    free(wake);
+    wake = next;
+  }
+  g_meth_posix_reactor.wake_head = NULL;
+  g_meth_posix_reactor.wake_tail = NULL;
+
+  MethPosixRegistration *reg = g_meth_posix_reactor.registrations;
+  while (reg) {
+    MethPosixRegistration *next = reg->next;
+    free(reg);
+    reg = next;
+  }
+  g_meth_posix_reactor.registrations = NULL;
+
+  g_meth_posix_reactor.initialized = 0;
+  pthread_mutex_unlock(&g_meth_posix_reactor.lock);
   return 1;
 }
 
 int32_t meth_coro_iocp_runtime_register_socket(int64_t socket_handle,
                                                uintptr_t token) {
-  (void)socket_handle;
-  (void)token;
-  return 0;
+  int fd = (int)socket_handle;
+  if (fd < 0) {
+    return 0;
+  }
+
+  pthread_mutex_lock(&g_meth_posix_reactor.lock);
+  if (!g_meth_posix_reactor.initialized) {
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+    return 0;
+  }
+
+  /* Re-registering a known fd just refreshes its token, matching the IOCP
+   * behaviour where re-association with the same key is idempotent. */
+  MethPosixRegistration *reg = g_meth_posix_reactor.registrations;
+  while (reg) {
+    if (reg->fd == fd) {
+      reg->token = token;
+      pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+      return 1;
+    }
+    reg = reg->next;
+  }
+
+  MethPosixRegistration *created =
+      (MethPosixRegistration *)calloc(1, sizeof(MethPosixRegistration));
+  if (!created) {
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+    return 0;
+  }
+  created->fd = fd;
+  created->token = token;
+  created->next = g_meth_posix_reactor.registrations;
+  g_meth_posix_reactor.registrations = created;
+  pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+  return 1;
 }
 
 int32_t meth_coro_iocp_runtime_post_wake(uintptr_t token, int32_t result) {
-  (void)token;
-  (void)result;
-  return 0;
+  MethPosixWakeNode *node =
+      (MethPosixWakeNode *)calloc(1, sizeof(MethPosixWakeNode));
+  if (!node) {
+    return 0;
+  }
+  node->token = token;
+  node->result = result;
+  node->next = NULL;
+
+  pthread_mutex_lock(&g_meth_posix_reactor.lock);
+  if (!g_meth_posix_reactor.initialized ||
+      g_meth_posix_reactor.wake_pipe[1] < 0) {
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+    free(node);
+    return 0;
+  }
+
+  if (g_meth_posix_reactor.wake_tail) {
+    g_meth_posix_reactor.wake_tail->next = node;
+  } else {
+    g_meth_posix_reactor.wake_head = node;
+  }
+  g_meth_posix_reactor.wake_tail = node;
+  int write_fd = g_meth_posix_reactor.wake_pipe[1];
+  pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+
+  /* One byte per queued wake keeps the pipe readable until every queued
+   * token has been drained by poll(). EINTR is retried; a full pipe is
+   * harmless because a single readable byte already guarantees a wakeup. */
+  unsigned char signal_byte = 1;
+  ssize_t written;
+  do {
+    written = write(write_fd, &signal_byte, 1);
+  } while (written < 0 && errno == EINTR);
+  return 1;
 }
 
 int32_t meth_coro_iocp_runtime_poll(int32_t timeout_ms, uintptr_t *out_token,
                                     int32_t *out_kind, int32_t *out_result) {
-  (void)timeout_ms;
-  (void)out_token;
-  (void)out_kind;
-  (void)out_result;
+  pthread_mutex_lock(&g_meth_posix_reactor.lock);
+  if (!g_meth_posix_reactor.initialized) {
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+    return 0;
+  }
+
+  /* A queued wake takes priority and is delivered without entering poll(). */
+  if (g_meth_posix_reactor.wake_head) {
+    MethPosixWakeNode *node = g_meth_posix_reactor.wake_head;
+    g_meth_posix_reactor.wake_head = node->next;
+    if (!g_meth_posix_reactor.wake_head) {
+      g_meth_posix_reactor.wake_tail = NULL;
+    }
+    int read_fd = g_meth_posix_reactor.wake_pipe[0];
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+
+    unsigned char drain;
+    ssize_t got;
+    do {
+      got = read(read_fd, &drain, 1);
+    } while (got < 0 && errno == EINTR);
+
+    if (out_token) {
+      *out_token = node->token;
+    }
+    if (out_kind) {
+      *out_kind = METH_CORO_IOCP_EVENT_WAKE;
+    }
+    if (out_result) {
+      *out_result = node->result;
+    }
+    free(node);
+    return 1;
+  }
+
+  /* Build the poll set: wake-pipe read end first, then registered fds. */
+  size_t registration_count = 0;
+  MethPosixRegistration *reg = g_meth_posix_reactor.registrations;
+  while (reg) {
+    registration_count++;
+    reg = reg->next;
+  }
+
+  size_t nfds = registration_count + 1;
+  struct pollfd *fds = (struct pollfd *)calloc(nfds, sizeof(struct pollfd));
+  uintptr_t *tokens = (uintptr_t *)calloc(nfds, sizeof(uintptr_t));
+  if (!fds || !tokens) {
+    free(fds);
+    free(tokens);
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+    return 0;
+  }
+
+  fds[0].fd = g_meth_posix_reactor.wake_pipe[0];
+  fds[0].events = POLLIN;
+  tokens[0] = 0;
+
+  size_t index = 1;
+  reg = g_meth_posix_reactor.registrations;
+  while (reg && index < nfds) {
+    fds[index].fd = reg->fd;
+    fds[index].events = POLLIN | POLLOUT;
+    tokens[index] = reg->token;
+    index++;
+    reg = reg->next;
+  }
+  pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+
+  int poll_timeout = (timeout_ms < 0) ? -1 : timeout_ms;
+  int ready;
+  do {
+    ready = poll(fds, (nfds_t)nfds, poll_timeout);
+  } while (ready < 0 && errno == EINTR);
+
+  if (ready <= 0) {
+    free(fds);
+    free(tokens);
+    return 0; /* timeout or poll error: treat as idle */
+  }
+
+  /* The wake pipe is reported as a WAKE with the next queued token. */
+  if (fds[0].revents & POLLIN) {
+    pthread_mutex_lock(&g_meth_posix_reactor.lock);
+    MethPosixWakeNode *node = g_meth_posix_reactor.wake_head;
+    if (node) {
+      g_meth_posix_reactor.wake_head = node->next;
+      if (!g_meth_posix_reactor.wake_head) {
+        g_meth_posix_reactor.wake_tail = NULL;
+      }
+    }
+    int read_fd = g_meth_posix_reactor.wake_pipe[0];
+    pthread_mutex_unlock(&g_meth_posix_reactor.lock);
+
+    unsigned char drain;
+    ssize_t got;
+    do {
+      got = read(read_fd, &drain, 1);
+    } while (got < 0 && errno == EINTR);
+
+    if (node) {
+      if (out_token) {
+        *out_token = node->token;
+      }
+      if (out_kind) {
+        *out_kind = METH_CORO_IOCP_EVENT_WAKE;
+      }
+      if (out_result) {
+        *out_result = node->result;
+      }
+      free(node);
+      free(fds);
+      free(tokens);
+      return 1;
+    }
+    /* Spurious readability with no queued node: fall through to fd scan. */
+  }
+
+  for (size_t i = 1; i < nfds; i++) {
+    short revents = fds[i].revents;
+    if (revents == 0) {
+      continue;
+    }
+    if (revents & (POLLERR | POLLNVAL | POLLHUP)) {
+      if (out_token) {
+        *out_token = tokens[i];
+      }
+      if (out_kind) {
+        *out_kind = METH_CORO_IOCP_EVENT_IO_ERROR;
+      }
+      if (out_result) {
+        *out_result = (revents & POLLNVAL) ? EBADF : ECONNRESET;
+      }
+      free(fds);
+      free(tokens);
+      return 1;
+    }
+    if (revents & (POLLIN | POLLOUT)) {
+      if (out_token) {
+        *out_token = tokens[i];
+      }
+      if (out_kind) {
+        *out_kind = METH_CORO_IOCP_EVENT_IO;
+      }
+      if (out_result) {
+        *out_result = 0;
+      }
+      free(fds);
+      free(tokens);
+      return 1;
+    }
+  }
+
+  free(fds);
+  free(tokens);
   return 0;
+}
+
+/*
+ * POSIX coroutine task scheduler.
+ *
+ * A direct pthread-mutex port of the Windows scheduler above: identical
+ * ready-queue, token-binding, and lifecycle semantics so the language-level
+ * lowering behaves the same on both platforms.
+ */
+
+typedef struct MethCoroTask {
+  MethCoroStepFn step_fn;
+  void *state;
+  int32_t done;
+  int32_t queued;
+  uintptr_t wake_token;
+  int32_t wake_kind;
+  int32_t wake_result;
+  struct MethCoroTask *next_ready;
+  struct MethCoroTask *next_all;
+} MethCoroTask;
+
+typedef struct MethCoroTokenBinding {
+  uintptr_t token;
+  int64_t task_handle;
+  struct MethCoroTokenBinding *next;
+} MethCoroTokenBinding;
+
+typedef struct MethCoroTaskRuntime {
+  pthread_mutex_t lock;
+  MethCoroTask *all_head;
+  MethCoroTask *ready_head;
+  MethCoroTask *ready_tail;
+  MethCoroTokenBinding *token_bindings;
+} MethCoroTaskRuntime;
+
+static MethCoroTaskRuntime g_meth_coro_task_runtime = {
+    PTHREAD_MUTEX_INITIALIZER, NULL, NULL, NULL, NULL};
+
+static MethCoroTask *meth_coro_find_task_locked(int64_t task_handle) {
+  MethCoroTask *task = g_meth_coro_task_runtime.all_head;
+  while (task) {
+    if ((int64_t)(intptr_t)task == task_handle) {
+      return task;
+    }
+    task = task->next_all;
+  }
+  return NULL;
+}
+
+static int64_t meth_coro_resolve_task_from_token_locked(uintptr_t token) {
+  MethCoroTokenBinding *binding = g_meth_coro_task_runtime.token_bindings;
+  while (binding) {
+    if (binding->token == token) {
+      return binding->task_handle;
+    }
+    binding = binding->next;
+  }
+  return (int64_t)(intptr_t)token;
 }
 
 int64_t meth_coro_task_create(MethCoroStepFn step_fn, void *state) {
-  (void)step_fn;
-  (void)state;
-  return 0;
+  if (!step_fn) {
+    return 0;
+  }
+
+  MethCoroTask *task = (MethCoroTask *)calloc(1, sizeof(MethCoroTask));
+  if (!task) {
+    return 0;
+  }
+
+  task->step_fn = step_fn;
+  task->state = state;
+  task->done = 0;
+  task->queued = 0;
+
+  /*
+   * Keep coroutine frame/state reachable by GC for the full task lifetime.
+   * The caller's Future<T> handle may transiently live only in registers while
+   * awaiting, so task runtime ownership must be an explicit root.
+   */
+  gc_register_root((void **)&task->state);
+
+  pthread_mutex_lock(&g_meth_coro_task_runtime.lock);
+  task->next_all = g_meth_coro_task_runtime.all_head;
+  g_meth_coro_task_runtime.all_head = task;
+  pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
+  return (int64_t)(intptr_t)task;
 }
 
 int32_t meth_coro_task_destroy(int64_t task_handle) {
-  (void)task_handle;
-  return 0;
+  if (!task_handle) {
+    return 0;
+  }
+
+  MethCoroTask *target = NULL;
+  pthread_mutex_lock(&g_meth_coro_task_runtime.lock);
+
+  MethCoroTask **all_cursor = &g_meth_coro_task_runtime.all_head;
+  while (*all_cursor) {
+    if ((int64_t)(intptr_t)(*all_cursor) == task_handle) {
+      target = *all_cursor;
+      *all_cursor = target->next_all;
+      break;
+    }
+    all_cursor = &(*all_cursor)->next_all;
+  }
+
+  if (!target) {
+    pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
+    return 0;
+  }
+
+  MethCoroTask **ready_cursor = &g_meth_coro_task_runtime.ready_head;
+  MethCoroTask *prev = NULL;
+  while (*ready_cursor) {
+    if (*ready_cursor == target) {
+      MethCoroTask *next = target->next_ready;
+      *ready_cursor = next;
+      if (g_meth_coro_task_runtime.ready_tail == target) {
+        g_meth_coro_task_runtime.ready_tail = prev;
+      }
+      break;
+    }
+    prev = *ready_cursor;
+    ready_cursor = &(*ready_cursor)->next_ready;
+  }
+
+  MethCoroTokenBinding **token_cursor =
+      &g_meth_coro_task_runtime.token_bindings;
+  while (*token_cursor) {
+    MethCoroTokenBinding *binding = *token_cursor;
+    if (binding->task_handle == task_handle) {
+      *token_cursor = binding->next;
+      free(binding);
+      continue;
+    }
+    token_cursor = &binding->next;
+  }
+  pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
+
+  gc_unregister_root((void **)&target->state);
+  free(target);
+  return 1;
 }
 
 int32_t meth_coro_task_schedule(int64_t task_handle, uintptr_t wake_token,
                                 int32_t wake_kind, int32_t wake_result) {
-  (void)task_handle;
-  (void)wake_token;
-  (void)wake_kind;
-  (void)wake_result;
-  return 0;
+  if (!task_handle) {
+    return 0;
+  }
+
+  int32_t scheduled = 0;
+  pthread_mutex_lock(&g_meth_coro_task_runtime.lock);
+  MethCoroTask *task = meth_coro_find_task_locked(task_handle);
+  if (task && !task->done) {
+    task->wake_token = wake_token;
+    task->wake_kind = wake_kind;
+    task->wake_result = wake_result;
+    if (!task->queued) {
+      task->queued = 1;
+      task->next_ready = NULL;
+      if (g_meth_coro_task_runtime.ready_tail) {
+        g_meth_coro_task_runtime.ready_tail->next_ready = task;
+      } else {
+        g_meth_coro_task_runtime.ready_head = task;
+      }
+      g_meth_coro_task_runtime.ready_tail = task;
+    }
+    scheduled = 1;
+  }
+  pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
+  return scheduled;
 }
 
 int32_t meth_coro_task_bind_token(int64_t task_handle, uintptr_t token) {
-  (void)task_handle;
-  (void)token;
-  return 0;
+  if (!task_handle || token == 0) {
+    return 0;
+  }
+
+  int32_t bound = 0;
+  pthread_mutex_lock(&g_meth_coro_task_runtime.lock);
+  MethCoroTask *task = meth_coro_find_task_locked(task_handle);
+  if (task && !task->done) {
+    MethCoroTokenBinding *binding = g_meth_coro_task_runtime.token_bindings;
+    while (binding) {
+      if (binding->token == token) {
+        binding->task_handle = task_handle;
+        bound = 1;
+        break;
+      }
+      binding = binding->next;
+    }
+
+    if (!bound) {
+      MethCoroTokenBinding *created =
+          (MethCoroTokenBinding *)calloc(1, sizeof(MethCoroTokenBinding));
+      if (created) {
+        created->token = token;
+        created->task_handle = task_handle;
+        created->next = g_meth_coro_task_runtime.token_bindings;
+        g_meth_coro_task_runtime.token_bindings = created;
+        bound = 1;
+      }
+    }
+  }
+  pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
+  return bound;
+}
+
+static MethCoroTask *meth_coro_pop_ready_task(void) {
+  MethCoroTask *task = NULL;
+  pthread_mutex_lock(&g_meth_coro_task_runtime.lock);
+  task = g_meth_coro_task_runtime.ready_head;
+  if (task) {
+    g_meth_coro_task_runtime.ready_head = task->next_ready;
+    if (!g_meth_coro_task_runtime.ready_head) {
+      g_meth_coro_task_runtime.ready_tail = NULL;
+    }
+    task->next_ready = NULL;
+    task->queued = 0;
+  }
+  pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
+  return task;
 }
 
 int32_t meth_coro_task_run_one(int32_t timeout_ms) {
-  (void)timeout_ms;
-  return 0;
+  MethCoroTask *task = meth_coro_pop_ready_task();
+  if (!task) {
+    uintptr_t token = 0;
+    int32_t kind = 0;
+    int32_t result = 0;
+    int32_t has_event =
+        meth_coro_iocp_runtime_poll(timeout_ms, &token, &kind, &result);
+    if (!has_event) {
+      return 0;
+    }
+    if (token != 0) {
+      int64_t task_handle = 0;
+      pthread_mutex_lock(&g_meth_coro_task_runtime.lock);
+      task_handle = meth_coro_resolve_task_from_token_locked(token);
+      pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
+      (void)meth_coro_task_schedule(task_handle, token, kind, result);
+    }
+    task = meth_coro_pop_ready_task();
+    if (!task) {
+      return 0;
+    }
+  }
+
+  int32_t complete = task->step_fn(task->state, task->wake_token,
+                                   task->wake_kind, task->wake_result);
+
+  pthread_mutex_lock(&g_meth_coro_task_runtime.lock);
+  MethCoroTask *alive = meth_coro_find_task_locked((int64_t)(intptr_t)task);
+  if (!alive) {
+    pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
+    return 1;
+  }
+  if (complete != 0) {
+    alive->done = 1;
+  }
+  pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
+  return 1;
 }
 
 int32_t meth_coro_task_is_done(int64_t task_handle) {
-  (void)task_handle;
-  return 0;
+  if (!task_handle) {
+    return 0;
+  }
+  int32_t done = 0;
+  pthread_mutex_lock(&g_meth_coro_task_runtime.lock);
+  MethCoroTask *task = meth_coro_find_task_locked(task_handle);
+  if (task) {
+    done = task->done != 0;
+  }
+  pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
+  return done;
 }
 #endif
 

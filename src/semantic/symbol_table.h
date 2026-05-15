@@ -134,6 +134,15 @@ int symbol_table_resolve_forward_declaration(SymbolTable *table,
                                              Symbol *symbol);
 int symbol_table_validate_declaration(SymbolTable *table, Symbol *symbol);
 Scope *symbol_table_get_current_scope(SymbolTable *table);
+
+// Returns a heap-allocated name of the in-scope symbol most similar to
+// `name` (typo suggestion for "did you mean?"), or NULL if nothing is close
+// enough. Walks the full scope chain (current -> ... -> global). When
+// `kinds`/`kind_count` are provided, only symbols of those kinds are
+// considered; pass NULL/0 to consider every kind. Caller frees the result.
+char *symbol_table_suggest_similar(SymbolTable *table, const char *name,
+                                   const SymbolKind *kinds, size_t kind_count);
+
 Symbol *symbol_create(const char *name, SymbolKind kind, Type *type);
 void symbol_destroy(Symbol *symbol);
 Type *type_create(TypeKind kind, const char *name);
