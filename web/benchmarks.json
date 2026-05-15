@@ -1,5 +1,5 @@
 ﻿{
-    "generated":  "2026-04-07T11:32:13Z",
+    "generated":  "2026-05-15T09:27:32Z",
     "harness":  {
                     "config":  "docs/benchmarks/harness.json",
                     "mode":  "meth-vs-c"
@@ -8,21 +8,21 @@
                        {
                            "name":  "fib",
                            "description":  "Fibonacci fib(35) x 10M",
-                           "meth_ms":  406,
+                           "meth_ms":  375,
                            "c_ms":  78,
-                           "relative":  5.21
+                           "relative":  4.81
                        },
                        {
                            "name":  "word_count",
                            "description":  "Word count 256 KB buffer x 500",
-                           "meth_ms":  203,
+                           "meth_ms":  187,
                            "c_ms":  47,
-                           "relative":  4.32
+                           "relative":  3.98
                        },
                        {
                            "name":  "grep",
                            "description":  "Grep ERROR 256 KB x 200",
-                           "meth_ms":  125,
+                           "meth_ms":  94,
                            "c_ms":  0,
                            "relative":  null
                        },
@@ -36,9 +36,9 @@
                        {
                            "name":  "collatz",
                            "description":  "Collatz steps 1..100000 x 10",
-                           "meth_ms":  500,
-                           "c_ms":  125,
-                           "relative":  4
+                           "meth_ms":  468,
+                           "c_ms":  109,
+                           "relative":  4.29
                        }
                    ],
     "failed":  [

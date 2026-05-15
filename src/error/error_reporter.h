@@ -107,4 +107,15 @@ const char *error_reporter_suggest_for_token(const char *token);
 char *error_reporter_suggest_for_type_mismatch(const char *expected,
                                                const char *actual);
 
+// Case-insensitive-tolerant Levenshtein edit distance between two strings.
+size_t error_reporter_edit_distance(const char *a, const char *b);
+
+// Given a misspelled `name` and a list of `candidates` (count entries),
+// returns the heap-allocated closest candidate within a sensible edit-distance
+// threshold (scaled to the name length), or NULL if none is close enough.
+// Caller must free the returned string.
+char *error_reporter_closest_candidate(const char *name,
+                                       const char *const *candidates,
+                                       size_t count);
+
 #endif // ERROR_REPORTER_H

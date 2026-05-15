@@ -311,6 +311,7 @@ $cases = @(
   },
   @{ Name = "import_std_core"; Path = "tests/test_import_std_core.meth"; ShouldSucceed = $true },
   @{ Name = "std_io"; Path = "tests/test_std_io.meth"; ShouldSucceed = $true },
+  @{ Name = "std_win32"; Path = "tests/test_internal_link_win32_user32.meth"; ShouldSucceed = $true },
   @{ Name = "enum"; Path = "tests/test_enum.meth"; ShouldSucceed = $true },
   @{
     Name          = "prelude"
@@ -732,6 +733,7 @@ $cases = @(
   @{ Name = "err_invalid_bin"; Path = "tests/err_invalid_bin.meth"; ShouldSucceed = $false; Pattern = "Invalid binary literal" },
   @{ Name = "err_missing_brace"; Path = "tests/err_missing_brace.meth"; ShouldSucceed = $false },
   @{ Name = "err_undefined_var"; Path = "tests/err_undefined_var.meth"; ShouldSucceed = $false; Pattern = "Undefined variable" },
+  @{ Name = "err_undefined_var_typo"; Path = "tests/err_undefined_var_typo.meth"; ShouldSucceed = $false; Pattern = "did you mean 'counter'" },
   @{ Name = "err_top_level_return"; Path = "tests/err_top_level_return.meth"; ShouldSucceed = $false; Pattern = "Return statement outside of a function|Unsupported top-level construct in declaration context" },
   @{ Name = "err_break_outside_loop"; Path = "tests/err_break_outside_loop.meth"; ShouldSucceed = $false; Pattern = "'break' can only be used inside a loop or switch" },
   @{ Name = "err_break_unknown_label"; Path = "tests/err_break_unknown_label.meth"; ShouldSucceed = $false; Pattern = "no matching labeled loop" },
@@ -1668,7 +1670,7 @@ catch {
   Write-CaseResult -Name "internal_link_basic" -Passed $false -Reason $_.Exception.Message
 }
 
-# Internal linker extra-library test: --link-arg -lws2_32 resolves imports via the native linker
+# Internal linker explicit DLL test: --link-arg -lws2_32 remains supported
 $total++
 try {
   $exePath = Join-Path $tmpDir "internal_link_ws2_32.exe"
@@ -1691,6 +1693,31 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "internal_link_ws2_32" -Passed $false -Reason $_.Exception.Message
+}
+
+# Internal linker native Win32 test: std/win32 resolves user32/kernel32 without link args
+$total++
+try {
+  $exePath = Join-Path $tmpDir "internal_link_win32_user32.exe"
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_internal_link_win32_user32.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker Win32 build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Internal linker Win32 build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker Win32 executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "internal_link_win32_user32" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "internal_link_win32_user32" -Passed $false -Reason $_.Exception.Message
 }
 
 # Internal linker UCRT test: std/io path resolves __acrt_iob_func via default DLL imports
@@ -2602,18 +2629,18 @@ if (-not $SkipRuntime) {
   $total++
   try {
     $coroIocpRuntimeExe = "bin\coro_iocp_runtime_test.exe"
-    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\coro_iocp_runtime_test.c src\runtime\async_runtime.c src\runtime\gc.c -Isrc -o $coroIocpRuntimeExe
+    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\coro_iocp_runtime_test.c src\runtime\async_runtime.c src\runtime\gc.c -Isrc -lpthread -o $coroIocpRuntimeExe
     if ($LASTEXITCODE -ne 0) {
-      throw "Failed to compile coroutine IOCP runtime test"
+      throw "Failed to compile coroutine reactor runtime test"
     }
 
     $coroIocpRuntimeOutput = & $coroIocpRuntimeExe 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
-      throw "Coroutine IOCP runtime test exited with code $LASTEXITCODE"
+      throw "Coroutine reactor runtime test exited with code $LASTEXITCODE"
     }
 
-    if ($coroIocpRuntimeOutput -notmatch "Coroutine IOCP runtime tests passed") {
-      throw "Coroutine IOCP runtime test output did not contain pass marker"
+    if ($coroIocpRuntimeOutput -notmatch "Coroutine reactor runtime tests passed") {
+      throw "Coroutine reactor runtime test output did not contain pass marker"
     }
 
     Write-CaseResult -Name "coro_iocp_runtime" -Passed $true
@@ -2622,6 +2649,33 @@ if (-not $SkipRuntime) {
     $failed++
     Write-CaseResult -Name "coro_iocp_runtime" -Passed $false -Reason $_.Exception.Message
   }
+}
+
+# Crash handler test. On Windows this compiles and runs but is a documented
+# no-op (the SEH crash path is already covered by runtime_null_trace /
+# runtime_access_violation_trace); the meaningful assertions run on POSIX.
+$total++
+try {
+  $crashHandlerExe = "bin\crash_handler_test.exe"
+  & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\crash_handler_test.c src\runtime\gc.c -Isrc -o $crashHandlerExe
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to compile crash handler test"
+  }
+
+  $crashHandlerOutput = & $crashHandlerExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Crash handler test exited with code $LASTEXITCODE"
+  }
+
+  if ($crashHandlerOutput -notmatch "Crash handler tests (passed|skipped)") {
+    throw "Crash handler test output did not contain pass/skip marker"
+  }
+
+  Write-CaseResult -Name "crash_handler" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "crash_handler" -Passed $false -Reason $_.Exception.Message
 }
 
 Write-Host ""

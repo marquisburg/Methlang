@@ -272,9 +272,11 @@ static int print_help_topic(const char *program_name, const char *argv0,
     printf("  Uses NASM, then tries the selected linker backend.\n");
     printf("  Default is --linker auto (internal, then gcc, then link.exe).\n");
     printf("  Use --linker internal to force the native PE linker.\n");
-    printf("  Add repeatable linker flags with --link-arg <arg>.\n");
-    printf("  Example: methlang --build web\\\\server.meth -o web\\\\server.exe "
-           "--linker internal --link-arg -lws2_32\n");
+    printf("  The internal linker probes common Win32 DLLs directly.\n");
+    printf("  Add repeatable linker flags with --link-arg <arg> for extra "
+           "DLLs or import libraries.\n");
+    printf("  Example: methlang --build --emit-obj web\\\\server.meth -o "
+           "web\\\\server.exe --linker internal\n");
     print_doc_reference(argv0, "compilation.md");
     return 0;
   }
@@ -295,9 +297,10 @@ static int print_help_topic(const char *program_name, const char *argv0,
   if (strcmp(topic, "interop") == 0 || strcmp(topic, "c") == 0) {
     printf("C interop help\n");
     printf("  Declare external C functions with extern function.\n");
+    printf("  Prefer std/win32 for common Windows OS APIs.\n");
     printf("  Use --link-arg for extra linker libraries in --build mode.\n");
-    printf("  Example: methlang --build main.meth -o main.exe --linker internal "
-           "--link-arg -lws2_32\n");
+    printf("  Example: methlang --build --emit-obj main.meth -o main.exe "
+           "--linker internal\n");
     print_doc_reference(argv0, "c-interop.md");
     return 0;
   }
@@ -686,6 +689,9 @@ static int collect_internal_link_imports(const CompilerOptions *options,
                                          StringList *import_library_paths,
                                          StringList *import_dll_names,
                                          char **error_message_out) {
+  static const char *default_import_dlls[] = {
+      "kernel32.dll", "ucrtbase.dll", "msvcrt.dll", "ws2_32.dll",
+      "user32.dll",   "gdi32.dll",    "advapi32.dll"};
   size_t i = 0u;
   StringList search_directories = {0};
 
@@ -696,16 +702,27 @@ static int collect_internal_link_imports(const CompilerOptions *options,
     return 0;
   }
 
-  if (!string_list_append_copy(import_dll_names, "kernel32.dll") ||
-      !string_list_append_copy(import_dll_names, "ucrtbase.dll") ||
-      !string_list_append_copy(import_dll_names, "msvcrt.dll") ||
-      (include_shell32 &&
-       !string_list_append_copy(import_dll_names, "shell32.dll"))) {
-    if (error_message_out) {
-      *error_message_out = strdup("Out of memory while preparing internal linker defaults");
+  for (i = 0u; i < sizeof(default_import_dlls) / sizeof(default_import_dlls[0]);
+       i++) {
+    if (!string_list_append_copy(import_dll_names, default_import_dlls[i])) {
+      if (error_message_out) {
+        *error_message_out =
+            strdup("Out of memory while preparing internal linker defaults");
+      }
+      string_list_destroy(&search_directories);
+      return 0;
     }
-    string_list_destroy(&search_directories);
-    return 0;
+  }
+
+  if (include_shell32) {
+    if (!string_list_append_copy(import_dll_names, "shell32.dll")) {
+      if (error_message_out) {
+        *error_message_out =
+            strdup("Out of memory while preparing internal linker defaults");
+      }
+      string_list_destroy(&search_directories);
+      return 0;
+    }
   }
 
   if (!options) {

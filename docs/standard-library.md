@@ -8,7 +8,7 @@ The compiler and most stdlib modules work on Linux and Windows. The compiler emi
 
 **Cross-platform modules:** `std/io`, `std/mem`, `std/math`, `std/conv`, and `std/process` use the C runtime and work on both Linux and Windows.
 
-**Windows-only:** `std/net` provides Winsock2 bindings and `std/thread` provides Win32 threading bindings. They do not work on Linux. Programs that import `std/net`/`std/thread` or use `--prelude` (which includes `std/net`) will fail to link on Linux with undefined references to Win32 symbols. For networking/threading on Linux, use `std/net_posix` and `std/thread_posix` respectively.
+**Windows-only:** `std/win32` provides native Win32 bindings, `std/net` provides Winsock2 bindings, and `std/thread` provides Win32 threading bindings. They do not work on Linux. Programs that import these modules or use `--prelude` (which includes `std/net`) will fail to link on Linux with undefined references to Win32 symbols. For networking/threading on Linux, use `std/net_posix` and `std/thread_posix` respectively.
 
 **Linux/macOS:** `std/net_posix` provides POSIX socket bindings and `std/thread_posix` provides pthread-based threading. These modules require linking with `stdlib/posix_helpers.c`.
 
@@ -32,6 +32,12 @@ Conversions and character classification. C runtime: `atoi`, `atol`. Digit helpe
 
 Process control. `exit` terminates the program with an exit code. `rand`, `srand` for pseudo-random numbers.
 
+## std/win32
+
+Native Win32 bindings for Windows-only programs. The module exports prefixed raw bindings such as `Win32_GetLastError`, `Win32_GetStdHandle`, `Win32_WriteFile`, `Win32_GetSystemMetrics`, and `Win32_MessageBoxA`, plus friendlier wrappers such as `win32_last_error`, `win32_stdout`, `win32_write_stdout`, `win32_get_system_metrics`, `win32_tick_count64`, and `win32_sleep_ms`.
+
+The internal PE linker probes common Win32 DLLs directly (`kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, plus the C runtime DLLs), so `methlang --build --emit-obj --linker internal` can call those APIs without a C bridge or import-library link flags. External GCC/MSVC linking may still need the matching `-l...` or `.lib` arguments.
+
 ## std/system
 
 Process spawning. `system(cmd: cstring) -> int32` runs a shell command via the C runtime. Use for invoking methlang, nasm, gcc, git, curl, etc. On Windows invokes cmd.exe; on Linux invokes sh -c.
@@ -46,7 +52,7 @@ HTTP fetch (MVP). `http_fetch_to_file(url: cstring, output_path: cstring) -> int
 
 ## std/net
 
-Winsock2 bindings for Windows only. Does not work on Linux. Requires linking with `-lws2_32`. Constants include address/socket/protocol values (`AF_INET`, `SOCK_STREAM`, `IPPROTO_TCP`) and common socket options (`SOL_SOCKET`, `SO_REUSEADDR`) plus shutdown values (`SD_RECEIVE`, `SD_SEND`, `SD_BOTH`).
+Winsock2 bindings for Windows only. Does not work on Linux. The internal PE linker resolves `ws2_32.dll` directly; external GCC/MSVC linking may still require `-lws2_32` or `ws2_32.lib`. Constants include address/socket/protocol values (`AF_INET`, `SOCK_STREAM`, `IPPROTO_TCP`) and common socket options (`SOL_SOCKET`, `SO_REUSEADDR`) plus shutdown values (`SD_RECEIVE`, `SD_SEND`, `SD_BOTH`).
 
 Core functions: `socket`, `bind`, `listen`, `accept`, `connect`, `send`, `recv`, `shutdown`, `closesocket`, `setsockopt`. Lifecycle: `net_init`, `net_cleanup`, `net_last_error`.
 
@@ -109,6 +115,5 @@ The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process
 ```bash
 methlang --prelude main.meth -o main.s
 ```
-
 
 

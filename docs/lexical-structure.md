@@ -11,7 +11,27 @@ Line comments start with `//` and extend to the end of the line. Everything afte
 var x: int32 = 42;  // inline comment
 ```
 
-Block comments are not supported. Comments cannot be nested; a second `//` on the same line is simply part of the comment text. The sequence `//` inside a string literal is not treated as a comment; it becomes part of the string. For example, `"http://example.com"` produces a string containing `http://example.com` with no comment.
+Block comments are written `/* ... */` and may span multiple lines:
+
+```meth
+/* This is a block comment.
+   It can span multiple lines. */
+var x: int32 = 42; /* inline block comment */
+```
+
+Block comments **nest**, so you can comment out a region that already
+contains a block comment:
+
+```meth
+/* outer
+   /* inner */
+   still commented */
+var ready: int32 = 1;
+```
+
+An unterminated block comment (missing the final `*/`) is a lexer error.
+
+The sequences `//`, `/*`, and `*/` inside a string literal are not treated as comments; they become part of the string. For example, `"http://example.com"` produces a string containing `http://example.com` with no comment.
 
 ## Identifiers
 
@@ -51,7 +71,9 @@ Multiline strings are supported. A newline inside the quotes is stored as a lite
 
 ## Operators and Punctuation
 
-Assignment `=`. Comparison `==`, `!=`, `<`, `>`, `<=`, `>=`. Logical `&&`, `||`. Arithmetic `+`, `-`, `*`, `/`, `%`. Unary `-` (negation), `*` (dereference), `&` (address-of). Member access `.`. Arrow `->`. Brackets `( )`, `{ }`, `[ ]`. Delimiters `:`, `;`, `,`.
+Assignment `=`. Compound assignment `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`. Comparison `==`, `!=`, `<`, `>`, `<=`, `>=`. Logical `&&`, `||`. Arithmetic `+`, `-`, `*`, `/`, `%`. Unary `-` (negation), `*` (dereference), `&` (address-of). Member access `.`. Arrow `->`. Brackets `( )`, `{ }`, `[ ]`. Delimiters `:`, `;`, `,`.
+
+**Compound assignment:** `target OP= value` is exact syntactic sugar for `target = target OP value`, where `OP` is one of `+ - * / % & | ^ << >>`. The target is evaluated as an ordinary assignment target (identifier, struct field, array element, or pointer dereference) and must be a valid lvalue. For example, `count += 1` is identical to `count = count + 1`, and `mask &= 0xFF` is identical to `mask = mask & 0xFF`. Compound assignment is a statement (also valid as a `for`-loop initializer or increment), not an expression, so it does not produce a value. See [Expressions](expressions.md).
 
 **Operator precedence:** Multiplication, division, and modulo bind tighter than addition and subtraction. Relational operators bind tighter than equality. Logical AND (`&&`) binds tighter than logical OR (`||`). So `a + b * c` parses as `a + (b * c)`, and `a < b == c` parses as `(a < b) == c`. Precedence levels (highest first): member access (`.`), multiplicative (`*`, `/`, `%`), additive (`+`, `-`), relational (`<`, `<=`, `>`, `>=`), equality (`==`, `!=`), logical AND (`&&`), logical OR (`||`). Use parentheses to override.
 

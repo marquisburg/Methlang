@@ -55,6 +55,12 @@ test: $(TARGET)
 	@echo "Running GC runtime tests..."
 	$(CC) $(CFLAGS) tests/gc_runtime_test.c src/runtime/gc.c -o $(BINDIR)/gc_runtime_test
 	@$(BINDIR)/gc_runtime_test
+	@echo "Running coroutine reactor runtime tests..."
+	$(CC) $(CFLAGS) -D_GNU_SOURCE tests/coro_iocp_runtime_test.c src/runtime/async_runtime.c src/runtime/gc.c -Isrc -lpthread -o $(BINDIR)/coro_iocp_runtime_test
+	@$(BINDIR)/coro_iocp_runtime_test
+	@echo "Running crash handler tests..."
+	$(CC) $(CFLAGS) -D_GNU_SOURCE tests/crash_handler_test.c src/runtime/gc.c -Isrc -o $(BINDIR)/crash_handler_test
+	@$(BINDIR)/crash_handler_test
 
 install: $(TARGET) bundle-stdlib bundle-runtime
 	mkdir -p /usr/local/bin /usr/local/stdlib /usr/local/runtime

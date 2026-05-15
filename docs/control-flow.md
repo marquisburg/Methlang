@@ -138,7 +138,41 @@ while (1) {
 }
 ```
 
-**Labeled break/continue** (e.g. `break outer` to exit an outer loop) is not supported. To break out of nested loops, use a flag or restructure the code.
+### Labeled break and continue
+
+A `while` or `for` loop may carry a label, written `name:` immediately before
+the loop keyword. `break name` then exits that labeled loop, and
+`continue name` jumps to the next iteration of that labeled loop, regardless of
+how deeply nested the statement is:
+
+```meth
+outer: for (var i: int32 = 0; i < n; i = i + 1) {
+  for (var j: int32 = 0; j < m; j = j + 1) {
+    if (grid[i][j] == target) {
+      break outer;     // exits BOTH loops
+    }
+    if (skip[j]) {
+      continue outer;  // next i, abandoning the rest of the j loop
+    }
+  }
+}
+```
+
+Rules and limits:
+
+- Labels attach only to `while` and `for` loops. Writing `name:` before any
+  other statement is a compile error.
+- The label in `break name` / `continue name` must match the label of an
+  enclosing loop; an unknown label is a compile error
+  (`'break NAME' has no matching labeled loop`).
+- `continue name` requires the target to be a loop (every labeled loop is, so
+  this always holds for valid labels).
+- Unlabeled `break`/`continue` still target the innermost loop or switch as
+  before.
+- Labels live in their own namespace and do not collide with variable or
+  function names.
+- Deferred statements are still emitted before the jump, the same as for
+  unlabeled `break`/`continue`.
 
 ## Return
 

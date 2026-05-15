@@ -1,8 +1,8 @@
 // Methlang standard library: Networking (Winsock2)
 //
 // Provides raw socket operations for TCP/UDP networking on Windows.
-// Programs using this module must link against ws2_32:
-//   gcc -o myapp output.s -lws2_32
+// The internal PE linker resolves ws2_32.dll directly. External/manual links
+// may still need -lws2_32 or ws2_32.lib.
 //
 // Usage pattern with defer for automatic cleanup:
 //   net_init();

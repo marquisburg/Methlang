@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "symbol_table.h"
+#include "../error/error_reporter.h"
 #include "../string_intern.h"
 #include <stdlib.h>
 #include <string.h>
@@ -449,6 +450,59 @@ Scope *symbol_table_get_current_scope(SymbolTable *table) {
   if (!table)
     return NULL;
   return table->current_scope;
+}
+
+static int symbol_kind_allowed(SymbolKind kind, const SymbolKind *kinds,
+                               size_t kind_count) {
+  if (!kinds || kind_count == 0)
+    return 1;
+  for (size_t i = 0; i < kind_count; i++) {
+    if (kinds[i] == kind)
+      return 1;
+  }
+  return 0;
+}
+
+char *symbol_table_suggest_similar(SymbolTable *table, const char *name,
+                                   const SymbolKind *kinds,
+                                   size_t kind_count) {
+  if (!table || !name || name[0] == '\0')
+    return NULL;
+
+  /* Collect candidate names across the whole visible scope chain. */
+  size_t capacity = 32;
+  size_t count = 0;
+  const char **names = malloc(capacity * sizeof(*names));
+  if (!names)
+    return NULL;
+
+  for (Scope *scope = table->current_scope; scope; scope = scope->parent) {
+    for (size_t i = 0; i < scope->symbol_count; i++) {
+      Symbol *sym = scope->symbols[i];
+      if (!sym || !sym->name)
+        continue;
+      if (!symbol_kind_allowed(sym->kind, kinds, kind_count))
+        continue;
+
+      if (count == capacity) {
+        size_t new_capacity = capacity * 2;
+        const char **grown =
+            realloc(names, new_capacity * sizeof(*names));
+        if (!grown) {
+          free(names);
+          return NULL;
+        }
+        names = grown;
+        capacity = new_capacity;
+      }
+      names[count++] = sym->name;
+    }
+  }
+
+  char *suggestion =
+      error_reporter_closest_candidate(name, names, count);
+  free(names);
+  return suggestion;
 }
 
 Symbol *symbol_create(const char *name, SymbolKind kind, Type *type) {

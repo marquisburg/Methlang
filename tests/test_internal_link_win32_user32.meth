@@ -1,0 +1,19 @@
+import "std/win32";
+
+function main() -> int32 {
+  var width: int32 = win32_get_system_metrics(SM_CXSCREEN());
+  var height: int32 = win32_get_system_metrics(SM_CYSCREEN());
+  if (width <= 0) {
+    return 1;
+  }
+  if (height <= 0) {
+    return 2;
+  }
+
+  if (win32_get_current_process_id() == 0) {
+    return 3;
+  }
+
+  win32_sleep_ms(0);
+  return 0;
+}

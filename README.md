@@ -100,7 +100,7 @@ Available topics: `build`, `gc`, `interop`, `stdlib`, `web`.
 - If you use async features, also link bundled `runtime/async_runtime.o`.
 - Compile with `-s` to embed runtime crash traceback support, or use `-d` to enable it alongside normal debug output.
 - On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated runtime traps with Meth function/source frames.
-- Networking examples may require extra libraries (for example `--link-arg -lws2_32` on Windows).
+- The internal PE linker resolves common Win32 DLLs directly; use `--link-arg` only for additional DLLs/import libraries.
 - For GC use from worker threads, use `gc_thread_attach` and `gc_thread_detach`.
 
 Example runtime crash output:
