@@ -112,6 +112,7 @@ static int ir_operand_clone(const IROperand *source, IROperand *out) {
   out->kind = source->kind;
   out->int_value = source->int_value;
   out->float_value = source->float_value;
+  out->float_bits = source->float_bits;
 
   switch (source->kind) {
   case IR_OPERAND_TEMP:
@@ -524,6 +525,9 @@ static int ir_rewrite_to_assign_operand(IRInstruction *instruction,
   instruction->lhs = cloned;
   instruction->rhs = ir_operand_none();
   instruction->is_float = (cloned.kind == IR_OPERAND_FLOAT) ? 1 : 0;
+  if (instruction->is_float) {
+    instruction->float_bits = (cloned.float_bits == 32) ? 32 : 64;
+  }
   instruction->ast_ref = NULL;
 
   if (changed) {
@@ -857,7 +861,12 @@ static int ir_operand_equals(const IROperand *lhs, const IROperand *rhs) {
   case IR_OPERAND_INT:
     return lhs->int_value == rhs->int_value;
   case IR_OPERAND_FLOAT:
-    return lhs->float_value == rhs->float_value;
+    /* Same numeric value at different IEEE-754 widths is NOT the same operand
+     * for CSE/propagation purposes: a float32 0.1 and float64 0.1 have
+     * distinct bit patterns and must not be coalesced. Treat unspecified (0)
+     * as the default 64 so legacy float64-only IR keeps matching. */
+    return lhs->float_value == rhs->float_value &&
+           ((lhs->float_bits == 32) == (rhs->float_bits == 32));
   case IR_OPERAND_TEMP:
   case IR_OPERAND_SYMBOL:
   case IR_OPERAND_STRING:
@@ -1521,6 +1530,7 @@ static int ir_clone_instruction_plain(const IRInstruction *source,
   out->op = source->op;
   out->location = source->location;
   out->is_float = source->is_float;
+  out->float_bits = source->float_bits;
   out->ast_ref = source->ast_ref;
 
   if (!ir_operand_clone(&source->dest, &out->dest) ||
@@ -1571,6 +1581,7 @@ static int ir_clone_instruction_for_inline(const IRInstruction *source,
   out->op = source->op;
   out->location = source->location;
   out->is_float = source->is_float;
+  out->float_bits = source->float_bits;
   out->ast_ref = NULL;
 
   if (!ir_inline_rewrite_operand(&source->dest, &out->dest, symbol_map,

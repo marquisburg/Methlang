@@ -15,7 +15,12 @@ function Write-CaseResult {
   )
 
   if ($Passed) {
-    Write-Host "[PASS] $Name"
+    if ($Reason) {
+      Write-Host "[PASS] $Name ($Reason)"
+    }
+    else {
+      Write-Host "[PASS] $Name"
+    }
   }
   else {
     if ($Reason) {
@@ -360,9 +365,11 @@ $cases = @(
     ShouldSucceed = $true
     AsmMustMatch  = @("\bmovsx\b", "\bmovzx\b")
   },
+  @{ Name = "integer_literal_wide"; Path = "tests/test_integer_literal_wide.meth"; ShouldSucceed = $true },
   @{ Name = "stack_mixed_locals"; Path = "tests/test_stack_mixed_locals.meth"; ShouldSucceed = $true },
   @{ Name = "stack_large_struct"; Path = "tests/test_stack_large_struct.meth"; ShouldSucceed = $true },
   @{ Name = "stack_array_scalar"; Path = "tests/test_stack_array_scalar.meth"; ShouldSucceed = $true },
+  @{ Name = "stack_array_struct_stride"; Path = "tests/test_array_struct_stride.meth"; ShouldSucceed = $true },
   @{ Name = "int64_truncate"; Path = "tests/test_int64_truncate.meth"; ShouldSucceed = $true },
   @{ Name = "string_length"; Path = "tests/test_string_length.meth"; ShouldSucceed = $true },
   @{ Name = "struct_new_zeroed"; Path = "tests/test_struct_new_zeroed.meth"; ShouldSucceed = $true },
@@ -380,6 +387,8 @@ $cases = @(
     Args          = @("-I", "tests/lib")
   },
   @{ Name = "traits_generic_bound"; Path = "tests/test_traits_generic_bound.meth"; ShouldSucceed = $true },
+  @{ Name = "traits_multiple_where_bounds"; Path = "tests/test_traits_multiple_where_bounds.meth"; ShouldSucceed = $true },
+  @{ Name = "trait_methods_generic_dispatch"; Path = "tests/test_trait_methods_generic_dispatch.meth"; ShouldSucceed = $true },
   @{
     Name          = "import_trait_bound"
     Path          = "tests/test_import_trait_bound.meth"
@@ -758,6 +767,8 @@ $cases = @(
   @{ Name = "err_function_arg_type"; Path = "tests/err_function_arg_type.meth"; ShouldSucceed = $false; Pattern = "Type mismatch" },
   @{ Name = "err_match_non_exhaustive"; Path = "tests/err_match_non_exhaustive.meth"; ShouldSucceed = $false; Pattern = "Non-exhaustive match" },
   @{ Name = "err_trait_bound_missing_impl"; Path = "tests/err_trait_bound_missing_impl.meth"; ShouldSucceed = $false; Pattern = "does not implement trait 'Addable'" },
+  @{ Name = "err_trait_bound_missing_second_impl"; Path = "tests/err_trait_bound_missing_second_impl.meth"; ShouldSucceed = $false; Pattern = "does not implement trait 'SignedNumber'" },
+  @{ Name = "err_trait_method_missing_impl"; Path = "tests/err_trait_method_missing_impl.meth"; ShouldSucceed = $false; Pattern = "missing trait method 'next_value'" },
   @{ Name = "err_member_on_non_struct"; Path = "tests/err_member_on_non_struct.meth"; ShouldSucceed = $false; Pattern = "Cannot access field on non-struct type" },
   @{ Name = "err_switch_multiple_default"; Path = "tests/err_switch_multiple_default.meth"; ShouldSucceed = $false; Pattern = "Only one default case is allowed|only contain one default clause" },
   @{ Name = "err_return_type_mismatch"; Path = "tests/err_return_type_mismatch.meth"; ShouldSucceed = $false; Pattern = "Type mismatch" },
@@ -1670,6 +1681,34 @@ catch {
   Write-CaseResult -Name "internal_link_basic" -Passed $false -Reason $_.Exception.Message
 }
 
+# Emit-obj + MinGW gcc link (parity with asm path: nostartfiles + methlang_entry.o)
+$total++
+try {
+  $gccCmd = Get-Command gcc -ErrorAction SilentlyContinue
+  if (-not $gccCmd) {
+    Write-CaseResult -Name "direct_object_emit_obj_gcc_link" -Passed $true -Reason "skipped: gcc not on PATH"
+  }
+  else {
+    $exeGcc = Join-Path $tmpDir "direct_object_emit_obj_gcc_link.exe"
+    $buildGccOut = & $CompilerPath --build --emit-obj --linker gcc tests\test_direct_object_return_const.meth -o $exeGcc 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "emit-obj gcc link build failed: $buildGccOut"
+    }
+    if (-not (Test-Path $exeGcc)) {
+      throw "emit-obj gcc link did not produce an executable"
+    }
+    & $exeGcc 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 7) {
+      throw "emit-obj gcc executable exited with $LASTEXITCODE (expected 7)"
+    }
+    Write-CaseResult -Name "direct_object_emit_obj_gcc_link" -Passed $true
+  }
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_emit_obj_gcc_link" -Passed $false -Reason $_.Exception.Message
+}
+
 # Internal linker explicit DLL test: --link-arg -lws2_32 remains supported
 $total++
 try {
@@ -2360,6 +2399,40 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "direct_object_struct_field_offset" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object: local array of struct — index scale must be sizeof(element), not 8
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_array_struct_stride.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_array_struct_stride.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_array_struct_stride.meth -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object array-struct-stride compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object array-struct-stride compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_array_struct_stride.meth -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object array-struct-stride build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object array-struct-stride build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 24) {
+    throw "Direct object array-struct-stride executable exited with $LASTEXITCODE (expected 24)"
+  }
+
+  Write-CaseResult -Name "direct_object_array_struct_stride" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_array_struct_stride" -Passed $false -Reason $_.Exception.Message
 }
 
 # Direct object backend function-pointer test: addr_of function plus indirect call

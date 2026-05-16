@@ -22,6 +22,11 @@ typedef struct {
   char *name;
   long long int_value;
   double float_value;
+  /* IEEE-754 width of a floating operand: 32 or 64. 0 means "not a float /
+   * unspecified" and callers must treat it as the default double width (64).
+   * Carried so backends never have to re-derive single vs double precision
+   * from scattered symbol/type lookups. */
+  int float_bits;
 } IROperand;
 
 typedef enum {
@@ -69,6 +74,10 @@ typedef struct {
   IROperand *arguments;
   size_t argument_count;
   int is_float;
+  /* Width of the floating result when is_float is set: 32 or 64. 0 means
+   * unspecified and is treated as 64 (double) for backward compatibility with
+   * code paths that only ever produced float64. */
+  int float_bits;
   ASTNode *ast_ref;
 } IRInstruction;
 
@@ -92,7 +101,11 @@ IROperand ir_operand_none(void);
 IROperand ir_operand_temp(const char *name);
 IROperand ir_operand_symbol(const char *name);
 IROperand ir_operand_int(long long value);
+/* Defaults float_bits to 64 (double) for backward compatibility. */
 IROperand ir_operand_float(double value);
+/* Like ir_operand_float but tags the IEEE-754 width (32 or 64). Any other
+ * value is normalized to 64. */
+IROperand ir_operand_float_sized(double value, int float_bits);
 IROperand ir_operand_string(const char *value);
 IROperand ir_operand_label(const char *name);
 void ir_operand_destroy(IROperand *operand);

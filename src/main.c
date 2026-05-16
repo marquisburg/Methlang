@@ -1211,6 +1211,9 @@ cleanup:
   return result;
 }
 
+/* Build → link routing is documented in docs/linker-build-pipelines.md (asm+GCC
+ * vs emit-obj+internal vs emit-obj+external GCC). */
+
 static int methlang_link_internal(const char **object_paths,
                                   size_t object_count,
                                   const char *executable_filename,
@@ -1275,7 +1278,11 @@ static int methlang_link_object_with_gcc(const char *object_filename,
                                          const char *gc_object,
                                          const char *async_object,
                                          const char *thread_object,
+                                         const char *entry_object,
                                          const CompilerOptions *options) {
+  /* Keep flags aligned with methlang_build_with_gcc (asm path): -nostartfiles,
+   * optional methlang_entry.o, -lkernel32 and -lshell32 when entry is linked.
+   * See docs/linker-build-pipelines.md. */
   size_t gcc_len = strlen(object_filename) + strlen(executable_filename) + 192;
   if (gc_object && gc_object[0] != '\0') {
     gcc_len += strlen(gc_object) + 1;
@@ -1285,6 +1292,9 @@ static int methlang_link_object_with_gcc(const char *object_filename,
   }
   if (thread_object && thread_object[0] != '\0') {
     gcc_len += strlen(thread_object) + 1;
+  }
+  if (entry_object && entry_object[0] != '\0') {
+    gcc_len += strlen(entry_object) + 1;
   }
   if (options) {
     for (size_t i = 0; i < options->link_argument_count; i++) {
@@ -1301,26 +1311,53 @@ static int methlang_link_object_with_gcc(const char *object_filename,
   }
 
   size_t offset = 0;
-  if (!append_argument_text(gcc_command, gcc_len, &offset, "gcc ") ||
-      !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
-      ((gc_object && gc_object[0] != '\0') &&
-       (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object))) ||
-      ((async_object && async_object[0] != '\0') &&
-       (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, async_object))) ||
-      ((thread_object && thread_object[0] != '\0') &&
-       (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, thread_object))) ||
-      !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
-      !append_quoted_argument(gcc_command, gcc_len, &offset,
-                              executable_filename) ||
-      !append_argument_text(gcc_command, gcc_len, &offset,
-                            " -mconsole -lkernel32") ||
-      !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
-    free(gcc_command);
-    fprintf(stderr, "Error: Failed to build GCC object link command\n");
-    return 1;
+  if (entry_object && entry_object[0] != '\0') {
+    if (!append_argument_text(gcc_command, gcc_len, &offset,
+                              "gcc -nostartfiles ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
+        ((gc_object && gc_object[0] != '\0') &&
+         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+          !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object))) ||
+        ((async_object && async_object[0] != '\0') &&
+         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+          !append_quoted_argument(gcc_command, gcc_len, &offset, async_object))) ||
+        ((thread_object && thread_object[0] != '\0') &&
+         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+          !append_quoted_argument(gcc_command, gcc_len, &offset, thread_object))) ||
+        !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset, entry_object) ||
+        !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset,
+                                executable_filename) ||
+        !append_argument_text(gcc_command, gcc_len, &offset,
+                              " -lkernel32 -lshell32") ||
+        !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
+      free(gcc_command);
+      fprintf(stderr, "Error: Failed to build GCC object link command\n");
+      return 1;
+    }
+  } else {
+    if (!append_argument_text(gcc_command, gcc_len, &offset,
+                              "gcc -nostartfiles ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
+        ((gc_object && gc_object[0] != '\0') &&
+         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+          !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object))) ||
+        ((async_object && async_object[0] != '\0') &&
+         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+          !append_quoted_argument(gcc_command, gcc_len, &offset, async_object))) ||
+        ((thread_object && thread_object[0] != '\0') &&
+         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
+          !append_quoted_argument(gcc_command, gcc_len, &offset, thread_object))) ||
+        !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
+        !append_quoted_argument(gcc_command, gcc_len, &offset,
+                                executable_filename) ||
+        !append_argument_text(gcc_command, gcc_len, &offset, " -lkernel32") ||
+        !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
+      free(gcc_command);
+      fprintf(stderr, "Error: Failed to build GCC object link command\n");
+      return 1;
+    }
   }
 
   int result = run_system_command(gcc_command);
@@ -1641,15 +1678,19 @@ static int methlang_link_object_file(const char *object_filename,
   char *gc_gcc_object = join_paths(runtime_directory, "gc.o");
   char *async_gcc_object = join_paths(runtime_directory, "async_runtime.o");
   char *thread_gcc_object = join_paths(runtime_directory, "meth_thread.o");
+  char *entry_gcc_object =
+      join_paths(runtime_directory, "methlang_entry.o");
   char *gc_msvc_object = join_paths(runtime_directory, "gc.obj");
   char *async_msvc_object = join_paths(runtime_directory, "async_runtime.obj");
   char *thread_msvc_object = join_paths(runtime_directory, "meth_thread.obj");
   if (!gc_gcc_object || !async_gcc_object || !thread_gcc_object ||
-      !gc_msvc_object || !async_msvc_object || !thread_msvc_object) {
+      !entry_gcc_object || !gc_msvc_object || !async_msvc_object ||
+      !thread_msvc_object) {
     fprintf(stderr, "Error: Failed to allocate build paths\n");
     free(gc_gcc_object);
     free(async_gcc_object);
     free(thread_gcc_object);
+    free(entry_gcc_object);
     free(gc_msvc_object);
     free(async_msvc_object);
     free(thread_msvc_object);
@@ -1663,6 +1704,7 @@ static int methlang_link_object_file(const char *object_filename,
     free(gc_gcc_object);
     free(async_gcc_object);
     free(thread_gcc_object);
+    free(entry_gcc_object);
     free(gc_msvc_object);
     free(async_msvc_object);
     free(thread_msvc_object);
@@ -1767,9 +1809,11 @@ static int methlang_link_object_file(const char *object_filename,
   if (has_gcc && linker_mode != LINKER_MODE_MSVC) {
     const char *tobj =
         (_access(thread_gcc_object, 0) == 0) ? thread_gcc_object : NULL;
+    const char *entry_object =
+        (_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL;
     if (methlang_link_object_with_gcc(object_filename, executable_filename,
                                       gc_gcc_object, async_gcc_object,
-                                      tobj, options) == 0) {
+                                      tobj, entry_object, options) == 0) {
       build_result = 0;
       goto cleanup;
     }
@@ -1800,6 +1844,7 @@ cleanup:
   free(gc_gcc_object);
   free(async_gcc_object);
   free(thread_gcc_object);
+  free(entry_gcc_object);
   free(gc_msvc_object);
   free(async_msvc_object);
   free(thread_msvc_object);

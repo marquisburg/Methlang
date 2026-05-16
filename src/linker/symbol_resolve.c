@@ -1,5 +1,9 @@
 #include "linker/symbol_resolve.h"
 
+/* Section merge and symbol resolution for COFF produced by the object backend;
+ * pair with relocation.c and see docs/linker-build-pipelines.md for pipeline
+ * triage (internal link vs external gcc). */
+
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>

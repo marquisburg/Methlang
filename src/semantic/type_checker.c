@@ -1346,6 +1346,45 @@ Type *type_checker_infer_type(TypeChecker *checker, ASTNode *expression) {
   return type;
 }
 
+static Type *type_checker_default_integer_literal_type(TypeChecker *checker,
+                                                     NumberLiteral *literal) {
+  if (!checker || !literal || literal->is_float) {
+    return checker ? checker->builtin_int32 : NULL;
+  }
+
+  unsigned long long u_bitpat = (unsigned long long)literal->int_value;
+  unsigned char radix = literal->int_radix;
+  if (radix != 2u && radix != 16u) {
+    radix = 10u;
+  }
+
+  /*
+   * Decimal defaults follow signed widening so large magnitudes usable with
+   * unary minus (-2147483648 via -(int64)…). Hex/binary infer uint32 in the
+   * (INT32_MAX, UINT32_MAX] range so 0xFFFFFFFF and similar stay uint32-ish.
+   */
+  if (radix == 10u) {
+    if (literal->int_value >= INT32_MIN && literal->int_value <= INT32_MAX) {
+      return checker->builtin_int32;
+    }
+    if (u_bitpat <= (unsigned long long)INT64_MAX) {
+      return checker->builtin_int64;
+    }
+    return checker->builtin_uint64;
+  }
+
+  if (u_bitpat <= (unsigned long long)INT32_MAX) {
+    return checker->builtin_int32;
+  }
+  if (u_bitpat <= UINT32_MAX) {
+    return checker->builtin_uint32;
+  }
+  if (u_bitpat <= (unsigned long long)INT64_MAX) {
+    return checker->builtin_int64;
+  }
+  return checker->builtin_uint64;
+}
+
 static Type *type_checker_infer_type_internal(TypeChecker *checker,
                                               ASTNode *expression) {
   if (!checker || !expression)
@@ -1357,10 +1396,9 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     if (literal->is_float) {
       // Floating literals default to float64
       return checker->builtin_float64;
-    } else {
-      // Integer literals default to int32
-      return checker->builtin_int32;
     }
+
+    return type_checker_default_integer_literal_type(checker, literal);
   }
 
   case AST_STRING_LITERAL:

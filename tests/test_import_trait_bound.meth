@@ -1,6 +1,6 @@
 import "traits_math" as math;
 
-function add_one<T: math.Addable>(value: T) -> T {
+function add_one<T: math.Addable>(value: T) -> T where T: math.SignedNumber {
     return value + 1;
 }
 

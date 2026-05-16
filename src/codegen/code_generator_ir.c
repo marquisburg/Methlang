@@ -842,6 +842,18 @@ static int code_generator_load_ir_operand(CodeGenerator *generator,
     return 1;
 
   case IR_OPERAND_FLOAT: {
+    if (operand->float_bits == 32) {
+      /* float32 literal: emit the true 32-bit IEEE-754 single pattern
+       * (zero-extended). Using the float64 bit pattern here and then storing
+       * only its low 32 bits would write 0 for almost every value. */
+      union {
+        float value;
+        unsigned int bits;
+      } converter;
+      converter.value = (float)operand->float_value;
+      code_generator_emit(generator, "    mov rax, 0x%08x\n", converter.bits);
+      return 1;
+    }
     union {
       double value;
       unsigned long long bits;
@@ -1218,6 +1230,9 @@ static int code_generator_extract_positive_power_of_two(long long value,
   return 1;
 }
 
+static int code_generator_ir_operand_float_bits(CodeGenerator *generator,
+                                                const IROperand *operand);
+
 static void code_generator_emit_and_mask(CodeGenerator *generator,
                                          const char *target_register,
                                          unsigned long long mask) {
@@ -1231,6 +1246,42 @@ static void code_generator_emit_and_mask(CodeGenerator *generator,
     code_generator_emit(generator, "    mov r10, 0x%016llx\n", mask);
     code_generator_emit(generator, "    and %s, r10\n", target_register);
   }
+}
+
+/* Materialize raw float bits in RAX or R10 into an XMM register at want_bits
+ * (32 or 64), using movd/movq plus cvtss2sd/cvtsd2ss when the storage width
+ * differs. Matches the object backend so float32 * float64 promotions do not
+ * reinterpret single-precision bits as double. */
+static int code_generator_ir_emit_float_gp_into_xmm(CodeGenerator *generator,
+                                                    const char *xmm_reg,
+                                                    x86Register gp_reg,
+                                                    int value_bits,
+                                                    int want_bits) {
+  const char *gp64 = (gp_reg == REG_RAX) ? "rax" : "r10";
+  const char *gp32 = (gp_reg == REG_RAX) ? "eax" : "r10d";
+
+  if (!generator || !xmm_reg) {
+    return 0;
+  }
+  if (want_bits != 32 && want_bits != 64) {
+    want_bits = 64;
+  }
+  if (value_bits != 32 && value_bits != 64) {
+    value_bits = 64;
+  }
+
+  if (value_bits == 32) {
+    code_generator_emit(generator, "    movd %s, %s\n", xmm_reg, gp32);
+    if (want_bits == 64) {
+      code_generator_emit(generator, "    cvtss2sd %s, %s\n", xmm_reg, xmm_reg);
+    }
+  } else {
+    code_generator_emit(generator, "    movq %s, %s\n", xmm_reg, gp64);
+    if (want_bits == 32) {
+      code_generator_emit(generator, "    cvtsd2ss %s, %s\n", xmm_reg, xmm_reg);
+    }
+  }
+  return 1;
 }
 
 static int
@@ -1307,25 +1358,47 @@ code_generator_emit_ir_binary_fallback(CodeGenerator *generator,
   }
 
   if (instruction->is_float) {
-    code_generator_emit(generator, "    movq xmm0, rax\n");
-    code_generator_emit(generator, "    movq xmm1, r10\n");
+    /* Operation precision comes from the inferred expression type; each operand
+     * may be float32 or float64 (or a mixed promotion). Widen/narrow into XMM
+     * before addss/addsd, etc. */
+    int want_bits = (instruction->float_bits == 32) ? 32 : 64;
+    int lhs_bits =
+        code_generator_ir_operand_float_bits(generator, &instruction->lhs);
+    int rhs_bits =
+        code_generator_ir_operand_float_bits(generator, &instruction->rhs);
+    if (lhs_bits != 32 && lhs_bits != 64) {
+      lhs_bits = 64;
+    }
+    if (rhs_bits != 32 && rhs_bits != 64) {
+      rhs_bits = 64;
+    }
+    if (!code_generator_ir_emit_float_gp_into_xmm(generator, "xmm0", REG_RAX,
+                                                  lhs_bits, want_bits) ||
+        !code_generator_ir_emit_float_gp_into_xmm(generator, "xmm1", REG_R10,
+                                                  rhs_bits, want_bits)) {
+      return 0;
+    }
+
+    const char *mov_x = (want_bits == 32) ? "movd" : "movq";
+    const char *suf = (want_bits == 32) ? "ss" : "sd";
+    const char *ga = (want_bits == 32) ? "eax" : "rax";
 
     if (strcmp(op, "+") == 0) {
-      code_generator_emit(generator, "    addsd xmm0, xmm1\n");
-      code_generator_emit(generator, "    movq rax, xmm0\n");
+      code_generator_emit(generator, "    add%s xmm0, xmm1\n", suf);
+      code_generator_emit(generator, "    %s %s, xmm0\n", mov_x, ga);
     } else if (strcmp(op, "-") == 0) {
-      code_generator_emit(generator, "    subsd xmm0, xmm1\n");
-      code_generator_emit(generator, "    movq rax, xmm0\n");
+      code_generator_emit(generator, "    sub%s xmm0, xmm1\n", suf);
+      code_generator_emit(generator, "    %s %s, xmm0\n", mov_x, ga);
     } else if (strcmp(op, "*") == 0) {
-      code_generator_emit(generator, "    mulsd xmm0, xmm1\n");
-      code_generator_emit(generator, "    movq rax, xmm0\n");
+      code_generator_emit(generator, "    mul%s xmm0, xmm1\n", suf);
+      code_generator_emit(generator, "    %s %s, xmm0\n", mov_x, ga);
     } else if (strcmp(op, "/") == 0) {
-      code_generator_emit(generator, "    divsd xmm0, xmm1\n");
-      code_generator_emit(generator, "    movq rax, xmm0\n");
+      code_generator_emit(generator, "    div%s xmm0, xmm1\n", suf);
+      code_generator_emit(generator, "    %s %s, xmm0\n", mov_x, ga);
     } else if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
                strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
                strcmp(op, ">") == 0 || strcmp(op, ">=") == 0) {
-      code_generator_emit(generator, "    ucomisd xmm0, xmm1\n");
+      code_generator_emit(generator, "    ucomi%s xmm0, xmm1\n", suf);
       if (strcmp(op, "==") == 0) {
         code_generator_emit(generator, "    sete al\n");
         code_generator_emit(generator, "    setnp cl\n");
@@ -1461,13 +1534,27 @@ code_generator_emit_ir_unary_fallback(CodeGenerator *generator,
   }
 
   if (instruction->is_float) {
+    int want_bits = (instruction->float_bits == 32) ? 32 : 64;
+    int lhs_bits =
+        code_generator_ir_operand_float_bits(generator, &instruction->lhs);
+    if (lhs_bits != 32 && lhs_bits != 64) {
+      lhs_bits = 64;
+    }
+    const char *mov_x = (want_bits == 32) ? "movd" : "movq";
+    const char *suf = (want_bits == 32) ? "ss" : "sd";
+    const char *ga = (want_bits == 32) ? "eax" : "rax";
+    if (!code_generator_ir_emit_float_gp_into_xmm(generator, "xmm0", REG_RAX,
+                                                  lhs_bits, want_bits)) {
+      return 0;
+    }
     if (strcmp(op, "-") == 0) {
-      code_generator_emit(generator, "    movq xmm0, rax\n");
+      /* Negate as 0 - x at the operand precision. */
       code_generator_emit(generator, "    pxor xmm1, xmm1\n");
-      code_generator_emit(generator, "    subsd xmm1, xmm0\n");
-      code_generator_emit(generator, "    movq rax, xmm1\n");
+      code_generator_emit(generator, "    sub%s xmm1, xmm0\n", suf);
+      code_generator_emit(generator, "    %s %s, xmm1\n", mov_x, ga);
     } else if (strcmp(op, "+") == 0) {
-      // No-op for float unary plus
+      /* Round-trip through XMM so mixed-width operands match -/. */
+      code_generator_emit(generator, "    %s %s, xmm0\n", mov_x, ga);
     } else {
       code_generator_set_error(generator,
                                "Unsupported float unary operator '%s'", op);
@@ -1521,6 +1608,37 @@ static int code_generator_ir_operand_has_float_type(CodeGenerator *generator,
   return code_generator_ir_operand_is_float(operand);
 }
 
+/* IEEE-754 width (0/32/64) of an operand for the text backend. Prefers the
+ * IR-carried float_bits (set by ir_lowering); falls back to the declared
+ * symbol type. Mirrors the internal backend's operand_float_bits so both
+ * backends agree on single vs double precision. */
+static int code_generator_ir_operand_float_bits(CodeGenerator *generator,
+                                                 const IROperand *operand) {
+  if (!operand) {
+    return 0;
+  }
+  if (operand->float_bits == 32 || operand->float_bits == 64) {
+    return operand->float_bits;
+  }
+  if (operand->kind == IR_OPERAND_FLOAT) {
+    return 64; /* literal with no explicit width: default double */
+  }
+  if (operand->kind == IR_OPERAND_SYMBOL && operand->name && generator &&
+      generator->symbol_table) {
+    Symbol *symbol =
+        symbol_table_lookup(generator->symbol_table, operand->name);
+    if (symbol && symbol->type) {
+      if (symbol->type->kind == TYPE_FLOAT32) {
+        return 32;
+      }
+      if (symbol->type->kind == TYPE_FLOAT64) {
+        return 64;
+      }
+    }
+  }
+  return 0;
+}
+
 static int code_generator_ir_call_argument_is_float(
     CodeGenerator *generator, Symbol *function_symbol,
     const IRInstruction *instruction, size_t argument_index) {
@@ -1570,7 +1688,14 @@ static int code_generator_emit_ir_call_argument_register(
   }
 
   if (is_float) {
-    code_generator_emit(generator, "    movq %s, rax\n", register_name);
+    /* Move the raw IEEE bits into the XMM parameter register at the value's
+     * precision: movd for float32 (32-bit pattern in eax), movq otherwise. */
+    int bits = code_generator_ir_operand_float_bits(generator, operand);
+    if (bits == 32) {
+      code_generator_emit(generator, "    movd %s, eax\n", register_name);
+    } else {
+      code_generator_emit(generator, "    movq %s, rax\n", register_name);
+    }
   } else {
     code_generator_emit(generator, "    mov %s, rax\n", register_name);
   }
@@ -1843,7 +1968,12 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
     }
   }
   if (return_type && code_generator_is_floating_point_type(return_type)) {
-    code_generator_emit(generator, "    movq rax, xmm0\n");
+    /* Win64 returns floats in XMM0; move back at the return precision. */
+    if (return_type->kind == TYPE_FLOAT32) {
+      code_generator_emit(generator, "    movd eax, xmm0\n");
+    } else {
+      code_generator_emit(generator, "    movq rax, xmm0\n");
+    }
   }
   code_generator_handle_return_value(generator, return_type);
 
@@ -1891,12 +2021,41 @@ static int code_generator_emit_ir_cast(CodeGenerator *generator,
     target_size = 8;
   }
 
+  /* Source float width comes from the CAST instruction (set by ir_lowering);
+   * target float width from the cast's destination type. */
+  int src_fb32 = (instruction->float_bits == 32);
+  int dst_fb32 = (target_type && target_type->kind == TYPE_FLOAT32);
+
   if (source_is_float && !target_is_float) {
-    code_generator_emit(generator, "    movq xmm0, rax\n");
-    code_generator_emit(generator, "    cvttsd2si rax, xmm0\n");
+    /* float -> int: truncate at the source precision. */
+    if (src_fb32) {
+      code_generator_emit(generator, "    movd xmm0, eax\n");
+      code_generator_emit(generator, "    cvttss2si rax, xmm0\n");
+    } else {
+      code_generator_emit(generator, "    movq xmm0, rax\n");
+      code_generator_emit(generator, "    cvttsd2si rax, xmm0\n");
+    }
   } else if (!source_is_float && target_is_float) {
-    code_generator_emit(generator, "    cvtsi2sd xmm0, rax\n");
-    code_generator_emit(generator, "    movq rax, xmm0\n");
+    /* int -> float: produce a value at the target precision. */
+    if (dst_fb32) {
+      code_generator_emit(generator, "    cvtsi2ss xmm0, rax\n");
+      code_generator_emit(generator, "    movd eax, xmm0\n");
+    } else {
+      code_generator_emit(generator, "    cvtsi2sd xmm0, rax\n");
+      code_generator_emit(generator, "    movq rax, xmm0\n");
+    }
+  } else if (source_is_float && target_is_float) {
+    /* float -> float: convert only when the precision differs. */
+    if (src_fb32 && !dst_fb32) {
+      code_generator_emit(generator, "    movd xmm0, eax\n");
+      code_generator_emit(generator, "    cvtss2sd xmm0, xmm0\n");
+      code_generator_emit(generator, "    movq rax, xmm0\n");
+    } else if (!src_fb32 && dst_fb32) {
+      code_generator_emit(generator, "    movq xmm0, rax\n");
+      code_generator_emit(generator, "    cvtsd2ss xmm0, xmm0\n");
+      code_generator_emit(generator, "    movd eax, xmm0\n");
+    }
+    /* same width: raw bits already correct. */
   } else if (!source_is_float && !target_is_float) {
     if (target_size == 1) {
       if (target_is_unsigned) {

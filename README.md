@@ -8,11 +8,14 @@ It is designed for systems-style control with stronger semantics than raw assemb
 
 - Compiles to x86-64 NASM assembly and Windows COFF objects
 - Strong typing with pointers, arrays, structs, enums, and function pointers
-- Control flow: `if`, `while`, `for`, `switch`, `defer`, `errdefer`
-- Async execution with `async`, `await`, `Future<T>`, and cooperative cancellation (default **pool** executor; optional experimental **`--async-model coroutine`** — see `docs/async.md`)
+- Control flow: `if`, `while`, `for`, `switch`, `match`, `defer`, `errdefer`, and labeled `break`/`continue`
+- Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`); line (`//`) and nesting block (`/* */`) comments
+- Async execution with `async`, `await`, `Future<T>`, and cooperative cancellation (default **pool** executor; optional experimental **`--async-model coroutine`** with a portable reactor — IOCP on Windows, `poll(2)` on POSIX — see `docs/async.md`)
 - C interop via `extern` and `cstring`
 - Optional conservative GC runtime for `new` and GC-backed string concatenation
 - Standard library modules for I/O, conversion, networking, process, threading, and more
+- Developer-friendly diagnostics: stable error codes, source snippets with carets, and scope-aware "did you mean?" suggestions for typos
+- Cross-platform symbolized crash tracebacks (Windows SEH and POSIX signal handlers)
 
 ## Hello World
 

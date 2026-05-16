@@ -1,0 +1,15 @@
+// Local array-of-struct: element spacing must equal sizeof(element), not ptr size (8).
+struct StrideS {
+  a: int64;
+  b: int64;
+  c: int64;
+}
+
+function main() -> int32 {
+  var arr: StrideS[2];
+  var d: int64 = (int64)(&(arr[1])) - (int64)(&(arr[0]));
+  if (d == (int64)24) {
+    return (int32)d;
+  }
+  return 0;
+}

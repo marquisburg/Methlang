@@ -1149,6 +1149,13 @@ static int rewrite_node_names(ASTNode *node, const NameRewrite *rewrites,
       return 0;
     }
 
+    for (size_t i = 0; i < trait_decl->method_count; i++) {
+      if (!rewrite_node_names(trait_decl->methods[i], rewrites, rewrite_count,
+                              bindings, binding_count, scope, 1)) {
+        return 0;
+      }
+    }
+
     return 1;
   }
 
@@ -1163,9 +1170,20 @@ static int rewrite_node_names(ASTNode *node, const NameRewrite *rewrites,
       return 0;
     }
 
-    return rewrite_type_string_in_place(&impl_decl->for_type_name, rewrites,
-                                        rewrite_count, bindings,
-                                        binding_count);
+    if (!rewrite_type_string_in_place(&impl_decl->for_type_name, rewrites,
+                                      rewrite_count, bindings,
+                                      binding_count)) {
+      return 0;
+    }
+
+    for (size_t i = 0; i < impl_decl->method_count; i++) {
+      if (!rewrite_node_names(impl_decl->methods[i], rewrites, rewrite_count,
+                              bindings, binding_count, scope, 1)) {
+        return 0;
+      }
+    }
+
+    return 1;
   }
 
   case AST_ASSIGNMENT: {

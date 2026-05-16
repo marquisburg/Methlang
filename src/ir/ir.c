@@ -47,6 +47,13 @@ IROperand ir_operand_float(double value) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_FLOAT;
   operand.float_value = value;
+  operand.float_bits = 64;
+  return operand;
+}
+
+IROperand ir_operand_float_sized(double value, int float_bits) {
+  IROperand operand = ir_operand_float(value);
+  operand.float_bits = (float_bits == 32) ? 32 : 64;
   return operand;
 }
 
@@ -89,14 +96,20 @@ static IROperand ir_operand_clone(const IROperand *operand) {
   }
 
   switch (operand->kind) {
-  case IR_OPERAND_TEMP:
-    return ir_operand_temp(operand->name);
-  case IR_OPERAND_SYMBOL:
-    return ir_operand_symbol(operand->name);
+  case IR_OPERAND_TEMP: {
+    IROperand copy = ir_operand_temp(operand->name);
+    copy.float_bits = operand->float_bits;
+    return copy;
+  }
+  case IR_OPERAND_SYMBOL: {
+    IROperand copy = ir_operand_symbol(operand->name);
+    copy.float_bits = operand->float_bits;
+    return copy;
+  }
   case IR_OPERAND_INT:
     return ir_operand_int(operand->int_value);
   case IR_OPERAND_FLOAT:
-    return ir_operand_float(operand->float_value);
+    return ir_operand_float_sized(operand->float_value, operand->float_bits);
   case IR_OPERAND_STRING:
     return ir_operand_string(operand->name);
   case IR_OPERAND_LABEL:
