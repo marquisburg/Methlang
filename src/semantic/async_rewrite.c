@@ -517,7 +517,7 @@ static int async_build_generated_decls(ASTNode *function_node,
 
   ASTNode *cancel_condition = ast_create_binary_expression(
       async_make_deref_member("__meth_async_ctx", "cancel_requested", location),
-      "!=", ast_create_number_literal(0, location), location);
+      "!=", ast_create_number_literal(0, location, 10), location);
   ASTNode *cancel_then = async_make_block();
   if (!cancel_condition || !cancel_then) {
     ast_destroy_node(entry_block);
@@ -541,7 +541,7 @@ static int async_build_generated_decls(ASTNode *function_node,
       async_make_call("__meth_async_finish", cancel_finish_args, 1, location);
   ASTNode *cancel_return = async_make_return(
       ast_create_number_literal(
-          model == ASYNC_REWRITE_MODEL_COROUTINE ? 1 : 0, location),
+          model == ASYNC_REWRITE_MODEL_COROUTINE ? 1 : 0, location, 10),
       location);
   if (!cancel_finish || !cancel_return ||
       !async_block_append(cancel_then, cancel_finish) ||
@@ -637,7 +637,8 @@ static int async_build_generated_decls(ASTNode *function_node,
                          function->name);
     return 0;
   }
-  if (async_is_void_type_name(payload_type)) {
+
+  if (async_is_void_type_name(payload_type)) {
     if (!async_block_append(entry_block, body_call)) {
       ast_destroy_node(body_call);
       ast_destroy_node(entry_block);
@@ -679,7 +680,7 @@ static int async_build_generated_decls(ASTNode *function_node,
       async_make_call("__meth_async_finish", finish_args, 1, location);
   ASTNode *final_return = async_make_return(
       ast_create_number_literal(
-          model == ASYNC_REWRITE_MODEL_COROUTINE ? 1 : 0, location),
+          model == ASYNC_REWRITE_MODEL_COROUTINE ? 1 : 0, location, 10),
       location);
   if (!finish_call || !final_return ||
       !async_block_append(entry_block, finish_call) ||
@@ -777,13 +778,13 @@ static int async_build_generated_decls(ASTNode *function_node,
 
   ASTNode *init_zero_assignments[3];
   init_zero_assignments[0] = async_make_field_assignment(
-      "__meth_async_ctx", "thread_handle", ast_create_number_literal(0, location),
+      "__meth_async_ctx", "thread_handle", ast_create_number_literal(0, location, 10),
       location);
   init_zero_assignments[1] = async_make_field_assignment(
-      "__meth_async_ctx", "state", ast_create_number_literal(0, location),
+      "__meth_async_ctx", "state", ast_create_number_literal(0, location, 10),
       location);
   init_zero_assignments[2] = async_make_field_assignment(
-      "__meth_async_ctx", "cancel_requested", ast_create_number_literal(0, location),
+      "__meth_async_ctx", "cancel_requested", ast_create_number_literal(0, location, 10),
       location);
   for (size_t i = 0; i < 3; i++) {
     if (!init_zero_assignments[i] ||
@@ -808,11 +809,12 @@ static int async_build_generated_decls(ASTNode *function_node,
 
   if (model == ASYNC_REWRITE_MODEL_COROUTINE && coro_suspend_count > 0) {
     ASTNode *resume_zero_init = async_make_field_assignment(
-        "__meth_async_ctx", "resume_state", ast_create_number_literal(0, location),
+        "__meth_async_ctx", "resume_state", ast_create_number_literal(0, location, 10),
         location);
     ASTNode *suspend_count_init = async_make_field_assignment(
         "__meth_async_ctx", "suspend_count",
-        ast_create_number_literal((long long)coro_suspend_count, location), location);
+        ast_create_number_literal((long long)coro_suspend_count, location,
+                                  10), location);
     if (!resume_zero_init || !suspend_count_init ||
         !async_block_append(wrapper_block, resume_zero_init) ||
         !async_block_append(wrapper_block, suspend_count_init)) {
@@ -943,9 +945,9 @@ static int async_build_generated_decls(ASTNode *function_node,
     ASTNode *schedule_args[4];
     schedule_args[0] =
         async_make_deref_member("__meth_async_ctx", "thread_handle", location);
-    schedule_args[1] = ast_create_number_literal(0, location);
-    schedule_args[2] = ast_create_number_literal(0, location);
-    schedule_args[3] = ast_create_number_literal(0, location);
+    schedule_args[1] = ast_create_number_literal(0, location, 10);
+    schedule_args[2] = ast_create_number_literal(0, location, 10);
+    schedule_args[3] = ast_create_number_literal(0, location, 10);
     schedule_call = async_make_call("__meth_coro_task_schedule", schedule_args, 4,
                                     location);
   }

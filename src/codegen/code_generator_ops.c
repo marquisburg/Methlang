@@ -1,8 +1,10 @@
 #include "code_generator_internal.h"
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
 static int code_generator_get_type_storage_size(Type *type);
+static int code_generator_get_type_array_element_stride(Type *element_type);
 static void code_generator_emit_store_value_at_address(CodeGenerator *generator,
                                                        int element_size);
 static void
@@ -677,6 +679,12 @@ void code_generator_load_variable(CodeGenerator *generator,
       value_size = (int)symbol->type->size;
     }
     int signed_integer = code_generator_is_signed_integer_type(symbol->type);
+    /* A 4-byte float (float32) holds an IEEE-754 bit pattern: it must be
+     * zero-extended into rax, NOT sign-extended like int32 — sign extension
+     * corrupts the bits fed to movd. */
+    int is_float32_value =
+        value_size == 4 && symbol->type &&
+        symbol->type->kind == TYPE_FLOAT32;
 
     if (symbol->data.variable.is_in_register) {
       x86Register reg = (x86Register)symbol->data.variable.register_id;
@@ -769,10 +777,17 @@ void code_generator_load_variable(CodeGenerator *generator,
                 resolved_name);
           }
         } else if (value_size == 4) {
-          code_generator_emit(
-              generator,
-              "    movsxd rax, dword [rel %s]  ; From global memory\n",
-              resolved_name);
+          if (is_float32_value) {
+            code_generator_emit(
+                generator,
+                "    mov eax, dword [rel %s]  ; From global memory (float32)\n",
+                resolved_name);
+          } else {
+            code_generator_emit(
+                generator,
+                "    movsxd rax, dword [rel %s]  ; From global memory\n",
+                resolved_name);
+          }
         } else {
           code_generator_emit(
               generator, "    mov rax, qword [rel %s]  ; From global memory\n",
@@ -806,10 +821,17 @@ void code_generator_load_variable(CodeGenerator *generator,
                                 offset, offset);
           }
         } else if (value_size == 4) {
-          code_generator_emit(generator,
-                              "    movsxd rax, dword [rbp - %d]  ; From stack "
-                              "[rbp - %d]\n",
-                              offset, offset);
+          if (is_float32_value) {
+            code_generator_emit(generator,
+                                "    mov eax, dword [rbp - %d]  ; From stack "
+                                "[rbp - %d] (float32)\n",
+                                offset, offset);
+          } else {
+            code_generator_emit(generator,
+                                "    movsxd rax, dword [rbp - %d]  ; From stack "
+                                "[rbp - %d]\n",
+                                offset, offset);
+          }
         } else {
           code_generator_emit(generator,
                               "    mov rax, qword [rbp - %d]  ; From stack "
@@ -1356,6 +1378,14 @@ static int code_generator_get_type_storage_size(Type *type) {
   return 8;
 }
 
+static int code_generator_get_type_array_element_stride(Type *element_type) {
+  if (!element_type || element_type->size == 0 ||
+      element_type->size > (size_t)INT_MAX) {
+    return 8;
+  }
+  return (int)element_type->size;
+}
+
 static void code_generator_emit_store_value_at_address(CodeGenerator *generator,
                                                        int element_size) {
   if (!generator) {
@@ -1418,7 +1448,7 @@ static int code_generator_generate_array_element_address(
   }
 
   int element_size =
-      code_generator_get_type_storage_size(array_type->base_type);
+      code_generator_get_type_array_element_stride(array_type->base_type);
 
   code_generator_generate_expression(generator, array_expr);
   if (array_type->kind == TYPE_POINTER) {

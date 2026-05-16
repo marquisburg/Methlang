@@ -97,6 +97,8 @@ typedef struct {
   int raw_frame_size;
   int frame_size;
   int return_is_float64;
+  /* IEEE-754 width of the function's float return (0/32/64). 0 = not float. */
+  int return_float_bits;
   FunctionDeclaration *function_data;
   const char *function_name;
 } BinaryFunctionContext;
@@ -1242,6 +1244,160 @@ static int binary_emit_cvtsi2sd_xmm_reg(BinaryCodeBuffer *buffer,
   return 1;
 }
 
+/* ---- Single-precision (float32) SSE encoders ----
+ * These mirror the double-precision encoders above but use the F3 scalar-
+ * single prefix / 32-bit operand forms. They exist so float32 values are
+ * computed and converted at single precision instead of being silently
+ * widened to double (which corrupts struct layout and ABI). */
+
+/* movd xmm, r32 : 66 0F 6E /r  (no REX.W -> 32-bit GP source) */
+static int binary_emit_movd_xmm_reg(BinaryCodeBuffer *buffer,
+                                    BinaryXmmRegister destination,
+                                    BinaryGpRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_code_buffer_append_u8(buffer, 0x66) ||
+      !binary_emit_rex(buffer, 0, destination >> 3, 0, source >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0x6E) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((destination & 7) << 3) |
+                                  (source & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+/* movd r32, xmm : 66 0F 7E /r  (no REX.W -> 32-bit GP destination) */
+static int binary_emit_movd_reg_xmm(BinaryCodeBuffer *buffer,
+                                    BinaryGpRegister destination,
+                                    BinaryXmmRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_code_buffer_append_u8(buffer, 0x66) ||
+      !binary_emit_rex(buffer, 0, source >> 3, 0, destination >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0x7E) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((source & 7) << 3) |
+                                  (destination & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int binary_emit_addss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                     BinaryXmmRegister destination,
+                                     BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF3, 0, 0x0F, 0x58, destination,
+                                 source);
+}
+
+static int binary_emit_subss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                     BinaryXmmRegister destination,
+                                     BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF3, 0, 0x0F, 0x5C, destination,
+                                 source);
+}
+
+static int binary_emit_mulss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                     BinaryXmmRegister destination,
+                                     BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF3, 0, 0x0F, 0x59, destination,
+                                 source);
+}
+
+static int binary_emit_divss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                     BinaryXmmRegister destination,
+                                     BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF3, 0, 0x0F, 0x5E, destination,
+                                 source);
+}
+
+/* ucomiss xmm, xmm : NP 0F 2E /r  (no mandatory prefix, so cannot use
+ * binary_emit_sse_reg_reg which always emits one). */
+static int binary_emit_ucomiss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                       BinaryXmmRegister lhs,
+                                       BinaryXmmRegister rhs) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_emit_rex(buffer, 0, lhs >> 3, 0, rhs >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0x2E) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((lhs & 7) << 3) | (rhs & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+/* cvttss2si r64, xmm : F3 REX.W 0F 2C /r  (truncating float32 -> int64) */
+static int binary_emit_cvttss2si_reg_xmm(BinaryCodeBuffer *buffer,
+                                         BinaryGpRegister destination,
+                                         BinaryXmmRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_code_buffer_append_u8(buffer, 0xF3) ||
+      !binary_emit_rex(buffer, 1, destination >> 3, 0, source >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0x2C) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((destination & 7) << 3) |
+                                  (source & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+/* cvtsi2ss xmm, r64 : F3 REX.W 0F 2A /r  (int64 -> float32) */
+static int binary_emit_cvtsi2ss_xmm_reg(BinaryCodeBuffer *buffer,
+                                        BinaryXmmRegister destination,
+                                        BinaryGpRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_code_buffer_append_u8(buffer, 0xF3) ||
+      !binary_emit_rex(buffer, 1, destination >> 3, 0, source >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0x2A) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((destination & 7) << 3) |
+                                  (source & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+/* cvtss2sd xmm, xmm : F3 0F 5A /r  (widen float32 -> float64) */
+static int binary_emit_cvtss2sd_xmm_xmm(BinaryCodeBuffer *buffer,
+                                        BinaryXmmRegister destination,
+                                        BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF3, 0, 0x0F, 0x5A, destination,
+                                 source);
+}
+
+/* cvtsd2ss xmm, xmm : F2 0F 5A /r  (narrow float64 -> float32) */
+static int binary_emit_cvtsd2ss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                        BinaryXmmRegister destination,
+                                        BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF2, 0, 0x0F, 0x5A, destination,
+                                 source);
+}
+
 static int binary_emit_call_placeholder(BinaryCodeBuffer *buffer,
                                         size_t *displacement_offset_out) {
   if (!buffer || !displacement_offset_out) {
@@ -1376,6 +1532,21 @@ static int code_generator_binary_resolved_type_is_float64(Type *type) {
   return type && type->kind == TYPE_FLOAT64 && type->size == 8;
 }
 
+/* IEEE-754 width of a resolved type: 32 for float32, 64 for float64, else 0
+ * (not a floating type). */
+static int code_generator_binary_resolved_type_float_bits(Type *type) {
+  if (!type) {
+    return 0;
+  }
+  if (type->kind == TYPE_FLOAT32 && type->size == 4) {
+    return 32;
+  }
+  if (type->kind == TYPE_FLOAT64 && type->size == 8) {
+    return 64;
+  }
+  return 0;
+}
+
 static int code_generator_binary_resolved_type_is_abi_supported(Type *type,
                                                                 int allow_void) {
   if (!type) {
@@ -1413,6 +1584,16 @@ static int code_generator_binary_named_type_is_float64(CodeGenerator *generator,
       code_generator_binary_get_resolved_type(generator, type_name, allow_void));
 }
 
+/* Float width (0/32/64) of a named type, e.g. a parameter/local type name. */
+static int code_generator_binary_named_type_float_bits(CodeGenerator *generator,
+                                                       const char *type_name) {
+  if (!type_name || type_name[0] == '\0') {
+    return 0;
+  }
+  return code_generator_binary_resolved_type_float_bits(
+      code_generator_binary_get_resolved_type(generator, type_name, 0));
+}
+
 static int code_generator_binary_is_marked_float64_symbol(
     const BinaryFunctionContext *context, const char *name) {
   return context && name &&
@@ -1420,13 +1601,40 @@ static int code_generator_binary_is_marked_float64_symbol(
              0;
 }
 
-static int code_generator_binary_mark_float64_symbol(
-    BinaryFunctionContext *context, const char *name) {
+/* The float64_symbols table doubles as a float-width map: the stored slot
+ * value is the IEEE-754 width (32 or 64) of the named symbol/temp. Width 0
+ * means "not recorded". */
+static int code_generator_binary_marked_symbol_float_bits(
+    const BinaryFunctionContext *context, const char *name) {
+  int width = 0;
+  if (!context || !name) {
+    return 0;
+  }
+  width = binary_named_slot_table_get_offset(&context->float64_symbols, name);
+  return (width == 32 || width == 64) ? width : 0;
+}
+
+static int code_generator_binary_mark_float_symbol(
+    BinaryFunctionContext *context, const char *name, int bits) {
   if (!context || !name || name[0] == '\0') {
     return 0;
   }
+  /* binary_named_slot_table_add fails a re-add with a different value, but a
+   * symbol/temp may legitimately be visited by more than one marking pass
+   * (declared-type pass and instruction-result pass). The first recorded
+   * width is authoritative; treat an already-present entry as success
+   * instead of aborting code generation. */
+  if (binary_named_slot_table_get_offset(&context->float64_symbols, name) >=
+      0) {
+    return 1;
+  }
+  return binary_named_slot_table_add(&context->float64_symbols, name,
+                                     (bits == 32) ? 32 : 64);
+}
 
-  return binary_named_slot_table_add(&context->float64_symbols, name, 1);
+static int code_generator_binary_mark_float64_symbol(
+    BinaryFunctionContext *context, const char *name) {
+  return code_generator_binary_mark_float_symbol(context, name, 64);
 }
 
 static int code_generator_binary_symbol_is_scalar_accessible(
@@ -1493,6 +1701,7 @@ static int code_generator_binary_resolved_type_is_supported(Type *type,
   case TYPE_UINT16:
   case TYPE_UINT32:
   case TYPE_UINT64:
+  case TYPE_FLOAT32:
   case TYPE_FLOAT64:
   case TYPE_POINTER:
   case TYPE_ENUM:
@@ -1605,6 +1814,12 @@ static int code_generator_binary_validate_signature(CodeGenerator *generator,
 static int code_generator_binary_instruction_result_is_float64(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IRInstruction *instruction);
+static int code_generator_binary_instruction_result_float_bits(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction);
+static int code_generator_binary_operand_float_bits(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand);
 
 static int code_generator_binary_prepare_function_context(
     CodeGenerator *generator, FunctionDeclaration *function_data,
@@ -1617,6 +1832,9 @@ static int code_generator_binary_prepare_function_context(
   context->function_data = function_data;
   context->function_name = function_data->name;
   context->return_is_float64 = code_generator_binary_resolved_type_is_float64(
+      code_generator_binary_get_resolved_type(generator,
+                                              function_data->return_type, 1));
+  context->return_float_bits = code_generator_binary_resolved_type_float_bits(
       code_generator_binary_get_resolved_type(generator,
                                               function_data->return_type, 1));
 
@@ -1645,18 +1863,21 @@ static int code_generator_binary_prepare_function_context(
       return 0;
     }
 
-    if (code_generator_binary_named_type_is_float64(
+    {
+      int param_fbits = code_generator_binary_named_type_float_bits(
+          generator, function_data->parameter_types
+                         ? function_data->parameter_types[i]
+                         : NULL);
+      if (param_fbits &&
+          !code_generator_binary_mark_float_symbol(context, parameter_name,
+                                                   param_fbits)) {
+        code_generator_set_error(
             generator,
-            function_data->parameter_types ? function_data->parameter_types[i]
-                                           : NULL,
-            0) &&
-        !code_generator_binary_mark_float64_symbol(context, parameter_name)) {
-      code_generator_set_error(
-          generator,
-          "Failed to allocate float64 parameter metadata in function '%s'",
-          function_data->name);
-      binary_function_context_destroy(context);
-      return 0;
+            "Failed to allocate float parameter metadata in function '%s'",
+            function_data->name);
+        binary_function_context_destroy(context);
+        return 0;
+      }
     }
   }
 
@@ -1720,12 +1941,15 @@ static int code_generator_binary_prepare_function_context(
         binary_named_slot_table_get_offset(&context->local_slots,
                                            instruction->dest.name);
     if (existing_offset > 0) {
-      if (code_generator_binary_resolved_type_is_float64(local_type) &&
-          !code_generator_binary_mark_float64_symbol(context,
-                                                     instruction->dest.name)) {
+      int local_fbits =
+          code_generator_binary_resolved_type_float_bits(local_type);
+      if (local_fbits &&
+          !code_generator_binary_mark_float_symbol(context,
+                                                   instruction->dest.name,
+                                                   local_fbits)) {
         code_generator_set_error(
             generator,
-            "Failed to allocate float64 local metadata in function '%s'",
+            "Failed to allocate float local metadata in function '%s'",
             function_data->name);
         binary_function_context_destroy(context);
         return 0;
@@ -1762,15 +1986,20 @@ static int code_generator_binary_prepare_function_context(
       return 0;
     }
 
-    if (code_generator_binary_resolved_type_is_float64(local_type) &&
-        !code_generator_binary_mark_float64_symbol(context,
-                                                   instruction->dest.name)) {
-      code_generator_set_error(
-          generator,
-          "Failed to allocate float64 local metadata in function '%s'",
-          function_data->name);
-      binary_function_context_destroy(context);
-      return 0;
+    {
+      int local_fbits =
+          code_generator_binary_resolved_type_float_bits(local_type);
+      if (local_fbits &&
+          !code_generator_binary_mark_float_symbol(context,
+                                                   instruction->dest.name,
+                                                   local_fbits)) {
+        code_generator_set_error(
+            generator,
+            "Failed to allocate float local metadata in function '%s'",
+            function_data->name);
+        binary_function_context_destroy(context);
+        return 0;
+      }
     }
   }
 
@@ -1816,19 +2045,21 @@ static int code_generator_binary_prepare_function_context(
       continue;
     }
 
-    if (!code_generator_binary_instruction_result_is_float64(
-            generator, context, instruction)) {
-      continue;
-    }
-
-    if (!code_generator_binary_mark_float64_symbol(context,
-                                                   instruction->dest.name)) {
-      code_generator_set_error(
-          generator,
-          "Failed to allocate float64 temporary metadata in function '%s'",
-          function_data->name);
-      binary_function_context_destroy(context);
-      return 0;
+    {
+      int result_fbits = code_generator_binary_instruction_result_float_bits(
+          generator, context, instruction);
+      if (!result_fbits) {
+        continue;
+      }
+      if (!code_generator_binary_mark_float_symbol(
+              context, instruction->dest.name, result_fbits)) {
+        code_generator_set_error(
+            generator,
+            "Failed to allocate float temporary metadata in function '%s'",
+            function_data->name);
+        binary_function_context_destroy(context);
+        return 0;
+      }
     }
   }
 
@@ -2430,6 +2661,49 @@ static int code_generator_binary_operand_is_known_float64(
   return 0;
 }
 
+/* IEEE-754 width of a value operand: 32, 64, or 0 (not floating). Resolution
+ * order: the operand's own IR-carried float_bits (authoritative, set by
+ * ir_lowering), then a width recorded for the named symbol/temp, then the
+ * declared symbol type. This is the single place backends ask "what float
+ * precision is this value" so single vs double is never re-guessed ad hoc. */
+static int code_generator_binary_operand_float_bits(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand) {
+  Symbol *symbol = NULL;
+
+  if (!context || !operand) {
+    return 0;
+  }
+
+  if (operand->kind == IR_OPERAND_FLOAT) {
+    return operand->float_bits == 32 ? 32 : 64;
+  }
+
+  if ((operand->kind == IR_OPERAND_SYMBOL ||
+       operand->kind == IR_OPERAND_TEMP)) {
+    if (operand->float_bits == 32 || operand->float_bits == 64) {
+      return operand->float_bits;
+    }
+    if (operand->name) {
+      int marked = code_generator_binary_marked_symbol_float_bits(
+          context, operand->name);
+      if (marked) {
+        return marked;
+      }
+    }
+  }
+
+  if (operand->kind == IR_OPERAND_SYMBOL && operand->name && generator &&
+      generator->symbol_table) {
+    symbol = symbol_table_lookup(generator->symbol_table, operand->name);
+    if (symbol) {
+      return code_generator_binary_resolved_type_float_bits(symbol->type);
+    }
+  }
+
+  return 0;
+}
+
 static int code_generator_binary_instruction_result_is_float64(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IRInstruction *instruction) {
@@ -2484,8 +2758,82 @@ static int code_generator_binary_instruction_result_is_float64(
     return code_generator_binary_named_type_is_float64(generator,
                                                        instruction->text, 0);
 
+  case IR_OP_LOAD:
+    /* A value dereferenced from a float* / struct member is floating in the
+     * machine sense even though no symbol carries that type. ir_lowering sets
+     * is_float on float32/float64 loads; honor it so the destination temp is
+     * marked and reaches xmm via movd/movq (bit copy) rather than cvtsi2s*
+     * (integer->float conversion of the raw bit pattern). */
+    return instruction->is_float;
+
   default:
     return 0;
+  }
+}
+
+/* Float width (0/32/64) of an instruction's destination value. Generalizes
+ * code_generator_binary_instruction_result_is_float64 so the symbol-marking
+ * pass can record single vs double precision per temp/symbol. */
+static int code_generator_binary_instruction_result_float_bits(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  Symbol *symbol = NULL;
+  Type *function_type = NULL;
+
+  if (!context || !instruction) {
+    return 0;
+  }
+
+  if (!code_generator_binary_instruction_result_is_float64(generator, context,
+                                                           instruction)) {
+    return 0;
+  }
+
+  switch (instruction->op) {
+  case IR_OP_ASSIGN:
+    return code_generator_binary_operand_float_bits(generator, context,
+                                                    &instruction->lhs);
+
+  case IR_OP_BINARY:
+  case IR_OP_UNARY:
+  case IR_OP_LOAD:
+    return (instruction->float_bits == 32) ? 32 : 64;
+
+  case IR_OP_CALL:
+    symbol = generator && generator->symbol_table && instruction->text
+                 ? symbol_table_lookup(generator->symbol_table,
+                                       instruction->text)
+                 : NULL;
+    return (symbol && symbol->kind == SYMBOL_FUNCTION)
+               ? code_generator_binary_resolved_type_float_bits(
+                     symbol->data.function.return_type)
+               : 64;
+
+  case IR_OP_CALL_INDIRECT:
+    symbol = generator && generator->symbol_table &&
+                     instruction->lhs.kind == IR_OPERAND_SYMBOL &&
+                     instruction->lhs.name
+                 ? symbol_table_lookup(generator->symbol_table,
+                                       instruction->lhs.name)
+                 : NULL;
+    function_type =
+        (symbol && symbol->type && symbol->type->kind == TYPE_FUNCTION_POINTER)
+            ? symbol->type
+            : NULL;
+    return function_type ? code_generator_binary_resolved_type_float_bits(
+                               function_type->fn_return_type)
+                         : 64;
+
+  case IR_OP_CAST: {
+    Type *t = generator && generator->type_checker
+                  ? type_checker_get_type_by_name(generator->type_checker,
+                                                  instruction->text)
+                  : NULL;
+    return code_generator_binary_resolved_type_float_bits(t);
+  }
+
+  default:
+    return 64;
   }
 }
 
@@ -2533,11 +2881,24 @@ static int code_generator_binary_emit_string_symbol_load(
   return 0;
 }
 
-static int code_generator_binary_emit_float_operand_to_xmm(
+/* Materialize an operand into an XMM register at the requested precision
+ * (want_bits = 32 or 64).
+ *   - A floating operand carries raw IEEE-754 bits in RAX: copy them with
+ *     movd (32) or movq (64) according to the operand's OWN width, then
+ *     widen/narrow to want_bits with cvtss2sd / cvtsd2ss if they differ.
+ *   - An integer operand is converted to float with cvtsi2ss / cvtsi2sd at
+ *     want_bits (matches the surrounding float expression's precision). */
+static int code_generator_binary_emit_float_operand_to_xmm_bits(
     CodeGenerator *generator, BinaryFunctionContext *context,
-    const IROperand *operand, BinaryXmmRegister target_register) {
+    const IROperand *operand, BinaryXmmRegister target_register,
+    int want_bits) {
+  int operand_bits = 0;
+
   if (!generator || !context || !operand) {
     return 0;
+  }
+  if (want_bits != 32 && want_bits != 64) {
+    want_bits = 64;
   }
 
   if (!code_generator_binary_emit_operand_load(generator, context, operand,
@@ -2545,14 +2906,75 @@ static int code_generator_binary_emit_float_operand_to_xmm(
     return 0;
   }
 
-  if (code_generator_binary_operand_is_known_float64(generator, context,
-                                                     operand)) {
-    return binary_emit_movq_xmm_reg(&context->code, target_register,
-                                    BINARY_GP_RAX);
+  operand_bits =
+      code_generator_binary_operand_float_bits(generator, context, operand);
+
+  if (operand_bits == 32) {
+    if (!binary_emit_movd_xmm_reg(&context->code, target_register,
+                                  BINARY_GP_RAX)) {
+      return 0;
+    }
+    if (want_bits == 64) {
+      return binary_emit_cvtss2sd_xmm_xmm(&context->code, target_register,
+                                          target_register);
+    }
+    return 1;
   }
 
+  if (operand_bits == 64) {
+    if (!binary_emit_movq_xmm_reg(&context->code, target_register,
+                                  BINARY_GP_RAX)) {
+      return 0;
+    }
+    if (want_bits == 32) {
+      return binary_emit_cvtsd2ss_xmm_xmm(&context->code, target_register,
+                                          target_register);
+    }
+    return 1;
+  }
+
+  /* Integer value used in a float context: convert at the target precision. */
+  if (want_bits == 32) {
+    return binary_emit_cvtsi2ss_xmm_reg(&context->code, target_register,
+                                        BINARY_GP_RAX);
+  }
   return binary_emit_cvtsi2sd_xmm_reg(&context->code, target_register,
                                       BINARY_GP_RAX);
+}
+
+static int code_generator_binary_emit_float_operand_to_xmm(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand, BinaryXmmRegister target_register) {
+  return code_generator_binary_emit_float_operand_to_xmm_bits(
+      generator, context, operand, target_register, 64);
+}
+
+/* Reinterpret the float bits held in `gp_register` from src_bits precision to
+ * dst_bits precision, in place, using XMM0 as scratch. No-op when the widths
+ * already match or either side is not a float (src/dst 0). Used by ASSIGN /
+ * STORE / RETURN when a float64 value lands in a float32 slot or vice versa. */
+static int code_generator_binary_emit_float_reg_convert(
+    BinaryFunctionContext *context, BinaryGpRegister gp_register,
+    int src_bits, int dst_bits) {
+  if (!context || src_bits == 0 || dst_bits == 0 || src_bits == dst_bits) {
+    return 1;
+  }
+
+  if (src_bits == 64 && dst_bits == 32) {
+    return binary_emit_movq_xmm_reg(&context->code, BINARY_XMM0,
+                                    gp_register) &&
+           binary_emit_cvtsd2ss_xmm_xmm(&context->code, BINARY_XMM0,
+                                        BINARY_XMM0) &&
+           binary_emit_movd_reg_xmm(&context->code, gp_register, BINARY_XMM0);
+  }
+  if (src_bits == 32 && dst_bits == 64) {
+    return binary_emit_movd_xmm_reg(&context->code, BINARY_XMM0,
+                                    gp_register) &&
+           binary_emit_cvtss2sd_xmm_xmm(&context->code, BINARY_XMM0,
+                                        BINARY_XMM0) &&
+           binary_emit_movq_reg_xmm(&context->code, gp_register, BINARY_XMM0);
+  }
+  return 1;
 }
 
 static int code_generator_binary_emit_operand_load(
@@ -2571,6 +2993,18 @@ static int code_generator_binary_emit_operand_load(
                                      (uint64_t)operand->int_value);
 
   case IR_OPERAND_FLOAT: {
+    if (operand->float_bits == 32) {
+      /* Materialize the true 32-bit IEEE-754 single pattern (zero-extended).
+       * Encoding it as the low half of a double would store 0 for most
+       * values. */
+      union {
+        float value;
+        uint32_t bits;
+      } encoded = {0};
+      encoded.value = (float)operand->float_value;
+      return binary_emit_mov_reg_imm64(&context->code, target_register,
+                                       (uint64_t)encoded.bits);
+    }
     union {
       double value;
       uint64_t bits;
@@ -2704,6 +3138,25 @@ static int code_generator_binary_emit_call_argument_load(
   }
 
   return 1;
+}
+
+/* Load a float register-argument and place it in its Win64 XMM parameter
+ * register at the parameter's precision. param_fbits is 32 or 64. The raw
+ * IEEE bits arrive in RAX; movd transfers a single, movq a double. */
+static int code_generator_binary_emit_float_call_argument(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand, Type *parameter_type, int param_fbits,
+    BinaryXmmRegister xmm_register) {
+  if (!code_generator_binary_emit_call_argument_load(
+          generator, context, operand, parameter_type, BINARY_GP_RAX)) {
+    return 0;
+  }
+  if (param_fbits == 32) {
+    return binary_emit_movd_xmm_reg(&context->code, xmm_register,
+                                    BINARY_GP_RAX);
+  }
+  return binary_emit_movq_xmm_reg(&context->code, xmm_register,
+                                  BINARY_GP_RAX);
 }
 
 static int code_generator_binary_emit_local_string_store(
@@ -3098,8 +3551,29 @@ static int code_generator_binary_emit_load(CodeGenerator *generator,
                                                BINARY_GP_RAX) ||
       !code_generator_binary_emit_load_from_address(generator, context,
                                                     BINARY_GP_RAX, size,
-                                                    BINARY_GP_RAX) ||
-      !code_generator_binary_emit_destination_store(generator, context,
+                                                    BINARY_GP_RAX)) {
+    if (!generator->has_error) {
+      code_generator_set_error(generator,
+                               "Out of memory while emitting IR load in "
+                               "function '%s'",
+                               context->function_name);
+    }
+    return 0;
+  }
+  /* x86-64: 32-bit integer loads into EAX zero-extend RAX. Signed int32 must
+   * sign-extend to int64. Skip for float32 loads (same width, raw IEEE bits). */
+  if (size == 4 && !instruction->is_float &&
+      !binary_emit_movsxd_rax_eax(&context->code)) {
+    if (!generator->has_error) {
+      code_generator_set_error(generator,
+                               "Out of memory while emitting IR load in "
+                               "function '%s'",
+                               context->function_name);
+    }
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_destination_store(generator, context,
                                                     &instruction->dest,
                                                     BINARY_GP_RAX)) {
     if (!generator->has_error) {
@@ -3131,8 +3605,34 @@ static int code_generator_binary_emit_store(CodeGenerator *generator,
 
   if (!code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->lhs,
-                                               BINARY_GP_RCX) ||
-      !code_generator_binary_emit_operand_load(generator, context,
+                                               BINARY_GP_RCX)) {
+    if (!generator->has_error) {
+      code_generator_set_error(generator,
+                               "Out of memory while emitting IR store in "
+                               "function '%s'",
+                               context->function_name);
+    }
+    return 0;
+  }
+
+  /* Narrow/widen the value to the destination's float precision when the
+   * stored expression's width differs (e.g. float64 expression -> float32
+   * member). instruction->float_bits is the destination width. */
+  if (instruction->is_float && instruction->float_bits) {
+    int value_bits = code_generator_binary_operand_float_bits(
+        generator, context, &instruction->lhs);
+    if (value_bits &&
+        !code_generator_binary_emit_float_reg_convert(
+            context, BINARY_GP_RCX, value_bits, instruction->float_bits)) {
+      code_generator_set_error(generator,
+                               "Out of memory while converting float store "
+                               "precision in function '%s'",
+                               context->function_name);
+      return 0;
+    }
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->dest,
                                                BINARY_GP_RAX) ||
       !code_generator_binary_emit_store_to_address(generator, context,
@@ -3246,22 +3746,64 @@ static int code_generator_binary_emit_cast(CodeGenerator *generator,
     return 0;
   }
 
+  /* Source float width is carried on the CAST instruction (set by
+   * ir_lowering); target float width is derived from the cast's named type. */
+  int src_fbits = (instruction->float_bits == 32) ? 32 : 64;
+  int dst_fbits =
+      code_generator_binary_resolved_type_float_bits(target_type);
+
   if (instruction->is_float && !target_is_float) {
-    if (!binary_emit_movq_xmm_reg(&context->code, BINARY_XMM0,
-                                  BINARY_GP_RAX) ||
-        !binary_emit_cvttsd2si_reg_xmm(&context->code, BINARY_GP_RAX,
-                                       BINARY_XMM0)) {
+    /* float -> int: truncate at the SOURCE precision. */
+    if (src_fbits == 32) {
+      if (!binary_emit_movd_xmm_reg(&context->code, BINARY_XMM0,
+                                    BINARY_GP_RAX) ||
+          !binary_emit_cvttss2si_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)) {
+        goto emit_failure;
+      }
+    } else if (!binary_emit_movq_xmm_reg(&context->code, BINARY_XMM0,
+                                         BINARY_GP_RAX) ||
+               !binary_emit_cvttsd2si_reg_xmm(&context->code, BINARY_GP_RAX,
+                                              BINARY_XMM0)) {
       goto emit_failure;
     }
   } else if (!instruction->is_float && target_is_float) {
-    if (!binary_emit_cvtsi2sd_xmm_reg(&context->code, BINARY_XMM0,
-                                      BINARY_GP_RAX) ||
-        !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                  BINARY_XMM0)) {
+    /* int -> float: produce a value at the TARGET precision. */
+    if (dst_fbits == 32) {
+      if (!binary_emit_cvtsi2ss_xmm_reg(&context->code, BINARY_XMM0,
+                                        BINARY_GP_RAX) ||
+          !binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                    BINARY_XMM0)) {
+        goto emit_failure;
+      }
+    } else if (!binary_emit_cvtsi2sd_xmm_reg(&context->code, BINARY_XMM0,
+                                             BINARY_GP_RAX) ||
+               !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)) {
       goto emit_failure;
     }
   } else if (instruction->is_float && target_is_float) {
-    /* No-op for float64-to-float64 today. */
+    /* float -> float: convert precision only when the widths differ. */
+    if (src_fbits == 32 && dst_fbits == 64) {
+      if (!binary_emit_movd_xmm_reg(&context->code, BINARY_XMM0,
+                                    BINARY_GP_RAX) ||
+          !binary_emit_cvtss2sd_xmm_xmm(&context->code, BINARY_XMM0,
+                                        BINARY_XMM0) ||
+          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                    BINARY_XMM0)) {
+        goto emit_failure;
+      }
+    } else if (src_fbits == 64 && dst_fbits == 32) {
+      if (!binary_emit_movq_xmm_reg(&context->code, BINARY_XMM0,
+                                    BINARY_GP_RAX) ||
+          !binary_emit_cvtsd2ss_xmm_xmm(&context->code, BINARY_XMM0,
+                                        BINARY_XMM0) ||
+          !binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                    BINARY_XMM0)) {
+        goto emit_failure;
+      }
+    }
+    /* same width -> raw bits already correct, nothing to emit. */
   } else if (target_size == 1) {
     if ((target_is_unsigned &&
          !binary_emit_movzx_eax_al(&context->code)) ||
@@ -3439,24 +3981,18 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
     register_argument_count = BINARY_WIN64_REGISTER_ARG_COUNT;
   }
   for (size_t i = 0; i < register_argument_count; i++) {
-    int argument_is_float64 =
-        function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
-        function_symbol->data.function.parameter_types &&
-        code_generator_binary_resolved_type_is_float64(
-            function_symbol->data.function.parameter_types[i]);
     Type *parameter_type =
         function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
                 function_symbol->data.function.parameter_types
             ? function_symbol->data.function.parameter_types[i]
             : NULL;
-    if ((argument_is_float64 &&
-         (!code_generator_binary_emit_call_argument_load(
-              generator, context, &instruction->arguments[i], parameter_type,
-              BINARY_GP_RAX) ||
-          !binary_emit_movq_xmm_reg(&context->code,
-                                    BINARY_WIN64_FLOAT_PARAM_REGISTERS[i],
-                                    BINARY_GP_RAX))) ||
-        (!argument_is_float64 &&
+    int param_fbits =
+        code_generator_binary_resolved_type_float_bits(parameter_type);
+    if ((param_fbits &&
+         !code_generator_binary_emit_float_call_argument(
+             generator, context, &instruction->arguments[i], parameter_type,
+             param_fbits, BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])) ||
+        (!param_fbits &&
          !code_generator_binary_emit_call_argument_load(
              generator, context, &instruction->arguments[i], parameter_type,
              BINARY_WIN64_INT_PARAM_REGISTERS[i]))) {
@@ -3493,16 +4029,21 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
     return 0;
   }
 
-  if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
-      code_generator_binary_resolved_type_is_float64(
-          function_symbol->data.function.return_type) &&
-      !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                BINARY_XMM0)) {
-    code_generator_set_error(generator,
-                             "Out of memory while materializing float call "
-                             "return in function '%s'",
-                             context->function_name);
-    return 0;
+  if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION) {
+    int ret_fbits = code_generator_binary_resolved_type_float_bits(
+        function_symbol->data.function.return_type);
+    if (((ret_fbits == 32 &&
+          !binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                    BINARY_XMM0)) ||
+         (ret_fbits == 64 &&
+          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                    BINARY_XMM0)))) {
+      code_generator_set_error(generator,
+                               "Out of memory while materializing float call "
+                               "return in function '%s'",
+                               context->function_name);
+      return 0;
+    }
   }
 
   if (!code_generator_binary_emit_destination_store(generator, context,
@@ -3597,22 +4138,17 @@ static int code_generator_binary_emit_call_indirect(
     register_argument_count = BINARY_WIN64_REGISTER_ARG_COUNT;
   }
   for (size_t i = 0; i < register_argument_count; i++) {
-    int argument_is_float64 =
-        function_type && function_type->fn_param_types &&
-        code_generator_binary_resolved_type_is_float64(
-            function_type->fn_param_types[i]);
     Type *parameter_type =
         function_type && function_type->fn_param_types
             ? function_type->fn_param_types[i]
             : NULL;
-    if ((argument_is_float64 &&
-         (!code_generator_binary_emit_call_argument_load(
-              generator, context, &instruction->arguments[i], parameter_type,
-              BINARY_GP_RAX) ||
-          !binary_emit_movq_xmm_reg(&context->code,
-                                    BINARY_WIN64_FLOAT_PARAM_REGISTERS[i],
-                                    BINARY_GP_RAX))) ||
-        (!argument_is_float64 &&
+    int param_fbits =
+        code_generator_binary_resolved_type_float_bits(parameter_type);
+    if ((param_fbits &&
+         !code_generator_binary_emit_float_call_argument(
+             generator, context, &instruction->arguments[i], parameter_type,
+             param_fbits, BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])) ||
+        (!param_fbits &&
          !code_generator_binary_emit_call_argument_load(
              generator, context, &instruction->arguments[i], parameter_type,
              BINARY_WIN64_INT_PARAM_REGISTERS[i]))) {
@@ -3640,16 +4176,21 @@ static int code_generator_binary_emit_call_indirect(
     return 0;
   }
 
-  if (function_type &&
-      code_generator_binary_resolved_type_is_float64(
-          function_type->fn_return_type) &&
-      !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                BINARY_XMM0)) {
-    code_generator_set_error(generator,
-                             "Out of memory while materializing float indirect "
-                             "call return in function '%s'",
-                             context->function_name);
-    return 0;
+  if (function_type) {
+    int ret_fbits = code_generator_binary_resolved_type_float_bits(
+        function_type->fn_return_type);
+    if ((ret_fbits == 32 &&
+         !binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                   BINARY_XMM0)) ||
+        (ret_fbits == 64 &&
+         !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                   BINARY_XMM0))) {
+      code_generator_set_error(generator,
+                               "Out of memory while materializing float "
+                               "indirect call return in function '%s'",
+                               context->function_name);
+      return 0;
+    }
   }
 
   if (!code_generator_binary_emit_destination_store(generator, context,
@@ -3832,47 +4373,88 @@ static int code_generator_binary_emit_binary(CodeGenerator *generator,
   }
 
   if (instruction->is_float) {
+    int fbits = (instruction->float_bits == 32) ? 32 : 64;
+    int arith_ok = 0;
+    int reg_move_ok = 0;
     op = instruction->text;
-    if (!code_generator_binary_emit_float_operand_to_xmm(
-            generator, context, &instruction->rhs, BINARY_XMM1) ||
-        !code_generator_binary_emit_float_operand_to_xmm(
-            generator, context, &instruction->lhs, BINARY_XMM0)) {
+    /* Bring both operands in at the operation's precision so single- and
+     * double-precision expressions stay in their own domain. */
+    if (!code_generator_binary_emit_float_operand_to_xmm_bits(
+            generator, context, &instruction->rhs, BINARY_XMM1, fbits) ||
+        !code_generator_binary_emit_float_operand_to_xmm_bits(
+            generator, context, &instruction->lhs, BINARY_XMM0, fbits)) {
       goto emit_failure;
     }
 
     if (strcmp(op, "+") == 0) {
-      if (!binary_emit_addsd_xmm_xmm(&context->code, BINARY_XMM0,
-                                     BINARY_XMM1) ||
-          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM0)) {
+      arith_ok = (fbits == 32)
+                     ? binary_emit_addss_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1)
+                     : binary_emit_addsd_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1);
+      reg_move_ok =
+          (fbits == 32)
+              ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)
+              : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0);
+      if (!arith_ok || !reg_move_ok) {
         goto emit_failure;
       }
     } else if (strcmp(op, "-") == 0) {
-      if (!binary_emit_subsd_xmm_xmm(&context->code, BINARY_XMM0,
-                                     BINARY_XMM1) ||
-          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM0)) {
+      arith_ok = (fbits == 32)
+                     ? binary_emit_subss_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1)
+                     : binary_emit_subsd_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1);
+      reg_move_ok =
+          (fbits == 32)
+              ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)
+              : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0);
+      if (!arith_ok || !reg_move_ok) {
         goto emit_failure;
       }
     } else if (strcmp(op, "*") == 0) {
-      if (!binary_emit_mulsd_xmm_xmm(&context->code, BINARY_XMM0,
-                                     BINARY_XMM1) ||
-          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM0)) {
+      arith_ok = (fbits == 32)
+                     ? binary_emit_mulss_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1)
+                     : binary_emit_mulsd_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1);
+      reg_move_ok =
+          (fbits == 32)
+              ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)
+              : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0);
+      if (!arith_ok || !reg_move_ok) {
         goto emit_failure;
       }
     } else if (strcmp(op, "/") == 0) {
-      if (!binary_emit_divsd_xmm_xmm(&context->code, BINARY_XMM0,
-                                     BINARY_XMM1) ||
-          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM0)) {
+      arith_ok = (fbits == 32)
+                     ? binary_emit_divss_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1)
+                     : binary_emit_divsd_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1);
+      reg_move_ok =
+          (fbits == 32)
+              ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)
+              : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0);
+      if (!arith_ok || !reg_move_ok) {
         goto emit_failure;
       }
     } else if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
                strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
                strcmp(op, ">") == 0 || strcmp(op, ">=") == 0) {
-      if (!binary_emit_ucomisd_xmm_xmm(&context->code, BINARY_XMM0,
-                                       BINARY_XMM1)) {
+      int cmp_ok = (fbits == 32)
+                       ? binary_emit_ucomiss_xmm_xmm(&context->code,
+                                                     BINARY_XMM0, BINARY_XMM1)
+                       : binary_emit_ucomisd_xmm_xmm(&context->code,
+                                                     BINARY_XMM0, BINARY_XMM1);
+      if (!cmp_ok) {
         goto emit_failure;
       }
 
@@ -4068,27 +4650,37 @@ static int code_generator_binary_emit_unary(CodeGenerator *generator,
   }
 
   if (instruction->is_float) {
+    int fbits = (instruction->float_bits == 32) ? 32 : 64;
     op = instruction->text;
-    if (!code_generator_binary_emit_operand_load(generator, context,
-                                                 &instruction->lhs,
-                                                 BINARY_GP_RAX) ||
-        !binary_emit_movq_xmm_reg(&context->code, BINARY_XMM0,
-                                  BINARY_GP_RAX)) {
+    if (!code_generator_binary_emit_float_operand_to_xmm_bits(
+            generator, context, &instruction->lhs, BINARY_XMM0, fbits)) {
       goto emit_failure;
     }
 
     if (strcmp(op, "-") == 0) {
-      if (!binary_emit_pxor_xmm_xmm(&context->code, BINARY_XMM1,
-                                    BINARY_XMM1) ||
-          !binary_emit_subsd_xmm_xmm(&context->code, BINARY_XMM1,
-                                     BINARY_XMM0) ||
-          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM1)) {
+      /* Negate as 0 - x at the operand precision. */
+      int neg_ok =
+          binary_emit_pxor_xmm_xmm(&context->code, BINARY_XMM1, BINARY_XMM1) &&
+          (fbits == 32
+               ? binary_emit_subss_xmm_xmm(&context->code, BINARY_XMM1,
+                                           BINARY_XMM0)
+               : binary_emit_subsd_xmm_xmm(&context->code, BINARY_XMM1,
+                                           BINARY_XMM0)) &&
+          (fbits == 32
+               ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                          BINARY_XMM1)
+               : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                          BINARY_XMM1));
+      if (!neg_ok) {
         goto emit_failure;
       }
     } else if (strcmp(op, "+") == 0) {
-      if (!binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM0)) {
+      int mv_ok = (fbits == 32)
+                      ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                                 BINARY_XMM0)
+                      : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                                 BINARY_XMM0);
+      if (!mv_ok) {
         goto emit_failure;
       }
     } else {
@@ -4253,11 +4845,33 @@ static int code_generator_binary_emit_instruction(
     return 1;
   }
 
-  case IR_OP_ASSIGN:
+  case IR_OP_ASSIGN: {
     if (!code_generator_binary_emit_operand_load(generator, context,
                                                  &instruction->lhs,
-                                                 BINARY_GP_RAX) ||
-        !code_generator_binary_emit_destination_store(generator, context,
+                                                 BINARY_GP_RAX)) {
+      if (!generator->has_error) {
+        code_generator_set_error(generator,
+                                 "Out of memory while emitting assign");
+      }
+      return 0;
+    }
+    /* Convert when a float value is assigned into a destination of a
+     * different float precision (instruction->float_bits = target width,
+     * set by ir_lowering from the declared/symbol type). */
+    if (instruction->is_float && instruction->float_bits) {
+      int value_bits = code_generator_binary_operand_float_bits(
+          generator, context, &instruction->lhs);
+      if (value_bits &&
+          !code_generator_binary_emit_float_reg_convert(
+              context, BINARY_GP_RAX, value_bits, instruction->float_bits)) {
+        code_generator_set_error(generator,
+                                 "Out of memory while converting float assign "
+                                 "precision in function '%s'",
+                                 context->function_name);
+        return 0;
+      }
+    }
+    if (!code_generator_binary_emit_destination_store(generator, context,
                                                       &instruction->dest,
                                                       BINARY_GP_RAX)) {
       if (!generator->has_error) {
@@ -4267,6 +4881,7 @@ static int code_generator_binary_emit_instruction(
       return 0;
     }
     return 1;
+  }
 
   case IR_OP_ADDRESS_OF:
     return code_generator_binary_emit_address_of(generator, context,
@@ -4362,6 +4977,23 @@ static int code_generator_binary_emit_instruction(
                                                  BINARY_GP_RAX)) {
       return 0;
     }
+    /* Convert the returned value to the function's float return precision
+     * (instruction->float_bits set by ir_lowering) so the epilogue's
+     * RAX->XMM0 transfer carries correctly-rounded bits. */
+    if (instruction->lhs.kind != IR_OPERAND_NONE && instruction->is_float &&
+        instruction->float_bits) {
+      int value_bits = code_generator_binary_operand_float_bits(
+          generator, context, &instruction->lhs);
+      if (value_bits &&
+          !code_generator_binary_emit_float_reg_convert(
+              context, BINARY_GP_RAX, value_bits, instruction->float_bits)) {
+        code_generator_set_error(generator,
+                                 "Out of memory while converting float return "
+                                 "precision in function '%s'",
+                                 context->function_name);
+        return 0;
+      }
+    }
     if (!binary_emit_jmp_placeholder(&context->code, &displacement_offset) ||
         !binary_offset_table_add(&context->return_fixups, displacement_offset)) {
       code_generator_set_error(generator,
@@ -4416,10 +5048,10 @@ static int code_generator_binary_emit_prologue(CodeGenerator *generator,
 
   for (size_t i = 0; i < function_data->parameter_count; i++) {
     const char *parameter_name = function_data->parameter_names[i];
-    int parameter_is_float64 = code_generator_binary_named_type_is_float64(
-        generator,
-        function_data->parameter_types ? function_data->parameter_types[i] : NULL,
-        0);
+    int parameter_fbits = code_generator_binary_named_type_float_bits(
+        generator, function_data->parameter_types
+                       ? function_data->parameter_types[i]
+                       : NULL);
     int home_offset =
         code_generator_binary_get_parameter_offset(context, parameter_name);
     if (home_offset <= 0) {
@@ -4432,14 +5064,26 @@ static int code_generator_binary_emit_prologue(CodeGenerator *generator,
     }
 
     if (i < BINARY_WIN64_REGISTER_ARG_COUNT) {
-      if ((parameter_is_float64 &&
-           (!binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                      BINARY_WIN64_FLOAT_PARAM_REGISTERS[i]) ||
-            !binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP,
-                                     -home_offset, BINARY_GP_RAX))) ||
-          (!parameter_is_float64 &&
-           !binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP, -home_offset,
-                                    BINARY_WIN64_INT_PARAM_REGISTERS[i]))) {
+      int home_ok = 1;
+      if (parameter_fbits) {
+        /* Float params arrive in XMM; copy the bits to GP at the param's
+         * precision (movd for float32, movq for float64) before homing. */
+        home_ok =
+            (parameter_fbits == 32
+                 ? binary_emit_movd_reg_xmm(
+                       &context->code, BINARY_GP_RAX,
+                       BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])
+                 : binary_emit_movq_reg_xmm(
+                       &context->code, BINARY_GP_RAX,
+                       BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])) &&
+            binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP,
+                                    -home_offset, BINARY_GP_RAX);
+      } else {
+        home_ok = binary_emit_mov_mem_reg(
+            &context->code, BINARY_GP_RBP, -home_offset,
+            BINARY_WIN64_INT_PARAM_REGISTERS[i]);
+      }
+      if (!home_ok) {
         code_generator_set_error(generator,
                                  "Out of memory while homing parameters");
         return 0;
@@ -4541,7 +5185,12 @@ static int code_generator_emit_binary_function(CodeGenerator *generator,
   }
 
   return_offset = context.code.size;
-  if ((context.return_is_float64 &&
+  /* Win64 returns floating values in XMM0. The function body leaves the raw
+   * return bits in RAX; transfer at the return type's precision. */
+  if ((context.return_float_bits == 32 &&
+       !binary_emit_movd_xmm_reg(&context.code, BINARY_XMM0,
+                                 BINARY_GP_RAX)) ||
+      (context.return_float_bits == 64 &&
        !binary_emit_movq_xmm_reg(&context.code, BINARY_XMM0,
                                  BINARY_GP_RAX)) ||
       !binary_emit_mov_reg_reg(&context.code, BINARY_GP_RSP, BINARY_GP_RBP) ||

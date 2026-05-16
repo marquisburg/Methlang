@@ -229,18 +229,23 @@ var n: int32 = identity<int32>(42);  // function call with type args
 
 The compiler performs **monomorphization** before type checking: each unique instantiation becomes a concrete type or function. There is no runtime generics; all type parameters are resolved at compile time.
 
-**Constraints:** A single inline marker-trait bound per type parameter is supported. Declare a trait with `trait Name;`, satisfy it with `impl Name for Type;`, and use it in a generic parameter as `T: Name`.
+**Constraints:** Trait bounds are supported. Declare a trait, satisfy it with `impl Trait for Type`, and constrain generic parameters with inline bounds such as `T: Name`, multiple inline bounds such as `T: Addable + SignedNumber`, or a trailing `where` clause.
 
 ```meth
-trait Addable;
-impl Addable for int32;
+trait Incrementable {
+  function next_value(self: Self) -> Self;
+}
 
-function identity_addable<T: Addable>(x: T) -> T {
-  return x;
+impl Incrementable for int32 {
+  function next_value(self: Self) -> Self {
+    return self + 1;
+  }
+}
+
+function bump<T>(x: T) -> T where T: Incrementable {
+  return x.next_value();
 }
 ```
-
-Trait bounds are currently marker-only: there are no trait methods, no multiple bounds, and no `where` clauses yet.
 
 ## Type Conversions
 

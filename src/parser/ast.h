@@ -139,11 +139,15 @@ typedef struct {
 typedef struct {
   char *name;
   int is_exported;
+  ASTNode **methods;
+  size_t method_count;
 } TraitDeclaration;
 
 typedef struct {
   char *trait_name;
   char *for_type_name;
+  ASTNode **methods;
+  size_t method_count;
 } ImplDeclaration;
 
 typedef struct {
@@ -187,6 +191,9 @@ typedef struct {
     double float_value;
   };
   int is_float;
+  /* TOKEN_NUMBER source radix for default integer type (2, 10, 16); 10 for
+   * synthesized literals. */
+  unsigned char int_radix;
 } NumberLiteral;
 
 typedef struct {
@@ -323,7 +330,8 @@ ASTNode *ast_create_inline_asm(const char *assembly_code,
                                SourceLocation location);
 ASTNode *ast_create_identifier(const char *name, SourceLocation location);
 ASTNode *ast_create_number_literal(long long int_value,
-                                   SourceLocation location);
+                                   SourceLocation location,
+                                   unsigned char int_radix);
 ASTNode *ast_create_float_literal(double float_value, SourceLocation location);
 ASTNode *ast_create_string_literal(const char *value, SourceLocation location);
 ASTNode *ast_create_binary_expression(ASTNode *left, const char *op,

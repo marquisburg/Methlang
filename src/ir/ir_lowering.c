@@ -21,6 +21,10 @@ typedef struct {
   TypeChecker *type_checker;
   SymbolTable *symbol_table;
   int emit_runtime_checks;
+  /* Declared return type name of the function currently being lowered. Used
+   * to give a width-less float literal in `return <lit>;` the correct
+   * single/double precision (literals always infer to float64 otherwise). */
+  const char *current_return_type_name;
 } IRLoweringContext;
 
 typedef struct {
@@ -77,6 +81,10 @@ static int ir_emit_return_with_defers(IRLoweringContext *context,
                                       IRFunction *function,
                                       IRDeferScope *defers, IROperand *value,
                                       SourceLocation location);
+static int ir_named_type_float_bits(IRLoweringContext *context,
+                                    const char *type_name);
+static void ir_assign_apply_float_bits(IRInstruction *instruction,
+                                       IROperand *value, int bits);
 static int ir_emit_jump_instruction(IRLoweringContext *context,
                                     IRFunction *function, const char *label,
                                     SourceLocation location);
@@ -103,6 +111,7 @@ static int ir_emit_address_of_symbol(IRLoweringContext *context,
                                      SourceLocation location,
                                      IROperand *out_address);
 static int ir_type_storage_size(Type *type);
+static int ir_type_array_element_stride(Type *element_type);
 static int ir_lower_switch_statement(IRLoweringContext *context,
                                      IRFunction *function, ASTNode *statement);
 static int ir_lower_match_statement(IRLoweringContext *context,
@@ -1018,6 +1027,14 @@ static int ir_emit_return_with_defers(IRLoweringContext *context,
   instruction.op = IR_OP_RETURN;
   instruction.location = location;
   instruction.lhs = *value;
+  if (value->kind != IR_OPERAND_NONE) {
+    int return_bits =
+        ir_named_type_float_bits(context, context->current_return_type_name);
+    if (return_bits) {
+      ir_assign_apply_float_bits(&instruction, &instruction.lhs, return_bits);
+      value->float_bits = instruction.lhs.float_bits;
+    }
+  }
   if (!ir_emit(context, function, &instruction)) {
     return 0;
   }
@@ -1439,6 +1456,119 @@ static int ir_expression_is_floating(IRLoweringContext *context,
   return type->kind == TYPE_FLOAT32 || type->kind == TYPE_FLOAT64;
 }
 
+/* True only for a true 8-byte float64. The backend's "known float64" path
+ * reinterprets the loaded 64 bits via `movq xmm, r64`; that is correct for
+ * float64 but wrong for float32 or integer-width types, so gate strictly. */
+static int ir_type_is_float64(Type *type) {
+  return type && type->kind == TYPE_FLOAT64 && type->size == 8;
+}
+
+/* IEEE-754 width for a floating type: 32 for float32, otherwise 64. Callers
+ * must already know the type is floating (use ir_type_is_float* / the type
+ * checker). Returns 64 for NULL so non-float contexts get the safe default. */
+static int ir_type_float_bits(Type *type) {
+  return (type && type->kind == TYPE_FLOAT32) ? 32 : 64;
+}
+
+/* Float width for a named type (e.g. a declared variable / parameter type).
+ * Returns 0 when the name does not resolve to a floating type, else 32/64. */
+static int ir_named_type_float_bits(IRLoweringContext *context,
+                                    const char *type_name) {
+  Type *type = NULL;
+  if (!context || !context->type_checker || !type_name) {
+    return 0;
+  }
+  type = type_checker_get_type_by_name(context->type_checker, type_name);
+  if (!type || (type->kind != TYPE_FLOAT32 && type->kind != TYPE_FLOAT64)) {
+    return 0;
+  }
+  return ir_type_float_bits(type);
+}
+
+/* Stamp a freshly produced float operand with the requested IEEE-754 width.
+ * No-op for non-float operands or when bits is 0. When narrowing a float64
+ * literal to float32, round the constant through float so the stored bits are
+ * the true single-precision value, not a truncated double pattern. */
+static void ir_operand_apply_float_bits(IROperand *operand, int bits) {
+  if (!operand || operand->kind != IR_OPERAND_FLOAT ||
+      (bits != 32 && bits != 64)) {
+    return;
+  }
+  if (bits == 32) {
+    operand->float_value = (double)(float)operand->float_value;
+  }
+  operand->float_bits = bits;
+}
+
+/* Float width of a declared symbol (variable/parameter). 0 if not floating. */
+static int ir_symbol_float_bits(IRLoweringContext *context, const char *name) {
+  Symbol *symbol = NULL;
+  if (!context || !context->symbol_table || !name) {
+    return 0;
+  }
+  symbol = symbol_table_lookup(context->symbol_table, name);
+  if (!symbol || !symbol->type ||
+      (symbol->type->kind != TYPE_FLOAT32 &&
+       symbol->type->kind != TYPE_FLOAT64)) {
+    return 0;
+  }
+  return ir_type_float_bits(symbol->type);
+}
+
+/* Record, on an ASSIGN/STORE, the TARGET float precision (bits = 32/64) of the
+ * destination. instruction->float_bits is the destination width; the source
+ * value operand keeps its own width so the backend can detect a precision
+ * mismatch (e.g. a float64 expression assigned to a float32 variable) and
+ * emit the cvtsd2ss / cvtss2sd it needs. A bare float literal has no runtime
+ * width, so re-round it to the target precision in place — no conversion is
+ * required for it. No-op when bits is 0 (target is not floating). */
+static void ir_assign_apply_float_bits(IRInstruction *instruction,
+                                       IROperand *value, int bits) {
+  if (!instruction || bits == 0) {
+    return;
+  }
+  instruction->is_float = 1;
+  instruction->float_bits = (bits == 32) ? 32 : 64;
+  if (value && value->kind == IR_OPERAND_FLOAT) {
+    ir_operand_apply_float_bits(value, instruction->float_bits);
+    instruction->lhs.float_bits = value->float_bits;
+  } else if (value) {
+    /* Preserve the value's own width; the backend converts if it differs
+     * from instruction->float_bits. */
+    instruction->lhs.float_bits = value->float_bits;
+  }
+}
+
+/* Mark a LOAD instruction (and its destination temp) as floating when the
+ * loaded type is float32/float64, recording the width. Backends key off this
+ * to pick movss/cvtss* vs movsd/cvtsd* and 4- vs 8-byte memory access. */
+static void ir_load_apply_float_type(IRInstruction *load, Type *loaded_type) {
+  if (!load || !loaded_type) {
+    return;
+  }
+  if (loaded_type->kind != TYPE_FLOAT32 && loaded_type->kind != TYPE_FLOAT64) {
+    return;
+  }
+  load->is_float = 1;
+  load->float_bits = ir_type_float_bits(loaded_type);
+  load->dest.float_bits = load->float_bits;
+}
+
+/* Resolve the float width of an expression via the type checker. Returns 0
+ * when the expression is not floating, else 32 or 64. */
+static int ir_expression_float_bits(IRLoweringContext *context,
+                                    ASTNode *expression) {
+  Type *type = NULL;
+  if (!context || !context->type_checker || !expression) {
+    return 0;
+  }
+  type = type_checker_infer_type(context->type_checker, expression);
+  if (!type || (type->kind != TYPE_FLOAT32 && type->kind != TYPE_FLOAT64)) {
+    return 0;
+  }
+  return ir_type_float_bits(type);
+}
+
 static int ir_type_storage_size(Type *type) {
   if (!type || type->size == 0) {
     return 8;
@@ -1450,6 +1580,17 @@ static int ir_type_storage_size(Type *type) {
   }
 
   return 8;
+}
+
+/* Memory stride between consecutive elements in an array — must match
+ * laid-out sizeof(element), including structs > 8 bytes. Prefer this over
+ * ir_type_storage_size() for base + index * stride address math only. */
+static int ir_type_array_element_stride(Type *element_type) {
+  if (!element_type || element_type->size == 0 ||
+      element_type->size > (size_t)INT_MAX) {
+    return 8;
+  }
+  return (int)element_type->size;
 }
 
 static int ir_make_temp_operand(IRLoweringContext *context,
@@ -2023,6 +2164,22 @@ static int ir_lower_call_expression(IRLoweringContext *context,
     }
   }
 
+  /* Give width-less float literal arguments the declared parameter precision
+   * so a float32 parameter receives a single-precision value, not a truncated
+   * double. Only direct calls expose declared parameter types. */
+  if (callee_symbol && callee_symbol->kind == SYMBOL_FUNCTION) {
+    size_t typed = callee_symbol->data.function.parameter_count;
+    for (size_t i = 0; i < call->argument_count && i < typed; i++) {
+      Type *ptype = callee_symbol->data.function.parameter_types
+                        ? callee_symbol->data.function.parameter_types[i]
+                        : NULL;
+      if (ptype && (ptype->kind == TYPE_FLOAT32 ||
+                    ptype->kind == TYPE_FLOAT64)) {
+        ir_operand_apply_float_bits(&arguments[i], ir_type_float_bits(ptype));
+      }
+    }
+  }
+
   IRInstruction instruction = {0};
   instruction.location = expression->location;
   instruction.dest = destination;
@@ -2296,7 +2453,7 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
       return 0;
     }
 
-    int element_size = ir_type_storage_size(array_type->base_type);
+    int element_size = ir_type_array_element_stride(array_type->base_type);
     IRInstruction multiply = {0};
     multiply.op = IR_OP_BINARY;
     multiply.location = expression->location;
@@ -2748,6 +2905,14 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     instruction.rhs = right;
     instruction.text = binary->operator;
     instruction.is_float = ir_expression_is_floating(context, expression);
+    if (instruction.is_float) {
+      instruction.float_bits = ir_expression_float_bits(context, expression);
+      if (instruction.float_bits == 0) {
+        instruction.float_bits = 64;
+      }
+      instruction.dest.float_bits = instruction.float_bits;
+      destination.float_bits = instruction.float_bits;
+    }
 
     if (!ir_emit(context, function, &instruction)) {
       ir_operand_destroy(&destination);
@@ -2889,6 +3054,8 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       load_result.dest = loaded_value;
       load_result.lhs = result_address;
       load_result.rhs = ir_operand_int(ir_type_storage_size(payload_type));
+      ir_load_apply_float_type(&load_result, payload_type);
+      loaded_value.float_bits = load_result.dest.float_bits;
       if (!ir_emit(context, function, &load_result)) {
         ir_operand_destroy(&future_value);
         ir_operand_destroy(&offset_address);
@@ -2940,11 +3107,13 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       load.dest = destination;
       load.lhs = address;
       load.rhs = ir_operand_int(ir_type_storage_size(target_type));
+      ir_load_apply_float_type(&load, target_type);
       if (!ir_emit(context, function, &load)) {
         ir_operand_destroy(&destination);
         ir_operand_destroy(&address);
         return 0;
       }
+      destination.float_bits = load.dest.float_bits;
 
       ir_operand_destroy(&address);
       *out_value = destination;
@@ -2969,6 +3138,14 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     instruction.lhs = operand;
     instruction.text = unary->operator;
     instruction.is_float = ir_expression_is_floating(context, expression);
+    if (instruction.is_float) {
+      instruction.float_bits = ir_expression_float_bits(context, expression);
+      if (instruction.float_bits == 0) {
+        instruction.float_bits = 64;
+      }
+      instruction.dest.float_bits = instruction.float_bits;
+      destination.float_bits = instruction.float_bits;
+    }
 
     if (!ir_emit(context, function, &instruction)) {
       ir_operand_destroy(&destination);
@@ -3007,11 +3184,13 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     load.dest = destination;
     load.lhs = address;
     load.rhs = ir_operand_int(ir_type_storage_size(value_type));
+    ir_load_apply_float_type(&load, value_type);
     if (!ir_emit(context, function, &load)) {
       ir_operand_destroy(&destination);
       ir_operand_destroy(&address);
       return 0;
     }
+    destination.float_bits = load.dest.float_bits;
 
     ir_operand_destroy(&address);
     *out_value = destination;
@@ -3098,6 +3277,26 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     instruction.text = cast_expr->type_name;
     instruction.is_float =
         ir_expression_is_floating(context, cast_expr->operand);
+    if (instruction.is_float) {
+      /* float_bits on a CAST records the SOURCE operand width so the backend
+       * can pick cvttss2si/cvtss2sd (f32) vs cvttsd2si (f64). The TARGET
+       * width is resolved separately from instruction->text. */
+      instruction.float_bits =
+          ir_expression_float_bits(context, cast_expr->operand);
+      if (instruction.float_bits == 0) {
+        instruction.float_bits = 64;
+      }
+    }
+    {
+      /* Tag the destination with the target float width so a value produced
+       * by e.g. (float32)x is recognized as float32 by later consumers. */
+      int target_bits =
+          ir_named_type_float_bits(context, cast_expr->type_name);
+      if (target_bits) {
+        instruction.dest.float_bits = target_bits;
+        destination.float_bits = target_bits;
+      }
+    }
 
     if (!ir_emit(context, function, &instruction)) {
       ir_operand_destroy(&destination);
@@ -3271,6 +3470,9 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
       assign.location = statement->location;
       assign.dest = ir_operand_symbol(declaration->name);
       assign.lhs = value;
+      ir_assign_apply_float_bits(
+          &assign, &assign.lhs,
+          ir_named_type_float_bits(context, declaration->type_name));
       if (!assign.dest.name) {
         ir_operand_destroy(&value);
         ir_set_error(context,
@@ -3306,6 +3508,9 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
       assign.location = statement->location;
       assign.dest = ir_operand_symbol(assignment->variable_name);
       assign.lhs = value;
+      ir_assign_apply_float_bits(
+          &assign, &assign.lhs,
+          ir_symbol_float_bits(context, assignment->variable_name));
       if (!assign.dest.name) {
         ir_operand_destroy(&value);
         ir_set_error(context, "Out of memory while lowering assignment target");
@@ -3350,6 +3555,11 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     store.dest = address;
     store.lhs = value;
     store.rhs = ir_operand_int(ir_type_storage_size(target_type));
+    if (target_type->kind == TYPE_FLOAT32 ||
+        target_type->kind == TYPE_FLOAT64) {
+      ir_assign_apply_float_bits(&store, &store.lhs,
+                                 ir_type_float_bits(target_type));
+    }
     if (!ir_emit(context, function, &store)) {
       ir_operand_destroy(&address);
       ir_operand_destroy(&value);
@@ -3719,6 +3929,8 @@ static IRFunction *ir_lower_function(IRLoweringContext *context,
     ir_set_error(context, "Malformed function declaration");
     return NULL;
   }
+
+  context->current_return_type_name = function_data->return_type;
 
   IRFunction *function = ir_function_create(function_data->name);
   if (!function) {

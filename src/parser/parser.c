@@ -1,7 +1,10 @@
 #include "parser.h"
 #include "../error/error_reporter.h"
 #include "../string_intern.h"
+#include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -944,6 +947,129 @@ static void parser_free_type_param_list(char **params, char **traits,
   parser_free_string_array(traits, count);
 }
 
+static char *parser_parse_qualified_name(Parser *parser, const char *expected);
+
+static int parser_append_type_param_bound(char **bounds,
+                                          const char *trait_name) {
+  char *combined = NULL;
+  size_t len = 0;
+
+  if (!bounds || !trait_name) {
+    return 0;
+  }
+
+  if (!*bounds) {
+    *bounds = strdup(trait_name);
+    return *bounds != NULL;
+  }
+
+  len = strlen(*bounds) + 1 + strlen(trait_name) + 1;
+  combined = malloc(len);
+  if (!combined) {
+    return 0;
+  }
+
+  snprintf(combined, len, "%s+%s", *bounds, trait_name);
+  free(*bounds);
+  *bounds = combined;
+  return 1;
+}
+
+static int parser_find_type_param_index(char **params, size_t count,
+                                        const char *name, size_t *out_index) {
+  if (!params || !name || !out_index) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    if (params[i] && strcmp(params[i], name) == 0) {
+      *out_index = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int parser_parse_bound_list(Parser *parser, char **out_bounds) {
+  if (!parser || !out_bounds) {
+    return 0;
+  }
+
+  do {
+    char *trait_name =
+        parser_parse_qualified_name(parser, "Expected trait name in bound");
+    if (!trait_name) {
+      return 0;
+    }
+
+    if (!parser_append_type_param_bound(out_bounds, trait_name)) {
+      free(trait_name);
+      parser_set_error(parser, "Out of memory while parsing trait bounds");
+      return 0;
+    }
+    free(trait_name);
+
+    if (parser->current_token.type != TOKEN_PLUS) {
+      break;
+    }
+    parser_advance(parser);
+  } while (1);
+
+  return 1;
+}
+
+static int parser_parse_where_clause(Parser *parser, char **type_params,
+                                     char **type_param_traits,
+                                     size_t type_param_count) {
+  if (!parser || parser->current_token.type != TOKEN_WHERE) {
+    return 1;
+  }
+
+  parser_advance(parser); // consume 'where'
+
+  do {
+    size_t param_index = 0;
+    char *param_name = NULL;
+
+    if (!parser_is_identifier_like(parser->current_token.type)) {
+      parser_set_error(parser, "Expected type parameter name in where clause");
+      return 0;
+    }
+
+    param_name = strdup(parser->current_token.value);
+    if (!param_name) {
+      parser_set_error(parser, "Out of memory while parsing where clause");
+      return 0;
+    }
+    parser_advance(parser);
+
+    if (!parser_find_type_param_index(type_params, type_param_count, param_name,
+                                      &param_index)) {
+      parser_set_error(parser,
+                       "Where clause references unknown type parameter");
+      free(param_name);
+      return 0;
+    }
+    free(param_name);
+
+    if (!parser_expect(parser, TOKEN_COLON)) {
+      return 0;
+    }
+
+    if (!parser_parse_bound_list(parser, &type_param_traits[param_index])) {
+      return 0;
+    }
+
+    if (parser->current_token.type != TOKEN_COMMA) {
+      break;
+    }
+    parser_advance(parser);
+  } while (1);
+
+  return 1;
+}
+
 static char *parser_parse_qualified_name(Parser *parser, const char *expected) {
   char *name = NULL;
 
@@ -1020,9 +1146,7 @@ static char **parser_parse_type_param_list(Parser *parser, char ***out_traits,
 
     if (parser->current_token.type == TOKEN_COLON) {
       parser_advance(parser);
-      traits[count - 1] =
-          parser_parse_qualified_name(parser, "Expected trait name after ':'");
-      if (!traits[count - 1]) {
+      if (!parser_parse_bound_list(parser, &traits[count - 1])) {
         parser_free_type_param_list(params, traits, count);
         return NULL;
       }
@@ -1295,6 +1419,89 @@ static char *parser_parse_type_annotation(Parser *parser) {
   return full_type;
 }
 
+static int parser_literal_radix_hint(const char *value) {
+  if (!value || value[0] != '0' || value[1] == '\0') {
+    return 10;
+  }
+  if (value[1] == 'x' || value[1] == 'X') {
+    return 16;
+  }
+  if (value[1] == 'b' || value[1] == 'B') {
+    return 2;
+  }
+  /* Leading zeros without 0x/0b prefix are still decimal (e.g. "007"). */
+  return 10;
+}
+
+/*
+ * Parses integer TOKEN_NUMBER lexeme text into long long bits and radix.
+ * Handles decimal, hexadecimal (strtoull 16), and binary (0b) digits only.
+ */
+static int parser_parse_integer_literal_string(
+    Parser *parser, const char *value, long long *out_value,
+    unsigned char *out_radix) {
+  if (!parser || !value || !out_value || !out_radix) {
+    return 0;
+  }
+
+  int hint = parser_literal_radix_hint(value);
+
+  errno = 0;
+  char *end = NULL;
+
+  if (hint == 16) {
+    unsigned long long u = strtoull(value, &end, 16);
+    if (end == value || *end != '\0') {
+      parser_set_error(parser, "Invalid hexadecimal literal");
+      return 0;
+    }
+    if (errno == ERANGE) {
+      parser_set_error(parser, "Hexadecimal literal is out of range");
+      return 0;
+    }
+    *out_radix = 16;
+    *out_value = (long long)u;
+    return 1;
+  }
+
+  if (hint == 2) {
+    const char *p = value + 2;
+    if (*p == '\0') {
+      parser_set_error(parser, "Invalid binary literal");
+      return 0;
+    }
+    unsigned long long u = 0;
+    while (*p) {
+      if (*p != '0' && *p != '1') {
+        parser_set_error(parser, "Invalid binary literal");
+        return 0;
+      }
+      if (u > (ULLONG_MAX >> 1)) {
+        parser_set_error(parser, "Binary literal is out of range");
+        return 0;
+      }
+      u = u * 2 + (unsigned long long)(*p - '0');
+      p++;
+    }
+    *out_radix = 2;
+    *out_value = (long long)u;
+    return 1;
+  }
+
+  long long s = strtoll(value, &end, 10);
+  if (end == value || *end != '\0') {
+    parser_set_error(parser, "Invalid integer literal");
+    return 0;
+  }
+  if (errno == ERANGE) {
+    parser_set_error(parser, "Decimal integer literal is out of range");
+    return 0;
+  }
+  *out_radix = 10;
+  *out_value = s;
+  return 1;
+}
+
 static ASTNode *parser_parse_for_initializer(Parser *parser) {
   if (!parser)
     return NULL;
@@ -1341,8 +1548,16 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
       double float_val = atof(value);
       result = ast_create_float_literal(float_val, location);
     } else {
-      long long int_val = atoll(value);
-      result = ast_create_number_literal(int_val, location);
+      long long int_val = 0;
+      unsigned char int_radix = 10;
+      if (!parser_parse_integer_literal_string(parser, value, &int_val,
+                                               &int_radix)) {
+        return NULL;
+      }
+      result = ast_create_number_literal(int_val, location, int_radix);
+      if (!result) {
+        return NULL;
+      }
     }
 
     parser_advance(parser);
@@ -2367,6 +2582,24 @@ static ASTNode *parser_parse_function_declaration_with_async(Parser *parser,
     }
   }
 
+  if (parser->current_token.type == TOKEN_WHERE &&
+      !parser_parse_where_clause(parser, func_type_params,
+                                 func_type_param_traits,
+                                 func_type_param_count)) {
+    for (size_t i = 0; i < param_count; i++) {
+      free(param_names[i]);
+      free(param_types[i]);
+    }
+    free(param_names);
+    free(param_types);
+    parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                func_type_param_count);
+    free(func_name);
+    free(return_type);
+    free(link_name);
+    return NULL;
+  }
+
   if (parser->current_token.type == TOKEN_EQUALS) {
     parser_advance(parser); // consume '='
     if (parser->current_token.type != TOKEN_STRING) {
@@ -2506,18 +2739,80 @@ ASTNode *parser_parse_trait_declaration(Parser *parser) {
 
   char *trait_name = strdup(parser->current_token.value);
   ASTNode *trait_decl = NULL;
+  ASTNode **methods = NULL;
+  size_t method_count = 0;
   parser_advance(parser);
 
   if (!trait_name) {
     return NULL;
   }
 
-  if (!parser_expect_statement_end(parser)) {
-    free(trait_name);
-    return NULL;
+  if (parser->current_token.type == TOKEN_LBRACE) {
+    parser_advance(parser);
+    while (parser->current_token.type != TOKEN_RBRACE &&
+           parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+      if (parser->current_token.type == TOKEN_NEWLINE ||
+          parser->current_token.type == TOKEN_SEMICOLON) {
+        parser_advance(parser);
+        continue;
+      }
+      if (parser->current_token.type != TOKEN_FUNCTION &&
+          parser->current_token.type != TOKEN_FN) {
+        parser_set_error(parser,
+                         "Expected function signature in trait declaration");
+        goto trait_cleanup;
+      }
+      ASTNode *method = parser_parse_function_declaration(parser);
+      if (!method) {
+        goto trait_cleanup;
+      }
+      FunctionDeclaration *method_decl = (FunctionDeclaration *)method->data;
+      if (method_decl && method_decl->body) {
+        parser_set_error(parser, "Trait method declarations must not have a body");
+        ast_destroy_node(method);
+        goto trait_cleanup;
+      }
+      ASTNode **grown = realloc(methods, (method_count + 1) * sizeof(ASTNode *));
+      if (!grown) {
+        parser_set_error(parser, "Out of memory while parsing trait methods");
+        ast_destroy_node(method);
+        goto trait_cleanup;
+      }
+      methods = grown;
+      methods[method_count++] = method;
+    }
+    if (!parser_expect(parser, TOKEN_RBRACE)) {
+      goto trait_cleanup;
+    }
+  } else if (!parser_expect_statement_end(parser)) {
+    goto trait_cleanup;
   }
 
   trait_decl = ast_create_trait_declaration(trait_name, location);
+  if (trait_decl && trait_decl->data && method_count > 0) {
+    TraitDeclaration *data = (TraitDeclaration *)trait_decl->data;
+    data->methods = malloc(method_count * sizeof(ASTNode *));
+    if (!data->methods) {
+      parser_set_error(parser, "Out of memory while parsing trait methods");
+      ast_destroy_node(trait_decl);
+      trait_decl = NULL;
+      goto trait_cleanup;
+    }
+    data->method_count = method_count;
+    for (size_t i = 0; i < method_count; i++) {
+      data->methods[i] = methods[i];
+      ast_add_child(trait_decl, methods[i]);
+      methods[i] = NULL;
+    }
+  }
+
+trait_cleanup:
+  for (size_t i = 0; i < method_count; i++) {
+    if (methods[i]) {
+      ast_destroy_node(methods[i]);
+    }
+  }
+  free(methods);
   free(trait_name);
   return trait_decl;
 }
@@ -2532,6 +2827,8 @@ ASTNode *parser_parse_impl_declaration(Parser *parser) {
   char *trait_name = NULL;
   char *for_type_name = NULL;
   ASTNode *impl_decl = NULL;
+  ASTNode **methods = NULL;
+  size_t method_count = 0;
 
   if (!parser_expect(parser, TOKEN_IMPL)) {
     return NULL;
@@ -2558,13 +2855,71 @@ ASTNode *parser_parse_impl_declaration(Parser *parser) {
     return NULL;
   }
 
-  if (!parser_expect_statement_end(parser)) {
-    free(trait_name);
-    free(for_type_name);
-    return NULL;
+  if (parser->current_token.type == TOKEN_LBRACE) {
+    parser_advance(parser);
+    while (parser->current_token.type != TOKEN_RBRACE &&
+           parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+      if (parser->current_token.type == TOKEN_NEWLINE ||
+          parser->current_token.type == TOKEN_SEMICOLON) {
+        parser_advance(parser);
+        continue;
+      }
+      if (parser->current_token.type != TOKEN_FUNCTION &&
+          parser->current_token.type != TOKEN_FN) {
+        parser_set_error(parser, "Expected function declaration in impl block");
+        goto impl_cleanup;
+      }
+      ASTNode *method = parser_parse_function_declaration(parser);
+      if (!method) {
+        goto impl_cleanup;
+      }
+      FunctionDeclaration *method_decl = (FunctionDeclaration *)method->data;
+      if (method_decl && !method_decl->body) {
+        parser_set_error(parser, "Impl method declarations must have a body");
+        ast_destroy_node(method);
+        goto impl_cleanup;
+      }
+      ASTNode **grown = realloc(methods, (method_count + 1) * sizeof(ASTNode *));
+      if (!grown) {
+        parser_set_error(parser, "Out of memory while parsing impl methods");
+        ast_destroy_node(method);
+        goto impl_cleanup;
+      }
+      methods = grown;
+      methods[method_count++] = method;
+    }
+    if (!parser_expect(parser, TOKEN_RBRACE)) {
+      goto impl_cleanup;
+    }
+  } else if (!parser_expect_statement_end(parser)) {
+    goto impl_cleanup;
   }
 
   impl_decl = ast_create_impl_declaration(trait_name, for_type_name, location);
+  if (impl_decl && impl_decl->data && method_count > 0) {
+    ImplDeclaration *data = (ImplDeclaration *)impl_decl->data;
+    data->methods = malloc(method_count * sizeof(ASTNode *));
+    if (!data->methods) {
+      parser_set_error(parser, "Out of memory while parsing impl methods");
+      ast_destroy_node(impl_decl);
+      impl_decl = NULL;
+      goto impl_cleanup;
+    }
+    data->method_count = method_count;
+    for (size_t i = 0; i < method_count; i++) {
+      data->methods[i] = methods[i];
+      ast_add_child(impl_decl, methods[i]);
+      methods[i] = NULL;
+    }
+  }
+
+impl_cleanup:
+  for (size_t i = 0; i < method_count; i++) {
+    if (methods[i]) {
+      ast_destroy_node(methods[i]);
+    }
+  }
+  free(methods);
   free(trait_name);
   free(for_type_name);
   return impl_decl;
@@ -2782,6 +3137,15 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
       free(struct_name);
       return NULL;
     }
+  }
+
+  if (parser->current_token.type == TOKEN_WHERE &&
+      !parser_parse_where_clause(parser, type_params, type_param_traits,
+                                 type_param_count)) {
+    parser_free_type_param_list(type_params, type_param_traits,
+                                type_param_count);
+    free(struct_name);
+    return NULL;
   }
 
   // Expect '{'

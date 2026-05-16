@@ -217,6 +217,22 @@ ASTNode *ast_clone_node(ASTNode *node) {
     }
     dst->name = ast_intern_string(src->name);
     dst->is_exported = src->is_exported;
+    dst->method_count = src->method_count;
+    if (src->method_count > 0) {
+      dst->methods = malloc(src->method_count * sizeof(ASTNode *));
+      if (!dst->methods) {
+        free(dst);
+        free(clone);
+        return NULL;
+      }
+      for (size_t i = 0; i < src->method_count; i++) {
+        dst->methods[i] = ast_clone_node(src->methods[i]);
+        if (dst->methods[i])
+          ast_add_child(clone, dst->methods[i]);
+      }
+    } else {
+      dst->methods = NULL;
+    }
     clone->data = dst;
     break;
   }
@@ -229,6 +245,22 @@ ASTNode *ast_clone_node(ASTNode *node) {
     }
     dst->trait_name = ast_intern_string(src->trait_name);
     dst->for_type_name = ast_intern_string(src->for_type_name);
+    dst->method_count = src->method_count;
+    if (src->method_count > 0) {
+      dst->methods = malloc(src->method_count * sizeof(ASTNode *));
+      if (!dst->methods) {
+        free(dst);
+        free(clone);
+        return NULL;
+      }
+      for (size_t i = 0; i < src->method_count; i++) {
+        dst->methods[i] = ast_clone_node(src->methods[i]);
+        if (dst->methods[i])
+          ast_add_child(clone, dst->methods[i]);
+      }
+    } else {
+      dst->methods = NULL;
+    }
     clone->data = dst;
     break;
   }
@@ -777,6 +809,7 @@ void ast_destroy_node(ASTNode *node) {
     TraitDeclaration *trait_decl = (TraitDeclaration *)node->data;
     if (trait_decl) {
       ast_free_string(trait_decl->name);
+      free(trait_decl->methods);
       free(trait_decl);
     }
     break;
@@ -786,6 +819,7 @@ void ast_destroy_node(ASTNode *node) {
     if (impl_decl) {
       ast_free_string(impl_decl->trait_name);
       ast_free_string(impl_decl->for_type_name);
+      free(impl_decl->methods);
       free(impl_decl);
     }
     break;
@@ -1290,6 +1324,8 @@ ASTNode *ast_create_trait_declaration(const char *name,
 
   trait_decl->name = ast_intern_string(name);
   trait_decl->is_exported = 0;
+  trait_decl->methods = NULL;
+  trait_decl->method_count = 0;
   node->data = trait_decl;
   return node;
 }
@@ -1310,6 +1346,8 @@ ASTNode *ast_create_impl_declaration(const char *trait_name,
 
   impl_decl->trait_name = ast_intern_string(trait_name);
   impl_decl->for_type_name = ast_intern_string(for_type_name);
+  impl_decl->methods = NULL;
+  impl_decl->method_count = 0;
   node->data = impl_decl;
   return node;
 }
@@ -1448,7 +1486,8 @@ ASTNode *ast_create_identifier(const char *name, SourceLocation location) {
 }
 
 ASTNode *ast_create_number_literal(long long int_value,
-                                   SourceLocation location) {
+                                   SourceLocation location,
+                                   unsigned char int_radix) {
   ASTNode *node = ast_create_node(AST_NUMBER_LITERAL, location);
   if (!node)
     return NULL;
@@ -1461,6 +1500,8 @@ ASTNode *ast_create_number_literal(long long int_value,
 
   number_literal->int_value = int_value;
   number_literal->is_float = 0;
+  number_literal->int_radix =
+      (int_radix == 2u || int_radix == 16u) ? int_radix : 10u;
   node->data = number_literal;
 
   return node;
@@ -1479,6 +1520,7 @@ ASTNode *ast_create_float_literal(double float_value, SourceLocation location) {
 
   number_literal->float_value = float_value;
   number_literal->is_float = 1;
+  number_literal->int_radix = 10;
   node->data = number_literal;
 
   return node;
