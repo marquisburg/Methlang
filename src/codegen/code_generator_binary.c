@@ -15,6 +15,8 @@ typedef enum {
   BINARY_GP_RDX = 2,
   BINARY_GP_RSP = 4,
   BINARY_GP_RBP = 5,
+  BINARY_GP_RSI = 6,
+  BINARY_GP_RDI = 7,
   BINARY_GP_R11 = 11,
   BINARY_GP_R8 = 8,
   BINARY_GP_R9 = 9,
@@ -2493,13 +2495,29 @@ static int code_generator_binary_emit_store_to_address(
   case 8:
     return binary_emit_mov_mem_reg(&context->code, address_register, 0,
                                    source_register);
-  default:
-    code_generator_set_error(
-        generator,
-        "Direct object backend does not yet support memory stores wider than "
-        "8 bytes in function '%s'",
-        context->function_name);
-    return 0;
+  default: {
+    /* Multi-byte aggregate (e.g. struct memcpy): rep movsb, RSI=src, RDI=dst,
+     * RCX=count. Save non-volatile RSI/RDI on Win64. */
+    uint64_t n = (uint64_t)size;
+    if (n != (uint64_t)size || n == 0) {
+      code_generator_set_error(
+          generator,
+          "Invalid aggregate store size %d in function '%s'",
+          size, context->function_name);
+      return 0;
+    }
+    return binary_emit_push_reg(&context->code, BINARY_GP_RSI) &&
+           binary_emit_push_reg(&context->code, BINARY_GP_RDI) &&
+           binary_emit_mov_reg_reg(&context->code, BINARY_GP_RSI,
+                                    source_register) &&
+           binary_emit_mov_reg_reg(&context->code, BINARY_GP_RDI,
+                                    address_register) &&
+           binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX, n) &&
+           binary_code_buffer_append_u8(&context->code, 0xF3) &&
+           binary_code_buffer_append_u8(&context->code, 0xA4) &&
+           binary_emit_pop_reg(&context->code, BINARY_GP_RDI) &&
+           binary_emit_pop_reg(&context->code, BINARY_GP_RSI);
+  }
   }
 }
 

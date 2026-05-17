@@ -639,6 +639,13 @@ x86Register register_allocator_try_allocate_free_register(RegisterAllocator* all
         start_reg = REG_XMM0;
         end_reg = REG_XMM15;
     } else {
+        /* GPRs hold at most one machine word. Aggregates (structs, large strings,
+         * arrays) must stay in memory so lowering can emit memcpy or multi-slot
+         * stack access; otherwise is_in_register blocks aggregate memcpy and
+         * codegen only moves 8 bytes. */
+        if (!interval->type || interval->type->size > 8) {
+            return REG_NONE;
+        }
         start_reg = REG_RAX;
         end_reg = REG_R15;
     }

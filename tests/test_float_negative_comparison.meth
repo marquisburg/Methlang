@@ -1,0 +1,17 @@
+function main() -> int32 {
+  var a: float64 = -3348.0;
+  var b: float64 = -22000.0;
+  var c: float64 = -30000.0;
+  var p: float64 = 3348.0;
+  var q: float64 = 22000.0;
+
+  if (a < b) { return 1; }
+  if (!(a >= b)) { return 2; }
+  if (!(a > b)) { return 3; }
+  if (a <= b) { return 4; }
+  if (!(c < b)) { return 5; }
+  if (!(p < q)) { return 6; }
+  if (p > q) { return 7; }
+
+  return 0;
+}
