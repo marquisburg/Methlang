@@ -256,6 +256,81 @@ static IROperand ir_clone_operand_local(const IROperand *operand) {
   }
 }
 
+/* Whole-struct copy: IR_OP_ASSIGN only moves scalar width through RAX. When
+ * both sides are the same by-reference struct on stack, memcpy via IR_OP_STORE.
+ *
+ * The symbol table scope of the function body has typically been popped by the
+ * time IR lowering runs, so we cannot rely on symbol_table_lookup here. Instead
+ * callers thread the resolved struct Type * (cached on AST nodes or fetched via
+ * the type_checker by name). */
+static int ir_try_emit_aggregate_symbol_memcpy(
+    IRLoweringContext *context, IRFunction *function, const char *dest_name,
+    const IROperand *value, Type *dest_type, SourceLocation location) {
+  int nbytes = 0;
+
+  if (!context || !function || !dest_name || !value ||
+      value->kind != IR_OPERAND_SYMBOL || !value->name) {
+    return 0;
+  }
+  if (!dest_type || dest_type->kind != TYPE_STRUCT) {
+    return 0;
+  }
+  if (dest_type->size == 0 || dest_type->size > (size_t)INT_MAX) {
+    return 0;
+  }
+  nbytes = (int)dest_type->size;
+  if (nbytes <= 8) {
+    return 0;
+  }
+
+  {
+    IROperand dest_addr = ir_operand_none();
+    IROperand src_addr = ir_operand_none();
+    IRInstruction store = {0};
+    int ok = 0;
+
+    if (!ir_emit_address_of_symbol(context, function, dest_name, location,
+                                     &dest_addr)) {
+      return 0;
+    }
+    if (!ir_emit_address_of_symbol(context, function, value->name, location,
+                                   &src_addr)) {
+      ir_operand_destroy(&dest_addr);
+      return 0;
+    }
+
+    store.op = IR_OP_STORE;
+    store.location = location;
+    store.dest = dest_addr;
+    store.lhs = src_addr;
+    store.rhs = ir_operand_int((long long)nbytes);
+    ok = ir_emit(context, function, &store);
+    ir_operand_destroy(&dest_addr);
+    ir_operand_destroy(&src_addr);
+    return ok;
+  }
+}
+
+/* Resolve a named type via the type_checker (works even after scope pop). */
+static Type *ir_resolve_named_type(IRLoweringContext *context,
+                                   const char *name) {
+  if (!context || !context->type_checker || !name) {
+    return NULL;
+  }
+  return type_checker_get_type_by_name(context->type_checker, name);
+}
+
+/* Look up a symbol's type from the symbol's name; falls back to NULL once the
+ * scope is gone. Callers must handle NULL. */
+static Type *ir_lookup_symbol_type(IRLoweringContext *context,
+                                   const char *name) {
+  if (!context || !context->symbol_table || !name) {
+    return NULL;
+  }
+  Symbol *sym = symbol_table_lookup(context->symbol_table, name);
+  return sym ? sym->type : NULL;
+}
+
 static int ir_emit_symbol_assignment(IRLoweringContext *context,
                                      IRFunction *function,
                                      const char *name,
@@ -265,23 +340,33 @@ static int ir_emit_symbol_assignment(IRLoweringContext *context,
     return 0;
   }
 
-  IRInstruction assign = {0};
-  assign.op = IR_OP_ASSIGN;
-  assign.location = location;
-  assign.dest = ir_operand_symbol(name);
-  assign.lhs = *value;
-  if (!assign.dest.name) {
-    ir_set_error(context, "Out of memory while assigning IR local '%s'", name);
-    return 0;
+  {
+    Type *dest_type = ir_lookup_symbol_type(context, name);
+    if (ir_try_emit_aggregate_symbol_memcpy(context, function, name, value,
+                                             dest_type, location)) {
+      return 1;
+    }
   }
 
-  if (!ir_emit(context, function, &assign)) {
+  {
+    IRInstruction assign = {0};
+    assign.op = IR_OP_ASSIGN;
+    assign.location = location;
+    assign.dest = ir_operand_symbol(name);
+    assign.lhs = *value;
+    if (!assign.dest.name) {
+      ir_set_error(context, "Out of memory while assigning IR local '%s'", name);
+      return 0;
+    }
+
+    if (!ir_emit(context, function, &assign)) {
+      ir_operand_destroy(&assign.dest);
+      return 0;
+    }
+
     ir_operand_destroy(&assign.dest);
-    return 0;
+    return 1;
   }
-
-  ir_operand_destroy(&assign.dest);
-  return 1;
 }
 
 static int ir_emit_address_with_offset(IRLoweringContext *context,
@@ -1567,6 +1652,37 @@ static int ir_expression_float_bits(IRLoweringContext *context,
     return 0;
   }
   return ir_type_float_bits(type);
+}
+
+static int ir_binary_operator_is_comparison(const char *op) {
+  return op && (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+                strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+                strcmp(op, ">") == 0 || strcmp(op, ">=") == 0);
+}
+
+static int ir_binary_expression_operation_float_bits(IRLoweringContext *context,
+                                                    ASTNode *expression,
+                                                    BinaryExpression *binary) {
+  int expression_bits = ir_expression_float_bits(context, expression);
+  int left_bits = 0;
+  int right_bits = 0;
+
+  if (expression_bits != 0) {
+    return expression_bits;
+  }
+  if (!binary || !ir_binary_operator_is_comparison(binary->operator)) {
+    return 0;
+  }
+
+  left_bits = ir_expression_float_bits(context, binary->left);
+  right_bits = ir_expression_float_bits(context, binary->right);
+  if (left_bits == 64 || right_bits == 64) {
+    return 64;
+  }
+  if (left_bits == 32 || right_bits == 32) {
+    return 32;
+  }
+  return 0;
 }
 
 static int ir_type_storage_size(Type *type) {
@@ -2904,14 +3020,15 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     instruction.lhs = left;
     instruction.rhs = right;
     instruction.text = binary->operator;
-    instruction.is_float = ir_expression_is_floating(context, expression);
+    int operation_float_bits = ir_binary_expression_operation_float_bits(
+        context, expression, binary);
+    instruction.is_float = operation_float_bits != 0;
     if (instruction.is_float) {
-      instruction.float_bits = ir_expression_float_bits(context, expression);
-      if (instruction.float_bits == 0) {
-        instruction.float_bits = 64;
+      instruction.float_bits = operation_float_bits;
+      if (!ir_binary_operator_is_comparison(binary->operator)) {
+        instruction.dest.float_bits = instruction.float_bits;
+        destination.float_bits = instruction.float_bits;
       }
-      instruction.dest.float_bits = instruction.float_bits;
-      destination.float_bits = instruction.float_bits;
     }
 
     if (!ir_emit(context, function, &instruction)) {
@@ -3465,27 +3582,39 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
                                &value)) {
         return 0;
       }
-      IRInstruction assign = {0};
-      assign.op = IR_OP_ASSIGN;
-      assign.location = statement->location;
-      assign.dest = ir_operand_symbol(declaration->name);
-      assign.lhs = value;
-      ir_assign_apply_float_bits(
-          &assign, &assign.lhs,
-          ir_named_type_float_bits(context, declaration->type_name));
-      if (!assign.dest.name) {
-        ir_operand_destroy(&value);
-        ir_set_error(context,
-                     "Out of memory while lowering variable initializer");
-        return 0;
+      Type *decl_type = ir_resolve_named_type(context, declaration->type_name);
+      if (!decl_type) {
+        decl_type = declaration->initializer
+                        ? declaration->initializer->resolved_type
+                        : NULL;
       }
-      if (!ir_emit(context, function, &assign)) {
+      if (ir_try_emit_aggregate_symbol_memcpy(context, function,
+                                              declaration->name, &value,
+                                              decl_type, statement->location)) {
+        ir_operand_destroy(&value);
+      } else {
+        IRInstruction assign = {0};
+        assign.op = IR_OP_ASSIGN;
+        assign.location = statement->location;
+        assign.dest = ir_operand_symbol(declaration->name);
+        assign.lhs = value;
+        ir_assign_apply_float_bits(
+            &assign, &assign.lhs,
+            ir_named_type_float_bits(context, declaration->type_name));
+        if (!assign.dest.name) {
+          ir_operand_destroy(&value);
+          ir_set_error(context,
+                       "Out of memory while lowering variable initializer");
+          return 0;
+        }
+        if (!ir_emit(context, function, &assign)) {
+          ir_operand_destroy(&assign.dest);
+          ir_operand_destroy(&value);
+          return 0;
+        }
         ir_operand_destroy(&assign.dest);
         ir_operand_destroy(&value);
-        return 0;
       }
-      ir_operand_destroy(&assign.dest);
-      ir_operand_destroy(&value);
     }
     return 1;
   }
@@ -3503,29 +3632,43 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     }
 
     if (assignment->variable_name) {
-      IRInstruction assign = {0};
-      assign.op = IR_OP_ASSIGN;
-      assign.location = statement->location;
-      assign.dest = ir_operand_symbol(assignment->variable_name);
-      assign.lhs = value;
-      ir_assign_apply_float_bits(
-          &assign, &assign.lhs,
-          ir_symbol_float_bits(context, assignment->variable_name));
-      if (!assign.dest.name) {
+      Type *assign_type =
+          ir_lookup_symbol_type(context, assignment->variable_name);
+      if (!assign_type && assignment->value) {
+        assign_type = assignment->value->resolved_type;
+      }
+      if (ir_try_emit_aggregate_symbol_memcpy(
+              context, function, assignment->variable_name, &value,
+              assign_type, statement->location)) {
         ir_operand_destroy(&value);
-        ir_set_error(context, "Out of memory while lowering assignment target");
-        return 0;
+        return 1;
       }
 
-      if (!ir_emit(context, function, &assign)) {
+      {
+        IRInstruction assign = {0};
+        assign.op = IR_OP_ASSIGN;
+        assign.location = statement->location;
+        assign.dest = ir_operand_symbol(assignment->variable_name);
+        assign.lhs = value;
+        ir_assign_apply_float_bits(
+            &assign, &assign.lhs,
+            ir_symbol_float_bits(context, assignment->variable_name));
+        if (!assign.dest.name) {
+          ir_operand_destroy(&value);
+          ir_set_error(context, "Out of memory while lowering assignment target");
+          return 0;
+        }
+
+        if (!ir_emit(context, function, &assign)) {
+          ir_operand_destroy(&assign.dest);
+          ir_operand_destroy(&value);
+          return 0;
+        }
+
         ir_operand_destroy(&assign.dest);
         ir_operand_destroy(&value);
-        return 0;
+        return 1;
       }
-
-      ir_operand_destroy(&assign.dest);
-      ir_operand_destroy(&value);
-      return 1;
     }
 
     if (!assignment->target) {

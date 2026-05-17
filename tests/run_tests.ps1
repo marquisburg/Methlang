@@ -342,6 +342,7 @@ $cases = @(
     AsmMustMatch  = @("\bidiv\b")
   },
   @{ Name = "signed_comparison"; Path = "tests/test_signed_comparison.meth"; ShouldSucceed = $true },
+  @{ Name = "float_negative_comparison"; Path = "tests/test_float_negative_comparison.meth"; ShouldSucceed = $true },
   @{ Name = "signed_wraparound"; Path = "tests/test_signed_wraparound.meth"; ShouldSucceed = $true },
   @{ Name = "signed_arithmetic"; Path = "tests/test_signed_arithmetic.meth"; ShouldSucceed = $true },
   @{
@@ -1679,6 +1680,139 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "internal_link_basic" -Passed $false -Reason $_.Exception.Message
+}
+
+# Float comparisons must use numeric FP ordering, not raw IEEE bit ordering.
+$total++
+try {
+  $asmExePath = Join-Path $tmpDir "internal_link_float_negative_comparison.exe"
+  $objExePath = Join-Path $tmpDir "internal_link_emit_obj_float_negative_comparison.exe"
+
+  $buildOut = & $CompilerPath --build --linker internal tests\test_float_negative_comparison.meth -o $asmExePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker float-negative asm build failed: $buildOut"
+  }
+  if (-not (Test-Path $asmExePath)) {
+    throw "Internal linker float-negative asm build did not produce an executable"
+  }
+
+  & $asmExePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker float-negative asm executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_float_negative_comparison.meth -o $objExePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker float-negative emit-obj build failed: $buildOut"
+  }
+  if (-not (Test-Path $objExePath)) {
+    throw "Internal linker float-negative emit-obj build did not produce an executable"
+  }
+
+  & $objExePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker float-negative emit-obj executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "internal_link_float_negative_comparison" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "internal_link_float_negative_comparison" -Passed $false -Reason $_.Exception.Message
+}
+
+# Whole-struct assignment must copy every byte, not just the first machine word.
+# Regression: structs > 8 bytes (ThreeI32, TwoF64, Mixed) used to keep only the
+# first 8 bytes; trailing fields were zero/garbage. Verify both asm and emit-obj
+# paths produce byte-perfect copies.
+$structCopyExpected = @(
+  "struct copy repro",
+  "two_i32_a 11",
+  "two_i32_b 22",
+  "three_i32_a 11",
+  "three_i32_b 22",
+  "three_i32_c 33",
+  "two_f64_a_mm -3500",
+  "two_f64_b_mm 22000",
+  "mixed_a 11",
+  "mixed_b_mm -3500",
+  "mixed_c 22"
+) -join "`r`n"
+
+foreach ($mode in @("asm", "emitobj")) {
+  $total++
+  $caseName = "internal_link_struct_copy_$mode"
+  try {
+    $exePath = Join-Path $tmpDir "$caseName.exe"
+    if ($mode -eq "asm") {
+      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_copy.meth -o $exePath 2>&1 | Out-String
+    }
+    else {
+      $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_struct_copy.meth -o $exePath 2>&1 | Out-String
+    }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct copy build failed ($mode): $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "Struct copy build ($mode) did not produce an executable"
+    }
+
+    $runOut = (& $exePath 2>&1 | Out-String).TrimEnd()
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct copy executable exited with $LASTEXITCODE ($mode)"
+    }
+    if ($runOut -ne $structCopyExpected) {
+      throw "Struct copy output mismatch ($mode):`n--- expected ---`n$structCopyExpected`n--- got ---`n$runOut"
+    }
+
+    Write-CaseResult -Name $caseName -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
+  }
+}
+
+# Companion repro: large structs containing float64 fields and engine-style
+# layouts (float64-first, trailing int32) plus heap allocation. Just verify the
+# repro builds and runs cleanly under both link modes; full byte-level scrutiny
+# of every line would be brittle if write_i64 formatting ever shifts.
+foreach ($mode in @("asm", "emitobj")) {
+  $total++
+  $caseName = "internal_link_struct_float_$mode"
+  try {
+    $exePath = Join-Path $tmpDir "$caseName.exe"
+    if ($mode -eq "asm") {
+      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_float.meth -o $exePath 2>&1 | Out-String
+    }
+    else {
+      $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_struct_float.meth -o $exePath 2>&1 | Out-String
+    }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct/float build failed ($mode): $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "Struct/float build ($mode) did not produce an executable"
+    }
+
+    $runOut = (& $exePath 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct/float executable exited with $LASTEXITCODE ($mode)"
+    }
+    # Every probe line that prints a copied float must show the non-zero scaled
+    # value, never 0 (which would indicate a truncated copy past the 8th byte).
+    foreach ($needle in @("lx_mm -3348000", "hz_mm 22000000", "marker 1234")) {
+      if ($runOut -notmatch [regex]::Escape($needle)) {
+        throw "Struct/float output missing '$needle' ($mode):`n$runOut"
+      }
+    }
+
+    Write-CaseResult -Name $caseName -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
+  }
 }
 
 # Emit-obj + MinGW gcc link (parity with asm path: nostartfiles + methlang_entry.o)
