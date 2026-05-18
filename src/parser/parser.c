@@ -1630,6 +1630,7 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
   size_t saved_pos = parser->lexer->position;
   size_t saved_line = parser->lexer->line;
   size_t saved_col = parser->lexer->column;
+  size_t saved_continuation_depth = parser->lexer->continuation_depth;
   Token saved_current = token_clone(&parser->current_token);
   Token saved_peek = token_clone(&parser->peek_token);
   int saved_has_error = parser->has_error;
@@ -1657,6 +1658,7 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
     parser->lexer->position = saved_pos;
     parser->lexer->line = saved_line;
     parser->lexer->column = saved_col;
+    parser->lexer->continuation_depth = saved_continuation_depth;
 
     token_destroy(&parser->current_token);
     parser->current_token = saved_current;
@@ -1691,6 +1693,7 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
     parser->lexer->position = saved_pos;
     parser->lexer->line = saved_line;
     parser->lexer->column = saved_col;
+    parser->lexer->continuation_depth = saved_continuation_depth;
 
     token_destroy(&parser->current_token);
     parser->current_token = saved_current;
@@ -1799,6 +1802,7 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
   size_t saved_pos = parser->lexer->position;
   size_t saved_line = parser->lexer->line;
   size_t saved_col = parser->lexer->column;
+  size_t saved_continuation_depth = parser->lexer->continuation_depth;
   Token saved_current = token_clone(&parser->current_token);
   Token saved_peek = token_clone(&parser->peek_token);
   int saved_has_error = parser->has_error;
@@ -1856,6 +1860,7 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
   parser->lexer->position = saved_pos;
   parser->lexer->line = saved_line;
   parser->lexer->column = saved_col;
+  parser->lexer->continuation_depth = saved_continuation_depth;
 
   token_destroy(&parser->current_token);
   parser->current_token = saved_current;
@@ -3500,6 +3505,10 @@ ASTNode *parser_parse_if_statement(Parser *parser) {
     return NULL;
   }
 
+  while (parser->current_token.type == TOKEN_NEWLINE) {
+    parser_advance(parser);
+  }
+
   ElseIfClause *else_ifs = NULL;
   size_t else_if_count = 0;
   ASTNode *else_branch = NULL;
@@ -3536,6 +3545,10 @@ ASTNode *parser_parse_if_statement(Parser *parser) {
       else_ifs[else_if_count].condition = elif_cond;
       else_ifs[else_if_count].body = elif_body;
       else_if_count++;
+
+      while (parser->current_token.type == TOKEN_NEWLINE) {
+        parser_advance(parser);
+      }
     } else {
       parser_advance(parser); // consume 'else'
       else_branch = (parser->current_token.type == TOKEN_LBRACE)

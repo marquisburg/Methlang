@@ -167,6 +167,7 @@ Lexer *lexer_create(const char *source) {
   lexer->length = strlen(source);
   lexer->error_message = NULL;
   lexer->has_error = 0;
+  lexer->continuation_depth = 0;
 
   return lexer;
 }
@@ -187,6 +188,12 @@ Token lexer_next_token(Lexer *lexer) {
   while (lexer->position < lexer->length &&
          isspace(lexer->source[lexer->position])) {
     if (lexer->source[lexer->position] == '\n') {
+      if (lexer->continuation_depth > 0) {
+        lexer->position++;
+        lexer->line++;
+        lexer->column = 1;
+        continue;
+      }
       token.type = TOKEN_NEWLINE;
       token.value = NULL;
       token_set_lexeme(&token, &lexer->source[lexer->position], 1);
@@ -360,9 +367,12 @@ Token lexer_next_token(Lexer *lexer) {
     break;
   case '(':
     token.type = TOKEN_LPAREN;
+    lexer->continuation_depth++;
     break;
   case ')':
     token.type = TOKEN_RPAREN;
+    if (lexer->continuation_depth > 0)
+      lexer->continuation_depth--;
     break;
   case '{':
     token.type = TOKEN_LBRACE;
@@ -372,9 +382,12 @@ Token lexer_next_token(Lexer *lexer) {
     break;
   case '[':
     token.type = TOKEN_LBRACKET;
+    lexer->continuation_depth++;
     break;
   case ']':
     token.type = TOKEN_RBRACKET;
+    if (lexer->continuation_depth > 0)
+      lexer->continuation_depth--;
     break;
   case '+':
     if (lexer->position + 1 < lexer->length &&
@@ -1009,12 +1022,14 @@ Token lexer_peek_token(Lexer *lexer) {
   size_t saved_position = lexer->position;
   size_t saved_line = lexer->line;
   size_t saved_column = lexer->column;
+  size_t saved_continuation_depth = lexer->continuation_depth;
 
   Token token = lexer_next_token(lexer);
 
   lexer->position = saved_position;
   lexer->line = saved_line;
   lexer->column = saved_column;
+  lexer->continuation_depth = saved_continuation_depth;
 
   return token;
 }
@@ -1065,12 +1080,14 @@ Token *lexer_tokenize(Lexer *lexer, size_t *token_count) {
   lexer->position = 0;
   lexer->line = 1;
   lexer->column = 1;
+  lexer->continuation_depth = 0;
 
   // First pass: count tokens
   size_t count = 0;
   size_t saved_position = lexer->position;
   size_t saved_line = lexer->line;
   size_t saved_column = lexer->column;
+  size_t saved_continuation_depth = lexer->continuation_depth;
 
   Token token;
   do {
@@ -1083,6 +1100,7 @@ Token *lexer_tokenize(Lexer *lexer, size_t *token_count) {
   lexer->position = saved_position;
   lexer->line = saved_line;
   lexer->column = saved_column;
+  lexer->continuation_depth = saved_continuation_depth;
 
   // Allocate token array
   Token *tokens = malloc(count * sizeof(Token));
