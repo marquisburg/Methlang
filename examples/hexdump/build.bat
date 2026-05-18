@@ -1,20 +1,20 @@
 @echo off
-REM Build Methlang Hex Dump Utility
-REM Requires: argc/argv -> methlang_entry.o and -lshell32
+REM Build Mettle Hex Dump Utility
+REM Requires: argc/argv -> mettle_entry.o and -lshell32
 set APP=%~dp0
 set ROOT=%APP%..\..
 cd /d "%ROOT%"
 
-if not exist bin\methlang.exe (
-    echo Building Methlang compiler...
+if not exist bin\mettle.exe (
+    echo Building Mettle compiler...
     call build.bat
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
-echo Compiling hexdump.meth...
-bin\methlang.exe examples\hexdump\hexdump.meth -o examples\hexdump\hexdump.s --stdlib stdlib
+echo Compiling hexdump.mettle...
+bin\mettle.exe examples\hexdump\hexdump.mettle -o examples\hexdump\hexdump.s
 if %ERRORLEVEL% NEQ 0 (
-    echo Methlang compilation failed.
+    echo Mettle compilation failed.
     exit /b 1
 )
 
@@ -28,9 +28,9 @@ if %ERRORLEVEL% EQU 0 (
     )
     gcc -c src\runtime\gc.c -o examples\hexdump\gc.o -Isrc
     if %ERRORLEVEL% NEQ 0 exit /b 1
-    gcc -c src\runtime\methlang_entry.c -o examples\hexdump\methlang_entry.o -Isrc
+    gcc -c src\runtime\mettle_entry.c -o examples\hexdump\mettle_entry.o -Isrc
     if %ERRORLEVEL% NEQ 0 exit /b 1
-    gcc -nostartfiles examples\hexdump\hexdump.o examples\hexdump\gc.o examples\hexdump\methlang_entry.o -o examples\hexdump\hexdump.exe -lkernel32 -lshell32
+    gcc -nostartfiles examples\hexdump\hexdump.o examples\hexdump\gc.o examples\hexdump\mettle_entry.o -o examples\hexdump\hexdump.exe -lkernel32 -lshell32
 ) else (
     echo NASM required. Install from https://www.nasm.us/
     exit /b 1
@@ -39,7 +39,7 @@ if %ERRORLEVEL% EQU 0 (
 if %ERRORLEVEL% EQU 0 (
     echo.
     echo Build successful! Run: hexdump.exe ^<filename^>
-    echo Example: examples\hexdump\hexdump.exe examples\hexdump\hexdump.meth
+    echo Example: examples\hexdump\hexdump.exe examples\hexdump\hexdump.mettle
 ) else (
     echo Link failed.
     exit /b 1

@@ -13,12 +13,19 @@ typedef enum {
   BINARY_GP_RAX = 0,
   BINARY_GP_RCX = 1,
   BINARY_GP_RDX = 2,
+  BINARY_GP_RBX = 3,
   BINARY_GP_RSP = 4,
   BINARY_GP_RBP = 5,
+  BINARY_GP_RSI = 6,
+  BINARY_GP_RDI = 7,
   BINARY_GP_R11 = 11,
   BINARY_GP_R8 = 8,
   BINARY_GP_R9 = 9,
   BINARY_GP_R10 = 10,
+  BINARY_GP_R12 = 12,
+  BINARY_GP_R13 = 13,
+  BINARY_GP_R14 = 14,
+  BINARY_GP_R15 = 15,
 } BinaryGpRegister;
 
 typedef enum {
@@ -90,13 +97,20 @@ typedef struct {
   BinaryNamedSlotTable local_slots;
   BinaryNamedSlotTable temp_slots;
   BinaryNamedSlotTable float64_symbols;
+  BinaryNamedSlotTable address_taken_symbols;
+  BinaryNamedSlotTable register_symbols;
   BinaryLabelTable labels;
   BinaryLabelFixupTable label_fixups;
   BinaryCallRelocationTable call_relocations;
   BinaryOffsetTable return_fixups;
+  BinaryGpRegister saved_registers[7];
+  int saved_register_offsets[7];
+  size_t saved_register_count;
   int raw_frame_size;
   int frame_size;
   int return_is_float64;
+  /* IEEE-754 width of the function's float return (0/32/64). 0 = not float. */
+  int return_float_bits;
   FunctionDeclaration *function_data;
   const char *function_name;
 } BinaryFunctionContext;
@@ -474,6 +488,8 @@ static void binary_function_context_destroy(BinaryFunctionContext *context) {
   binary_named_slot_table_destroy(&context->local_slots);
   binary_named_slot_table_destroy(&context->temp_slots);
   binary_named_slot_table_destroy(&context->float64_symbols);
+  binary_named_slot_table_destroy(&context->address_taken_symbols);
+  binary_named_slot_table_destroy(&context->register_symbols);
   binary_label_table_destroy(&context->labels);
   binary_label_fixup_table_destroy(&context->label_fixups);
   binary_call_relocation_table_destroy(&context->call_relocations);
@@ -587,6 +603,29 @@ static int binary_emit_sub_reg_imm32(BinaryCodeBuffer *buffer,
                                      BinaryGpRegister reg,
                                      uint32_t immediate) {
   return binary_emit_alu_reg_imm32(buffer, 5, reg, immediate);
+}
+
+static int binary_emit_and_reg_imm32(BinaryCodeBuffer *buffer,
+                                     BinaryGpRegister reg,
+                                     uint32_t immediate) {
+  return binary_emit_alu_reg_imm32(buffer, 4, reg, immediate);
+}
+
+static int binary_emit_or_reg_imm32(BinaryCodeBuffer *buffer,
+                                    BinaryGpRegister reg, uint32_t immediate) {
+  return binary_emit_alu_reg_imm32(buffer, 1, reg, immediate);
+}
+
+static int binary_emit_xor_reg_imm32(BinaryCodeBuffer *buffer,
+                                     BinaryGpRegister reg,
+                                     uint32_t immediate) {
+  return binary_emit_alu_reg_imm32(buffer, 6, reg, immediate);
+}
+
+static int binary_emit_cmp_reg_imm32(BinaryCodeBuffer *buffer,
+                                     BinaryGpRegister reg,
+                                     uint32_t immediate) {
+  return binary_emit_alu_reg_imm32(buffer, 7, reg, immediate);
 }
 
 static int binary_emit_mov_reg_imm64(BinaryCodeBuffer *buffer,
@@ -894,6 +933,26 @@ static int binary_emit_imul_reg_reg(BinaryCodeBuffer *buffer,
   return 1;
 }
 
+static int binary_emit_imul_reg_reg_imm32(BinaryCodeBuffer *buffer,
+                                          BinaryGpRegister destination,
+                                          BinaryGpRegister source,
+                                          uint32_t immediate) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_emit_rex(buffer, 1, destination >> 3, 0, source >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x69) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((destination & 7) << 3) |
+                                  (source & 7))) ||
+      !binary_code_buffer_append_u32(buffer, immediate)) {
+    return 0;
+  }
+
+  return 1;
+}
+
 static int binary_emit_unary_reg(BinaryCodeBuffer *buffer,
                                  unsigned char subopcode,
                                  BinaryGpRegister reg) {
@@ -937,6 +996,26 @@ static int binary_emit_shift_reg_cl(BinaryCodeBuffer *buffer,
       !binary_code_buffer_append_u8(
           buffer,
           (unsigned char)(0xC0 | ((subopcode & 7) << 3) | (reg & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int binary_emit_shift_reg_imm8(BinaryCodeBuffer *buffer,
+                                      unsigned char subopcode,
+                                      BinaryGpRegister reg,
+                                      unsigned char immediate) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_emit_rex(buffer, 1, 0, 0, reg >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0xC1) ||
+      !binary_code_buffer_append_u8(
+          buffer,
+          (unsigned char)(0xC0 | ((subopcode & 7) << 3) | (reg & 7))) ||
+      !binary_code_buffer_append_u8(buffer, immediate)) {
     return 0;
   }
 
@@ -1242,6 +1321,160 @@ static int binary_emit_cvtsi2sd_xmm_reg(BinaryCodeBuffer *buffer,
   return 1;
 }
 
+/* ---- Single-precision (float32) SSE encoders ----
+ * These mirror the double-precision encoders above but use the F3 scalar-
+ * single prefix / 32-bit operand forms. They exist so float32 values are
+ * computed and converted at single precision instead of being silently
+ * widened to double (which corrupts struct layout and ABI). */
+
+/* movd xmm, r32 : 66 0F 6E /r  (no REX.W -> 32-bit GP source) */
+static int binary_emit_movd_xmm_reg(BinaryCodeBuffer *buffer,
+                                    BinaryXmmRegister destination,
+                                    BinaryGpRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_code_buffer_append_u8(buffer, 0x66) ||
+      !binary_emit_rex(buffer, 0, destination >> 3, 0, source >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0x6E) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((destination & 7) << 3) |
+                                  (source & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+/* movd r32, xmm : 66 0F 7E /r  (no REX.W -> 32-bit GP destination) */
+static int binary_emit_movd_reg_xmm(BinaryCodeBuffer *buffer,
+                                    BinaryGpRegister destination,
+                                    BinaryXmmRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_code_buffer_append_u8(buffer, 0x66) ||
+      !binary_emit_rex(buffer, 0, source >> 3, 0, destination >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0x7E) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((source & 7) << 3) |
+                                  (destination & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int binary_emit_addss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                     BinaryXmmRegister destination,
+                                     BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF3, 0, 0x0F, 0x58, destination,
+                                 source);
+}
+
+static int binary_emit_subss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                     BinaryXmmRegister destination,
+                                     BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF3, 0, 0x0F, 0x5C, destination,
+                                 source);
+}
+
+static int binary_emit_mulss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                     BinaryXmmRegister destination,
+                                     BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF3, 0, 0x0F, 0x59, destination,
+                                 source);
+}
+
+static int binary_emit_divss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                     BinaryXmmRegister destination,
+                                     BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF3, 0, 0x0F, 0x5E, destination,
+                                 source);
+}
+
+/* ucomiss xmm, xmm : NP 0F 2E /r  (no mandatory prefix, so cannot use
+ * binary_emit_sse_reg_reg which always emits one). */
+static int binary_emit_ucomiss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                       BinaryXmmRegister lhs,
+                                       BinaryXmmRegister rhs) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_emit_rex(buffer, 0, lhs >> 3, 0, rhs >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0x2E) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((lhs & 7) << 3) | (rhs & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+/* cvttss2si r64, xmm : F3 REX.W 0F 2C /r  (truncating float32 -> int64) */
+static int binary_emit_cvttss2si_reg_xmm(BinaryCodeBuffer *buffer,
+                                         BinaryGpRegister destination,
+                                         BinaryXmmRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_code_buffer_append_u8(buffer, 0xF3) ||
+      !binary_emit_rex(buffer, 1, destination >> 3, 0, source >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0x2C) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((destination & 7) << 3) |
+                                  (source & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+/* cvtsi2ss xmm, r64 : F3 REX.W 0F 2A /r  (int64 -> float32) */
+static int binary_emit_cvtsi2ss_xmm_reg(BinaryCodeBuffer *buffer,
+                                        BinaryXmmRegister destination,
+                                        BinaryGpRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_code_buffer_append_u8(buffer, 0xF3) ||
+      !binary_emit_rex(buffer, 1, destination >> 3, 0, source >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0x2A) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((destination & 7) << 3) |
+                                  (source & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+/* cvtss2sd xmm, xmm : F3 0F 5A /r  (widen float32 -> float64) */
+static int binary_emit_cvtss2sd_xmm_xmm(BinaryCodeBuffer *buffer,
+                                        BinaryXmmRegister destination,
+                                        BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF3, 0, 0x0F, 0x5A, destination,
+                                 source);
+}
+
+/* cvtsd2ss xmm, xmm : F2 0F 5A /r  (narrow float64 -> float32) */
+static int binary_emit_cvtsd2ss_xmm_xmm(BinaryCodeBuffer *buffer,
+                                        BinaryXmmRegister destination,
+                                        BinaryXmmRegister source) {
+  return binary_emit_sse_reg_reg(buffer, 0xF2, 0, 0x0F, 0x5A, destination,
+                                 source);
+}
+
 static int binary_emit_call_placeholder(BinaryCodeBuffer *buffer,
                                         size_t *displacement_offset_out) {
   if (!buffer || !displacement_offset_out) {
@@ -1288,19 +1521,25 @@ static int binary_emit_jmp_placeholder(BinaryCodeBuffer *buffer,
   return binary_code_buffer_append_u32(buffer, 0);
 }
 
-static int binary_emit_je_placeholder(BinaryCodeBuffer *buffer,
-                                      size_t *displacement_offset_out) {
+static int binary_emit_jcc_placeholder(BinaryCodeBuffer *buffer,
+                                       unsigned char condition_opcode,
+                                       size_t *displacement_offset_out) {
   if (!buffer || !displacement_offset_out) {
     return 0;
   }
 
   if (!binary_code_buffer_append_u8(buffer, 0x0F) ||
-      !binary_code_buffer_append_u8(buffer, 0x84)) {
+      !binary_code_buffer_append_u8(buffer, condition_opcode)) {
     return 0;
   }
 
   *displacement_offset_out = buffer->size;
   return binary_code_buffer_append_u32(buffer, 0);
+}
+
+static int binary_emit_je_placeholder(BinaryCodeBuffer *buffer,
+                                      size_t *displacement_offset_out) {
+  return binary_emit_jcc_placeholder(buffer, 0x84, displacement_offset_out);
 }
 
 static int binary_emit_ret(BinaryCodeBuffer *buffer) {
@@ -1376,6 +1615,21 @@ static int code_generator_binary_resolved_type_is_float64(Type *type) {
   return type && type->kind == TYPE_FLOAT64 && type->size == 8;
 }
 
+/* IEEE-754 width of a resolved type: 32 for float32, 64 for float64, else 0
+ * (not a floating type). */
+static int code_generator_binary_resolved_type_float_bits(Type *type) {
+  if (!type) {
+    return 0;
+  }
+  if (type->kind == TYPE_FLOAT32 && type->size == 4) {
+    return 32;
+  }
+  if (type->kind == TYPE_FLOAT64 && type->size == 8) {
+    return 64;
+  }
+  return 0;
+}
+
 static int code_generator_binary_resolved_type_is_abi_supported(Type *type,
                                                                 int allow_void) {
   if (!type) {
@@ -1413,6 +1667,16 @@ static int code_generator_binary_named_type_is_float64(CodeGenerator *generator,
       code_generator_binary_get_resolved_type(generator, type_name, allow_void));
 }
 
+/* Float width (0/32/64) of a named type, e.g. a parameter/local type name. */
+static int code_generator_binary_named_type_float_bits(CodeGenerator *generator,
+                                                       const char *type_name) {
+  if (!type_name || type_name[0] == '\0') {
+    return 0;
+  }
+  return code_generator_binary_resolved_type_float_bits(
+      code_generator_binary_get_resolved_type(generator, type_name, 0));
+}
+
 static int code_generator_binary_is_marked_float64_symbol(
     const BinaryFunctionContext *context, const char *name) {
   return context && name &&
@@ -1420,13 +1684,40 @@ static int code_generator_binary_is_marked_float64_symbol(
              0;
 }
 
-static int code_generator_binary_mark_float64_symbol(
-    BinaryFunctionContext *context, const char *name) {
+/* The float64_symbols table doubles as a float-width map: the stored slot
+ * value is the IEEE-754 width (32 or 64) of the named symbol/temp. Width 0
+ * means "not recorded". */
+static int code_generator_binary_marked_symbol_float_bits(
+    const BinaryFunctionContext *context, const char *name) {
+  int width = 0;
+  if (!context || !name) {
+    return 0;
+  }
+  width = binary_named_slot_table_get_offset(&context->float64_symbols, name);
+  return (width == 32 || width == 64) ? width : 0;
+}
+
+static int code_generator_binary_mark_float_symbol(
+    BinaryFunctionContext *context, const char *name, int bits) {
   if (!context || !name || name[0] == '\0') {
     return 0;
   }
+  /* binary_named_slot_table_add fails a re-add with a different value, but a
+   * symbol/temp may legitimately be visited by more than one marking pass
+   * (declared-type pass and instruction-result pass). The first recorded
+   * width is authoritative; treat an already-present entry as success
+   * instead of aborting code generation. */
+  if (binary_named_slot_table_get_offset(&context->float64_symbols, name) >=
+      0) {
+    return 1;
+  }
+  return binary_named_slot_table_add(&context->float64_symbols, name,
+                                     (bits == 32) ? 32 : 64);
+}
 
-  return binary_named_slot_table_add(&context->float64_symbols, name, 1);
+static int code_generator_binary_mark_float64_symbol(
+    BinaryFunctionContext *context, const char *name) {
+  return code_generator_binary_mark_float_symbol(context, name, 64);
 }
 
 static int code_generator_binary_symbol_is_scalar_accessible(
@@ -1443,6 +1734,347 @@ static int code_generator_binary_symbol_is_scalar_accessible(
   }
 
   return code_generator_binary_resolved_type_is_stack_scalar(symbol->type);
+}
+
+static int code_generator_binary_immediate_fits_signed_32(long long value) {
+  return value >= INT32_MIN && value <= INT32_MAX;
+}
+
+static int code_generator_binary_extract_positive_power_of_two(
+    long long value, unsigned int *shift_out, unsigned long long *mask_out) {
+  unsigned long long uvalue = 0;
+  unsigned int shift = 0;
+
+  if (!shift_out || !mask_out || value <= 0) {
+    return 0;
+  }
+
+  uvalue = (unsigned long long)value;
+  if ((uvalue & (uvalue - 1ULL)) != 0ULL) {
+    return 0;
+  }
+
+  while (uvalue > 1ULL) {
+    uvalue >>= 1ULL;
+    shift++;
+  }
+
+  *shift_out = shift;
+  *mask_out = ((unsigned long long)value) - 1ULL;
+  return 1;
+}
+
+static int code_generator_binary_emit_and_mask(BinaryFunctionContext *context,
+                                               BinaryGpRegister target_register,
+                                               unsigned long long mask) {
+  if (!context) {
+    return 0;
+  }
+
+  if (mask <= 0x7fffffffULL) {
+    return binary_emit_and_reg_imm32(&context->code, target_register,
+                                     (uint32_t)mask);
+  }
+
+  return binary_emit_mov_reg_imm64(&context->code, BINARY_GP_R10, mask) &&
+         binary_emit_alu_reg_reg(&context->code, 0x21, target_register,
+                                 BINARY_GP_R10);
+}
+
+static int code_generator_binary_x86_to_gp_register(x86Register source,
+                                                    BinaryGpRegister *out) {
+  if (!out) {
+    return 0;
+  }
+
+  switch (source) {
+  case REG_RAX:
+    *out = BINARY_GP_RAX;
+    return 1;
+  case REG_RBX:
+    *out = BINARY_GP_RBX;
+    return 1;
+  case REG_RCX:
+    *out = BINARY_GP_RCX;
+    return 1;
+  case REG_RDX:
+    *out = BINARY_GP_RDX;
+    return 1;
+  case REG_RSI:
+    *out = BINARY_GP_RSI;
+    return 1;
+  case REG_RDI:
+    *out = BINARY_GP_RDI;
+    return 1;
+  case REG_R8:
+    *out = BINARY_GP_R8;
+    return 1;
+  case REG_R9:
+    *out = BINARY_GP_R9;
+    return 1;
+  case REG_R10:
+    *out = BINARY_GP_R10;
+    return 1;
+  case REG_R11:
+    *out = BINARY_GP_R11;
+    return 1;
+  case REG_R12:
+    *out = BINARY_GP_R12;
+    return 1;
+  case REG_R13:
+    *out = BINARY_GP_R13;
+    return 1;
+  case REG_R14:
+    *out = BINARY_GP_R14;
+    return 1;
+  case REG_R15:
+    *out = BINARY_GP_R15;
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+static int code_generator_binary_gp_register_is_win64_nonvolatile(
+    BinaryGpRegister reg) {
+  return reg == BINARY_GP_RBX || reg == BINARY_GP_RSI ||
+         reg == BINARY_GP_RDI || reg == BINARY_GP_R12 ||
+         reg == BINARY_GP_R13 || reg == BINARY_GP_R14 ||
+         reg == BINARY_GP_R15;
+}
+
+static int code_generator_binary_context_add_saved_register(
+    BinaryFunctionContext *context, BinaryGpRegister reg) {
+  if (!context) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < context->saved_register_count; i++) {
+    if (context->saved_registers[i] == reg) {
+      return 1;
+    }
+  }
+
+  if (context->saved_register_count >=
+      sizeof(context->saved_registers) / sizeof(context->saved_registers[0])) {
+    return 0;
+  }
+
+  context->saved_registers[context->saved_register_count++] = reg;
+  return 1;
+}
+
+static int code_generator_binary_type_is_gp_promotable(Type *type) {
+  if (!type || !code_generator_binary_resolved_type_is_supported(type, 0)) {
+    return 0;
+  }
+
+  if (code_generator_binary_resolved_type_float_bits(type) != 0 ||
+      type->kind == TYPE_STRING || type->kind == TYPE_VOID) {
+    return 0;
+  }
+
+  return type->size > 0 && type->size <= 8;
+}
+
+static int code_generator_binary_operand_mentions_symbol(
+    const IROperand *operand, const char *name) {
+  return operand && operand->kind == IR_OPERAND_SYMBOL && operand->name &&
+         name && strcmp(operand->name, name) == 0;
+}
+
+static size_t code_generator_binary_function_symbol_score(
+    const IRFunction *function, const char *name) {
+  size_t score = 0;
+
+  if (!function || !name) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (!instruction) {
+      continue;
+    }
+
+    if (code_generator_binary_operand_mentions_symbol(&instruction->dest,
+                                                      name)) {
+      score++;
+    }
+    if (code_generator_binary_operand_mentions_symbol(&instruction->lhs,
+                                                      name)) {
+      score++;
+    }
+    if (code_generator_binary_operand_mentions_symbol(&instruction->rhs,
+                                                      name)) {
+      score++;
+    }
+    for (size_t arg_index = 0; arg_index < instruction->argument_count;
+         arg_index++) {
+      if (code_generator_binary_operand_mentions_symbol(
+              &instruction->arguments[arg_index], name)) {
+        score++;
+      }
+    }
+  }
+
+  return score;
+}
+
+static int code_generator_binary_symbol_already_promoted(
+    BinaryFunctionContext *context, const char *name) {
+  return context && name &&
+         binary_named_slot_table_get_offset(&context->register_symbols, name) >=
+             0;
+}
+
+static int code_generator_binary_symbol_assigned_register(
+    CodeGenerator *generator, BinaryFunctionContext *context, const char *name,
+    BinaryGpRegister *register_out) {
+  Symbol *symbol = NULL;
+  BinaryGpRegister mapped = BINARY_GP_RAX;
+  int promoted_register = -1;
+
+  if (!generator || !context || !name || !register_out) {
+    return 0;
+  }
+
+  if (binary_named_slot_table_get_offset(&context->address_taken_symbols,
+                                         name) >= 0) {
+    return 0;
+  }
+
+  if (code_generator_binary_get_symbol_offset(context, name) <= 0) {
+    return 0;
+  }
+
+  promoted_register =
+      binary_named_slot_table_get_offset(&context->register_symbols, name);
+  if (promoted_register >= 0) {
+    mapped = (BinaryGpRegister)promoted_register;
+    if (code_generator_binary_gp_register_is_win64_nonvolatile(mapped)) {
+      *register_out = mapped;
+      return 1;
+    }
+  }
+
+  symbol = generator->symbol_table ? symbol_table_lookup(generator->symbol_table,
+                                                         name)
+                                   : NULL;
+  if (!symbol || !symbol->type || !symbol->data.variable.is_in_register) {
+    return 0;
+  }
+
+  if (!code_generator_binary_resolved_type_is_supported(symbol->type, 0) ||
+      code_generator_binary_resolved_type_float_bits(symbol->type) != 0 ||
+      symbol->type->kind == TYPE_STRING) {
+    return 0;
+  }
+
+  if (!code_generator_binary_x86_to_gp_register(
+          (x86Register)symbol->data.variable.register_id, &mapped) ||
+      !code_generator_binary_gp_register_is_win64_nonvolatile(mapped)) {
+    return 0;
+  }
+
+  *register_out = mapped;
+  return 1;
+}
+
+static int code_generator_binary_promote_hot_symbols(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    FunctionDeclaration *function_data, IRFunction *ir_function) {
+  static const BinaryGpRegister promotion_registers[] = {
+      BINARY_GP_R12, BINARY_GP_R13, BINARY_GP_R14, BINARY_GP_R15,
+      BINARY_GP_RBX};
+
+  if (!generator || !context || !function_data || !ir_function) {
+    return 0;
+  }
+
+  for (size_t reg_index = 0;
+       reg_index < sizeof(promotion_registers) / sizeof(promotion_registers[0]);
+       reg_index++) {
+    const char *best_name = NULL;
+    size_t best_score = 0;
+
+    for (size_t i = 0; i < function_data->parameter_count; i++) {
+      const char *name = function_data->parameter_names[i];
+      Type *type = NULL;
+      if (!name || code_generator_binary_symbol_already_promoted(context, name) ||
+          binary_named_slot_table_get_offset(&context->address_taken_symbols,
+                                             name) >= 0) {
+        continue;
+      }
+
+      type = code_generator_binary_get_resolved_type(
+          generator,
+          function_data->parameter_types ? function_data->parameter_types[i]
+                                         : NULL,
+          0);
+      if (!code_generator_binary_type_is_gp_promotable(type)) {
+        continue;
+      }
+
+      size_t score =
+          code_generator_binary_function_symbol_score(ir_function, name);
+      if (score > best_score) {
+        best_score = score;
+        best_name = name;
+      }
+    }
+
+    for (size_t i = 0; i < ir_function->instruction_count; i++) {
+      const IRInstruction *instruction = &ir_function->instructions[i];
+      const char *name = NULL;
+      Type *type = NULL;
+      if (!instruction || instruction->op != IR_OP_DECLARE_LOCAL ||
+          instruction->dest.kind != IR_OPERAND_SYMBOL ||
+          !instruction->dest.name) {
+        continue;
+      }
+
+      name = instruction->dest.name;
+      if (code_generator_binary_symbol_already_promoted(context, name) ||
+          binary_named_slot_table_get_offset(&context->address_taken_symbols,
+                                             name) >= 0) {
+        continue;
+      }
+
+      type = code_generator_binary_get_resolved_type(
+          generator,
+          instruction->text && instruction->text[0] != '\0' ? instruction->text
+                                                            : "int64",
+          0);
+      if (!code_generator_binary_type_is_gp_promotable(type)) {
+        continue;
+      }
+
+      size_t score =
+          code_generator_binary_function_symbol_score(ir_function, name);
+      if (score > best_score) {
+        best_score = score;
+        best_name = name;
+      }
+    }
+
+    if (!best_name || best_score < 3) {
+      break;
+    }
+
+    if (!binary_named_slot_table_add(&context->register_symbols, best_name,
+                                     (int)promotion_registers[reg_index]) ||
+        !code_generator_binary_context_add_saved_register(
+            context, promotion_registers[reg_index])) {
+      code_generator_set_error(
+          generator,
+          "Failed to promote hot symbol '%s' in direct object function '%s'",
+          best_name, function_data->name);
+      return 0;
+    }
+  }
+
+  return 1;
 }
 
 static int code_generator_binary_resolved_type_is_signed_integer(Type *type) {
@@ -1466,7 +2098,8 @@ static int code_generator_binary_resolved_type_scalar_size(Type *type) {
     return 8;
   }
 
-  if (type->kind == TYPE_POINTER || type->kind == TYPE_FUNCTION_POINTER) {
+  if (type->kind == TYPE_POINTER || type->kind == TYPE_FUNCTION_POINTER ||
+      type->kind == TYPE_FUTURE) {
     return 8;
   }
 
@@ -1492,10 +2125,12 @@ static int code_generator_binary_resolved_type_is_supported(Type *type,
   case TYPE_UINT16:
   case TYPE_UINT32:
   case TYPE_UINT64:
+  case TYPE_FLOAT32:
   case TYPE_FLOAT64:
   case TYPE_POINTER:
   case TYPE_ENUM:
   case TYPE_FUNCTION_POINTER:
+  case TYPE_FUTURE:
     return type->size <= 8;
   case TYPE_VOID:
     return allow_void;
@@ -1507,6 +2142,10 @@ static int code_generator_binary_resolved_type_is_supported(Type *type,
 static int code_generator_binary_type_is_abi_supported(CodeGenerator *generator,
                                                        const char *type_name,
                                                        int allow_void) {
+  if (type_name && strncmp(type_name, "Future<", 7) == 0) {
+    return 1;
+  }
+
   if (!generator || !generator->type_checker) {
     return 1;
   }
@@ -1523,6 +2162,35 @@ static int code_generator_binary_type_is_abi_supported(CodeGenerator *generator,
 static int code_generator_binary_type_is_cstring(Type *type) {
   return type && type->kind == TYPE_POINTER && type->name &&
          strcmp(type->name, "cstring") == 0;
+}
+
+static int code_generator_binary_type_is_string(Type *type) {
+  return type && type->kind == TYPE_STRING;
+}
+
+static Type *code_generator_binary_get_operand_type(CodeGenerator *generator,
+                                                    const IROperand *operand) {
+  Symbol *symbol = NULL;
+
+  if (!generator || !operand) {
+    return NULL;
+  }
+
+  switch (operand->kind) {
+  case IR_OPERAND_STRING:
+    return generator->type_checker ? generator->type_checker->builtin_string
+                                   : NULL;
+
+  case IR_OPERAND_SYMBOL:
+    if (!generator->symbol_table || !operand->name) {
+      return NULL;
+    }
+    symbol = symbol_table_lookup(generator->symbol_table, operand->name);
+    return symbol ? symbol->type : NULL;
+
+  default:
+    return NULL;
+  }
 }
 
 static int code_generator_binary_validate_signature(CodeGenerator *generator,
@@ -1570,6 +2238,12 @@ static int code_generator_binary_validate_signature(CodeGenerator *generator,
 static int code_generator_binary_instruction_result_is_float64(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IRInstruction *instruction);
+static int code_generator_binary_instruction_result_float_bits(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction);
+static int code_generator_binary_operand_float_bits(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand);
 
 static int code_generator_binary_prepare_function_context(
     CodeGenerator *generator, FunctionDeclaration *function_data,
@@ -1584,6 +2258,9 @@ static int code_generator_binary_prepare_function_context(
   context->return_is_float64 = code_generator_binary_resolved_type_is_float64(
       code_generator_binary_get_resolved_type(generator,
                                               function_data->return_type, 1));
+  context->return_float_bits = code_generator_binary_resolved_type_float_bits(
+      code_generator_binary_get_resolved_type(generator,
+                                              function_data->return_type, 1));
 
   int parameter_home_size = 0;
   if (function_data->parameter_count >
@@ -1595,6 +2272,23 @@ static int code_generator_binary_prepare_function_context(
   }
   parameter_home_size =
       (int)(function_data->parameter_count * BINARY_FUNCTION_STACK_SLOT_SIZE);
+
+  for (size_t i = 0; i < ir_function->instruction_count; i++) {
+    const IRInstruction *instruction = &ir_function->instructions[i];
+    if (!instruction || instruction->op != IR_OP_ADDRESS_OF ||
+        instruction->lhs.kind != IR_OPERAND_SYMBOL || !instruction->lhs.name) {
+      continue;
+    }
+    if (!binary_named_slot_table_add(&context->address_taken_symbols,
+                                     instruction->lhs.name, 1)) {
+      code_generator_set_error(
+          generator,
+          "Failed to record address-taken symbol metadata in function '%s'",
+          function_data->name);
+      binary_function_context_destroy(context);
+      return 0;
+    }
+  }
 
   for (size_t i = 0; i < function_data->parameter_count; i++) {
     const char *parameter_name = function_data->parameter_names[i];
@@ -1610,18 +2304,21 @@ static int code_generator_binary_prepare_function_context(
       return 0;
     }
 
-    if (code_generator_binary_named_type_is_float64(
+    {
+      int param_fbits = code_generator_binary_named_type_float_bits(
+          generator, function_data->parameter_types
+                         ? function_data->parameter_types[i]
+                         : NULL);
+      if (param_fbits &&
+          !code_generator_binary_mark_float_symbol(context, parameter_name,
+                                                   param_fbits)) {
+        code_generator_set_error(
             generator,
-            function_data->parameter_types ? function_data->parameter_types[i]
-                                           : NULL,
-            0) &&
-        !code_generator_binary_mark_float64_symbol(context, parameter_name)) {
-      code_generator_set_error(
-          generator,
-          "Failed to allocate float64 parameter metadata in function '%s'",
-          function_data->name);
-      binary_function_context_destroy(context);
-      return 0;
+            "Failed to allocate float parameter metadata in function '%s'",
+            function_data->name);
+        binary_function_context_destroy(context);
+        return 0;
+      }
     }
   }
 
@@ -1685,12 +2382,15 @@ static int code_generator_binary_prepare_function_context(
         binary_named_slot_table_get_offset(&context->local_slots,
                                            instruction->dest.name);
     if (existing_offset > 0) {
-      if (code_generator_binary_resolved_type_is_float64(local_type) &&
-          !code_generator_binary_mark_float64_symbol(context,
-                                                     instruction->dest.name)) {
+      int local_fbits =
+          code_generator_binary_resolved_type_float_bits(local_type);
+      if (local_fbits &&
+          !code_generator_binary_mark_float_symbol(context,
+                                                   instruction->dest.name,
+                                                   local_fbits)) {
         code_generator_set_error(
             generator,
-            "Failed to allocate float64 local metadata in function '%s'",
+            "Failed to allocate float local metadata in function '%s'",
             function_data->name);
         binary_function_context_destroy(context);
         return 0;
@@ -1727,15 +2427,20 @@ static int code_generator_binary_prepare_function_context(
       return 0;
     }
 
-    if (code_generator_binary_resolved_type_is_float64(local_type) &&
-        !code_generator_binary_mark_float64_symbol(context,
-                                                   instruction->dest.name)) {
-      code_generator_set_error(
-          generator,
-          "Failed to allocate float64 local metadata in function '%s'",
-          function_data->name);
-      binary_function_context_destroy(context);
-      return 0;
+    {
+      int local_fbits =
+          code_generator_binary_resolved_type_float_bits(local_type);
+      if (local_fbits &&
+          !code_generator_binary_mark_float_symbol(context,
+                                                   instruction->dest.name,
+                                                   local_fbits)) {
+        code_generator_set_error(
+            generator,
+            "Failed to allocate float local metadata in function '%s'",
+            function_data->name);
+        binary_function_context_destroy(context);
+        return 0;
+      }
     }
   }
 
@@ -1781,16 +2486,61 @@ static int code_generator_binary_prepare_function_context(
       continue;
     }
 
-    if (!code_generator_binary_instruction_result_is_float64(
-            generator, context, instruction)) {
-      continue;
+    {
+      int result_fbits = code_generator_binary_instruction_result_float_bits(
+          generator, context, instruction);
+      if (!result_fbits) {
+        continue;
+      }
+      if (!code_generator_binary_mark_float_symbol(
+              context, instruction->dest.name, result_fbits)) {
+        code_generator_set_error(
+            generator,
+            "Failed to allocate float temporary metadata in function '%s'",
+            function_data->name);
+        binary_function_context_destroy(context);
+        return 0;
+      }
     }
+  }
 
-    if (!code_generator_binary_mark_float64_symbol(context,
-                                                   instruction->dest.name)) {
+  if (!code_generator_binary_promote_hot_symbols(generator, context,
+                                                 function_data, ir_function)) {
+    binary_function_context_destroy(context);
+    return 0;
+  }
+
+  for (size_t i = 0; i < function_data->parameter_count; i++) {
+    BinaryGpRegister assigned_register = BINARY_GP_RAX;
+    const char *parameter_name = function_data->parameter_names[i];
+    if (code_generator_binary_symbol_assigned_register(
+            generator, context, parameter_name, &assigned_register) &&
+        !code_generator_binary_context_add_saved_register(context,
+                                                          assigned_register)) {
       code_generator_set_error(
           generator,
-          "Failed to allocate float64 temporary metadata in function '%s'",
+          "Too many callee-saved register-backed symbols in function '%s'",
+          function_data->name);
+      binary_function_context_destroy(context);
+      return 0;
+    }
+  }
+
+  for (size_t i = 0; i < ir_function->instruction_count; i++) {
+    const IRInstruction *instruction = &ir_function->instructions[i];
+    BinaryGpRegister assigned_register = BINARY_GP_RAX;
+    if (!instruction || instruction->op != IR_OP_DECLARE_LOCAL ||
+        instruction->dest.kind != IR_OPERAND_SYMBOL ||
+        !instruction->dest.name) {
+      continue;
+    }
+    if (code_generator_binary_symbol_assigned_register(
+            generator, context, instruction->dest.name, &assigned_register) &&
+        !code_generator_binary_context_add_saved_register(context,
+                                                          assigned_register)) {
+      code_generator_set_error(
+          generator,
+          "Too many callee-saved register-backed symbols in function '%s'",
           function_data->name);
       binary_function_context_destroy(context);
       return 0;
@@ -1816,7 +2566,16 @@ static int code_generator_binary_prepare_function_context(
     return 0;
   }
 
-  context->raw_frame_size = parameter_home_size + local_home_size + temp_home_size;
+  int saved_register_home_size =
+      (int)(context->saved_register_count * BINARY_FUNCTION_STACK_SLOT_SIZE);
+  for (size_t i = 0; i < context->saved_register_count; i++) {
+    context->saved_register_offsets[i] =
+        parameter_home_size + local_home_size + temp_home_size +
+        (int)((i + 1) * BINARY_FUNCTION_STACK_SLOT_SIZE);
+  }
+
+  context->raw_frame_size = parameter_home_size + local_home_size +
+                            temp_home_size + saved_register_home_size;
   if (!binary_align_up_int(context->raw_frame_size, 16, &context->frame_size)) {
     code_generator_set_error(generator,
                              "Stack frame too large in function '%s'",
@@ -2227,13 +2986,29 @@ static int code_generator_binary_emit_store_to_address(
   case 8:
     return binary_emit_mov_mem_reg(&context->code, address_register, 0,
                                    source_register);
-  default:
-    code_generator_set_error(
-        generator,
-        "Direct object backend does not yet support memory stores wider than "
-        "8 bytes in function '%s'",
-        context->function_name);
-    return 0;
+  default: {
+    /* Multi-byte aggregate (e.g. struct memcpy): rep movsb, RSI=src, RDI=dst,
+     * RCX=count. Save non-volatile RSI/RDI on Win64. */
+    uint64_t n = (uint64_t)size;
+    if (n != (uint64_t)size || n == 0) {
+      code_generator_set_error(
+          generator,
+          "Invalid aggregate store size %d in function '%s'",
+          size, context->function_name);
+      return 0;
+    }
+    return binary_emit_push_reg(&context->code, BINARY_GP_RSI) &&
+           binary_emit_push_reg(&context->code, BINARY_GP_RDI) &&
+           binary_emit_mov_reg_reg(&context->code, BINARY_GP_RSI,
+                                    source_register) &&
+           binary_emit_mov_reg_reg(&context->code, BINARY_GP_RDI,
+                                    address_register) &&
+           binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX, n) &&
+           binary_code_buffer_append_u8(&context->code, 0xF3) &&
+           binary_code_buffer_append_u8(&context->code, 0xA4) &&
+           binary_emit_pop_reg(&context->code, BINARY_GP_RDI) &&
+           binary_emit_pop_reg(&context->code, BINARY_GP_RSI);
+  }
   }
 }
 
@@ -2395,6 +3170,49 @@ static int code_generator_binary_operand_is_known_float64(
   return 0;
 }
 
+/* IEEE-754 width of a value operand: 32, 64, or 0 (not floating). Resolution
+ * order: the operand's own IR-carried float_bits (authoritative, set by
+ * ir_lowering), then a width recorded for the named symbol/temp, then the
+ * declared symbol type. This is the single place backends ask "what float
+ * precision is this value" so single vs double is never re-guessed ad hoc. */
+static int code_generator_binary_operand_float_bits(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand) {
+  Symbol *symbol = NULL;
+
+  if (!context || !operand) {
+    return 0;
+  }
+
+  if (operand->kind == IR_OPERAND_FLOAT) {
+    return operand->float_bits == 32 ? 32 : 64;
+  }
+
+  if ((operand->kind == IR_OPERAND_SYMBOL ||
+       operand->kind == IR_OPERAND_TEMP)) {
+    if (operand->float_bits == 32 || operand->float_bits == 64) {
+      return operand->float_bits;
+    }
+    if (operand->name) {
+      int marked = code_generator_binary_marked_symbol_float_bits(
+          context, operand->name);
+      if (marked) {
+        return marked;
+      }
+    }
+  }
+
+  if (operand->kind == IR_OPERAND_SYMBOL && operand->name && generator &&
+      generator->symbol_table) {
+    symbol = symbol_table_lookup(generator->symbol_table, operand->name);
+    if (symbol) {
+      return code_generator_binary_resolved_type_float_bits(symbol->type);
+    }
+  }
+
+  return 0;
+}
+
 static int code_generator_binary_instruction_result_is_float64(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IRInstruction *instruction) {
@@ -2449,8 +3267,82 @@ static int code_generator_binary_instruction_result_is_float64(
     return code_generator_binary_named_type_is_float64(generator,
                                                        instruction->text, 0);
 
+  case IR_OP_LOAD:
+    /* A value dereferenced from a float* / struct member is floating in the
+     * machine sense even though no symbol carries that type. ir_lowering sets
+     * is_float on float32/float64 loads; honor it so the destination temp is
+     * marked and reaches xmm via movd/movq (bit copy) rather than cvtsi2s*
+     * (integer->float conversion of the raw bit pattern). */
+    return instruction->is_float;
+
   default:
     return 0;
+  }
+}
+
+/* Float width (0/32/64) of an instruction's destination value. Generalizes
+ * code_generator_binary_instruction_result_is_float64 so the symbol-marking
+ * pass can record single vs double precision per temp/symbol. */
+static int code_generator_binary_instruction_result_float_bits(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  Symbol *symbol = NULL;
+  Type *function_type = NULL;
+
+  if (!context || !instruction) {
+    return 0;
+  }
+
+  if (!code_generator_binary_instruction_result_is_float64(generator, context,
+                                                           instruction)) {
+    return 0;
+  }
+
+  switch (instruction->op) {
+  case IR_OP_ASSIGN:
+    return code_generator_binary_operand_float_bits(generator, context,
+                                                    &instruction->lhs);
+
+  case IR_OP_BINARY:
+  case IR_OP_UNARY:
+  case IR_OP_LOAD:
+    return (instruction->float_bits == 32) ? 32 : 64;
+
+  case IR_OP_CALL:
+    symbol = generator && generator->symbol_table && instruction->text
+                 ? symbol_table_lookup(generator->symbol_table,
+                                       instruction->text)
+                 : NULL;
+    return (symbol && symbol->kind == SYMBOL_FUNCTION)
+               ? code_generator_binary_resolved_type_float_bits(
+                     symbol->data.function.return_type)
+               : 64;
+
+  case IR_OP_CALL_INDIRECT:
+    symbol = generator && generator->symbol_table &&
+                     instruction->lhs.kind == IR_OPERAND_SYMBOL &&
+                     instruction->lhs.name
+                 ? symbol_table_lookup(generator->symbol_table,
+                                       instruction->lhs.name)
+                 : NULL;
+    function_type =
+        (symbol && symbol->type && symbol->type->kind == TYPE_FUNCTION_POINTER)
+            ? symbol->type
+            : NULL;
+    return function_type ? code_generator_binary_resolved_type_float_bits(
+                               function_type->fn_return_type)
+                         : 64;
+
+  case IR_OP_CAST: {
+    Type *t = generator && generator->type_checker
+                  ? type_checker_get_type_by_name(generator->type_checker,
+                                                  instruction->text)
+                  : NULL;
+    return code_generator_binary_resolved_type_float_bits(t);
+  }
+
+  default:
+    return 64;
   }
 }
 
@@ -2498,11 +3390,24 @@ static int code_generator_binary_emit_string_symbol_load(
   return 0;
 }
 
-static int code_generator_binary_emit_float_operand_to_xmm(
+/* Materialize an operand into an XMM register at the requested precision
+ * (want_bits = 32 or 64).
+ *   - A floating operand carries raw IEEE-754 bits in RAX: copy them with
+ *     movd (32) or movq (64) according to the operand's OWN width, then
+ *     widen/narrow to want_bits with cvtss2sd / cvtsd2ss if they differ.
+ *   - An integer operand is converted to float with cvtsi2ss / cvtsi2sd at
+ *     want_bits (matches the surrounding float expression's precision). */
+static int code_generator_binary_emit_float_operand_to_xmm_bits(
     CodeGenerator *generator, BinaryFunctionContext *context,
-    const IROperand *operand, BinaryXmmRegister target_register) {
+    const IROperand *operand, BinaryXmmRegister target_register,
+    int want_bits) {
+  int operand_bits = 0;
+
   if (!generator || !context || !operand) {
     return 0;
+  }
+  if (want_bits != 32 && want_bits != 64) {
+    want_bits = 64;
   }
 
   if (!code_generator_binary_emit_operand_load(generator, context, operand,
@@ -2510,14 +3415,75 @@ static int code_generator_binary_emit_float_operand_to_xmm(
     return 0;
   }
 
-  if (code_generator_binary_operand_is_known_float64(generator, context,
-                                                     operand)) {
-    return binary_emit_movq_xmm_reg(&context->code, target_register,
-                                    BINARY_GP_RAX);
+  operand_bits =
+      code_generator_binary_operand_float_bits(generator, context, operand);
+
+  if (operand_bits == 32) {
+    if (!binary_emit_movd_xmm_reg(&context->code, target_register,
+                                  BINARY_GP_RAX)) {
+      return 0;
+    }
+    if (want_bits == 64) {
+      return binary_emit_cvtss2sd_xmm_xmm(&context->code, target_register,
+                                          target_register);
+    }
+    return 1;
   }
 
+  if (operand_bits == 64) {
+    if (!binary_emit_movq_xmm_reg(&context->code, target_register,
+                                  BINARY_GP_RAX)) {
+      return 0;
+    }
+    if (want_bits == 32) {
+      return binary_emit_cvtsd2ss_xmm_xmm(&context->code, target_register,
+                                          target_register);
+    }
+    return 1;
+  }
+
+  /* Integer value used in a float context: convert at the target precision. */
+  if (want_bits == 32) {
+    return binary_emit_cvtsi2ss_xmm_reg(&context->code, target_register,
+                                        BINARY_GP_RAX);
+  }
   return binary_emit_cvtsi2sd_xmm_reg(&context->code, target_register,
                                       BINARY_GP_RAX);
+}
+
+static int code_generator_binary_emit_float_operand_to_xmm(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand, BinaryXmmRegister target_register) {
+  return code_generator_binary_emit_float_operand_to_xmm_bits(
+      generator, context, operand, target_register, 64);
+}
+
+/* Reinterpret the float bits held in `gp_register` from src_bits precision to
+ * dst_bits precision, in place, using XMM0 as scratch. No-op when the widths
+ * already match or either side is not a float (src/dst 0). Used by ASSIGN /
+ * STORE / RETURN when a float64 value lands in a float32 slot or vice versa. */
+static int code_generator_binary_emit_float_reg_convert(
+    BinaryFunctionContext *context, BinaryGpRegister gp_register,
+    int src_bits, int dst_bits) {
+  if (!context || src_bits == 0 || dst_bits == 0 || src_bits == dst_bits) {
+    return 1;
+  }
+
+  if (src_bits == 64 && dst_bits == 32) {
+    return binary_emit_movq_xmm_reg(&context->code, BINARY_XMM0,
+                                    gp_register) &&
+           binary_emit_cvtsd2ss_xmm_xmm(&context->code, BINARY_XMM0,
+                                        BINARY_XMM0) &&
+           binary_emit_movd_reg_xmm(&context->code, gp_register, BINARY_XMM0);
+  }
+  if (src_bits == 32 && dst_bits == 64) {
+    return binary_emit_movd_xmm_reg(&context->code, BINARY_XMM0,
+                                    gp_register) &&
+           binary_emit_cvtss2sd_xmm_xmm(&context->code, BINARY_XMM0,
+                                        BINARY_XMM0) &&
+           binary_emit_movq_reg_xmm(&context->code, gp_register, BINARY_XMM0);
+  }
+  return 1;
 }
 
 static int code_generator_binary_emit_operand_load(
@@ -2536,6 +3502,18 @@ static int code_generator_binary_emit_operand_load(
                                      (uint64_t)operand->int_value);
 
   case IR_OPERAND_FLOAT: {
+    if (operand->float_bits == 32) {
+      /* Materialize the true 32-bit IEEE-754 single pattern (zero-extended).
+       * Encoding it as the low half of a double would store 0 for most
+       * values. */
+      union {
+        float value;
+        uint32_t bits;
+      } encoded = {0};
+      encoded.value = (float)operand->float_value;
+      return binary_emit_mov_reg_imm64(&context->code, target_register,
+                                       (uint64_t)encoded.bits);
+    }
     union {
       double value;
       uint64_t bits;
@@ -2568,9 +3546,18 @@ static int code_generator_binary_emit_operand_load(
                                                operand->name)
                          : NULL;
     int offset = code_generator_binary_get_symbol_offset(context, operand->name);
+    BinaryGpRegister assigned_register = BINARY_GP_RAX;
     if (symbol && symbol->type && symbol->type->kind == TYPE_STRING) {
       return code_generator_binary_emit_string_symbol_load(
           generator, context, operand->name, symbol, target_register);
+    }
+    if (code_generator_binary_symbol_assigned_register(
+            generator, context, operand->name, &assigned_register)) {
+      if (target_register == assigned_register) {
+        return 1;
+      }
+      return binary_emit_mov_reg_reg(&context->code, target_register,
+                                     assigned_register);
     }
     if (offset <= 0) {
       if (symbol && symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
@@ -2643,6 +3630,8 @@ static int code_generator_binary_emit_call_argument_load(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IROperand *operand, Type *parameter_type,
     BinaryGpRegister target_register) {
+  Type *operand_type = NULL;
+
   if (!generator || !context || !operand) {
     return 0;
   }
@@ -2654,8 +3643,38 @@ static int code_generator_binary_emit_call_argument_load(
         target_register);
   }
 
-  return code_generator_binary_emit_operand_load(generator, context, operand,
-                                                 target_register);
+  if (!code_generator_binary_emit_operand_load(generator, context, operand,
+                                               target_register)) {
+    return 0;
+  }
+
+  operand_type = code_generator_binary_get_operand_type(generator, operand);
+  if (code_generator_binary_type_is_cstring(parameter_type) &&
+      code_generator_binary_type_is_string(operand_type)) {
+    return binary_emit_mov_reg_mem(&context->code, target_register,
+                                   target_register, 0);
+  }
+
+  return 1;
+}
+
+/* Load a float register-argument and place it in its Win64 XMM parameter
+ * register at the parameter's precision. param_fbits is 32 or 64. The raw
+ * IEEE bits arrive in RAX; movd transfers a single, movq a double. */
+static int code_generator_binary_emit_float_call_argument(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand, Type *parameter_type, int param_fbits,
+    BinaryXmmRegister xmm_register) {
+  if (!code_generator_binary_emit_call_argument_load(
+          generator, context, operand, parameter_type, BINARY_GP_RAX)) {
+    return 0;
+  }
+  if (param_fbits == 32) {
+    return binary_emit_movd_xmm_reg(&context->code, xmm_register,
+                                    BINARY_GP_RAX);
+  }
+  return binary_emit_movq_xmm_reg(&context->code, xmm_register,
+                                  BINARY_GP_RAX);
 }
 
 static int code_generator_binary_emit_local_string_store(
@@ -2718,6 +3737,7 @@ static int code_generator_binary_emit_destination_store(
                          : NULL;
     int offset =
         code_generator_binary_get_symbol_offset(context, destination->name);
+    BinaryGpRegister assigned_register = BINARY_GP_RAX;
     if (symbol && symbol->type && symbol->type->kind == TYPE_STRING) {
       if (offset <= 0) {
         if (symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
@@ -2743,6 +3763,14 @@ static int code_generator_binary_emit_destination_store(
 
       return code_generator_binary_emit_local_string_store(
           generator, context, offset, source_register);
+    }
+    if (code_generator_binary_symbol_assigned_register(
+            generator, context, destination->name, &assigned_register)) {
+      if (assigned_register == source_register) {
+        return 1;
+      }
+      return binary_emit_mov_reg_reg(&context->code, assigned_register,
+                                     source_register);
     }
     if (offset <= 0) {
       if (symbol && symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
@@ -3050,8 +4078,29 @@ static int code_generator_binary_emit_load(CodeGenerator *generator,
                                                BINARY_GP_RAX) ||
       !code_generator_binary_emit_load_from_address(generator, context,
                                                     BINARY_GP_RAX, size,
-                                                    BINARY_GP_RAX) ||
-      !code_generator_binary_emit_destination_store(generator, context,
+                                                    BINARY_GP_RAX)) {
+    if (!generator->has_error) {
+      code_generator_set_error(generator,
+                               "Out of memory while emitting IR load in "
+                               "function '%s'",
+                               context->function_name);
+    }
+    return 0;
+  }
+  /* x86-64: 32-bit integer loads into EAX zero-extend RAX. Signed int32 must
+   * sign-extend to int64. Skip for float32 loads (same width, raw IEEE bits). */
+  if (size == 4 && !instruction->is_float &&
+      !binary_emit_movsxd_rax_eax(&context->code)) {
+    if (!generator->has_error) {
+      code_generator_set_error(generator,
+                               "Out of memory while emitting IR load in "
+                               "function '%s'",
+                               context->function_name);
+    }
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_destination_store(generator, context,
                                                     &instruction->dest,
                                                     BINARY_GP_RAX)) {
     if (!generator->has_error) {
@@ -3083,8 +4132,34 @@ static int code_generator_binary_emit_store(CodeGenerator *generator,
 
   if (!code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->lhs,
-                                               BINARY_GP_RCX) ||
-      !code_generator_binary_emit_operand_load(generator, context,
+                                               BINARY_GP_RCX)) {
+    if (!generator->has_error) {
+      code_generator_set_error(generator,
+                               "Out of memory while emitting IR store in "
+                               "function '%s'",
+                               context->function_name);
+    }
+    return 0;
+  }
+
+  /* Narrow/widen the value to the destination's float precision when the
+   * stored expression's width differs (e.g. float64 expression -> float32
+   * member). instruction->float_bits is the destination width. */
+  if (instruction->is_float && instruction->float_bits) {
+    int value_bits = code_generator_binary_operand_float_bits(
+        generator, context, &instruction->lhs);
+    if (value_bits &&
+        !code_generator_binary_emit_float_reg_convert(
+            context, BINARY_GP_RCX, value_bits, instruction->float_bits)) {
+      code_generator_set_error(generator,
+                               "Out of memory while converting float store "
+                               "precision in function '%s'",
+                               context->function_name);
+      return 0;
+    }
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->dest,
                                                BINARY_GP_RAX) ||
       !code_generator_binary_emit_store_to_address(generator, context,
@@ -3183,7 +4258,8 @@ static int code_generator_binary_emit_cast(CodeGenerator *generator,
                          target_type->kind == TYPE_UINT64;
     target_size = (int)target_type->size;
     if (target_type->kind == TYPE_POINTER ||
-        target_type->kind == TYPE_FUNCTION_POINTER) {
+        target_type->kind == TYPE_FUNCTION_POINTER ||
+        target_type->kind == TYPE_FUTURE) {
       target_size = 8;
     }
   }
@@ -3197,22 +4273,64 @@ static int code_generator_binary_emit_cast(CodeGenerator *generator,
     return 0;
   }
 
+  /* Source float width is carried on the CAST instruction (set by
+   * ir_lowering); target float width is derived from the cast's named type. */
+  int src_fbits = (instruction->float_bits == 32) ? 32 : 64;
+  int dst_fbits =
+      code_generator_binary_resolved_type_float_bits(target_type);
+
   if (instruction->is_float && !target_is_float) {
-    if (!binary_emit_movq_xmm_reg(&context->code, BINARY_XMM0,
-                                  BINARY_GP_RAX) ||
-        !binary_emit_cvttsd2si_reg_xmm(&context->code, BINARY_GP_RAX,
-                                       BINARY_XMM0)) {
+    /* float -> int: truncate at the SOURCE precision. */
+    if (src_fbits == 32) {
+      if (!binary_emit_movd_xmm_reg(&context->code, BINARY_XMM0,
+                                    BINARY_GP_RAX) ||
+          !binary_emit_cvttss2si_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)) {
+        goto emit_failure;
+      }
+    } else if (!binary_emit_movq_xmm_reg(&context->code, BINARY_XMM0,
+                                         BINARY_GP_RAX) ||
+               !binary_emit_cvttsd2si_reg_xmm(&context->code, BINARY_GP_RAX,
+                                              BINARY_XMM0)) {
       goto emit_failure;
     }
   } else if (!instruction->is_float && target_is_float) {
-    if (!binary_emit_cvtsi2sd_xmm_reg(&context->code, BINARY_XMM0,
-                                      BINARY_GP_RAX) ||
-        !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                  BINARY_XMM0)) {
+    /* int -> float: produce a value at the TARGET precision. */
+    if (dst_fbits == 32) {
+      if (!binary_emit_cvtsi2ss_xmm_reg(&context->code, BINARY_XMM0,
+                                        BINARY_GP_RAX) ||
+          !binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                    BINARY_XMM0)) {
+        goto emit_failure;
+      }
+    } else if (!binary_emit_cvtsi2sd_xmm_reg(&context->code, BINARY_XMM0,
+                                             BINARY_GP_RAX) ||
+               !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)) {
       goto emit_failure;
     }
   } else if (instruction->is_float && target_is_float) {
-    /* No-op for float64-to-float64 today. */
+    /* float -> float: convert precision only when the widths differ. */
+    if (src_fbits == 32 && dst_fbits == 64) {
+      if (!binary_emit_movd_xmm_reg(&context->code, BINARY_XMM0,
+                                    BINARY_GP_RAX) ||
+          !binary_emit_cvtss2sd_xmm_xmm(&context->code, BINARY_XMM0,
+                                        BINARY_XMM0) ||
+          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                    BINARY_XMM0)) {
+        goto emit_failure;
+      }
+    } else if (src_fbits == 64 && dst_fbits == 32) {
+      if (!binary_emit_movq_xmm_reg(&context->code, BINARY_XMM0,
+                                    BINARY_GP_RAX) ||
+          !binary_emit_cvtsd2ss_xmm_xmm(&context->code, BINARY_XMM0,
+                                        BINARY_XMM0) ||
+          !binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                    BINARY_XMM0)) {
+        goto emit_failure;
+      }
+    }
+    /* same width -> raw bits already correct, nothing to emit. */
   } else if (target_size == 1) {
     if ((target_is_unsigned &&
          !binary_emit_movzx_eax_al(&context->code)) ||
@@ -3310,6 +4428,7 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
                                            BinaryFunctionContext *context,
                                            const IRInstruction *instruction) {
   Symbol *function_symbol = NULL;
+  IRFunction *target_ir_function = NULL;
 
   if (!generator || !context || !instruction || !instruction->text ||
       instruction->text[0] == '\0') {
@@ -3329,6 +4448,8 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
                         ? symbol_table_lookup(generator->symbol_table,
                                               instruction->text)
                         : NULL;
+  target_ir_function =
+      code_generator_find_ir_function_binary(generator, instruction->text);
 
   size_t stack_argument_count =
       instruction->argument_count > BINARY_WIN64_REGISTER_ARG_COUNT
@@ -3387,24 +4508,18 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
     register_argument_count = BINARY_WIN64_REGISTER_ARG_COUNT;
   }
   for (size_t i = 0; i < register_argument_count; i++) {
-    int argument_is_float64 =
-        function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
-        function_symbol->data.function.parameter_types &&
-        code_generator_binary_resolved_type_is_float64(
-            function_symbol->data.function.parameter_types[i]);
     Type *parameter_type =
         function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
                 function_symbol->data.function.parameter_types
             ? function_symbol->data.function.parameter_types[i]
             : NULL;
-    if ((argument_is_float64 &&
-         (!code_generator_binary_emit_call_argument_load(
-              generator, context, &instruction->arguments[i], parameter_type,
-              BINARY_GP_RAX) ||
-          !binary_emit_movq_xmm_reg(&context->code,
-                                    BINARY_WIN64_FLOAT_PARAM_REGISTERS[i],
-                                    BINARY_GP_RAX))) ||
-        (!argument_is_float64 &&
+    int param_fbits =
+        code_generator_binary_resolved_type_float_bits(parameter_type);
+    if ((param_fbits &&
+         !code_generator_binary_emit_float_call_argument(
+             generator, context, &instruction->arguments[i], parameter_type,
+             param_fbits, BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])) ||
+        (!param_fbits &&
          !code_generator_binary_emit_call_argument_load(
              generator, context, &instruction->arguments[i], parameter_type,
              BINARY_WIN64_INT_PARAM_REGISTERS[i]))) {
@@ -3418,6 +4533,11 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
   if (!link_target || link_target[0] == '\0') {
     code_generator_set_error(generator, "Invalid call target '%s'",
                              instruction->text);
+    return 0;
+  }
+
+  if (!target_ir_function &&
+      !code_generator_binary_declare_external_symbol(generator, link_target)) {
     return 0;
   }
 
@@ -3436,16 +4556,21 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
     return 0;
   }
 
-  if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
-      code_generator_binary_resolved_type_is_float64(
-          function_symbol->data.function.return_type) &&
-      !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                BINARY_XMM0)) {
-    code_generator_set_error(generator,
-                             "Out of memory while materializing float call "
-                             "return in function '%s'",
-                             context->function_name);
-    return 0;
+  if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION) {
+    int ret_fbits = code_generator_binary_resolved_type_float_bits(
+        function_symbol->data.function.return_type);
+    if (((ret_fbits == 32 &&
+          !binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                    BINARY_XMM0)) ||
+         (ret_fbits == 64 &&
+          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                    BINARY_XMM0)))) {
+      code_generator_set_error(generator,
+                               "Out of memory while materializing float call "
+                               "return in function '%s'",
+                               context->function_name);
+      return 0;
+    }
   }
 
   if (!code_generator_binary_emit_destination_store(generator, context,
@@ -3540,22 +4665,17 @@ static int code_generator_binary_emit_call_indirect(
     register_argument_count = BINARY_WIN64_REGISTER_ARG_COUNT;
   }
   for (size_t i = 0; i < register_argument_count; i++) {
-    int argument_is_float64 =
-        function_type && function_type->fn_param_types &&
-        code_generator_binary_resolved_type_is_float64(
-            function_type->fn_param_types[i]);
     Type *parameter_type =
         function_type && function_type->fn_param_types
             ? function_type->fn_param_types[i]
             : NULL;
-    if ((argument_is_float64 &&
-         (!code_generator_binary_emit_call_argument_load(
-              generator, context, &instruction->arguments[i], parameter_type,
-              BINARY_GP_RAX) ||
-          !binary_emit_movq_xmm_reg(&context->code,
-                                    BINARY_WIN64_FLOAT_PARAM_REGISTERS[i],
-                                    BINARY_GP_RAX))) ||
-        (!argument_is_float64 &&
+    int param_fbits =
+        code_generator_binary_resolved_type_float_bits(parameter_type);
+    if ((param_fbits &&
+         !code_generator_binary_emit_float_call_argument(
+             generator, context, &instruction->arguments[i], parameter_type,
+             param_fbits, BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])) ||
+        (!param_fbits &&
          !code_generator_binary_emit_call_argument_load(
              generator, context, &instruction->arguments[i], parameter_type,
              BINARY_WIN64_INT_PARAM_REGISTERS[i]))) {
@@ -3583,16 +4703,21 @@ static int code_generator_binary_emit_call_indirect(
     return 0;
   }
 
-  if (function_type &&
-      code_generator_binary_resolved_type_is_float64(
-          function_type->fn_return_type) &&
-      !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                BINARY_XMM0)) {
-    code_generator_set_error(generator,
-                             "Out of memory while materializing float indirect "
-                             "call return in function '%s'",
-                             context->function_name);
-    return 0;
+  if (function_type) {
+    int ret_fbits = code_generator_binary_resolved_type_float_bits(
+        function_type->fn_return_type);
+    if ((ret_fbits == 32 &&
+         !binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                   BINARY_XMM0)) ||
+        (ret_fbits == 64 &&
+         !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                   BINARY_XMM0))) {
+      code_generator_set_error(generator,
+                               "Out of memory while materializing float "
+                               "indirect call return in function '%s'",
+                               context->function_name);
+      return 0;
+    }
   }
 
   if (!code_generator_binary_emit_destination_store(generator, context,
@@ -3775,47 +4900,88 @@ static int code_generator_binary_emit_binary(CodeGenerator *generator,
   }
 
   if (instruction->is_float) {
+    int fbits = (instruction->float_bits == 32) ? 32 : 64;
+    int arith_ok = 0;
+    int reg_move_ok = 0;
     op = instruction->text;
-    if (!code_generator_binary_emit_float_operand_to_xmm(
-            generator, context, &instruction->rhs, BINARY_XMM1) ||
-        !code_generator_binary_emit_float_operand_to_xmm(
-            generator, context, &instruction->lhs, BINARY_XMM0)) {
+    /* Bring both operands in at the operation's precision so single- and
+     * double-precision expressions stay in their own domain. */
+    if (!code_generator_binary_emit_float_operand_to_xmm_bits(
+            generator, context, &instruction->rhs, BINARY_XMM1, fbits) ||
+        !code_generator_binary_emit_float_operand_to_xmm_bits(
+            generator, context, &instruction->lhs, BINARY_XMM0, fbits)) {
       goto emit_failure;
     }
 
     if (strcmp(op, "+") == 0) {
-      if (!binary_emit_addsd_xmm_xmm(&context->code, BINARY_XMM0,
-                                     BINARY_XMM1) ||
-          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM0)) {
+      arith_ok = (fbits == 32)
+                     ? binary_emit_addss_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1)
+                     : binary_emit_addsd_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1);
+      reg_move_ok =
+          (fbits == 32)
+              ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)
+              : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0);
+      if (!arith_ok || !reg_move_ok) {
         goto emit_failure;
       }
     } else if (strcmp(op, "-") == 0) {
-      if (!binary_emit_subsd_xmm_xmm(&context->code, BINARY_XMM0,
-                                     BINARY_XMM1) ||
-          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM0)) {
+      arith_ok = (fbits == 32)
+                     ? binary_emit_subss_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1)
+                     : binary_emit_subsd_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1);
+      reg_move_ok =
+          (fbits == 32)
+              ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)
+              : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0);
+      if (!arith_ok || !reg_move_ok) {
         goto emit_failure;
       }
     } else if (strcmp(op, "*") == 0) {
-      if (!binary_emit_mulsd_xmm_xmm(&context->code, BINARY_XMM0,
-                                     BINARY_XMM1) ||
-          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM0)) {
+      arith_ok = (fbits == 32)
+                     ? binary_emit_mulss_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1)
+                     : binary_emit_mulsd_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1);
+      reg_move_ok =
+          (fbits == 32)
+              ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)
+              : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0);
+      if (!arith_ok || !reg_move_ok) {
         goto emit_failure;
       }
     } else if (strcmp(op, "/") == 0) {
-      if (!binary_emit_divsd_xmm_xmm(&context->code, BINARY_XMM0,
-                                     BINARY_XMM1) ||
-          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM0)) {
+      arith_ok = (fbits == 32)
+                     ? binary_emit_divss_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1)
+                     : binary_emit_divsd_xmm_xmm(&context->code, BINARY_XMM0,
+                                                 BINARY_XMM1);
+      reg_move_ok =
+          (fbits == 32)
+              ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0)
+              : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                         BINARY_XMM0);
+      if (!arith_ok || !reg_move_ok) {
         goto emit_failure;
       }
     } else if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
                strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
                strcmp(op, ">") == 0 || strcmp(op, ">=") == 0) {
-      if (!binary_emit_ucomisd_xmm_xmm(&context->code, BINARY_XMM0,
-                                       BINARY_XMM1)) {
+      int cmp_ok = (fbits == 32)
+                       ? binary_emit_ucomiss_xmm_xmm(&context->code,
+                                                     BINARY_XMM0, BINARY_XMM1)
+                       : binary_emit_ucomisd_xmm_xmm(&context->code,
+                                                     BINARY_XMM0, BINARY_XMM1);
+      if (!cmp_ok) {
         goto emit_failure;
       }
 
@@ -3874,6 +5040,184 @@ static int code_generator_binary_emit_binary(CodeGenerator *generator,
   }
 
   op = instruction->text;
+  if (!instruction->is_float &&
+      (strcmp(op, "/") == 0 || strcmp(op, "%") == 0) &&
+      instruction->rhs.kind == IR_OPERAND_INT) {
+    unsigned int shift = 0;
+    unsigned long long mask = 0;
+    if (code_generator_binary_extract_positive_power_of_two(
+            instruction->rhs.int_value, &shift, &mask)) {
+      if (!code_generator_binary_emit_operand_load(generator, context,
+                                                   &instruction->lhs,
+                                                   BINARY_GP_RAX)) {
+        return 0;
+      }
+
+      if (strcmp(op, "/") == 0) {
+        if (shift != 0 &&
+            (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_RCX,
+                                      BINARY_GP_RAX) ||
+             !binary_emit_shift_reg_imm8(&context->code, 7, BINARY_GP_RCX,
+                                         63) ||
+             !code_generator_binary_emit_and_mask(context, BINARY_GP_RCX,
+                                                  mask) ||
+             !binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+                                      BINARY_GP_RCX) ||
+             !binary_emit_shift_reg_imm8(&context->code, 7, BINARY_GP_RAX,
+                                         (unsigned char)shift))) {
+          goto emit_failure;
+        }
+      } else {
+        if (shift == 0) {
+          if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RAX, 0)) {
+            goto emit_failure;
+          }
+        } else if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_R11,
+                                            BINARY_GP_RAX) ||
+                   !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RCX,
+                                            BINARY_GP_RAX) ||
+                   !binary_emit_shift_reg_imm8(&context->code, 7,
+                                               BINARY_GP_RCX, 63) ||
+                   !code_generator_binary_emit_and_mask(context,
+                                                        BINARY_GP_RCX, mask) ||
+                   !binary_emit_alu_reg_reg(&context->code, 0x01,
+                                            BINARY_GP_RAX, BINARY_GP_RCX) ||
+                   !binary_emit_shift_reg_imm8(&context->code, 7,
+                                               BINARY_GP_RAX,
+                                               (unsigned char)shift) ||
+                   !binary_emit_shift_reg_imm8(&context->code, 4,
+                                               BINARY_GP_RAX,
+                                               (unsigned char)shift) ||
+                   !binary_emit_alu_reg_reg(&context->code, 0x29,
+                                            BINARY_GP_R11, BINARY_GP_RAX) ||
+                   !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX,
+                                            BINARY_GP_R11)) {
+          goto emit_failure;
+        }
+      }
+
+      if (!code_generator_binary_emit_destination_store(generator, context,
+                                                        &instruction->dest,
+                                                        BINARY_GP_RAX)) {
+        return 0;
+      }
+      return 1;
+    }
+  }
+
+  if (!instruction->is_float) {
+    const IROperand *value_operand = NULL;
+    long long immediate = 0;
+    int immediate_on_rhs = 0;
+    int commutative =
+        strcmp(op, "+") == 0 || strcmp(op, "*") == 0 ||
+        strcmp(op, "&") == 0 || strcmp(op, "|") == 0 ||
+        strcmp(op, "^") == 0 || strcmp(op, "==") == 0 ||
+        strcmp(op, "!=") == 0;
+    int rhs_immediate_supported =
+        commutative || strcmp(op, "-") == 0 || strcmp(op, "<<") == 0 ||
+        strcmp(op, ">>") == 0 || strcmp(op, "<") == 0 ||
+        strcmp(op, "<=") == 0 || strcmp(op, ">") == 0 ||
+        strcmp(op, ">=") == 0;
+
+    if (rhs_immediate_supported && instruction->rhs.kind == IR_OPERAND_INT &&
+        code_generator_binary_immediate_fits_signed_32(
+            instruction->rhs.int_value)) {
+      value_operand = &instruction->lhs;
+      immediate = instruction->rhs.int_value;
+      immediate_on_rhs = 1;
+    } else if (commutative && instruction->lhs.kind == IR_OPERAND_INT &&
+               code_generator_binary_immediate_fits_signed_32(
+                   instruction->lhs.int_value)) {
+      value_operand = &instruction->rhs;
+      immediate = instruction->lhs.int_value;
+    }
+
+    if (value_operand) {
+      int handled = 1;
+      if (!code_generator_binary_emit_operand_load(generator, context,
+                                                   value_operand,
+                                                   BINARY_GP_RAX)) {
+        return 0;
+      }
+
+      if (strcmp(op, "+") == 0) {
+        if (!binary_emit_add_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate)) {
+          goto emit_failure;
+        }
+      } else if (strcmp(op, "-") == 0 && immediate_on_rhs) {
+        if (!binary_emit_sub_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate)) {
+          goto emit_failure;
+        }
+      } else if (strcmp(op, "*") == 0) {
+        if (!binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
+                                            BINARY_GP_RAX,
+                                            (uint32_t)(int32_t)immediate)) {
+          goto emit_failure;
+        }
+      } else if (strcmp(op, "&") == 0) {
+        if (!binary_emit_and_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate)) {
+          goto emit_failure;
+        }
+      } else if (strcmp(op, "|") == 0) {
+        if (!binary_emit_or_reg_imm32(&context->code, BINARY_GP_RAX,
+                                      (uint32_t)(int32_t)immediate)) {
+          goto emit_failure;
+        }
+      } else if (strcmp(op, "^") == 0) {
+        if (!binary_emit_xor_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate)) {
+          goto emit_failure;
+        }
+      } else if ((strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) &&
+                 immediate_on_rhs && immediate >= 0 && immediate < 64) {
+        if (!binary_emit_shift_reg_imm8(
+                &context->code, strcmp(op, "<<") == 0 ? 4 : 7,
+                BINARY_GP_RAX, (unsigned char)immediate)) {
+          goto emit_failure;
+        }
+      } else if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+                 (immediate_on_rhs &&
+                  (strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+                   strcmp(op, ">") == 0 || strcmp(op, ">=") == 0))) {
+        if (strcmp(op, "==") == 0) {
+          condition_opcode = 0x94;
+        } else if (strcmp(op, "!=") == 0) {
+          condition_opcode = 0x95;
+        } else if (strcmp(op, "<") == 0) {
+          condition_opcode = 0x9C;
+        } else if (strcmp(op, "<=") == 0) {
+          condition_opcode = 0x9E;
+        } else if (strcmp(op, ">") == 0) {
+          condition_opcode = 0x9F;
+        } else {
+          condition_opcode = 0x9D;
+        }
+
+        if (!binary_emit_cmp_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate) ||
+            !binary_emit_setcc_al(&context->code, condition_opcode) ||
+            !binary_emit_movzx_eax_al(&context->code)) {
+          goto emit_failure;
+        }
+      } else {
+        handled = 0;
+      }
+
+      if (handled) {
+        if (!code_generator_binary_emit_destination_store(generator, context,
+                                                          &instruction->dest,
+                                                          BINARY_GP_RAX)) {
+          return 0;
+        }
+        return 1;
+      }
+    }
+  }
+
   if (!code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->rhs,
                                                BINARY_GP_R10) ||
@@ -4011,27 +5355,37 @@ static int code_generator_binary_emit_unary(CodeGenerator *generator,
   }
 
   if (instruction->is_float) {
+    int fbits = (instruction->float_bits == 32) ? 32 : 64;
     op = instruction->text;
-    if (!code_generator_binary_emit_operand_load(generator, context,
-                                                 &instruction->lhs,
-                                                 BINARY_GP_RAX) ||
-        !binary_emit_movq_xmm_reg(&context->code, BINARY_XMM0,
-                                  BINARY_GP_RAX)) {
+    if (!code_generator_binary_emit_float_operand_to_xmm_bits(
+            generator, context, &instruction->lhs, BINARY_XMM0, fbits)) {
       goto emit_failure;
     }
 
     if (strcmp(op, "-") == 0) {
-      if (!binary_emit_pxor_xmm_xmm(&context->code, BINARY_XMM1,
-                                    BINARY_XMM1) ||
-          !binary_emit_subsd_xmm_xmm(&context->code, BINARY_XMM1,
-                                     BINARY_XMM0) ||
-          !binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM1)) {
+      /* Negate as 0 - x at the operand precision. */
+      int neg_ok =
+          binary_emit_pxor_xmm_xmm(&context->code, BINARY_XMM1, BINARY_XMM1) &&
+          (fbits == 32
+               ? binary_emit_subss_xmm_xmm(&context->code, BINARY_XMM1,
+                                           BINARY_XMM0)
+               : binary_emit_subsd_xmm_xmm(&context->code, BINARY_XMM1,
+                                           BINARY_XMM0)) &&
+          (fbits == 32
+               ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                          BINARY_XMM1)
+               : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                          BINARY_XMM1));
+      if (!neg_ok) {
         goto emit_failure;
       }
     } else if (strcmp(op, "+") == 0) {
-      if (!binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                    BINARY_XMM0)) {
+      int mv_ok = (fbits == 32)
+                      ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                                 BINARY_XMM0)
+                      : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                                 BINARY_XMM0);
+      if (!mv_ok) {
         goto emit_failure;
       }
     } else {
@@ -4196,11 +5550,33 @@ static int code_generator_binary_emit_instruction(
     return 1;
   }
 
-  case IR_OP_ASSIGN:
+  case IR_OP_ASSIGN: {
     if (!code_generator_binary_emit_operand_load(generator, context,
                                                  &instruction->lhs,
-                                                 BINARY_GP_RAX) ||
-        !code_generator_binary_emit_destination_store(generator, context,
+                                                 BINARY_GP_RAX)) {
+      if (!generator->has_error) {
+        code_generator_set_error(generator,
+                                 "Out of memory while emitting assign");
+      }
+      return 0;
+    }
+    /* Convert when a float value is assigned into a destination of a
+     * different float precision (instruction->float_bits = target width,
+     * set by ir_lowering from the declared/symbol type). */
+    if (instruction->is_float && instruction->float_bits) {
+      int value_bits = code_generator_binary_operand_float_bits(
+          generator, context, &instruction->lhs);
+      if (value_bits &&
+          !code_generator_binary_emit_float_reg_convert(
+              context, BINARY_GP_RAX, value_bits, instruction->float_bits)) {
+        code_generator_set_error(generator,
+                                 "Out of memory while converting float assign "
+                                 "precision in function '%s'",
+                                 context->function_name);
+        return 0;
+      }
+    }
+    if (!code_generator_binary_emit_destination_store(generator, context,
                                                       &instruction->dest,
                                                       BINARY_GP_RAX)) {
       if (!generator->has_error) {
@@ -4210,6 +5586,7 @@ static int code_generator_binary_emit_instruction(
       return 0;
     }
     return 1;
+  }
 
   case IR_OP_ADDRESS_OF:
     return code_generator_binary_emit_address_of(generator, context,
@@ -4240,6 +5617,63 @@ static int code_generator_binary_emit_instruction(
   case IR_OP_CAST:
     return code_generator_binary_emit_cast(generator, context, instruction);
 
+  // Threading opcodes that reach codegen are lowered as plain calls to
+  // the runtime. IR_OP_THREAD_SPAWN emits a call to __meth_thread_spawn
+  // passing a function pointer (address-of the named function) followed by
+  // the user-supplied arguments, then the arg count as the final argument.
+  // All other thread opcodes are already lowered to IR_OP_CALL by
+  // ir_emit_thread_runtime_call / ir_lower_thread_method_call.
+  case IR_OP_THREAD_SPAWN: {
+    // Synthesize: __meth_thread_spawn(fn_ptr, arg0..argN, arg_count)
+    // args layout: [symbol(fn_name), original_args..., int(arg_count)]
+    size_t orig_argc = instruction->argument_count;
+    size_t new_argc = 1 + orig_argc + 1;
+    IROperand *new_args = (IROperand *)calloc(new_argc, sizeof(IROperand));
+    if (!new_args) {
+      code_generator_set_error(generator, "OOM in IR_OP_THREAD_SPAWN lowering");
+      return 0;
+    }
+    new_args[0] = ir_operand_symbol(instruction->text); // fn ptr
+    for (size_t i = 0; i < orig_argc; i++)
+      new_args[1 + i] = instruction->arguments[i]; // shallow copy — names are interned
+    new_args[1 + orig_argc] = ir_operand_int((long long)orig_argc);
+
+    IRInstruction synth = *instruction;
+    synth.op = IR_OP_CALL;
+    synth.text = "__meth_thread_spawn";
+    synth.arguments = new_args;
+    synth.argument_count = new_argc;
+
+    int ok = code_generator_binary_emit_call(generator, context, &synth);
+
+    // Only free the wrapper array and the two operands we allocated;
+    // the shallow-copied slots share names with the original instruction.
+    ir_operand_destroy(&new_args[0]);
+    ir_operand_destroy(&new_args[1 + orig_argc]);
+    free(new_args);
+    return ok;
+  }
+
+  case IR_OP_CHAN_NEW:
+  case IR_OP_MUTEX_NEW:
+  case IR_OP_MUTEX_LOCK:
+  case IR_OP_MUTEX_UNLOCK:
+  case IR_OP_ATOMIC_LOAD:
+  case IR_OP_ATOMIC_STORE:
+  case IR_OP_ATOMIC_FETCH_ADD:
+  case IR_OP_ATOMIC_FETCH_SUB:
+  case IR_OP_ATOMIC_CAS:
+  case IR_OP_CHAN_SEND:
+  case IR_OP_CHAN_RECV:
+  case IR_OP_THREAD_JOIN: {
+    // These are emitted as IR_OP_CALL by the lowering pass. If they somehow
+    // arrive here directly (e.g. future optimization passes), synthesize a
+    // plain call using instruction->text as the runtime function name.
+    IRInstruction synth = *instruction;
+    synth.op = IR_OP_CALL;
+    return code_generator_binary_emit_call(generator, context, &synth);
+  }
+
   case IR_OP_RETURN: {
     size_t displacement_offset = 0;
     if (instruction->lhs.kind != IR_OPERAND_NONE &&
@@ -4247,6 +5681,23 @@ static int code_generator_binary_emit_instruction(
                                                  &instruction->lhs,
                                                  BINARY_GP_RAX)) {
       return 0;
+    }
+    /* Convert the returned value to the function's float return precision
+     * (instruction->float_bits set by ir_lowering) so the epilogue's
+     * RAX->XMM0 transfer carries correctly-rounded bits. */
+    if (instruction->lhs.kind != IR_OPERAND_NONE && instruction->is_float &&
+        instruction->float_bits) {
+      int value_bits = code_generator_binary_operand_float_bits(
+          generator, context, &instruction->lhs);
+      if (value_bits &&
+          !code_generator_binary_emit_float_reg_convert(
+              context, BINARY_GP_RAX, value_bits, instruction->float_bits)) {
+        code_generator_set_error(generator,
+                                 "Out of memory while converting float return "
+                                 "precision in function '%s'",
+                                 context->function_name);
+        return 0;
+      }
     }
     if (!binary_emit_jmp_placeholder(&context->code, &displacement_offset) ||
         !binary_offset_table_add(&context->return_fixups, displacement_offset)) {
@@ -4300,12 +5751,25 @@ static int code_generator_binary_emit_prologue(CodeGenerator *generator,
     return 0;
   }
 
+  for (size_t i = 0; i < context->saved_register_count; i++) {
+    if (!binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP,
+                                 -context->saved_register_offsets[i],
+                                 context->saved_registers[i])) {
+      code_generator_set_error(generator,
+                               "Out of memory while saving callee registers");
+      return 0;
+    }
+  }
+
   for (size_t i = 0; i < function_data->parameter_count; i++) {
     const char *parameter_name = function_data->parameter_names[i];
-    int parameter_is_float64 = code_generator_binary_named_type_is_float64(
-        generator,
-        function_data->parameter_types ? function_data->parameter_types[i] : NULL,
-        0);
+    int parameter_fbits = code_generator_binary_named_type_float_bits(
+        generator, function_data->parameter_types
+                       ? function_data->parameter_types[i]
+                       : NULL);
+    BinaryGpRegister assigned_register = BINARY_GP_RAX;
+    int parameter_in_register = code_generator_binary_symbol_assigned_register(
+        generator, context, parameter_name, &assigned_register);
     int home_offset =
         code_generator_binary_get_parameter_offset(context, parameter_name);
     if (home_offset <= 0) {
@@ -4317,15 +5781,50 @@ static int code_generator_binary_emit_prologue(CodeGenerator *generator,
       return 0;
     }
 
+    if (parameter_in_register) {
+      int home_ok = 1;
+      if (i < BINARY_WIN64_REGISTER_ARG_COUNT) {
+        home_ok = binary_emit_mov_reg_reg(
+            &context->code, assigned_register,
+            BINARY_WIN64_INT_PARAM_REGISTERS[i]);
+      } else {
+        int incoming_stack_offset =
+            16 + BINARY_WIN64_SHADOW_SPACE_SIZE +
+            (int)((i - BINARY_WIN64_REGISTER_ARG_COUNT) *
+                  BINARY_FUNCTION_STACK_SLOT_SIZE);
+        home_ok = binary_emit_mov_reg_mem(&context->code, assigned_register,
+                                          BINARY_GP_RBP,
+                                          incoming_stack_offset);
+      }
+      if (!home_ok) {
+        code_generator_set_error(
+            generator, "Out of memory while homing register parameters");
+        return 0;
+      }
+      continue;
+    }
+
     if (i < BINARY_WIN64_REGISTER_ARG_COUNT) {
-      if ((parameter_is_float64 &&
-           (!binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                      BINARY_WIN64_FLOAT_PARAM_REGISTERS[i]) ||
-            !binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP,
-                                     -home_offset, BINARY_GP_RAX))) ||
-          (!parameter_is_float64 &&
-           !binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP, -home_offset,
-                                    BINARY_WIN64_INT_PARAM_REGISTERS[i]))) {
+      int home_ok = 1;
+      if (parameter_fbits) {
+        /* Float params arrive in XMM; copy the bits to GP at the param's
+         * precision (movd for float32, movq for float64) before homing. */
+        home_ok =
+            (parameter_fbits == 32
+                 ? binary_emit_movd_reg_xmm(
+                       &context->code, BINARY_GP_RAX,
+                       BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])
+                 : binary_emit_movq_reg_xmm(
+                       &context->code, BINARY_GP_RAX,
+                       BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])) &&
+            binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP,
+                                    -home_offset, BINARY_GP_RAX);
+      } else {
+        home_ok = binary_emit_mov_mem_reg(
+            &context->code, BINARY_GP_RBP, -home_offset,
+            BINARY_WIN64_INT_PARAM_REGISTERS[i]);
+      }
+      if (!home_ok) {
         code_generator_set_error(generator,
                                  "Out of memory while homing parameters");
         return 0;
@@ -4392,6 +5891,682 @@ static int code_generator_binary_resolve_fixups(CodeGenerator *generator,
   return 1;
 }
 
+static int code_generator_binary_is_compare_operator(const char *op) {
+  return op &&
+         (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+          strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+          strcmp(op, ">") == 0 || strcmp(op, ">=") == 0);
+}
+
+static int code_generator_binary_compare_false_jcc(const char *op,
+                                                   unsigned char *opcode_out) {
+  if (!op || !opcode_out) {
+    return 0;
+  }
+
+  if (strcmp(op, "==") == 0) {
+    *opcode_out = 0x85; /* jne */
+    return 1;
+  }
+  if (strcmp(op, "!=") == 0) {
+    *opcode_out = 0x84; /* je */
+    return 1;
+  }
+  if (strcmp(op, "<") == 0) {
+    *opcode_out = 0x8D; /* jge */
+    return 1;
+  }
+  if (strcmp(op, "<=") == 0) {
+    *opcode_out = 0x8F; /* jg */
+    return 1;
+  }
+  if (strcmp(op, ">") == 0) {
+    *opcode_out = 0x8E; /* jle */
+    return 1;
+  }
+  if (strcmp(op, ">=") == 0) {
+    *opcode_out = 0x8C; /* jl */
+    return 1;
+  }
+
+  return 0;
+}
+
+static int code_generator_binary_operand_uses_temp(const IROperand *operand,
+                                                   const char *name) {
+  return operand && operand->kind == IR_OPERAND_TEMP && operand->name && name &&
+         strcmp(operand->name, name) == 0;
+}
+
+static int code_generator_binary_instruction_temp_use_count(
+    const IRInstruction *instruction, const char *name) {
+  int count = 0;
+
+  if (!instruction || !name) {
+    return 0;
+  }
+
+  if (code_generator_binary_operand_uses_temp(&instruction->lhs, name)) {
+    count++;
+  }
+  if (code_generator_binary_operand_uses_temp(&instruction->rhs, name)) {
+    count++;
+  }
+  for (size_t i = 0; i < instruction->argument_count; i++) {
+    if (code_generator_binary_operand_uses_temp(&instruction->arguments[i],
+                                                name)) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+static int code_generator_binary_function_temp_use_count(
+    const IRFunction *function, const char *name) {
+  int count = 0;
+
+  if (!function || !name) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    count += code_generator_binary_instruction_temp_use_count(
+        &function->instructions[i], name);
+  }
+
+  return count;
+}
+
+static int code_generator_binary_emit_compare_false_branch(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *compare, const char *target_label) {
+  unsigned char branch_opcode = 0;
+  size_t displacement_offset = 0;
+
+  if (!generator || !context || !compare || !target_label ||
+      target_label[0] == '\0' ||
+      !code_generator_binary_compare_false_jcc(compare->text,
+                                               &branch_opcode)) {
+    return 0;
+  }
+
+  if (compare->rhs.kind == IR_OPERAND_INT &&
+      code_generator_binary_immediate_fits_signed_32(
+          compare->rhs.int_value)) {
+    if (!code_generator_binary_emit_operand_load(generator, context,
+                                                 &compare->lhs,
+                                                 BINARY_GP_RAX) ||
+        !binary_emit_cmp_reg_imm32(&context->code, BINARY_GP_RAX,
+                                   (uint32_t)(int32_t)compare->rhs.int_value)) {
+      return 0;
+    }
+  } else if ((strcmp(compare->text, "==") == 0 ||
+              strcmp(compare->text, "!=") == 0) &&
+             compare->lhs.kind == IR_OPERAND_INT &&
+             code_generator_binary_immediate_fits_signed_32(
+                 compare->lhs.int_value)) {
+    if (!code_generator_binary_emit_operand_load(generator, context,
+                                                 &compare->rhs,
+                                                 BINARY_GP_RAX) ||
+        !binary_emit_cmp_reg_imm32(&context->code, BINARY_GP_RAX,
+                                   (uint32_t)(int32_t)compare->lhs.int_value)) {
+      return 0;
+    }
+  } else if (!code_generator_binary_emit_operand_load(generator, context,
+                                                      &compare->rhs,
+                                                      BINARY_GP_R10) ||
+             !code_generator_binary_emit_operand_load(generator, context,
+                                                      &compare->lhs,
+                                                      BINARY_GP_RAX) ||
+             !binary_emit_cmp_reg_reg(&context->code, BINARY_GP_RAX,
+                                      BINARY_GP_R10)) {
+    return 0;
+  }
+
+  if (!binary_emit_jcc_placeholder(&context->code, branch_opcode,
+                                   &displacement_offset) ||
+      !binary_label_fixup_table_add(&context->label_fixups, target_label,
+                                    displacement_offset)) {
+    code_generator_set_error(generator,
+                             "Out of memory while emitting compare branch");
+    return 0;
+  }
+
+  return 1;
+}
+
+static int code_generator_binary_emit_integer_binary_to_rax(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  const char *op = NULL;
+
+  if (!generator || !context || !instruction || instruction->is_float ||
+      !instruction->text) {
+    return 0;
+  }
+
+  op = instruction->text;
+  if ((strcmp(op, "/") == 0 || strcmp(op, "%") == 0) &&
+      instruction->rhs.kind == IR_OPERAND_INT) {
+    unsigned int shift = 0;
+    unsigned long long mask = 0;
+    if (code_generator_binary_extract_positive_power_of_two(
+            instruction->rhs.int_value, &shift, &mask)) {
+      if (!code_generator_binary_emit_operand_load(generator, context,
+                                                   &instruction->lhs,
+                                                   BINARY_GP_RAX)) {
+        return 0;
+      }
+
+      if (strcmp(op, "/") == 0) {
+        if (shift != 0 &&
+            (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_RCX,
+                                      BINARY_GP_RAX) ||
+             !binary_emit_shift_reg_imm8(&context->code, 7, BINARY_GP_RCX,
+                                         63) ||
+             !code_generator_binary_emit_and_mask(context, BINARY_GP_RCX,
+                                                  mask) ||
+             !binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+                                      BINARY_GP_RCX) ||
+             !binary_emit_shift_reg_imm8(&context->code, 7, BINARY_GP_RAX,
+                                         (unsigned char)shift))) {
+          code_generator_set_error(
+              generator,
+              "Out of memory while emitting integer expression chain in "
+              "function '%s'",
+              context->function_name);
+          return 0;
+        }
+      } else if (shift == 0) {
+        if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RAX, 0)) {
+          code_generator_set_error(
+              generator,
+              "Out of memory while emitting integer expression chain in "
+              "function '%s'",
+              context->function_name);
+          return 0;
+        }
+      } else if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_R11,
+                                          BINARY_GP_RAX) ||
+                 !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RCX,
+                                          BINARY_GP_RAX) ||
+                 !binary_emit_shift_reg_imm8(&context->code, 7, BINARY_GP_RCX,
+                                             63) ||
+                 !code_generator_binary_emit_and_mask(context, BINARY_GP_RCX,
+                                                      mask) ||
+                 !binary_emit_alu_reg_reg(&context->code, 0x01,
+                                          BINARY_GP_RAX, BINARY_GP_RCX) ||
+                 !binary_emit_shift_reg_imm8(&context->code, 7, BINARY_GP_RAX,
+                                             (unsigned char)shift) ||
+                 !binary_emit_shift_reg_imm8(&context->code, 4, BINARY_GP_RAX,
+                                             (unsigned char)shift) ||
+                 !binary_emit_alu_reg_reg(&context->code, 0x29,
+                                          BINARY_GP_R11, BINARY_GP_RAX) ||
+                 !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX,
+                                          BINARY_GP_R11)) {
+        code_generator_set_error(
+            generator,
+            "Out of memory while emitting integer expression chain in function "
+            "'%s'",
+            context->function_name);
+        return 0;
+      }
+      return 1;
+    }
+  }
+
+  if (instruction->rhs.kind == IR_OPERAND_INT &&
+      code_generator_binary_immediate_fits_signed_32(
+          instruction->rhs.int_value) &&
+      (strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
+       strcmp(op, "*") == 0 || strcmp(op, "&") == 0 ||
+       strcmp(op, "|") == 0 || strcmp(op, "^") == 0 ||
+       ((strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) &&
+        instruction->rhs.int_value >= 0 && instruction->rhs.int_value < 64))) {
+    long long immediate = instruction->rhs.int_value;
+    if (!code_generator_binary_emit_operand_load(generator, context,
+                                                 &instruction->lhs,
+                                                 BINARY_GP_RAX)) {
+      return 0;
+    }
+
+    if (strcmp(op, "+") == 0) {
+      return binary_emit_add_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "-") == 0) {
+      return binary_emit_sub_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "*") == 0) {
+      return binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
+                                            BINARY_GP_RAX,
+                                            (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "&") == 0) {
+      return binary_emit_and_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "|") == 0) {
+      return binary_emit_or_reg_imm32(&context->code, BINARY_GP_RAX,
+                                      (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "^") == 0) {
+      return binary_emit_xor_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate);
+    }
+    return binary_emit_shift_reg_imm8(
+        &context->code, strcmp(op, "<<") == 0 ? 4 : 7, BINARY_GP_RAX,
+        (unsigned char)immediate);
+  }
+
+  if (instruction->lhs.kind == IR_OPERAND_INT &&
+      code_generator_binary_immediate_fits_signed_32(
+          instruction->lhs.int_value) &&
+      (strcmp(op, "+") == 0 || strcmp(op, "*") == 0 ||
+       strcmp(op, "&") == 0 || strcmp(op, "|") == 0 ||
+       strcmp(op, "^") == 0)) {
+    long long immediate = instruction->lhs.int_value;
+    if (!code_generator_binary_emit_operand_load(generator, context,
+                                                 &instruction->rhs,
+                                                 BINARY_GP_RAX)) {
+      return 0;
+    }
+    if (strcmp(op, "+") == 0) {
+      return binary_emit_add_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "*") == 0) {
+      return binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
+                                            BINARY_GP_RAX,
+                                            (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "&") == 0) {
+      return binary_emit_and_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "|") == 0) {
+      return binary_emit_or_reg_imm32(&context->code, BINARY_GP_RAX,
+                                      (uint32_t)(int32_t)immediate);
+    }
+    return binary_emit_xor_reg_imm32(&context->code, BINARY_GP_RAX,
+                                     (uint32_t)(int32_t)immediate);
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->rhs,
+                                               BINARY_GP_R10) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->lhs,
+                                               BINARY_GP_RAX)) {
+    return 0;
+  }
+
+  if (strcmp(op, "+") == 0) {
+    return binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+                                   BINARY_GP_R10);
+  }
+  if (strcmp(op, "-") == 0) {
+    return binary_emit_alu_reg_reg(&context->code, 0x29, BINARY_GP_RAX,
+                                   BINARY_GP_R10);
+  }
+  if (strcmp(op, "*") == 0) {
+    return binary_emit_imul_reg_reg(&context->code, BINARY_GP_RAX,
+                                    BINARY_GP_R10);
+  }
+  if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0) {
+    if (!binary_emit_cqo(&context->code) ||
+        !binary_emit_idiv_reg(&context->code, BINARY_GP_R10)) {
+      return 0;
+    }
+    if (strcmp(op, "%") == 0) {
+      return binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX,
+                                     BINARY_GP_RDX);
+    }
+    return 1;
+  }
+  if (strcmp(op, "&") == 0) {
+    return binary_emit_alu_reg_reg(&context->code, 0x21, BINARY_GP_RAX,
+                                   BINARY_GP_R10);
+  }
+  if (strcmp(op, "|") == 0) {
+    return binary_emit_alu_reg_reg(&context->code, 0x09, BINARY_GP_RAX,
+                                   BINARY_GP_R10);
+  }
+  if (strcmp(op, "^") == 0) {
+    return binary_emit_alu_reg_reg(&context->code, 0x31, BINARY_GP_RAX,
+                                   BINARY_GP_R10);
+  }
+  if (strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) {
+    return binary_emit_mov_reg_reg(&context->code, BINARY_GP_RCX,
+                                   BINARY_GP_R10) &&
+           binary_emit_shift_reg_cl(&context->code,
+                                    strcmp(op, "<<") == 0 ? 4 : 7,
+                                    BINARY_GP_RAX);
+  }
+
+  return 0;
+}
+
+static int code_generator_binary_emit_compare_false_branch_from_rax(
+    CodeGenerator *generator, BinaryFunctionContext *context, const char *op,
+    const IROperand *rhs, const char *target_label) {
+  unsigned char branch_opcode = 0;
+  size_t displacement_offset = 0;
+
+  if (!generator || !context || !op || !rhs || !target_label ||
+      !code_generator_binary_compare_false_jcc(op, &branch_opcode)) {
+    return 0;
+  }
+
+  if (rhs->kind == IR_OPERAND_INT &&
+      code_generator_binary_immediate_fits_signed_32(rhs->int_value)) {
+    if (!binary_emit_cmp_reg_imm32(&context->code, BINARY_GP_RAX,
+                                   (uint32_t)(int32_t)rhs->int_value)) {
+      return 0;
+    }
+  } else if (!code_generator_binary_emit_operand_load(generator, context, rhs,
+                                                      BINARY_GP_R10) ||
+             !binary_emit_cmp_reg_reg(&context->code, BINARY_GP_RAX,
+                                      BINARY_GP_R10)) {
+    return 0;
+  }
+
+  if (!binary_emit_jcc_placeholder(&context->code, branch_opcode,
+                                   &displacement_offset) ||
+      !binary_label_fixup_table_add(&context->label_fixups, target_label,
+                                    displacement_offset)) {
+    code_generator_set_error(
+        generator,
+        "Out of memory while emitting chained compare branch in function '%s'",
+        context->function_name);
+    return 0;
+  }
+
+  return 1;
+}
+
+static int code_generator_binary_try_emit_compare_branch_zero(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRFunction *function, size_t instruction_index,
+    size_t *consumed_out) {
+  const IRInstruction *compare = NULL;
+  const IRInstruction *branch = NULL;
+
+  if (consumed_out) {
+    *consumed_out = 0;
+  }
+  if (!generator || !context || !function || !consumed_out ||
+      instruction_index + 1 >= function->instruction_count) {
+    return 0;
+  }
+
+  compare = &function->instructions[instruction_index];
+  branch = &function->instructions[instruction_index + 1];
+  if (!compare || compare->op != IR_OP_BINARY || compare->is_float ||
+      !code_generator_binary_is_compare_operator(compare->text) ||
+      compare->dest.kind != IR_OPERAND_TEMP || !compare->dest.name ||
+      branch->op != IR_OP_BRANCH_ZERO ||
+      !code_generator_binary_operand_uses_temp(&branch->lhs,
+                                               compare->dest.name) ||
+      code_generator_binary_function_temp_use_count(function,
+                                                    compare->dest.name) != 1) {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_compare_false_branch(generator, context,
+                                                       compare,
+                                                       branch->text)) {
+    return 0;
+  }
+
+  *consumed_out = 2;
+  return 1;
+}
+
+static int code_generator_binary_chain_producer_supported(const char *op) {
+  return op &&
+         (strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
+          strcmp(op, "*") == 0 || strcmp(op, "/") == 0 ||
+          strcmp(op, "%") == 0 || strcmp(op, "&") == 0 ||
+          strcmp(op, "|") == 0 || strcmp(op, "^") == 0 ||
+          strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0);
+}
+
+static int code_generator_binary_try_emit_binary_compare_branch_chain(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRFunction *function, size_t instruction_index,
+    size_t *consumed_out) {
+  const IRInstruction *producer = NULL;
+  const IRInstruction *compare = NULL;
+  const IRInstruction *branch = NULL;
+  const IROperand *other_operand = NULL;
+
+  if (consumed_out) {
+    *consumed_out = 0;
+  }
+  if (!generator || !context || !function || !consumed_out ||
+      instruction_index + 2 >= function->instruction_count) {
+    return 0;
+  }
+
+  producer = &function->instructions[instruction_index];
+  compare = &function->instructions[instruction_index + 1];
+  branch = &function->instructions[instruction_index + 2];
+
+  if (!producer || producer->op != IR_OP_BINARY || producer->is_float ||
+      !code_generator_binary_chain_producer_supported(producer->text) ||
+      producer->dest.kind != IR_OPERAND_TEMP || !producer->dest.name ||
+      !compare || compare->op != IR_OP_BINARY || compare->is_float ||
+      !code_generator_binary_is_compare_operator(compare->text) ||
+      compare->dest.kind != IR_OPERAND_TEMP || !compare->dest.name ||
+      !branch || branch->op != IR_OP_BRANCH_ZERO ||
+      !code_generator_binary_operand_uses_temp(&branch->lhs,
+                                               compare->dest.name) ||
+      code_generator_binary_function_temp_use_count(function,
+                                                    producer->dest.name) != 1 ||
+      code_generator_binary_function_temp_use_count(function,
+                                                    compare->dest.name) != 1) {
+    return 0;
+  }
+
+  if (code_generator_binary_operand_uses_temp(&compare->lhs,
+                                              producer->dest.name)) {
+    other_operand = &compare->rhs;
+  } else if ((strcmp(compare->text, "==") == 0 ||
+              strcmp(compare->text, "!=") == 0) &&
+             code_generator_binary_operand_uses_temp(&compare->rhs,
+                                                     producer->dest.name)) {
+    other_operand = &compare->lhs;
+  } else {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_integer_binary_to_rax(generator, context,
+                                                        producer)) {
+    if (!generator->has_error) {
+      code_generator_set_error(
+          generator,
+          "Failed to emit chained integer expression in function '%s'",
+          context->function_name);
+    }
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_compare_false_branch_from_rax(
+          generator, context, compare->text, other_operand, branch->text)) {
+    return 0;
+  }
+
+  *consumed_out = 3;
+  return 1;
+}
+
+static int code_generator_binary_operator_is_commutative(const char *op) {
+  return op &&
+         (strcmp(op, "+") == 0 || strcmp(op, "*") == 0 ||
+          strcmp(op, "&") == 0 || strcmp(op, "|") == 0 ||
+          strcmp(op, "^") == 0);
+}
+
+static int code_generator_binary_emit_rax_binary_rhs(
+    CodeGenerator *generator, BinaryFunctionContext *context, const char *op,
+    const IROperand *rhs) {
+  if (!generator || !context || !op || !rhs) {
+    return 0;
+  }
+
+  if (rhs->kind == IR_OPERAND_INT &&
+      code_generator_binary_immediate_fits_signed_32(rhs->int_value)) {
+    long long immediate = rhs->int_value;
+    if (strcmp(op, "+") == 0) {
+      return binary_emit_add_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "-") == 0) {
+      return binary_emit_sub_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "*") == 0) {
+      return binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
+                                            BINARY_GP_RAX,
+                                            (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "&") == 0) {
+      return binary_emit_and_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "|") == 0) {
+      return binary_emit_or_reg_imm32(&context->code, BINARY_GP_RAX,
+                                      (uint32_t)(int32_t)immediate);
+    }
+    if (strcmp(op, "^") == 0) {
+      return binary_emit_xor_reg_imm32(&context->code, BINARY_GP_RAX,
+                                       (uint32_t)(int32_t)immediate);
+    }
+    if ((strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) &&
+        immediate >= 0 && immediate < 64) {
+      return binary_emit_shift_reg_imm8(
+          &context->code, strcmp(op, "<<") == 0 ? 4 : 7, BINARY_GP_RAX,
+          (unsigned char)immediate);
+    }
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context, rhs,
+                                               BINARY_GP_R10)) {
+    return 0;
+  }
+
+  if (strcmp(op, "+") == 0) {
+    return binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+                                   BINARY_GP_R10);
+  }
+  if (strcmp(op, "-") == 0) {
+    return binary_emit_alu_reg_reg(&context->code, 0x29, BINARY_GP_RAX,
+                                   BINARY_GP_R10);
+  }
+  if (strcmp(op, "*") == 0) {
+    return binary_emit_imul_reg_reg(&context->code, BINARY_GP_RAX,
+                                    BINARY_GP_R10);
+  }
+  if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0) {
+    if (!binary_emit_cqo(&context->code) ||
+        !binary_emit_idiv_reg(&context->code, BINARY_GP_R10)) {
+      return 0;
+    }
+    if (strcmp(op, "%") == 0) {
+      return binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX,
+                                     BINARY_GP_RDX);
+    }
+    return 1;
+  }
+  if (strcmp(op, "&") == 0) {
+    return binary_emit_alu_reg_reg(&context->code, 0x21, BINARY_GP_RAX,
+                                   BINARY_GP_R10);
+  }
+  if (strcmp(op, "|") == 0) {
+    return binary_emit_alu_reg_reg(&context->code, 0x09, BINARY_GP_RAX,
+                                   BINARY_GP_R10);
+  }
+  if (strcmp(op, "^") == 0) {
+    return binary_emit_alu_reg_reg(&context->code, 0x31, BINARY_GP_RAX,
+                                   BINARY_GP_R10);
+  }
+  if (strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) {
+    return binary_emit_mov_reg_reg(&context->code, BINARY_GP_RCX,
+                                   BINARY_GP_R10) &&
+           binary_emit_shift_reg_cl(&context->code,
+                                    strcmp(op, "<<") == 0 ? 4 : 7,
+                                    BINARY_GP_RAX);
+  }
+
+  return 0;
+}
+
+static int code_generator_binary_try_emit_binary_expression_chain(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRFunction *function, size_t instruction_index,
+    size_t *consumed_out) {
+  const IRInstruction *producer = NULL;
+  const IRInstruction *consumer = NULL;
+  const IROperand *rhs = NULL;
+
+  if (consumed_out) {
+    *consumed_out = 0;
+  }
+  if (!generator || !context || !function || !consumed_out ||
+      instruction_index + 1 >= function->instruction_count) {
+    return 0;
+  }
+
+  producer = &function->instructions[instruction_index];
+  consumer = &function->instructions[instruction_index + 1];
+  if (!producer || producer->op != IR_OP_BINARY || producer->is_float ||
+      !code_generator_binary_chain_producer_supported(producer->text) ||
+      producer->dest.kind != IR_OPERAND_TEMP || !producer->dest.name ||
+      !consumer || consumer->op != IR_OP_BINARY || consumer->is_float ||
+      code_generator_binary_is_compare_operator(consumer->text) ||
+      !code_generator_binary_chain_producer_supported(consumer->text) ||
+      code_generator_binary_function_temp_use_count(function,
+                                                    producer->dest.name) != 1) {
+    return 0;
+  }
+
+  if (code_generator_binary_operand_uses_temp(&consumer->lhs,
+                                              producer->dest.name)) {
+    rhs = &consumer->rhs;
+  } else if (code_generator_binary_operator_is_commutative(consumer->text) &&
+             code_generator_binary_operand_uses_temp(&consumer->rhs,
+                                                     producer->dest.name)) {
+    rhs = &consumer->lhs;
+  } else {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_integer_binary_to_rax(generator, context,
+                                                        producer) ||
+      !code_generator_binary_emit_rax_binary_rhs(generator, context,
+                                                 consumer->text, rhs)) {
+    if (!generator->has_error) {
+      code_generator_set_error(
+          generator,
+          "Failed to emit chained integer expression in function '%s'",
+          context->function_name);
+    }
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_destination_store(generator, context,
+                                                    &consumer->dest,
+                                                    BINARY_GP_RAX)) {
+    return 0;
+  }
+
+  *consumed_out = 2;
+  return 1;
+}
+
 static int code_generator_emit_binary_function(CodeGenerator *generator,
                                                FunctionDeclaration *function_data,
                                                IRFunction *ir_function) {
@@ -4418,16 +6593,53 @@ static int code_generator_emit_binary_function(CodeGenerator *generator,
     return 0;
   }
 
-  for (size_t i = 0; i < ir_function->instruction_count; i++) {
+  for (size_t i = 0; i < ir_function->instruction_count;) {
+    size_t consumed = 0;
+    if (code_generator_binary_try_emit_binary_compare_branch_chain(
+            generator, &context, ir_function, i, &consumed)) {
+      i += consumed;
+      continue;
+    }
+
+    if (code_generator_binary_try_emit_binary_expression_chain(
+            generator, &context, ir_function, i, &consumed)) {
+      i += consumed;
+      continue;
+    }
+
+    if (code_generator_binary_try_emit_compare_branch_zero(
+            generator, &context, ir_function, i, &consumed)) {
+      i += consumed;
+      continue;
+    }
+
     if (!code_generator_binary_emit_instruction(
             generator, &context, &ir_function->instructions[i])) {
       binary_function_context_destroy(&context);
       return 0;
     }
+    i++;
   }
 
   return_offset = context.code.size;
-  if ((context.return_is_float64 &&
+  /* Win64 returns floating values in XMM0. The function body leaves the raw
+   * return bits in RAX; transfer at the return type's precision. */
+  for (size_t i = context.saved_register_count; i > 0; i--) {
+    size_t slot = i - 1;
+    if (!binary_emit_mov_reg_mem(&context.code, context.saved_registers[slot],
+                                 BINARY_GP_RBP,
+                                 -context.saved_register_offsets[slot])) {
+      code_generator_set_error(generator,
+                               "Out of memory while restoring callee registers");
+      binary_function_context_destroy(&context);
+      return 0;
+    }
+  }
+
+  if ((context.return_float_bits == 32 &&
+       !binary_emit_movd_xmm_reg(&context.code, BINARY_XMM0,
+                                 BINARY_GP_RAX)) ||
+      (context.return_float_bits == 64 &&
        !binary_emit_movq_xmm_reg(&context.code, BINARY_XMM0,
                                  BINARY_GP_RAX)) ||
       !binary_emit_mov_reg_reg(&context.code, BINARY_GP_RSP, BINARY_GP_RBP) ||

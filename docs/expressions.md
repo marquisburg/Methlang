@@ -7,7 +7,7 @@ Expressions produce values. They appear in initializers, assignments, function a
 | Precedence | Operators | Example |
 |------------|-----------|---------|
 | 1 | Member access `.`, `->` | `obj.field`, `ptr->x` |
-| 2 | Unary `-`, `!`, `*`, `&` | `-x`, `!y`, `*p`, `&v` |
+| 2 | Unary `-`, `!`, `*`, `&`, `await` | `-x`, `!y`, `*p`, `&v`, `await f` |
 | 3 | Multiplicative `*`, `/` | `a * b`, `a / b` |
 | 4 | Additive `+`, `-` | `a + b`, `a - b` |
 | 5 | Relational `<`, `<=`, `>`, `>=` | `a < b` |
@@ -32,7 +32,7 @@ Numeric literals: decimal (`42`), hexadecimal (`0xFF`), binary (`0b1010`), float
 
 An identifier denotes a variable, parameter, or function. Member access uses `.` for struct fields and string fields. Pointer field access uses `->`.
 
-```meth
+```mettle
 x
 obj.field
 ptr->field
@@ -44,7 +44,7 @@ s.length
 
 Arithmetic: `+`, `-`, `*`, `/`, `%`. Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`. Operands must have compatible types. Integer division truncates toward zero. Modulo `%` returns the remainder and requires integer operands.
 
-```meth
+```mettle
 a + b
 a - b
 a * b
@@ -66,18 +66,21 @@ a >= b
 
 ## Unary Operators
 
-Negation `-x`. Logical NOT `!x` (returns 1 if x is 0, otherwise 0). Dereference `*p` (loads the value at the pointer). Address-of `&x` (produces a pointer to x). Address-of requires an assignable expression (lvalue).
+Negation `-x`. Logical NOT `!x` (returns 1 if x is 0, otherwise 0). Dereference `*p` (loads the value at the pointer). Address-of `&x` (produces a pointer to x). `await x` waits on a future and yields its payload. Address-of requires an assignable expression (lvalue).
 
-```meth
+```mettle
 -x       // negation
 !x       // logical NOT
 *p       // dereference
 &x       // address-of
+await f  // wait for a Future<T>
 ```
 
 **Null dereference:** In normal builds, the compiler emits runtime null checks for dynamic pointer dereference/indexing and traps with a fatal message on null. In `--release`, those generated checks are disabled; dereferencing a null pointer is undefined behavior and typically crashes. See [Types](types.md#pointer-types).
 
 **Address-of on non-lvalues:** Taking the address of a temporary or non-assignable expression is a compile error. For example, `&(x + 1)` and `&42` are invalid—the operand must be a variable, struct field, array element, or dereferenced pointer. The error message is "Address-of operator requires an assignable expression".
+
+**Await:** `await` requires a `Future<T>` operand. It blocks until the future completes and yields a value of type `T`. `await` is valid in both synchronous and asynchronous functions. It does not suspend the caller as a coroutine; it blocks the current OS thread. See [Async and Sync Execution](async.md).
 
 ## Indexing
 
@@ -87,7 +90,7 @@ Arrays and pointers support indexing. The index must be an integer. The expressi
 
 To pass an array to a function that expects a pointer, use `&arr[0]` or `&buf[0]`. The function parameter should have type `T*`:
 
-```meth
+```mettle
 function sum(buf: int32*, len: int32) -> int32 {
   var total: int32 = 0;
   var i: int32 = 0;
@@ -107,7 +110,7 @@ var result: int32 = sum(&data[0], 10);
 
 Function calls: `name(args)`. Method calls: `obj.method(args)`. Arguments are evaluated left to right. The number and types must match the declaration.
 
-```meth
+```mettle
 add(1, 2)
 puts("hello")
 obj.method(args)
@@ -117,12 +120,54 @@ obj.method(args)
 
 **Function pointers:** Use the `fn(param_types) -> return_type` type to store and pass function addresses. Take the address with `&func` and call like a normal function: `fp(args)`. See [Types](types.md#function-pointer-type) for details.
 
+### Sync vs Async Calls
+
+Synchronous and asynchronous calls look similar at the surface but differ in both type and runtime behavior.
+
+```mettle
+function inc(x: int32) -> int32 {
+  return x + 1;
+}
+
+async fn add_one_async(x: int32) -> int32 {
+  return x + 1;
+}
+
+var a: int32 = inc(41);                    // immediate int32
+var f: Future<int32> = add_one_async(41); // immediate Future<int32>
+var b: int32 = await f;                   // waits, then yields int32
+```
+
+Current behavior:
+
+- A sync call runs on the caller thread and returns its payload directly.
+- An async call returns immediately with a future handle.
+- `await` turns that future back into its payload type.
+- Awaiting blocks the current thread until the worker finishes.
+
+### Cancellation Helpers
+
+The compiler recognizes these async-runtime helpers:
+
+- `cancel(future)` requests cooperative cancellation of a future.
+- `cancelled()` reports whether the current async task has been asked to stop.
+
+```mettle
+async fn worker() -> int32 {
+  while (cancelled() == 0) {
+  }
+  return 0;
+}
+```
+
+`cancelled()` returns `0` outside an active async task. `cancel(future)` and `await future` are still meaningful in synchronous code because they operate on a future handle rather than on the current execution context.
+
 
 ## Allocation
 
-The `new` expression allocates a value on the GC heap and returns a pointer. In the normal Windows flow, `methlang --build` links the bundled GC runtime automatically. The pointer is managed; no explicit `free` is needed. The GC performs conservative mark-and-sweep collection. See [Garbage Collector](garbage-collector.md) for details.
+The `new` expression allocates a value on the GC heap and returns a pointer. In the normal Windows flow, `mettle --build` links the bundled GC runtime automatically. The pointer is managed; no explicit `free` is needed. The GC performs conservative mark-and-sweep collection. See [Garbage Collector](garbage-collector.md) for details.
 
-```meth
+```mettle
 var p: MyStruct* = new MyStruct;
 ```
 
@@ -140,7 +185,7 @@ var p: MyStruct* = new MyStruct;
 
 Explicit type casting is supported using the `(Type)expression` syntax. This allows explicit conversions between different numeric types, pointer types, and between integers and pointers.
 
-```meth
+```mettle
 var f: float64 = 3.14;
 var i: int64 = (int64)f;
 
@@ -152,6 +197,8 @@ Valid cast conversions include:
 - Any numeric type (integer or float) to any other numeric type.
 - Any pointer type to any other pointer type.
 - Any integer type to any pointer type, and vice versa.
+- `Future<T>` to/from pointers and integers.
+- `Future<A>` to `Future<B>` with an explicit cast.
 - Function pointers to other function pointers, or to/from regular pointers and integers.
 
 Casting across different sizes might result in zero-extension, sign-extension, or truncation, depending on the target type and the sign of the source type. Floating-point to integer conversions truncate towards zero.
@@ -164,6 +211,6 @@ Comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) produce `int32` with val
 
 ## String Expressions
 
-**Concatenation:** The `+` operator concatenates two `string` values. Both operands must be `string`; the result is a new GC-managed string whose `.chars` points to a freshly allocated buffer and whose `.length` is the sum of the operand lengths. Because the runtime allocates via `gc_alloc`, use `methlang --build` or otherwise link the bundled GC runtime before using string concatenation or other heap-backed string helpers. `gc_init` is handled automatically by the generated entry point.
+**Concatenation:** The `+` operator concatenates two `string` values. Both operands must be `string`; the result is a new GC-managed string whose `.chars` points to a freshly allocated buffer and whose `.length` is the sum of the operand lengths. Because the runtime allocates via `gc_alloc`, use `mettle --build` or otherwise link the bundled GC runtime before using string concatenation or other heap-backed string helpers. `gc_init` is handled automatically by the generated entry point.
 
 **Indexing:** Use `s.chars[i]` to access the i-th byte of a string. The `.chars` field is a pointer; indexing advances by 1 byte (element size of `uint8`). Pointer indexing is not bounds-checked; ensure `i < s.length` to avoid undefined behavior.

@@ -9,19 +9,19 @@ RUNTIMEDIR = src/runtime
 # Source files
 LEXER_SOURCES = $(SRCDIR)/lexer/lexer.c
 PARSER_SOURCES = $(SRCDIR)/parser/parser.c $(SRCDIR)/parser/ast.c
-SEMANTIC_SOURCES = $(SRCDIR)/semantic/symbol_table.c $(SRCDIR)/semantic/type_checker.c $(SRCDIR)/semantic/register_allocator.c $(SRCDIR)/semantic/import_resolver.c $(SRCDIR)/semantic/monomorphize.c
+SEMANTIC_SOURCES = $(SRCDIR)/semantic/symbol_table.c $(SRCDIR)/semantic/type_checker.c $(SRCDIR)/semantic/register_allocator.c $(SRCDIR)/semantic/import_resolver.c $(SRCDIR)/semantic/monomorphize.c $(SRCDIR)/semantic/async_rewrite.c
 IR_SOURCES = $(wildcard $(SRCDIR)/ir/*.c)
 CODEGEN_SOURCES = $(wildcard $(SRCDIR)/codegen/*.c)
 LINKER_SOURCES = $(wildcard $(SRCDIR)/linker/*.c)
 ERROR_SOURCES = $(SRCDIR)/error/error_reporter.c
 DEBUG_SOURCES = $(SRCDIR)/debug/debug_info.c
 MAIN_SOURCES = $(SRCDIR)/main.c
-RUNTIME_SOURCES = $(SRCDIR)/runtime/gc.c
+RUNTIME_SOURCES = $(SRCDIR)/runtime/gc.c $(SRCDIR)/runtime/async_runtime.c $(SRCDIR)/runtime/meth_thread.c
 
 SOURCES = $(LEXER_SOURCES) $(PARSER_SOURCES) $(SEMANTIC_SOURCES) $(IR_SOURCES) $(CODEGEN_SOURCES) $(LINKER_SOURCES) $(ERROR_SOURCES) $(DEBUG_SOURCES) $(RUNTIME_SOURCES) $(MAIN_SOURCES)
 OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-TARGET = $(BINDIR)/methlang
+TARGET = $(BINDIR)/mettle
 
 .PHONY: all clean test install bundle-stdlib bundle-runtime
 
@@ -55,6 +55,12 @@ test: $(TARGET)
 	@echo "Running GC runtime tests..."
 	$(CC) $(CFLAGS) tests/gc_runtime_test.c src/runtime/gc.c -o $(BINDIR)/gc_runtime_test
 	@$(BINDIR)/gc_runtime_test
+	@echo "Running coroutine reactor runtime tests..."
+	$(CC) $(CFLAGS) -D_GNU_SOURCE tests/coro_iocp_runtime_test.c src/runtime/async_runtime.c src/runtime/gc.c -Isrc -lpthread -o $(BINDIR)/coro_iocp_runtime_test
+	@$(BINDIR)/coro_iocp_runtime_test
+	@echo "Running crash handler tests..."
+	$(CC) $(CFLAGS) -D_GNU_SOURCE tests/crash_handler_test.c src/runtime/gc.c -Isrc -o $(BINDIR)/crash_handler_test
+	@$(BINDIR)/crash_handler_test
 
 install: $(TARGET) bundle-stdlib bundle-runtime
 	mkdir -p /usr/local/bin /usr/local/stdlib /usr/local/runtime

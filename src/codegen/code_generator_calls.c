@@ -247,21 +247,24 @@ void code_generator_generate_parameter(CodeGenerator *generator,
     return;
   }
 
-  // Check if we need string literal -> cstring coercion
-  int is_string_literal_to_cstring = 0;
-  if (argument->type == AST_STRING_LITERAL && func_symbol &&
-      func_symbol->kind == SYMBOL_FUNCTION &&
+  // Extern calls may implicitly pass string.chars to cstring parameters.
+  int is_string_to_cstring = 0;
+  if (func_symbol && func_symbol->kind == SYMBOL_FUNCTION &&
+      func_symbol->is_extern &&
       param_index < (int)func_symbol->data.function.parameter_count) {
     Type *expected_type =
         func_symbol->data.function.parameter_types[param_index];
-    if (expected_type && expected_type->name &&
-        strcmp(expected_type->name, "cstring") == 0) {
-      is_string_literal_to_cstring = 1;
+    Type *argument_type =
+        code_generator_infer_expression_type(generator, argument);
+    if (expected_type && expected_type->name && argument_type &&
+        strcmp(expected_type->name, "cstring") == 0 &&
+        argument_type->kind == TYPE_STRING) {
+      is_string_to_cstring = 1;
     }
   }
 
   // Generate the argument expression
-  if (is_string_literal_to_cstring) {
+  if (is_string_to_cstring && argument->type == AST_STRING_LITERAL) {
     StringLiteral *str_data = (StringLiteral *)argument->data;
     if (str_data && str_data->value) {
       code_generator_load_string_literal_as_cstring(generator, str_data->value);
@@ -270,6 +273,11 @@ void code_generator_generate_parameter(CodeGenerator *generator,
     }
   } else {
     code_generator_generate_expression(generator, argument);
+    if (is_string_to_cstring && !generator->has_error) {
+      code_generator_emit(
+          generator,
+          "    mov rax, qword [rax]  ; Implicit extern string -> cstring\n");
+    }
   }
 
   // Determine parameter type if not provided

@@ -1,17 +1,37 @@
 # Lexical Structure
 
-This document covers the low-level syntax of Methlang: comments, identifiers, keywords, literals, and operators.
+This document covers the low-level syntax of Mettle: comments, identifiers, keywords, literals, and operators.
 
 ## Comments
 
 Line comments start with `//` and extend to the end of the line. Everything after `//` is ignored by the compiler.
 
-```meth
+```mettle
 // Line comment: everything from // to end of line is ignored
 var x: int32 = 42;  // inline comment
 ```
 
-Block comments are not supported. Comments cannot be nested; a second `//` on the same line is simply part of the comment text. The sequence `//` inside a string literal is not treated as a comment; it becomes part of the string. For example, `"http://example.com"` produces a string containing `http://example.com` with no comment.
+Block comments are written `/* ... */` and may span multiple lines:
+
+```mettle
+/* This is a block comment.
+   It can span multiple lines. */
+var x: int32 = 42; /* inline block comment */
+```
+
+Block comments **nest**, so you can comment out a region that already
+contains a block comment:
+
+```mettle
+/* outer
+   /* inner */
+   still commented */
+var ready: int32 = 1;
+```
+
+An unterminated block comment (missing the final `*/`) is a lexer error.
+
+The sequences `//`, `/*`, and `*/` inside a string literal are not treated as comments; they become part of the string. For example, `"http://example.com"` produces a string containing `http://example.com` with no comment.
 
 ## Identifiers
 
@@ -27,9 +47,9 @@ Vector3
 
 The following words are reserved and cannot be used as identifiers.
 
-Declarations: `import`, `extern`, `export`, `var`, `function`, `struct`, `enum`, `method`. Control flow: `if`, `else`, `while`, `for`, `switch`, `case`, `default`, `break`, `continue`, `return`. Other: `asm`, `this`, `new`. Types: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`, `string`.
+Declarations: `import`, `extern`, `export`, `var`, `function`, `fn`, `async`, `struct`, `enum`, `method`. Control flow: `if`, `else`, `while`, `for`, `switch`, `case`, `default`, `break`, `continue`, `return`. Other: `asm`, `this`, `new`, `await`. Types: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`, `string`.
 
-`this` is only valid inside method bodies; it refers to the receiver. Using `this` as a variable name outside a method produces an error. `new` is an expression keyword, not a statement keyword; it appears in expressions like `var p: T* = new T` and cannot start a statement by itself. `cstring` is a type alias, not a keyword; it is available as a built-in name.
+`this` is only valid inside method bodies; it refers to the receiver. Using `this` as a variable name outside a method produces an error. `new` is an expression keyword, not a statement keyword; it appears in expressions like `var p: T* = new T` and cannot start a statement by itself. `await` is also an expression keyword; it appears in expressions such as `var x: int32 = await future`. `cstring` is a type alias, not a keyword; it is available as a built-in name.
 
 ## Numeric Literals
 
@@ -43,7 +63,7 @@ Underscores in numeric literals (e.g. `1_000_000`) are not supported. The unders
 
 Strings are enclosed in double quotes. The compiler processes escape sequences before storing the value. Supported escapes: `\n` (newline, LF), `\t` (tab), `\r` (carriage return), `\\` (backslash), `\"` (double quote), `\0` (null byte). Unknown escape sequences are preserved literally: the backslash and the following character are both stored. For example, `"\q"` produces the two characters `\` and `q`, not a single character. String literals have type `string` (see [Types](types.md)).
 
-```meth
+```mettle
 var msg: string = "Hello\nWorld\t\"quoted\"";
 ```
 
@@ -51,7 +71,9 @@ Multiline strings are supported. A newline inside the quotes is stored as a lite
 
 ## Operators and Punctuation
 
-Assignment `=`. Comparison `==`, `!=`, `<`, `>`, `<=`, `>=`. Logical `&&`, `||`. Arithmetic `+`, `-`, `*`, `/`, `%`. Unary `-` (negation), `*` (dereference), `&` (address-of). Member access `.`. Arrow `->`. Brackets `( )`, `{ }`, `[ ]`. Delimiters `:`, `;`, `,`.
+Assignment `=`. Compound assignment `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`. Comparison `==`, `!=`, `<`, `>`, `<=`, `>=`. Logical `&&`, `||`. Arithmetic `+`, `-`, `*`, `/`, `%`. Unary `-` (negation), `*` (dereference), `&` (address-of). Member access `.`. Arrow `->`. Brackets `( )`, `{ }`, `[ ]`. Delimiters `:`, `;`, `,`.
+
+**Compound assignment:** `target OP= value` is exact syntactic sugar for `target = target OP value`, where `OP` is one of `+ - * / % & | ^ << >>`. The target is evaluated as an ordinary assignment target (identifier, struct field, array element, or pointer dereference) and must be a valid lvalue. For example, `count += 1` is identical to `count = count + 1`, and `mask &= 0xFF` is identical to `mask = mask & 0xFF`. Compound assignment is a statement (also valid as a `for`-loop initializer or increment), not an expression, so it does not produce a value. See [Expressions](expressions.md).
 
 **Operator precedence:** Multiplication, division, and modulo bind tighter than addition and subtraction. Relational operators bind tighter than equality. Logical AND (`&&`) binds tighter than logical OR (`||`). So `a + b * c` parses as `a + (b * c)`, and `a < b == c` parses as `(a < b) == c`. Precedence levels (highest first): member access (`.`), multiplicative (`*`, `/`, `%`), additive (`+`, `-`), relational (`<`, `<=`, `>`, `>=`), equality (`==`, `!=`), logical AND (`&&`), logical OR (`||`). Use parentheses to override.
 
@@ -63,7 +85,7 @@ Assignment `=`. Comparison `==`, `!=`, `<`, `>`, `<=`, `>=`. Logical `&&`, `||`.
 
 **Arrow `->`:** The arrow serves two roles. In function signatures it denotes the return type: `function f() -> int32`. In expressions it denotes pointer field access: `ptr->field`. Both uses appear in the same program:
 
-```meth
+```mettle
 struct Point { x: int32; y: int32; }
 
 function get_x(p: Point*) -> int32 {

@@ -1,0 +1,17 @@
+function main() -> int32 {
+  var i: int32 = 0;
+  var j: int32 = 0;
+  outer: while (i < 10) {
+    j = 0;
+    while (j < 10) {
+      if (i == 4) {
+        if (j == 7) {
+          break outer;
+        }
+      }
+      j += 1;
+    }
+    i += 1;
+  }
+  return i * 100 + j; // 407
+}

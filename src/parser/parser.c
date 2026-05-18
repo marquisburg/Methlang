@@ -1,7 +1,10 @@
 #include "parser.h"
 #include "../error/error_reporter.h"
 #include "../string_intern.h"
+#include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,9 +30,18 @@ static void parser_report_lexer_token_error(Parser *parser,
   if (parser->error_reporter) {
     SourceLocation location =
         source_location_create(token->line, token->column);
+    location.filename = parser->source_filename;
     error_reporter_add_error(parser->error_reporter, ERROR_LEXICAL, location,
                              error_msg);
   }
+}
+
+static SourceLocation parser_current_location(Parser *parser) {
+  SourceLocation location = source_location_create(
+      parser ? parser->current_token.line : 0,
+      parser ? parser->current_token.column : 0);
+  location.filename = parser ? parser->source_filename : NULL;
+  return location;
 }
 
 Parser *parser_create(Lexer *lexer) {
@@ -55,6 +67,7 @@ Parser *parser_create_with_error_reporter(Lexer *lexer,
   parser->error_message = NULL;
   parser->error_reporter = error_reporter;
   parser->error_recovery_mode = 0;
+  parser->source_filename = error_reporter_current_filename(error_reporter);
 
   if (parser->current_token.type == TOKEN_ERROR) {
     parser_report_lexer_token_error(parser, &parser->current_token);
@@ -295,6 +308,7 @@ void parser_set_error_with_suggestion(Parser *parser, const char *message,
   if (parser->error_reporter) {
     SourceLocation location = source_location_create(
         parser->current_token.line, parser->current_token.column);
+    location.filename = parser->source_filename;
 
     size_t span_len = 1;
     if (parser->current_token.lexeme.length > 0) {
@@ -355,6 +369,8 @@ void parser_synchronize(Parser *parser) {
 
     switch (parser->peek_token.type) {
     case TOKEN_FUNCTION:
+    case TOKEN_ASYNC:
+    case TOKEN_SPAWN:
     case TOKEN_VAR:
     case TOKEN_STRUCT:
     case TOKEN_RETURN:
@@ -446,6 +462,7 @@ int parser_is_unary_operator(TokenType type) {
   case TOKEN_AMPERSAND:
   case TOKEN_TILDE:
   case TOKEN_NOT:
+  case TOKEN_AWAIT:
     return 1;
   default:
     return 0;
@@ -496,6 +513,8 @@ ASTNode *parser_parse_program(Parser *parser) {
 }
 
 static ASTNode *parser_parse_extern_var_declaration(Parser *parser);
+static ASTNode *parser_parse_function_declaration_with_async(Parser *parser,
+                                                             int is_async);
 
 ASTNode *parser_parse_declaration(Parser *parser) {
   if (!parser)
@@ -504,10 +523,32 @@ ASTNode *parser_parse_declaration(Parser *parser) {
   switch (parser->current_token.type) {
   case TOKEN_IMPORT:
     return parser_parse_import_declaration(parser);
+  case TOKEN_ASYNC: {
+    parser_advance(parser); // consume 'async'
+    if (parser->current_token.type != TOKEN_FUNCTION &&
+        parser->current_token.type != TOKEN_FN) {
+      parser_set_error(parser, "Expected 'function' or 'fn' after 'async'");
+      return NULL;
+    }
+    return parser_parse_function_declaration_with_async(parser, 1);
+  }
   case TOKEN_EXTERN: {
     parser_advance(parser); // consume 'extern'
-    if (parser->current_token.type == TOKEN_FUNCTION) {
-      ASTNode *decl = parser_parse_function_declaration(parser);
+    if (parser->current_token.type == TOKEN_FUNCTION ||
+        parser->current_token.type == TOKEN_ASYNC) {
+      ASTNode *decl = NULL;
+      if (parser->current_token.type == TOKEN_ASYNC) {
+        parser_advance(parser); // consume 'async'
+        if (parser->current_token.type != TOKEN_FUNCTION &&
+            parser->current_token.type != TOKEN_FN) {
+          parser_set_error(parser,
+                           "Expected 'function' or 'fn' after 'extern async'");
+          return NULL;
+        }
+        decl = parser_parse_function_declaration_with_async(parser, 1);
+      } else {
+        decl = parser_parse_function_declaration(parser);
+      }
       if (decl && decl->data) {
         FunctionDeclaration *func_data = (FunctionDeclaration *)decl->data;
         if (func_data->body != NULL) {
@@ -528,8 +569,20 @@ ASTNode *parser_parse_declaration(Parser *parser) {
   case TOKEN_EXPORT: {
     parser_advance(parser); // consume 'export'
     ASTNode *decl = NULL;
-    if (parser->current_token.type == TOKEN_FUNCTION) {
-      decl = parser_parse_function_declaration(parser);
+    if (parser->current_token.type == TOKEN_FUNCTION ||
+        parser->current_token.type == TOKEN_ASYNC) {
+      if (parser->current_token.type == TOKEN_ASYNC) {
+        parser_advance(parser); // consume 'async'
+        if (parser->current_token.type != TOKEN_FUNCTION &&
+            parser->current_token.type != TOKEN_FN) {
+          parser_set_error(parser,
+                           "Expected 'function' or 'fn' after 'export async'");
+          return NULL;
+        }
+        decl = parser_parse_function_declaration_with_async(parser, 1);
+      } else {
+        decl = parser_parse_function_declaration(parser);
+      }
       if (decl && decl->data) {
         ((FunctionDeclaration *)decl->data)->is_exported = 1;
       }
@@ -543,6 +596,11 @@ ASTNode *parser_parse_declaration(Parser *parser) {
       if (decl && decl->data) {
         ((EnumDeclaration *)decl->data)->is_exported = 1;
       }
+    } else if (parser->current_token.type == TOKEN_TRAIT) {
+      decl = parser_parse_trait_declaration(parser);
+      if (decl && decl->data) {
+        ((TraitDeclaration *)decl->data)->is_exported = 1;
+      }
     } else if (parser->current_token.type == TOKEN_VAR) {
       decl = parser_parse_var_declaration(parser);
       if (decl && decl->data) {
@@ -550,8 +608,21 @@ ASTNode *parser_parse_declaration(Parser *parser) {
       }
     } else if (parser->current_token.type == TOKEN_EXTERN) {
       parser_advance(parser); // consume 'extern'
-      if (parser->current_token.type == TOKEN_FUNCTION) {
-        decl = parser_parse_function_declaration(parser);
+      if (parser->current_token.type == TOKEN_FUNCTION ||
+          parser->current_token.type == TOKEN_ASYNC) {
+        if (parser->current_token.type == TOKEN_ASYNC) {
+          parser_advance(parser); // consume 'async'
+          if (parser->current_token.type != TOKEN_FUNCTION &&
+              parser->current_token.type != TOKEN_FN) {
+            parser_set_error(
+                parser,
+                "Expected 'function' or 'fn' after 'export extern async'");
+            return NULL;
+          }
+          decl = parser_parse_function_declaration_with_async(parser, 1);
+        } else {
+          decl = parser_parse_function_declaration(parser);
+        }
         if (decl && decl->data) {
           FunctionDeclaration *func_data = (FunctionDeclaration *)decl->data;
           if (func_data->body != NULL) {
@@ -574,7 +645,7 @@ ASTNode *parser_parse_declaration(Parser *parser) {
       }
     } else {
       parser_set_error(parser, "Expected 'function', 'var', 'struct', 'enum', "
-                               "or 'extern' after 'export'");
+                               "'trait', or 'extern' after 'export'");
       return NULL;
     }
     return decl;
@@ -591,6 +662,10 @@ ASTNode *parser_parse_declaration(Parser *parser) {
     return parser_parse_struct_declaration(parser);
   case TOKEN_ENUM:
     return parser_parse_enum_declaration(parser);
+  case TOKEN_TRAIT:
+    return parser_parse_trait_declaration(parser);
+  case TOKEN_IMPL:
+    return parser_parse_impl_declaration(parser);
   default:
     // Try to parse as a statement instead
     return parser_parse_statement(parser);
@@ -615,6 +690,26 @@ static int parser_is_assignment_target(ASTNode *target) {
   return 0;
 }
 
+static const char *parser_compound_assign_op(TokenType type) {
+  switch (type) {
+  case TOKEN_PLUS_EQUALS:    return "+";
+  case TOKEN_MINUS_EQUALS:   return "-";
+  case TOKEN_STAR_EQUALS:    return "*";
+  case TOKEN_SLASH_EQUALS:   return "/";
+  case TOKEN_PERCENT_EQUALS: return "%";
+  case TOKEN_AMP_EQUALS:     return "&";
+  case TOKEN_PIPE_EQUALS:    return "|";
+  case TOKEN_CARET_EQUALS:   return "^";
+  case TOKEN_LSHIFT_EQUALS:  return "<<";
+  case TOKEN_RSHIFT_EQUALS:  return ">>";
+  default:                   return NULL;
+  }
+}
+
+int parser_is_assignment_token(TokenType type) {
+  return type == TOKEN_EQUALS || parser_compound_assign_op(type) != NULL;
+}
+
 static ASTNode *parser_parse_assignment_from_target(Parser *parser,
                                                     ASTNode *target) {
   if (!parser || !target) {
@@ -627,11 +722,34 @@ static ASTNode *parser_parse_assignment_from_target(Parser *parser,
     return NULL;
   }
 
-  parser_advance(parser); // consume '='
+  TokenType assign_token = parser->current_token.type;
+  const char *compound_op = parser_compound_assign_op(assign_token);
+
+  parser_advance(parser); // consume '=' or compound assignment operator
   ASTNode *value = parser_parse_expression(parser);
   if (!value) {
     ast_destroy_node(target);
     return NULL;
+  }
+
+  // Desugar `target OP= value` into `target = target OP value`.
+  if (compound_op) {
+    ASTNode *target_clone = ast_clone_node(target);
+    if (!target_clone) {
+      ast_destroy_node(target);
+      ast_destroy_node(value);
+      parser_set_error(parser, "Out of memory cloning compound assignment target");
+      return NULL;
+    }
+    ASTNode *combined = ast_create_binary_expression(target_clone, compound_op,
+                                                     value, target->location);
+    if (!combined) {
+      ast_destroy_node(target);
+      ast_destroy_node(target_clone);
+      ast_destroy_node(value);
+      return NULL;
+    }
+    value = combined;
   }
 
   if (target->type == AST_IDENTIFIER) {
@@ -655,6 +773,46 @@ ASTNode *parser_parse_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
+  // Labeled loop: IDENT ':' (while | for | switch)
+  if (parser->current_token.type == TOKEN_IDENTIFIER &&
+      parser->peek_token.type == TOKEN_COLON) {
+    char *label = strdup(parser->current_token.value);
+    Token saved_current = parser->current_token;
+    Token saved_peek = parser->peek_token;
+    parser_advance(parser); // consume IDENT
+    parser_advance(parser); // consume ':'
+
+    ASTNode *loop = NULL;
+    if (parser->current_token.type == TOKEN_WHILE) {
+      loop = parser_parse_while_statement(parser);
+      if (loop && loop->data) {
+        WhileStatement *w = (WhileStatement *)loop->data;
+        w->label = label;
+        label = NULL;
+      }
+    } else if (parser->current_token.type == TOKEN_FOR) {
+      loop = parser_parse_for_statement(parser);
+      if (loop && loop->data) {
+        ForStatement *f = (ForStatement *)loop->data;
+        f->label = label;
+        label = NULL;
+      }
+    } else {
+      // Not a labeled loop; rewind. Because we already consumed two tokens
+      // and the lexer is one-token-lookahead, we cannot fully unwind. Treat
+      // this as a parse error explaining the constraint.
+      free(label);
+      (void)saved_current;
+      (void)saved_peek;
+      parser_set_error(parser,
+                       "Labels may only be applied to 'while' or 'for' loops");
+      return NULL;
+    }
+
+    free(label);
+    return loop;
+  }
+
   switch (parser->current_token.type) {
   case TOKEN_EXTERN:
     return parser_parse_declaration(parser);
@@ -670,6 +828,8 @@ ASTNode *parser_parse_statement(Parser *parser) {
     return parser_parse_for_statement(parser);
   case TOKEN_SWITCH:
     return parser_parse_switch_statement(parser);
+  case TOKEN_MATCH:
+    return parser_parse_match_statement(parser);
   case TOKEN_BREAK:
     return parser_parse_break_statement(parser);
   case TOKEN_CONTINUE:
@@ -691,7 +851,7 @@ ASTNode *parser_parse_statement(Parser *parser) {
     return NULL;
   }
 
-  if (parser->current_token.type == TOKEN_EQUALS) {
+  if (parser_is_assignment_token(parser->current_token.type)) {
     return parser_parse_assignment_from_target(parser, expr);
   }
 
@@ -703,8 +863,7 @@ ASTNode *parser_parse_defer_statement(Parser *parser) {
     return NULL;
   }
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (!parser_expect(parser, TOKEN_DEFER)) {
     return NULL;
@@ -733,8 +892,7 @@ ASTNode *parser_parse_errdefer_statement(Parser *parser) {
     return NULL;
   }
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (!parser_expect(parser, TOKEN_ERRDEFER)) {
     return NULL;
@@ -768,6 +926,8 @@ ASTNode *parser_parse_expression(Parser *parser) {
 int parser_is_identifier_like(TokenType type) {
   // Check if token can be used as an identifier in expression context
   return type == TOKEN_IDENTIFIER ||
+         // threading keywords that can also appear as type/function names
+         type == TOKEN_CHANNEL ||
          // x86 mnemonics can be used as function names
          (type >= TOKEN_MOV && type <= TOKEN_SYSCALL) ||
          // x86 registers can be used as identifiers in high-level context
@@ -779,48 +939,244 @@ int parser_is_type_keyword(TokenType type) {
   return (type >= TOKEN_INT8 && type <= TOKEN_STRING_TYPE);
 }
 
-static char **parser_parse_type_param_list(Parser *parser, size_t *out_count) {
+static void parser_free_string_array(char **values, size_t count) {
+  if (!values) {
+    return;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    free(values[i]);
+  }
+  free(values);
+}
+
+static void parser_free_type_param_list(char **params, char **traits,
+                                        size_t count) {
+  parser_free_string_array(params, count);
+  parser_free_string_array(traits, count);
+}
+
+static char *parser_parse_qualified_name(Parser *parser, const char *expected);
+
+static int parser_append_type_param_bound(char **bounds,
+                                          const char *trait_name) {
+  char *combined = NULL;
+  size_t len = 0;
+
+  if (!bounds || !trait_name) {
+    return 0;
+  }
+
+  if (!*bounds) {
+    *bounds = strdup(trait_name);
+    return *bounds != NULL;
+  }
+
+  len = strlen(*bounds) + 1 + strlen(trait_name) + 1;
+  combined = malloc(len);
+  if (!combined) {
+    return 0;
+  }
+
+  snprintf(combined, len, "%s+%s", *bounds, trait_name);
+  free(*bounds);
+  *bounds = combined;
+  return 1;
+}
+
+static int parser_find_type_param_index(char **params, size_t count,
+                                        const char *name, size_t *out_index) {
+  if (!params || !name || !out_index) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    if (params[i] && strcmp(params[i], name) == 0) {
+      *out_index = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int parser_parse_bound_list(Parser *parser, char **out_bounds) {
+  if (!parser || !out_bounds) {
+    return 0;
+  }
+
+  do {
+    char *trait_name =
+        parser_parse_qualified_name(parser, "Expected trait name in bound");
+    if (!trait_name) {
+      return 0;
+    }
+
+    if (!parser_append_type_param_bound(out_bounds, trait_name)) {
+      free(trait_name);
+      parser_set_error(parser, "Out of memory while parsing trait bounds");
+      return 0;
+    }
+    free(trait_name);
+
+    if (parser->current_token.type != TOKEN_PLUS) {
+      break;
+    }
+    parser_advance(parser);
+  } while (1);
+
+  return 1;
+}
+
+static int parser_parse_where_clause(Parser *parser, char **type_params,
+                                     char **type_param_traits,
+                                     size_t type_param_count) {
+  if (!parser || parser->current_token.type != TOKEN_WHERE) {
+    return 1;
+  }
+
+  parser_advance(parser); // consume 'where'
+
+  do {
+    size_t param_index = 0;
+    char *param_name = NULL;
+
+    if (!parser_is_identifier_like(parser->current_token.type)) {
+      parser_set_error(parser, "Expected type parameter name in where clause");
+      return 0;
+    }
+
+    param_name = strdup(parser->current_token.value);
+    if (!param_name) {
+      parser_set_error(parser, "Out of memory while parsing where clause");
+      return 0;
+    }
+    parser_advance(parser);
+
+    if (!parser_find_type_param_index(type_params, type_param_count, param_name,
+                                      &param_index)) {
+      parser_set_error(parser,
+                       "Where clause references unknown type parameter");
+      free(param_name);
+      return 0;
+    }
+    free(param_name);
+
+    if (!parser_expect(parser, TOKEN_COLON)) {
+      return 0;
+    }
+
+    if (!parser_parse_bound_list(parser, &type_param_traits[param_index])) {
+      return 0;
+    }
+
+    if (parser->current_token.type != TOKEN_COMMA) {
+      break;
+    }
+    parser_advance(parser);
+  } while (1);
+
+  return 1;
+}
+
+static char *parser_parse_qualified_name(Parser *parser, const char *expected) {
+  char *name = NULL;
+
+  if (!parser || !expected) {
+    return NULL;
+  }
+
+  if (!parser_is_identifier_like(parser->current_token.type) &&
+      !parser_is_type_keyword(parser->current_token.type)) {
+    parser_set_error(parser, expected);
+    return NULL;
+  }
+
+  name = strdup(parser->current_token.value);
+  if (!name) {
+    return NULL;
+  }
+  parser_advance(parser);
+
+  while (parser->current_token.type == TOKEN_DOT) {
+    char *qualified_name = NULL;
+    size_t qualified_len = 0;
+
+    parser_advance(parser);
+    if (!parser_is_identifier_like(parser->current_token.type) &&
+        !parser_is_type_keyword(parser->current_token.type)) {
+      parser_set_error(parser, expected);
+      free(name);
+      return NULL;
+    }
+
+    qualified_len = strlen(name) + 1 + strlen(parser->current_token.value) + 1;
+    qualified_name = malloc(qualified_len);
+    if (!qualified_name) {
+      free(name);
+      return NULL;
+    }
+
+    snprintf(qualified_name, qualified_len, "%s.%s", name,
+             parser->current_token.value);
+    free(name);
+    name = qualified_name;
+    parser_advance(parser);
+  }
+
+  return name;
+}
+
+static char **parser_parse_type_param_list(Parser *parser, char ***out_traits,
+                                           size_t *out_count) {
   *out_count = 0;
+  *out_traits = NULL;
   if (parser->current_token.type != TOKEN_LESS_THAN)
     return NULL;
   parser_advance(parser); // consume '<'
 
   char **params = NULL;
+  char **traits = NULL;
   size_t count = 0;
 
   while (parser->current_token.type != TOKEN_GREATER_THAN &&
          parser->current_token.type != TOKEN_EOF) {
     if (!parser_is_identifier_like(parser->current_token.type)) {
       parser_set_error(parser, "Expected type parameter name");
-      for (size_t i = 0; i < count; i++)
-        free(params[i]);
-      free(params);
+      parser_free_type_param_list(params, traits, count);
       return NULL;
     }
     params = realloc(params, (count + 1) * sizeof(char *));
+    traits = realloc(traits, (count + 1) * sizeof(char *));
     params[count] = strdup(parser->current_token.value);
+    traits[count] = NULL;
     count++;
     parser_advance(parser);
+
+    if (parser->current_token.type == TOKEN_COLON) {
+      parser_advance(parser);
+      if (!parser_parse_bound_list(parser, &traits[count - 1])) {
+        parser_free_type_param_list(params, traits, count);
+        return NULL;
+      }
+    }
 
     if (parser->current_token.type == TOKEN_COMMA) {
       parser_advance(parser);
     } else if (parser->current_token.type != TOKEN_GREATER_THAN) {
       parser_set_error(parser, "Expected ',' or '>' in type parameter list");
-      for (size_t i = 0; i < count; i++)
-        free(params[i]);
-      free(params);
+      parser_free_type_param_list(params, traits, count);
       return NULL;
     }
   }
 
   if (!parser_expect(parser, TOKEN_GREATER_THAN)) {
-    for (size_t i = 0; i < count; i++)
-      free(params[i]);
-    free(params);
+    parser_free_type_param_list(params, traits, count);
     return NULL;
   }
 
   *out_count = count;
+  *out_traits = traits;
   return params;
 }
 
@@ -926,6 +1282,33 @@ static char *parser_parse_type_annotation(Parser *parser) {
     parser_advance(parser);
     if (!type_name)
       return NULL;
+  }
+
+  while (parser->current_token.type == TOKEN_DOT) {
+    char *qualified_type = NULL;
+    size_t qualified_len = 0;
+
+    parser_advance(parser); // consume '.'
+    if (!parser_is_identifier_like(parser->current_token.type) &&
+        !parser_is_type_keyword(parser->current_token.type)) {
+      parser_set_error(parser, "Expected type name after '.'");
+      free(type_name);
+      return NULL;
+    }
+
+    qualified_len =
+        strlen(type_name) + 1 + strlen(parser->current_token.value) + 1;
+    qualified_type = malloc(qualified_len);
+    if (!qualified_type) {
+      free(type_name);
+      return NULL;
+    }
+
+    snprintf(qualified_type, qualified_len, "%s.%s", type_name,
+             parser->current_token.value);
+    free(type_name);
+    type_name = qualified_type;
+    parser_advance(parser);
   }
 
   if (parser->current_token.type == TOKEN_LESS_THAN) {
@@ -1045,6 +1428,89 @@ static char *parser_parse_type_annotation(Parser *parser) {
   return full_type;
 }
 
+static int parser_literal_radix_hint(const char *value) {
+  if (!value || value[0] != '0' || value[1] == '\0') {
+    return 10;
+  }
+  if (value[1] == 'x' || value[1] == 'X') {
+    return 16;
+  }
+  if (value[1] == 'b' || value[1] == 'B') {
+    return 2;
+  }
+  /* Leading zeros without 0x/0b prefix are still decimal (e.g. "007"). */
+  return 10;
+}
+
+/*
+ * Parses integer TOKEN_NUMBER lexeme text into long long bits and radix.
+ * Handles decimal, hexadecimal (strtoull 16), and binary (0b) digits only.
+ */
+static int parser_parse_integer_literal_string(
+    Parser *parser, const char *value, long long *out_value,
+    unsigned char *out_radix) {
+  if (!parser || !value || !out_value || !out_radix) {
+    return 0;
+  }
+
+  int hint = parser_literal_radix_hint(value);
+
+  errno = 0;
+  char *end = NULL;
+
+  if (hint == 16) {
+    unsigned long long u = strtoull(value, &end, 16);
+    if (end == value || *end != '\0') {
+      parser_set_error(parser, "Invalid hexadecimal literal");
+      return 0;
+    }
+    if (errno == ERANGE) {
+      parser_set_error(parser, "Hexadecimal literal is out of range");
+      return 0;
+    }
+    *out_radix = 16;
+    *out_value = (long long)u;
+    return 1;
+  }
+
+  if (hint == 2) {
+    const char *p = value + 2;
+    if (*p == '\0') {
+      parser_set_error(parser, "Invalid binary literal");
+      return 0;
+    }
+    unsigned long long u = 0;
+    while (*p) {
+      if (*p != '0' && *p != '1') {
+        parser_set_error(parser, "Invalid binary literal");
+        return 0;
+      }
+      if (u > (ULLONG_MAX >> 1)) {
+        parser_set_error(parser, "Binary literal is out of range");
+        return 0;
+      }
+      u = u * 2 + (unsigned long long)(*p - '0');
+      p++;
+    }
+    *out_radix = 2;
+    *out_value = (long long)u;
+    return 1;
+  }
+
+  long long s = strtoll(value, &end, 10);
+  if (end == value || *end != '\0') {
+    parser_set_error(parser, "Invalid integer literal");
+    return 0;
+  }
+  if (errno == ERANGE) {
+    parser_set_error(parser, "Decimal integer literal is out of range");
+    return 0;
+  }
+  *out_radix = 10;
+  *out_value = s;
+  return 1;
+}
+
 static ASTNode *parser_parse_for_initializer(Parser *parser) {
   if (!parser)
     return NULL;
@@ -1061,19 +1527,27 @@ static ASTNode *parser_parse_for_initializer(Parser *parser) {
   if (!expr)
     return NULL;
 
-  if (parser->current_token.type == TOKEN_EQUALS) {
+  if (parser_is_assignment_token(parser->current_token.type)) {
     return parser_parse_assignment_from_target(parser, expr);
   }
 
   return expr;
 }
 
+static int parser_identifier_name_is(ASTNode *expr, const char *name) {
+  if (!expr || expr->type != AST_IDENTIFIER || !name) {
+    return 0;
+  }
+
+  Identifier *id = (Identifier *)expr->data;
+  return id && id->name && strcmp(id->name, name) == 0;
+}
+
 ASTNode *parser_parse_primary_expression(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (parser_is_identifier_like(parser->current_token.type)) {
     char *name = strdup(parser->current_token.value);
@@ -1091,8 +1565,16 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
       double float_val = atof(value);
       result = ast_create_float_literal(float_val, location);
     } else {
-      long long int_val = atoll(value);
-      result = ast_create_number_literal(int_val, location);
+      long long int_val = 0;
+      unsigned char int_radix = 10;
+      if (!parser_parse_integer_literal_string(parser, value, &int_val,
+                                               &int_radix)) {
+        return NULL;
+      }
+      result = ast_create_number_literal(int_val, location, int_radix);
+      if (!result) {
+        return NULL;
+      }
     }
 
     parser_advance(parser);
@@ -1131,12 +1613,15 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
   case TOKEN_NEW: {
     parser_advance(parser); // Built-in memory alloc handling
     if (!parser_is_identifier_like(parser->current_token.type) &&
-        !parser_is_type_keyword(parser->current_token.type)) {
+        !parser_is_type_keyword(parser->current_token.type) &&
+        parser->current_token.type != TOKEN_FN) {
       parser_set_error(parser, "Expected type name after 'new'");
       return NULL;
     }
-    char *type_name = strdup(parser->current_token.value);
-    parser_advance(parser); // consume type name
+    char *type_name = parser_parse_type_annotation(parser);
+    if (!type_name) {
+      return NULL;
+    }
 
     ASTNode *new_expr = ast_create_new_expression(type_name, location);
     free(type_name);
@@ -1162,6 +1647,7 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
   size_t saved_pos = parser->lexer->position;
   size_t saved_line = parser->lexer->line;
   size_t saved_col = parser->lexer->column;
+  size_t saved_continuation_depth = parser->lexer->continuation_depth;
   Token saved_current = token_clone(&parser->current_token);
   Token saved_peek = token_clone(&parser->peek_token);
   int saved_has_error = parser->has_error;
@@ -1174,8 +1660,7 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
   parser->error_reporter =
       NULL; // Disable error reporting during speculative parsing
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   parser_advance(parser); // consume '('
 
@@ -1189,6 +1674,7 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
     parser->lexer->position = saved_pos;
     parser->lexer->line = saved_line;
     parser->lexer->column = saved_col;
+    parser->lexer->continuation_depth = saved_continuation_depth;
 
     token_destroy(&parser->current_token);
     parser->current_token = saved_current;
@@ -1223,6 +1709,7 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
     parser->lexer->position = saved_pos;
     parser->lexer->line = saved_line;
     parser->lexer->column = saved_col;
+    parser->lexer->continuation_depth = saved_continuation_depth;
 
     token_destroy(&parser->current_token);
     parser->current_token = saved_current;
@@ -1264,8 +1751,36 @@ ASTNode *parser_parse_unary_expression(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
+
+  if (parser->current_token.type == TOKEN_AWAIT) {
+    parser_advance(parser);
+
+    ASTNode *operand = parser_parse_unary_expression(parser);
+    if (!operand) {
+      return NULL;
+    }
+
+    return ast_create_unary_expression("await", operand, location);
+  }
+
+  if (parser->current_token.type == TOKEN_SPAWN) {
+    parser_advance(parser);
+
+    ASTNode *call = parser_parse_postfix_expression(parser);
+    if (!call) {
+      if (!parser->has_error)
+        parser_set_error(parser, "Expected function call after 'spawn'");
+      return NULL;
+    }
+    if (call->type != AST_FUNCTION_CALL && call->type != AST_FUNC_PTR_CALL) {
+      parser_set_error(parser, "'spawn' requires a function call expression");
+      ast_destroy_node(call);
+      return NULL;
+    }
+
+    return ast_create_spawn_expression(call, location);
+  }
 
   if (parser->current_token.type == TOKEN_LPAREN) {
     ASTNode *cast = parser_parse_cast_expression(parser);
@@ -1302,6 +1817,7 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
   size_t saved_pos = parser->lexer->position;
   size_t saved_line = parser->lexer->line;
   size_t saved_col = parser->lexer->column;
+  size_t saved_continuation_depth = parser->lexer->continuation_depth;
   Token saved_current = token_clone(&parser->current_token);
   Token saved_peek = token_clone(&parser->peek_token);
   int saved_has_error = parser->has_error;
@@ -1359,6 +1875,7 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
   parser->lexer->position = saved_pos;
   parser->lexer->line = saved_line;
   parser->lexer->column = saved_col;
+  parser->lexer->continuation_depth = saved_continuation_depth;
 
   token_destroy(&parser->current_token);
   parser->current_token = saved_current;
@@ -1383,8 +1900,7 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
     return NULL;
 
   while (1) {
-    SourceLocation location = {parser->current_token.line,
-                               parser->current_token.column};
+    SourceLocation location = parser_current_location(parser);
 
     if (expr->type == AST_IDENTIFIER &&
         parser->current_token.type == TOKEN_LESS_THAN) {
@@ -1454,7 +1970,48 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
       ASTNode **arguments = NULL;
       size_t arg_count = 0;
 
-      if (parser->current_token.type != TOKEN_RPAREN) {
+      if (parser_identifier_name_is(expr, "sizeof")) {
+        SourceLocation type_location = parser_current_location(parser);
+        if (parser->current_token.type == TOKEN_RPAREN) {
+          parser_set_error(parser, "Expected type name in sizeof");
+          ast_destroy_node(expr);
+          return NULL;
+        }
+
+        char *type_name = parser_parse_type_annotation(parser);
+        if (!type_name) {
+          if (!parser->has_error) {
+            parser_set_error(parser, "Expected type name in sizeof");
+          }
+          ast_destroy_node(expr);
+          return NULL;
+        }
+
+        ASTNode *type_arg = ast_create_identifier(type_name, type_location);
+        free(type_name);
+        if (!type_arg) {
+          ast_destroy_node(expr);
+          return NULL;
+        }
+
+        arguments = malloc(sizeof(ASTNode *));
+        if (!arguments) {
+          ast_destroy_node(type_arg);
+          ast_destroy_node(expr);
+          parser_set_error(parser, "Out of memory parsing sizeof");
+          return NULL;
+        }
+        arguments[0] = type_arg;
+        arg_count = 1;
+
+        if (parser->current_token.type == TOKEN_COMMA) {
+          parser_set_error(parser, "sizeof expects exactly one type argument");
+          ast_destroy_node(type_arg);
+          free(arguments);
+          ast_destroy_node(expr);
+          return NULL;
+        }
+      } else if (parser->current_token.type != TOKEN_RPAREN) {
         do {
           ASTNode *arg = parser_parse_expression(parser);
           if (!arg)
@@ -1491,6 +2048,9 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
         ASTNode *object = access->object;
         // Detach the object from the member access so it's not double-freed
         access->object = NULL;
+        free(expr->children);
+        expr->children = NULL;
+        expr->child_count = 0;
         ast_destroy_node(expr);
 
         expr = ast_create_method_call(object, method_name, arguments, arg_count,
@@ -1590,8 +2150,7 @@ ASTNode *parser_parse_binary_expression(Parser *parser, int min_precedence) {
     return NULL;
 
   while (parser_is_binary_operator(parser->current_token.type)) {
-    SourceLocation location = {parser->current_token.line,
-                               parser->current_token.column};
+    SourceLocation location = parser_current_location(parser);
     int precedence = parser_get_operator_precedence(parser->current_token.type);
     if (precedence < min_precedence)
       break;
@@ -1620,25 +2179,126 @@ ASTNode *parser_parse_import_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   parser_advance(parser); // consume 'import'
 
+  // Selective import: import { a, b } from "mod"
+  if (parser->current_token.type == TOKEN_LBRACE) {
+    parser_advance(parser); // consume '{'
+
+    char **selected = NULL;
+    size_t selected_count = 0;
+    size_t selected_capacity = 0;
+
+    while (parser->current_token.type != TOKEN_RBRACE &&
+           parser->current_token.type != TOKEN_EOF) {
+      if (!parser_is_identifier_like(parser->current_token.type)) {
+        parser_set_error(parser, "Expected identifier in import list");
+        for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+        free(selected);
+        return NULL;
+      }
+
+      if (selected_count >= selected_capacity) {
+        size_t new_cap = selected_capacity == 0 ? 8 : selected_capacity * 2;
+        char **grown = realloc(selected, new_cap * sizeof(char *));
+        if (!grown) {
+          for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+          free(selected);
+          parser_set_error(parser, "Out of memory parsing import list");
+          return NULL;
+        }
+        selected = grown;
+        selected_capacity = new_cap;
+      }
+
+      selected[selected_count++] = strdup(parser->current_token.value);
+      parser_advance(parser); // consume name
+
+      if (parser->current_token.type == TOKEN_COMMA) {
+        parser_advance(parser); // consume ','
+      } else {
+        break;
+      }
+    }
+
+    if (parser->current_token.type != TOKEN_RBRACE) {
+      parser_set_error(parser, "Expected '}' after import list");
+      for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+      free(selected);
+      return NULL;
+    }
+    parser_advance(parser); // consume '}'
+
+    // expect 'from'
+    if (!parser_is_identifier_like(parser->current_token.type) ||
+        !parser->current_token.value ||
+        strcmp(parser->current_token.value, "from") != 0) {
+      parser_set_error(parser, "Expected 'from' after import list");
+      for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+      free(selected);
+      return NULL;
+    }
+    parser_advance(parser); // consume 'from'
+
+    if (parser->current_token.type != TOKEN_STRING) {
+      parser_set_error(parser, "Expected string literal after 'from'");
+      for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+      free(selected);
+      return NULL;
+    }
+
+    char *module_name = strdup(parser->current_token.value);
+    parser_advance(parser); // consume string
+
+    if (!parser_expect_statement_end(parser)) {
+      free(module_name);
+      for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+      free(selected);
+      return NULL;
+    }
+
+    ASTNode *node = ast_create_import_declaration(
+        module_name, NULL, (const char **)selected, selected_count, location);
+    free(module_name);
+    for (size_t i = 0; i < selected_count; i++) free(selected[i]);
+    free(selected);
+    return node;
+  }
+
+  // Plain import or namespaced import
   if (parser->current_token.type != TOKEN_STRING) {
     parser_set_error(parser, "Expected string literal after 'import'");
     return NULL;
   }
 
   char *module_name = strdup(parser->current_token.value);
+  char *namespace_alias = NULL;
   parser_advance(parser); // consume string
+
+  if (parser_is_identifier_like(parser->current_token.type) &&
+      parser->current_token.value &&
+      strcmp(parser->current_token.value, "as") == 0) {
+    parser_advance(parser); // consume 'as'
+    if (!parser_is_identifier_like(parser->current_token.type)) {
+      free(module_name);
+      parser_set_error(parser, "Expected namespace alias after 'as'");
+      return NULL;
+    }
+    namespace_alias = strdup(parser->current_token.value);
+    parser_advance(parser); // consume alias
+  }
 
   if (!parser_expect_statement_end(parser)) {
     free(module_name);
+    free(namespace_alias);
     return NULL;
   }
 
-  ASTNode *node = ast_create_import_declaration(module_name, location);
+  ASTNode *node =
+      ast_create_import_declaration(module_name, namespace_alias, NULL, 0, location);
   free(module_name);
+  free(namespace_alias);
 
   return node;
 }
@@ -1648,8 +2308,7 @@ static ASTNode *parser_parse_extern_var_declaration(Parser *parser) {
     return NULL;
   }
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_VAR)) {
     return NULL;
   }
@@ -1739,8 +2398,7 @@ ASTNode *parser_parse_var_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   // Expect 'var' keyword
   if (!parser_expect(parser, TOKEN_VAR)) {
     return NULL;
@@ -1805,16 +2463,18 @@ ASTNode *parser_parse_var_declaration(Parser *parser) {
   return var_decl;
 }
 
-ASTNode *parser_parse_function_declaration(Parser *parser) {
+static ASTNode *parser_parse_function_declaration_with_async(Parser *parser,
+                                                             int is_async) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
-  // Expect 'function' keyword
-  if (!parser_expect(parser, TOKEN_FUNCTION)) {
+  SourceLocation location = parser_current_location(parser);
+  if (parser->current_token.type != TOKEN_FUNCTION &&
+      parser->current_token.type != TOKEN_FN) {
+    parser_set_error(parser, "Expected 'function' or 'fn'");
     return NULL;
   }
+  parser_advance(parser);
 
   // Expect function name
   if (!parser_is_identifier_like(parser->current_token.type)) {
@@ -1826,10 +2486,11 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
   parser_advance(parser);
 
   char **func_type_params = NULL;
+  char **func_type_param_traits = NULL;
   size_t func_type_param_count = 0;
   if (parser->current_token.type == TOKEN_LESS_THAN) {
-    func_type_params =
-        parser_parse_type_param_list(parser, &func_type_param_count);
+    func_type_params = parser_parse_type_param_list(
+        parser, &func_type_param_traits, &func_type_param_count);
     if (!func_type_params && parser->has_error) {
       free(func_name);
       return NULL;
@@ -1838,9 +2499,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
 
   // Expect '('
   if (!parser_expect(parser, TOKEN_LPAREN)) {
-    for (size_t i = 0; i < func_type_param_count; i++)
-      free(func_type_params[i]);
-    free(func_type_params);
+    parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                func_type_param_count);
     free(func_name);
     return NULL;
   }
@@ -1863,6 +2523,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
         }
         free(param_names);
         free(param_types);
+        parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                    func_type_param_count);
         free(func_name);
         return NULL;
       }
@@ -1884,6 +2546,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
         }
         free(param_names);
         free(param_types);
+        parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                    func_type_param_count);
         free(func_name);
         return NULL;
       }
@@ -1902,6 +2566,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
         }
         free(param_names);
         free(param_types);
+        parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                    func_type_param_count);
         free(func_name);
         return NULL;
       }
@@ -1921,6 +2587,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
         }
         free(param_names);
         free(param_types);
+        parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                    func_type_param_count);
         free(func_name);
         return NULL;
       }
@@ -1936,6 +2604,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
     }
     free(param_names);
     free(param_types);
+    parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                func_type_param_count);
     free(func_name);
     return NULL;
   }
@@ -1959,10 +2629,30 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
       }
       free(param_names);
       free(param_types);
+      parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                  func_type_param_count);
       free(func_name);
       free(link_name);
       return NULL;
     }
+  }
+
+  if (parser->current_token.type == TOKEN_WHERE &&
+      !parser_parse_where_clause(parser, func_type_params,
+                                 func_type_param_traits,
+                                 func_type_param_count)) {
+    for (size_t i = 0; i < param_count; i++) {
+      free(param_names[i]);
+      free(param_types[i]);
+    }
+    free(param_names);
+    free(param_types);
+    parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                func_type_param_count);
+    free(func_name);
+    free(return_type);
+    free(link_name);
+    return NULL;
   }
 
   if (parser->current_token.type == TOKEN_EQUALS) {
@@ -1975,6 +2665,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
       }
       free(param_names);
       free(param_types);
+      parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                  func_type_param_count);
       free(func_name);
       free(return_type);
       return NULL;
@@ -2007,6 +2699,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
       }
       free(param_names);
       free(param_types);
+      parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                  func_type_param_count);
       free(func_name);
       free(return_type);
       free(link_name);
@@ -2025,6 +2719,8 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
     }
     free(param_names);
     free(param_types);
+    parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                func_type_param_count);
     free(func_name);
     free(return_type);
     free(link_name);
@@ -2034,26 +2730,33 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
   ASTNode *func_decl =
       ast_create_function_declaration(func_name, param_names, param_types,
                                       param_count, return_type, body, location);
-  if (func_decl && func_decl->data && link_name) {
+  if (func_decl && func_decl->data) {
     FunctionDeclaration *func_data = (FunctionDeclaration *)func_decl->data;
-    func_data->link_name = strdup(link_name);
-    if (!func_data->link_name) {
-      ast_destroy_node(func_decl);
-      func_decl = NULL;
-      parser_set_error(parser, "Memory allocation failed for link name");
+    func_data->is_async = is_async ? 1 : 0;
+    if (link_name) {
+      func_data->link_name = strdup(link_name);
+      if (!func_data->link_name) {
+        ast_destroy_node(func_decl);
+        func_decl = NULL;
+        parser_set_error(parser, "Memory allocation failed for link name");
+      }
     }
   }
   if (func_decl && func_decl->data && func_type_param_count > 0) {
     FunctionDeclaration *fd = (FunctionDeclaration *)func_decl->data;
     fd->type_params = malloc(func_type_param_count * sizeof(char *));
+    fd->type_param_traits = malloc(func_type_param_count * sizeof(char *));
     fd->type_param_count = func_type_param_count;
     for (size_t i = 0; i < func_type_param_count; i++) {
       fd->type_params[i] = (char *)string_intern(func_type_params[i]);
+      fd->type_param_traits[i] = func_type_param_traits[i]
+                                     ? (char *)string_intern(
+                                           func_type_param_traits[i])
+                                     : NULL;
     }
   }
-  for (size_t i = 0; i < func_type_param_count; i++)
-    free(func_type_params[i]);
-  free(func_type_params);
+  parser_free_type_param_list(func_type_params, func_type_param_traits,
+                              func_type_param_count);
 
   // Clean up temporary strings
   free(func_name);
@@ -2069,12 +2772,217 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
   return func_decl;
 }
 
+ASTNode *parser_parse_function_declaration(Parser *parser) {
+  return parser_parse_function_declaration_with_async(parser, 0);
+}
+
+ASTNode *parser_parse_trait_declaration(Parser *parser) {
+  if (!parser) {
+    return NULL;
+  }
+
+  SourceLocation location = parser_current_location(parser);
+  if (!parser_expect(parser, TOKEN_TRAIT)) {
+    return NULL;
+  }
+
+  if (!parser_is_identifier_like(parser->current_token.type)) {
+    parser_set_error(parser, "Expected trait name after 'trait'");
+    return NULL;
+  }
+
+  char *trait_name = strdup(parser->current_token.value);
+  ASTNode *trait_decl = NULL;
+  ASTNode **methods = NULL;
+  size_t method_count = 0;
+  parser_advance(parser);
+
+  if (!trait_name) {
+    return NULL;
+  }
+
+  if (parser->current_token.type == TOKEN_LBRACE) {
+    parser_advance(parser);
+    while (parser->current_token.type != TOKEN_RBRACE &&
+           parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+      if (parser->current_token.type == TOKEN_NEWLINE ||
+          parser->current_token.type == TOKEN_SEMICOLON) {
+        parser_advance(parser);
+        continue;
+      }
+      if (parser->current_token.type != TOKEN_FUNCTION &&
+          parser->current_token.type != TOKEN_FN) {
+        parser_set_error(parser,
+                         "Expected function signature in trait declaration");
+        goto trait_cleanup;
+      }
+      ASTNode *method = parser_parse_function_declaration(parser);
+      if (!method) {
+        goto trait_cleanup;
+      }
+      FunctionDeclaration *method_decl = (FunctionDeclaration *)method->data;
+      if (method_decl && method_decl->body) {
+        parser_set_error(parser, "Trait method declarations must not have a body");
+        ast_destroy_node(method);
+        goto trait_cleanup;
+      }
+      ASTNode **grown = realloc(methods, (method_count + 1) * sizeof(ASTNode *));
+      if (!grown) {
+        parser_set_error(parser, "Out of memory while parsing trait methods");
+        ast_destroy_node(method);
+        goto trait_cleanup;
+      }
+      methods = grown;
+      methods[method_count++] = method;
+    }
+    if (!parser_expect(parser, TOKEN_RBRACE)) {
+      goto trait_cleanup;
+    }
+  } else if (!parser_expect_statement_end(parser)) {
+    goto trait_cleanup;
+  }
+
+  trait_decl = ast_create_trait_declaration(trait_name, location);
+  if (trait_decl && trait_decl->data && method_count > 0) {
+    TraitDeclaration *data = (TraitDeclaration *)trait_decl->data;
+    data->methods = malloc(method_count * sizeof(ASTNode *));
+    if (!data->methods) {
+      parser_set_error(parser, "Out of memory while parsing trait methods");
+      ast_destroy_node(trait_decl);
+      trait_decl = NULL;
+      goto trait_cleanup;
+    }
+    data->method_count = method_count;
+    for (size_t i = 0; i < method_count; i++) {
+      data->methods[i] = methods[i];
+      ast_add_child(trait_decl, methods[i]);
+      methods[i] = NULL;
+    }
+  }
+
+trait_cleanup:
+  for (size_t i = 0; i < method_count; i++) {
+    if (methods[i]) {
+      ast_destroy_node(methods[i]);
+    }
+  }
+  free(methods);
+  free(trait_name);
+  return trait_decl;
+}
+
+ASTNode *parser_parse_impl_declaration(Parser *parser) {
+  if (!parser) {
+    return NULL;
+  }
+
+  SourceLocation location = parser_current_location(parser);
+  char *trait_name = NULL;
+  char *for_type_name = NULL;
+  ASTNode *impl_decl = NULL;
+  ASTNode **methods = NULL;
+  size_t method_count = 0;
+
+  if (!parser_expect(parser, TOKEN_IMPL)) {
+    return NULL;
+  }
+
+  trait_name =
+      parser_parse_qualified_name(parser, "Expected trait name after 'impl'");
+  if (!trait_name) {
+    return NULL;
+  }
+
+  if (!parser_expect(parser, TOKEN_FOR)) {
+    free(trait_name);
+    parser_set_error(parser, "Expected 'for' after trait name in impl");
+    return NULL;
+  }
+
+  for_type_name = parser_parse_type_annotation(parser);
+  if (!for_type_name) {
+    if (!parser->has_error) {
+      parser_set_error(parser, "Expected type name after 'for' in impl");
+    }
+    free(trait_name);
+    return NULL;
+  }
+
+  if (parser->current_token.type == TOKEN_LBRACE) {
+    parser_advance(parser);
+    while (parser->current_token.type != TOKEN_RBRACE &&
+           parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+      if (parser->current_token.type == TOKEN_NEWLINE ||
+          parser->current_token.type == TOKEN_SEMICOLON) {
+        parser_advance(parser);
+        continue;
+      }
+      if (parser->current_token.type != TOKEN_FUNCTION &&
+          parser->current_token.type != TOKEN_FN) {
+        parser_set_error(parser, "Expected function declaration in impl block");
+        goto impl_cleanup;
+      }
+      ASTNode *method = parser_parse_function_declaration(parser);
+      if (!method) {
+        goto impl_cleanup;
+      }
+      FunctionDeclaration *method_decl = (FunctionDeclaration *)method->data;
+      if (method_decl && !method_decl->body) {
+        parser_set_error(parser, "Impl method declarations must have a body");
+        ast_destroy_node(method);
+        goto impl_cleanup;
+      }
+      ASTNode **grown = realloc(methods, (method_count + 1) * sizeof(ASTNode *));
+      if (!grown) {
+        parser_set_error(parser, "Out of memory while parsing impl methods");
+        ast_destroy_node(method);
+        goto impl_cleanup;
+      }
+      methods = grown;
+      methods[method_count++] = method;
+    }
+    if (!parser_expect(parser, TOKEN_RBRACE)) {
+      goto impl_cleanup;
+    }
+  } else if (!parser_expect_statement_end(parser)) {
+    goto impl_cleanup;
+  }
+
+  impl_decl = ast_create_impl_declaration(trait_name, for_type_name, location);
+  if (impl_decl && impl_decl->data && method_count > 0) {
+    ImplDeclaration *data = (ImplDeclaration *)impl_decl->data;
+    data->methods = malloc(method_count * sizeof(ASTNode *));
+    if (!data->methods) {
+      parser_set_error(parser, "Out of memory while parsing impl methods");
+      ast_destroy_node(impl_decl);
+      impl_decl = NULL;
+      goto impl_cleanup;
+    }
+    data->method_count = method_count;
+    for (size_t i = 0; i < method_count; i++) {
+      data->methods[i] = methods[i];
+      ast_add_child(impl_decl, methods[i]);
+      methods[i] = NULL;
+    }
+  }
+
+impl_cleanup:
+  for (size_t i = 0; i < method_count; i++) {
+    if (methods[i]) {
+      ast_destroy_node(methods[i]);
+    }
+  }
+  free(methods);
+  free(trait_name);
+  free(for_type_name);
+  return impl_decl;
+}
+
 ASTNode *parser_parse_enum_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_ENUM))
     return NULL;
 
@@ -2085,7 +2993,44 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
   char *enum_name = strdup(parser->current_token.value);
   parser_advance(parser);
 
+  // Optional generic type parameters: enum Option<T> { ... }
+  char **type_params = NULL;
+  size_t type_param_count = 0;
+  if (parser->current_token.type == TOKEN_LESS_THAN) {
+    parser_advance(parser); // consume '<'
+    while (parser->current_token.type != TOKEN_GREATER_THAN &&
+           parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+      if (parser->current_token.type == TOKEN_COMMA ||
+          parser->current_token.type == TOKEN_NEWLINE) {
+        parser_advance(parser);
+        continue;
+      }
+      if (!parser_is_identifier_like(parser->current_token.type) &&
+          !parser_is_type_keyword(parser->current_token.type)) {
+        parser_set_error(parser, "Expected type parameter name");
+        break;
+      }
+      char **new_tp =
+          realloc(type_params, (type_param_count + 1) * sizeof(char *));
+      if (!new_tp) {
+        parser_set_error(parser, "Out of memory in enum type parameters");
+        break;
+      }
+      type_params = new_tp;
+      type_params[type_param_count++] = strdup(parser->current_token.value);
+      parser_advance(parser);
+    }
+    if (!parser->has_error && !parser_expect(parser, TOKEN_GREATER_THAN)) {
+      for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+      free(type_params);
+      free(enum_name);
+      return NULL;
+    }
+  }
+
   if (!parser_expect(parser, TOKEN_LBRACE)) {
+    for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+    free(type_params);
     free(enum_name);
     return NULL;
   }
@@ -2108,6 +3053,29 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
     char *variant_name = strdup(parser->current_token.value);
     parser_advance(parser);
 
+    // Optional payload type: Some(T)
+    char *payload_type = NULL;
+    if (parser->current_token.type == TOKEN_LPAREN) {
+      parser_advance(parser); // consume '('
+      if (!parser_is_identifier_like(parser->current_token.type) &&
+          !parser_is_type_keyword(parser->current_token.type)) {
+        parser_set_error(parser, "Expected payload type in variant");
+        free(variant_name);
+        break;
+      }
+      payload_type = parser_parse_type_annotation(parser);
+      if (!payload_type) {
+        parser_set_error(parser, "Expected payload type in variant");
+        free(variant_name);
+        break;
+      }
+      if (!parser_expect(parser, TOKEN_RPAREN)) {
+        free(payload_type);
+        free(variant_name);
+        break;
+      }
+    }
+
     ASTNode *value = NULL;
     if (parser->current_token.type == TOKEN_EQUALS) {
       parser_advance(parser);
@@ -2115,13 +3083,23 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
       if (!value) {
         if (!parser->has_error)
           parser_set_error(parser, "Expected expression after '='");
+        free(payload_type);
         free(variant_name);
         break;
       }
     }
 
-    variants = realloc(variants, (variant_count + 1) * sizeof(EnumVariant));
+    EnumVariant *new_v =
+        realloc(variants, (variant_count + 1) * sizeof(EnumVariant));
+    if (!new_v) {
+      parser_set_error(parser, "Out of memory");
+      free(payload_type);
+      free(variant_name);
+      break;
+    }
+    variants = new_v;
     variants[variant_count].name = variant_name;
+    variants[variant_count].payload_type = payload_type;
     variants[variant_count].value = value;
     variant_count++;
 
@@ -2134,9 +3112,12 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
   if (parser->has_error) {
     for (size_t i = 0; i < variant_count; i++) {
       free(variants[i].name);
+      free(variants[i].payload_type);
       ast_destroy_node(variants[i].value);
     }
     free(variants);
+    for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+    free(type_params);
     free(enum_name);
     return NULL;
   }
@@ -2144,9 +3125,12 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
   if (!parser_expect(parser, TOKEN_RBRACE)) {
     for (size_t i = 0; i < variant_count; i++) {
       free(variants[i].name);
+      free(variants[i].payload_type);
       ast_destroy_node(variants[i].value);
     }
     free(variants);
+    for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+    free(type_params);
     free(enum_name);
     return NULL;
   }
@@ -2154,11 +3138,23 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
   ASTNode *node =
       ast_create_enum_declaration(enum_name, variants, variant_count, location);
 
+  if (node) {
+    EnumDeclaration *decl = (EnumDeclaration *)node->data;
+    if (decl && type_param_count > 0) {
+      decl->type_params = type_params;
+      decl->type_param_count = type_param_count;
+      type_params = NULL; // ownership transferred
+    }
+  }
+
   free(enum_name);
   for (size_t i = 0; i < variant_count; i++) {
     free(variants[i].name);
+    free(variants[i].payload_type);
   }
   free(variants);
+  for (size_t i = 0; i < type_param_count; i++) free(type_params[i]);
+  free(type_params);
 
   return node;
 }
@@ -2167,8 +3163,7 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   // Expect 'struct' keyword
   if (!parser_expect(parser, TOKEN_STRUCT)) {
     return NULL;
@@ -2184,20 +3179,30 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   parser_advance(parser);
 
   char **type_params = NULL;
+  char **type_param_traits = NULL;
   size_t type_param_count = 0;
   if (parser->current_token.type == TOKEN_LESS_THAN) {
-    type_params = parser_parse_type_param_list(parser, &type_param_count);
+    type_params = parser_parse_type_param_list(parser, &type_param_traits,
+                                               &type_param_count);
     if (!type_params && parser->has_error) {
       free(struct_name);
       return NULL;
     }
   }
 
+  if (parser->current_token.type == TOKEN_WHERE &&
+      !parser_parse_where_clause(parser, type_params, type_param_traits,
+                                 type_param_count)) {
+    parser_free_type_param_list(type_params, type_param_traits,
+                                type_param_count);
+    free(struct_name);
+    return NULL;
+  }
+
   // Expect '{'
   if (!parser_expect(parser, TOKEN_LBRACE)) {
-    for (size_t i = 0; i < type_param_count; i++)
-      free(type_params[i]);
-    free(type_params);
+    parser_free_type_param_list(type_params, type_param_traits,
+                                type_param_count);
     free(struct_name);
     return NULL;
   }
@@ -2238,6 +3243,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
           ast_destroy_node(methods[i]);
         }
         free(methods);
+        parser_free_type_param_list(type_params, type_param_traits,
+                                    type_param_count);
         free(struct_name);
         return NULL;
       }
@@ -2256,6 +3263,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
           ast_destroy_node(methods[i]);
         }
         free(methods);
+        parser_free_type_param_list(type_params, type_param_traits,
+                                    type_param_count);
         free(struct_name);
         return NULL;
       }
@@ -2281,6 +3290,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
           ast_destroy_node(methods[i]);
         }
         free(methods);
+        parser_free_type_param_list(type_params, type_param_traits,
+                                    type_param_count);
         free(struct_name);
         return NULL;
       }
@@ -2303,6 +3314,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
           ast_destroy_node(methods[i]);
         }
         free(methods);
+        parser_free_type_param_list(type_params, type_param_traits,
+                                    type_param_count);
         free(struct_name);
         return NULL;
       }
@@ -2326,6 +3339,8 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
       ast_destroy_node(methods[i]);
     }
     free(methods);
+    parser_free_type_param_list(type_params, type_param_traits,
+                                type_param_count);
     free(struct_name);
     return NULL;
   }
@@ -2337,14 +3352,16 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   if (struct_decl && struct_decl->data && type_param_count > 0) {
     StructDeclaration *sd = (StructDeclaration *)struct_decl->data;
     sd->type_params = malloc(type_param_count * sizeof(char *));
+    sd->type_param_traits = malloc(type_param_count * sizeof(char *));
     sd->type_param_count = type_param_count;
     for (size_t i = 0; i < type_param_count; i++) {
       sd->type_params[i] = (char *)string_intern(type_params[i]);
+      sd->type_param_traits[i] =
+          type_param_traits[i] ? (char *)string_intern(type_param_traits[i])
+                               : NULL;
     }
   }
-  for (size_t i = 0; i < type_param_count; i++)
-    free(type_params[i]);
-  free(type_params);
+  parser_free_type_param_list(type_params, type_param_traits, type_param_count);
 
   // Keep a stable copy for debug output before freeing temporary buffers.
   char *debug_struct_name = strdup(struct_name);
@@ -2366,8 +3383,7 @@ ASTNode *parser_parse_inline_asm(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   // Expect 'asm' keyword
   if (!parser_expect(parser, TOKEN_ASM)) {
     return NULL;
@@ -2448,8 +3464,7 @@ ASTNode *parser_parse_assignment(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (parser->current_token.type != TOKEN_IDENTIFIER) {
     parser_set_error(parser, "Expected identifier in assignment");
     return NULL;
@@ -2478,8 +3493,7 @@ ASTNode *parser_parse_return_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   parser_advance(parser); // consume 'return'
 
   ASTNode *value = NULL;
@@ -2503,8 +3517,7 @@ ASTNode *parser_parse_if_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (!parser_expect(parser, TOKEN_IF)) {
     return NULL;
@@ -2532,6 +3545,10 @@ ASTNode *parser_parse_if_statement(Parser *parser) {
   if (!then_branch) {
     ast_destroy_node(condition);
     return NULL;
+  }
+
+  while (parser->current_token.type == TOKEN_NEWLINE) {
+    parser_advance(parser);
   }
 
   ElseIfClause *else_ifs = NULL;
@@ -2570,6 +3587,10 @@ ASTNode *parser_parse_if_statement(Parser *parser) {
       else_ifs[else_if_count].condition = elif_cond;
       else_ifs[else_if_count].body = elif_body;
       else_if_count++;
+
+      while (parser->current_token.type == TOKEN_NEWLINE) {
+        parser_advance(parser);
+      }
     } else {
       parser_advance(parser); // consume 'else'
       else_branch = (parser->current_token.type == TOKEN_LBRACE)
@@ -2626,8 +3647,7 @@ ASTNode *parser_parse_while_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (!parser_expect(parser, TOKEN_WHILE)) {
     return NULL;
@@ -2674,6 +3694,7 @@ ASTNode *parser_parse_while_statement(Parser *parser) {
 
   while_data->condition = condition;
   while_data->body = body;
+  while_data->label = NULL;
   while_node->data = while_data;
 
   ast_add_child(while_node, condition);
@@ -2686,36 +3707,49 @@ ASTNode *parser_parse_break_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_BREAK)) {
     return NULL;
   }
 
+  char *target_label = NULL;
+  if (parser->current_token.type == TOKEN_IDENTIFIER) {
+    target_label = strdup(parser->current_token.value);
+    parser_advance(parser);
+  }
+
   parser_expect_statement_end(parser);
-  return ast_create_break_statement(location);
+  ASTNode *node = ast_create_labeled_break_statement(target_label, location);
+  free(target_label);
+  return node;
 }
 
 ASTNode *parser_parse_continue_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_CONTINUE)) {
     return NULL;
   }
 
+  char *target_label = NULL;
+  if (parser->current_token.type == TOKEN_IDENTIFIER) {
+    target_label = strdup(parser->current_token.value);
+    parser_advance(parser);
+  }
+
   parser_expect_statement_end(parser);
-  return ast_create_continue_statement(location);
+  ASTNode *node = ast_create_labeled_continue_statement(target_label, location);
+  free(target_label);
+  return node;
 }
 
 ASTNode *parser_parse_for_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_FOR)) {
     return NULL;
   }
@@ -2770,7 +3804,7 @@ ASTNode *parser_parse_for_statement(Parser *parser) {
       return NULL;
     }
 
-    if (parser->current_token.type == TOKEN_EQUALS) {
+    if (parser_is_assignment_token(parser->current_token.type)) {
       increment = parser_parse_assignment_from_target(parser, expr);
       if (!increment) {
         if (initializer)
@@ -2815,8 +3849,7 @@ ASTNode *parser_parse_switch_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_SWITCH)) {
     return NULL;
   }
@@ -2858,8 +3891,7 @@ ASTNode *parser_parse_switch_statement(Parser *parser) {
 
     int is_default = 0;
     ASTNode *case_value = NULL;
-    SourceLocation case_loc = {parser->current_token.line,
-                               parser->current_token.column};
+    SourceLocation case_loc = parser_current_location(parser);
 
     if (parser->current_token.type == TOKEN_CASE) {
       parser_advance(parser);
@@ -2953,6 +3985,151 @@ ASTNode *parser_parse_switch_statement(Parser *parser) {
   return switch_node;
 }
 
+// Parse: match (expr) {
+//   case VariantName(binding): { body }
+//   case VariantName: { body }
+//   default: { body }
+// }
+ASTNode *parser_parse_match_statement(Parser *parser) {
+  if (!parser)
+    return NULL;
+
+  SourceLocation location = parser_current_location(parser);
+  if (!parser_expect(parser, TOKEN_MATCH))
+    return NULL;
+
+  if (!parser_expect(parser, TOKEN_LPAREN)) {
+    parser_set_error(parser, "Expected '(' after 'match'");
+    return NULL;
+  }
+  ASTNode *expr = parser_parse_expression(parser);
+  if (!expr)
+    return NULL;
+  if (!parser_expect(parser, TOKEN_RPAREN)) {
+    ast_destroy_node(expr);
+    return NULL;
+  }
+  if (!parser_expect(parser, TOKEN_LBRACE)) {
+    ast_destroy_node(expr);
+    return NULL;
+  }
+
+  MatchArm *arms = NULL;
+  size_t arm_count = 0;
+  int seen_default = 0;
+
+  while (parser->current_token.type != TOKEN_RBRACE &&
+         parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+    while (parser->current_token.type == TOKEN_NEWLINE ||
+           parser->current_token.type == TOKEN_SEMICOLON)
+      parser_advance(parser);
+    if (parser->current_token.type == TOKEN_RBRACE)
+      break;
+
+    MatchArm arm = {0};
+
+    if (parser->current_token.type == TOKEN_DEFAULT) {
+      if (seen_default) {
+        parser_set_error(parser, "Only one default arm is allowed in match");
+        break;
+      }
+      seen_default = 1;
+      arm.is_default = 1;
+      arm.variant_name = strdup("default");
+      parser_advance(parser);
+    } else if (parser->current_token.type == TOKEN_CASE) {
+      parser_advance(parser); // consume 'case'
+      if (!parser_is_identifier_like(parser->current_token.type)) {
+        parser_set_error(parser, "Expected variant name after 'case' in match");
+        break;
+      }
+      arm.variant_name = strdup(parser->current_token.value);
+      parser_advance(parser);
+
+      // Optional binding: case Some(v)
+      if (parser->current_token.type == TOKEN_LPAREN) {
+        parser_advance(parser); // consume '('
+        if (!parser_is_identifier_like(parser->current_token.type)) {
+          parser_set_error(parser, "Expected binding name in match arm");
+          free(arm.variant_name);
+          break;
+        }
+        arm.binding_name = strdup(parser->current_token.value);
+        parser_advance(parser);
+        if (!parser_expect(parser, TOKEN_RPAREN)) {
+          free(arm.binding_name);
+          free(arm.variant_name);
+          break;
+        }
+      }
+    } else {
+      parser_set_error(parser, "Expected 'case' or 'default' in match");
+      break;
+    }
+
+    if (!parser_expect(parser, TOKEN_COLON)) {
+      free(arm.binding_name);
+      free(arm.variant_name);
+      break;
+    }
+
+    arm.body = parser_parse_block(parser);
+    if (!arm.body) {
+      if (!parser->has_error)
+        parser_set_error(parser, "Expected '{' block body in match arm");
+      free(arm.binding_name);
+      free(arm.variant_name);
+      break;
+    }
+
+    MatchArm *new_arms = realloc(arms, (arm_count + 1) * sizeof(MatchArm));
+    if (!new_arms) {
+      parser_set_error(parser, "Out of memory in match statement");
+      ast_destroy_node(arm.body);
+      free(arm.binding_name);
+      free(arm.variant_name);
+      break;
+    }
+    arms = new_arms;
+    arms[arm_count++] = arm;
+
+    while (parser->current_token.type == TOKEN_NEWLINE ||
+           parser->current_token.type == TOKEN_SEMICOLON)
+      parser_advance(parser);
+  }
+
+  if (parser->has_error) {
+    for (size_t i = 0; i < arm_count; i++) {
+      free(arms[i].variant_name);
+      free(arms[i].binding_name);
+      ast_destroy_node(arms[i].body);
+    }
+    free(arms);
+    ast_destroy_node(expr);
+    return NULL;
+  }
+
+  if (!parser_expect(parser, TOKEN_RBRACE)) {
+    for (size_t i = 0; i < arm_count; i++) {
+      free(arms[i].variant_name);
+      free(arms[i].binding_name);
+      ast_destroy_node(arms[i].body);
+    }
+    free(arms);
+    ast_destroy_node(expr);
+    return NULL;
+  }
+
+  ASTNode *node = ast_create_match_statement(expr, arms, arm_count, location);
+  for (size_t i = 0; i < arm_count; i++) {
+    free(arms[i].variant_name);
+    free(arms[i].binding_name);
+    // body nodes now owned by the match node
+  }
+  free(arms);
+  return node;
+}
+
 ASTNode *parser_parse_block(Parser *parser) {
   if (!parser)
     return NULL;
@@ -3020,8 +4197,7 @@ ASTNode *parser_parse_method_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   // Expect 'method' keyword
   if (!parser_expect(parser, TOKEN_METHOD)) {
     return NULL;

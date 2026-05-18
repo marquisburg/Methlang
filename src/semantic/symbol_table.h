@@ -13,15 +13,25 @@ typedef enum {
   TYPE_UINT16,
   TYPE_UINT32,
   TYPE_UINT64,
+  TYPE_BOOL,
   TYPE_FLOAT32,
   TYPE_FLOAT64,
   TYPE_STRING,
   TYPE_FUNCTION_POINTER,
+  TYPE_FUTURE,
   TYPE_POINTER,
   TYPE_ARRAY,
   TYPE_STRUCT,
   TYPE_ENUM,
-  TYPE_VOID
+  TYPE_TAGGED_ENUM,
+  TYPE_VOID,
+  // Threading types — base_type holds the inner/payload type
+  TYPE_THREAD,   // Thread<T>  — base_type = T (return type of the spawned fn)
+  TYPE_MUTEX,    // Mutex<T>   — base_type = T (guarded value type)
+  TYPE_GUARD,    // Guard<T>   — base_type = T (returned by Mutex.lock())
+  TYPE_ATOMIC,   // Atomic<T>  — base_type = T (must be integer/pointer)
+  TYPE_SENDER,   // Sender<T>  — base_type = T
+  TYPE_RECEIVER  // Receiver<T> — base_type = T
 } TypeKind;
 
 typedef struct Type {
@@ -40,6 +50,17 @@ typedef struct Type {
   struct Type **field_types; // For structs - field types
   size_t *field_offsets;     // For structs - field memory offsets
   size_t field_count;        // For structs - number of fields
+
+  // Tagged enum variant info (TYPE_TAGGED_ENUM only)
+  char **tagged_variant_names;
+  int *tagged_variant_tags;              // discriminant value per variant
+  struct Type **tagged_variant_payloads; // payload type per variant (NULL = none)
+  size_t tagged_variant_count;
+  size_t tagged_data_offset;   // byte offset of the data union inside the struct
+  size_t tagged_data_size;     // size of the data union
+
+  // Template info: for un-instantiated generic enum templates
+  char *generic_template_name; // base name e.g. "Option" (NULL if not generic)
 } Type;
 
 typedef enum { SCOPE_GLOBAL, SCOPE_FUNCTION, SCOPE_BLOCK } ScopeType;
@@ -50,6 +71,12 @@ typedef struct Scope {
   struct Symbol **symbols;
   size_t symbol_count;
   size_t symbol_capacity;
+  /* Open-addressing hash index over `symbols`, keyed by name. Stores
+   * (symbol_index + 1); 0 marks an empty bucket. Lets symbol_table_lookup and
+   * the declare-time duplicate check avoid a linear strcmp scan per query.
+   * Built lazily once a scope grows past a small threshold. */
+  size_t *name_index;
+  size_t name_index_bucket_count;
 } Scope;
 
 typedef enum {
@@ -58,7 +85,8 @@ typedef enum {
   SYMBOL_STRUCT,
   SYMBOL_ENUM,
   SYMBOL_CONSTANT,
-  SYMBOL_PARAMETER
+  SYMBOL_PARAMETER,
+  SYMBOL_TAGGED_ENUM_CONSTRUCTOR
 } SymbolKind;
 
 typedef struct Symbol {
@@ -85,6 +113,11 @@ typedef struct Symbol {
     struct {
       long long value;
     } constant;
+    struct {
+      Type *enum_type;    // The concrete tagged enum type this constructs
+      int tag_value;      // Discriminant value for this variant
+      Type *payload_type; // NULL if variant carries no payload
+    } constructor;
   } data;
 } Symbol;
 
@@ -107,6 +140,15 @@ int symbol_table_resolve_forward_declaration(SymbolTable *table,
                                              Symbol *symbol);
 int symbol_table_validate_declaration(SymbolTable *table, Symbol *symbol);
 Scope *symbol_table_get_current_scope(SymbolTable *table);
+
+// Returns a heap-allocated name of the in-scope symbol most similar to
+// `name` (typo suggestion for "did you mean?"), or NULL if nothing is close
+// enough. Walks the full scope chain (current -> ... -> global). When
+// `kinds`/`kind_count` are provided, only symbols of those kinds are
+// considered; pass NULL/0 to consider every kind. Caller frees the result.
+char *symbol_table_suggest_similar(SymbolTable *table, const char *name,
+                                   const SymbolKind *kinds, size_t kind_count);
+
 Symbol *symbol_create(const char *name, SymbolKind kind, Type *type);
 void symbol_destroy(Symbol *symbol);
 Type *type_create(TypeKind kind, const char *name);

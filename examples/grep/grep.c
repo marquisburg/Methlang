@@ -1,5 +1,5 @@
 /*
- * C Grep benchmark - counterpart to grep.meth
+ * C Grep benchmark - counterpart to grep.mettle
  *
  * Counts lines containing "ERROR" in a 256 KB log buffer, 200 passes.
  *

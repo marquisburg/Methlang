@@ -1,0 +1,12 @@
+trait Addable;
+trait SignedNumber;
+
+impl Addable for int32;
+
+function add_one<T: Addable + SignedNumber>(value: T) -> T {
+    return value + 1;
+}
+
+function main() -> int32 {
+    return add_one<int32>(41);
+}

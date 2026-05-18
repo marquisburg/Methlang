@@ -1,5 +1,5 @@
 param(
-  [string]$CompilerPath = ".\bin\methlang.exe",
+  [string]$CompilerPath = ".\bin\mettle.exe",
   [switch]$BuildCompiler,
   [switch]$SkipRuntime,
   [switch]$SkipDeterminism
@@ -15,7 +15,12 @@ function Write-CaseResult {
   )
 
   if ($Passed) {
-    Write-Host "[PASS] $Name"
+    if ($Reason) {
+      Write-Host "[PASS] $Name ($Reason)"
+    }
+    else {
+      Write-Host "[PASS] $Name"
+    }
   }
   else {
     if ($Reason) {
@@ -90,10 +95,11 @@ if (-not (Test-Path $CompilerPath)) {
   exit 1
 }
 
-$tmpDir = Join-Path $env:TEMP "Methlang-test-artifacts"
+$tmpDir = Join-Path $env:TEMP "Mettle-test-artifacts"
 if (-not (Test-Path $tmpDir)) {
   New-Item -Path $tmpDir -ItemType Directory | Out-Null
 }
+$repoRoot = (Resolve-Path ".").Path
 
 $callManyArgsAsmMustMatch = @()
 $callManyArgsAsmMustNotMatch = @()
@@ -113,57 +119,174 @@ if ($env:OS -eq "Windows_NT") {
 }
 
 $cases = @(
-  @{ Name = "ok_global_int"; Path = "tests/ok_global_int.meth"; ShouldSucceed = $true },
-  @{ Name = "only_struct"; Path = "tests/only_struct.meth"; ShouldSucceed = $true },
-  @{ Name = "array_index"; Path = "tests/test_array_index.meth"; ShouldSucceed = $true },
-  @{ Name = "control_flow"; Path = "tests/test_control_flow.meth"; ShouldSucceed = $true },
-  @{ Name = "nested_switch_loop"; Path = "tests/test_nested_switch_loop.meth"; ShouldSucceed = $true },
-  @{ Name = "elseif_chaining"; Path = "tests/test_elseif.meth"; ShouldSucceed = $true },
-  @{ Name = "switch_const_expr"; Path = "tests/test_switch_const_expr.meth"; ShouldSucceed = $true },
-  @{ Name = "switch_continue_loop"; Path = "tests/test_switch_continue_loop.meth"; ShouldSucceed = $true },
+  @{ Name = "ok_global_int"; Path = "tests/ok_global_int.mettle"; ShouldSucceed = $true },
+  @{ Name = "only_struct"; Path = "tests/only_struct.mettle"; ShouldSucceed = $true },
+  @{ Name = "array_index"; Path = "tests/test_array_index.mettle"; ShouldSucceed = $true },
+  @{ Name = "control_flow"; Path = "tests/test_control_flow.mettle"; ShouldSucceed = $true },
+  @{ Name = "nested_switch_loop"; Path = "tests/test_nested_switch_loop.mettle"; ShouldSucceed = $true },
+  @{ Name = "elseif_chaining"; Path = "tests/test_elseif.mettle"; ShouldSucceed = $true },
+  @{ Name = "switch_const_expr"; Path = "tests/test_switch_const_expr.mettle"; ShouldSucceed = $true },
+  @{ Name = "switch_continue_loop"; Path = "tests/test_switch_continue_loop.mettle"; ShouldSucceed = $true },
+  @{ Name = "block_comment"; Path = "tests/test_block_comment.mettle"; ShouldSucceed = $true },
+  @{ Name = "compound_assign"; Path = "tests/test_compound_assign.mettle"; ShouldSucceed = $true },
+  @{ Name = "compound_assign_for"; Path = "tests/test_compound_assign_for.mettle"; ShouldSucceed = $true },
+  @{ Name = "labeled_break"; Path = "tests/test_labeled_break.mettle"; ShouldSucceed = $true },
+  @{ Name = "labeled_continue"; Path = "tests/test_labeled_continue.mettle"; ShouldSucceed = $true },
+  @{ Name = "labeled_while"; Path = "tests/test_labeled_while.mettle"; ShouldSucceed = $true },
   @{
     Name            = "forward_decl"
-    Path            = "tests/test_forward_decl.meth"
+    Path            = "tests/test_forward_decl.mettle"
     ShouldSucceed   = $true
     AsmMustMatch    = @("(?m)^\s*add:\s*$")
     AsmMustNotMatch = @("(?s)(?m)^\s*add:\s*.*^\s*add:\s*")
   },
-  @{ Name = "forward_decl_pointer"; Path = "tests/test_forward_decl_pointer.meth"; ShouldSucceed = $true },
+  @{ Name = "forward_decl_pointer"; Path = "tests/test_forward_decl_pointer.mettle"; ShouldSucceed = $true },
   @{
     Name            = "extern_function_link_name"
-    Path            = "tests/test_extern_function_link_name.meth"
+    Path            = "tests/test_extern_function_link_name.mettle"
     ShouldSucceed   = $true
     AsmMustMatch    = @("(?m)^\s*extern\s+puts\b", "(?m)\bcall\s+puts\b")
     AsmMustNotMatch = @("(?m)^\s*global\s+puts\b", "(?m)^\s*puts:\s*$")
   },
   @{
     Name            = "extern_global_link_name"
-    Path            = "tests/test_extern_global_link_name.meth"
+    Path            = "tests/test_extern_global_link_name.mettle"
     ShouldSucceed   = $true
     AsmMustMatch    = @("(?m)^\s*extern\s+errno\b", "(\[\s*errno\s*\+\s*rip\s*\]|\[\s*rel\s+errno\s*\])")
     AsmMustNotMatch = @("(?m)^\s*global\s+errno\b", "(?m)^\s*errno:\s*$")
   },
-  @{ Name = "cstring_alias_type"; Path = "tests/test_cstring_alias_type.meth"; ShouldSucceed = $true },
-  @{ Name = "nested_function_pointer_type_annotation"; Path = "tests/test_nested_function_pointer_type_annotation.meth"; ShouldSucceed = $true },
-  @{ Name = "gc_alloc"; Path = "tests/test_gc_alloc.meth"; ShouldSucceed = $true },
-  @{ Name = "gc_alloc_fixed"; Path = "tests/test_gc_alloc_fixed.meth"; ShouldSucceed = $true },
-  @{ Name = "pointers"; Path = "tests/test_pointers.meth"; ShouldSucceed = $true },
-  @{ Name = "pointer_null"; Path = "tests/test_pointer_null.meth"; ShouldSucceed = $true },
+  @{ Name = "cstring_alias_type"; Path = "tests/test_cstring_alias_type.mettle"; ShouldSucceed = $true },
+  @{ Name = "nested_function_pointer_type_annotation"; Path = "tests/test_nested_function_pointer_type_annotation.mettle"; ShouldSucceed = $true },
+  @{ Name = "gc_alloc"; Path = "tests/test_gc_alloc.mettle"; ShouldSucceed = $true },
+  @{ Name = "gc_alloc_fixed"; Path = "tests/test_gc_alloc_fixed.mettle"; ShouldSucceed = $true },
+  @{
+    Name          = "async_await"
+    Path          = "tests/test_async_await.mettle"
+    ShouldSucceed = $true
+    AsmMustMatch  = @(
+      "global __meth_async_body_add_one_",
+      "global __meth_async_entry_add_one_",
+      "extern __meth_async_start",
+      "extern __meth_async_wait"
+    )
+  },
+  @{
+    Name          = "async_cancel"
+    Path          = "tests/test_async_cancel.mettle"
+    ShouldSucceed = $true
+    AsmMustMatch  = @(
+      "extern __meth_async_cancel",
+      "extern __meth_async_current_cancelled",
+      "extern __meth_async_wait"
+    )
+  },
+  @{
+    Name          = "async_nested_await"
+    Path          = "tests/test_async_nested_await.mettle"
+    ShouldSucceed = $true
+    AsmMustMatch  = @(
+      "extern __meth_async_start",
+      "extern __meth_async_wait"
+    )
+  },
+  @{
+    Name          = "async_coro_basic"
+    Path          = "tests/test_async_coro_basic.mettle"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_coro_task_create",
+      "extern __meth_coro_task_schedule",
+      "global __meth_async_entry_add_one_"
+    )
+  },
+  @{
+    Name          = "async_coro_internal_await_return"
+    Path          = "tests/test_async_coro_internal_await_return.mettle"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_internal_await_var_return"
+    Path          = "tests/test_async_coro_internal_await_var_return.mettle"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_future_var_return_await"
+    Path          = "tests/test_async_coro_future_var_return_await.mettle"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_future_var_await_var_return"
+    Path          = "tests/test_async_coro_future_var_await_var_return.mettle"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_two_await_chain"
+    Path          = "tests/test_async_coro_two_await_chain.mettle"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_two_await_pointer_chain"
+    Path          = "tests/test_async_coro_two_await_pointer_chain.mettle"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_async_wait",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{
+    Name          = "async_coro_nested_expr_await"
+    Path          = "tests/test_async_nested_await.mettle"
+    ShouldSucceed = $true
+    Args          = @("--async-model", "coroutine")
+    AsmMustMatch  = @(
+      "extern __meth_coro_task_create",
+      "extern __meth_coro_task_schedule"
+    )
+  },
+  @{ Name = "pointers"; Path = "tests/test_pointers.mettle"; ShouldSucceed = $true },
+  @{ Name = "pointer_null"; Path = "tests/test_pointer_null.mettle"; ShouldSucceed = $true },
   @{
     Name          = "runtime_null_deref_check"
-    Path          = "tests/test_runtime_null_deref_check.meth"
+    Path          = "tests/test_runtime_null_deref_check.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("Fatal error: Null pointer dereference", "\bcall meth_runtime_debug_trap\b")
   },
   @{
     Name          = "runtime_array_bounds_check"
-    Path          = "tests/test_runtime_array_bounds_check.meth"
+    Path          = "tests/test_runtime_array_bounds_check.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("Fatal error: Array index out of bounds", "(\bsetl al\b|\bjge\s+ir_trap_bounds_|\bjl\s+ir_in_bounds_)")
   },
   @{
     Name          = "stack_trace_support"
-    Path          = "tests/test_runtime_null_deref_check.meth"
+    Path          = "tests/test_runtime_null_deref_check.mettle"
     ShouldSucceed = $true
     Args          = @("-s")
     AsmMustMatch  = @(
@@ -175,129 +298,153 @@ $cases = @(
       "meth_debug_locations:"
     )
   },
-  @{ Name = "pointer_param_address"; Path = "tests/test_pointer_param_address.meth"; ShouldSucceed = $true },
+  @{ Name = "pointer_param_address"; Path = "tests/test_pointer_param_address.mettle"; ShouldSucceed = $true },
   @{
     Name            = "call_many_args"
-    Path            = "tests/test_call_many_args.meth"
+    Path            = "tests/test_call_many_args.mettle"
     ShouldSucceed   = $true
     AsmMustMatch    = $callManyArgsAsmMustMatch
     AsmMustNotMatch = $callManyArgsAsmMustNotMatch
   },
-  @{ Name = "import_relative_no_ext"; Path = "tests/test_import_relative_no_ext.meth"; ShouldSucceed = $true },
-  @{ Name = "import_circular"; Path = "tests/test_import_circular.meth"; ShouldSucceed = $true },
+  @{ Name = "import_relative_no_ext"; Path = "tests/test_import_relative_no_ext.mettle"; ShouldSucceed = $true },
+  @{ Name = "import_circular"; Path = "tests/test_import_circular.mettle"; ShouldSucceed = $true },
   @{
     Name          = "import_include_path"
-    Path          = "tests/test_import_include_path.meth"
+    Path          = "tests/test_import_include_path.mettle"
     ShouldSucceed = $true
     Args          = @("-I", "tests/lib")
   },
-  @{ Name = "import_std_core"; Path = "tests/test_import_std_core.meth"; ShouldSucceed = $true },
-  @{ Name = "std_io"; Path = "tests/test_std_io.meth"; ShouldSucceed = $true },
-  @{ Name = "enum"; Path = "tests/test_enum.meth"; ShouldSucceed = $true },
+  @{ Name = "import_std_core"; Path = "tests/test_import_std_core.mettle"; ShouldSucceed = $true },
+  @{ Name = "std_io"; Path = "tests/test_std_io.mettle"; ShouldSucceed = $true },
+  @{ Name = "std_win32"; Path = "tests/test_internal_link_win32_user32.mettle"; ShouldSucceed = $true },
+  @{ Name = "enum"; Path = "tests/test_enum.mettle"; ShouldSucceed = $true },
   @{
     Name          = "prelude"
-    Path          = "tests/test_prelude.meth"
+    Path          = "tests/test_prelude.mettle"
     ShouldSucceed = $true
     Args          = @("--prelude")
   },
   @{
     Name          = "string_escape_codegen"
-    Path          = "tests/test_string_escape_codegen.meth"
+    Path          = "tests/test_string_escape_codegen.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("(?m)^\s*db .*13,\s*10.*$", "(?m)^\s*db .*9.*34.*92.*$")
   },
-  @{ Name = "char_literals"; Path = "tests/test_char_literals.meth"; ShouldSucceed = $true },
-  @{ Name = "logical_ops"; Path = "tests/test_logical_ops.meth"; ShouldSucceed = $true },
-  @{ Name = "strncmp_slice"; Path = "tests/test_strncmp_slice.meth"; ShouldSucceed = $true },
-  @{ Name = "narrowing_conversions"; Path = "tests/test_narrowing_conversions.meth"; ShouldSucceed = $true },
-  @{ Name = "signed_negation"; Path = "tests/test_signed_negation.meth"; ShouldSucceed = $true },
+  @{ Name = "char_literals"; Path = "tests/test_char_literals.mettle"; ShouldSucceed = $true },
+  @{ Name = "logical_ops"; Path = "tests/test_logical_ops.mettle"; ShouldSucceed = $true },
+  @{ Name = "multiline_continuation"; Path = "tests/test_multiline_continuation.mettle"; ShouldSucceed = $true },
+  @{ Name = "sizeof_static_assert"; Path = "tests/test_sizeof_static_assert.mettle"; ShouldSucceed = $true },
+  @{ Name = "strncmp_slice"; Path = "tests/test_strncmp_slice.mettle"; ShouldSucceed = $true },
+  @{ Name = "narrowing_conversions"; Path = "tests/test_narrowing_conversions.mettle"; ShouldSucceed = $true },
+  @{ Name = "signed_negation"; Path = "tests/test_signed_negation.mettle"; ShouldSucceed = $true },
   @{
     Name          = "signed_division"
-    Path          = "tests/test_signed_division.meth"
+    Path          = "tests/test_signed_division.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("\bidiv\b")
   },
-  @{ Name = "signed_comparison"; Path = "tests/test_signed_comparison.meth"; ShouldSucceed = $true },
-  @{ Name = "signed_wraparound"; Path = "tests/test_signed_wraparound.meth"; ShouldSucceed = $true },
-  @{ Name = "signed_arithmetic"; Path = "tests/test_signed_arithmetic.meth"; ShouldSucceed = $true },
+  @{ Name = "signed_comparison"; Path = "tests/test_signed_comparison.mettle"; ShouldSucceed = $true },
+  @{ Name = "float_negative_comparison"; Path = "tests/test_float_negative_comparison.mettle"; ShouldSucceed = $true },
+  @{ Name = "signed_wraparound"; Path = "tests/test_signed_wraparound.mettle"; ShouldSucceed = $true },
+  @{ Name = "signed_arithmetic"; Path = "tests/test_signed_arithmetic.mettle"; ShouldSucceed = $true },
   @{
     Name          = "sign_extension"
-    Path          = "tests/test_sign_extension.meth"
+    Path          = "tests/test_sign_extension.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("\bmovsx\b")
   },
   @{
     Name            = "unsigned_zero_ext"
-    Path            = "tests/test_unsigned_zero_ext.meth"
+    Path            = "tests/test_unsigned_zero_ext.mettle"
     ShouldSucceed   = $true
     AsmMustMatch    = @("\bmovzx\b")
     AsmMustNotMatch = @("\bmovsx\b")
   },
-  @{ Name = "unsigned_division"; Path = "tests/test_unsigned_division.meth"; ShouldSucceed = $true },
-  @{ Name = "mixed_signed_unsigned"; Path = "tests/test_mixed_signed_unsigned.meth"; ShouldSucceed = $true },
+  @{ Name = "unsigned_division"; Path = "tests/test_unsigned_division.mettle"; ShouldSucceed = $true },
+  @{ Name = "mixed_signed_unsigned"; Path = "tests/test_mixed_signed_unsigned.mettle"; ShouldSucceed = $true },
   @{
     Name          = "narrowing_reverify"
-    Path          = "tests/test_narrowing_reverify.meth"
+    Path          = "tests/test_narrowing_reverify.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("\bmovsx\b", "\bmovzx\b")
   },
-  @{ Name = "stack_mixed_locals"; Path = "tests/test_stack_mixed_locals.meth"; ShouldSucceed = $true },
-  @{ Name = "stack_large_struct"; Path = "tests/test_stack_large_struct.meth"; ShouldSucceed = $true },
-  @{ Name = "stack_array_scalar"; Path = "tests/test_stack_array_scalar.meth"; ShouldSucceed = $true },
-  @{ Name = "int64_truncate"; Path = "tests/test_int64_truncate.meth"; ShouldSucceed = $true },
-  @{ Name = "string_length"; Path = "tests/test_string_length.meth"; ShouldSucceed = $true },
-  @{ Name = "struct_new_zeroed"; Path = "tests/test_struct_new_zeroed.meth"; ShouldSucceed = $true },
-  @{ Name = "struct_field_offset"; Path = "tests/test_struct_field_offset.meth"; ShouldSucceed = $true },
+  @{ Name = "integer_literal_wide"; Path = "tests/test_integer_literal_wide.mettle"; ShouldSucceed = $true },
+  @{ Name = "stack_mixed_locals"; Path = "tests/test_stack_mixed_locals.mettle"; ShouldSucceed = $true },
+  @{ Name = "stack_large_struct"; Path = "tests/test_stack_large_struct.mettle"; ShouldSucceed = $true },
+  @{ Name = "stack_array_scalar"; Path = "tests/test_stack_array_scalar.mettle"; ShouldSucceed = $true },
+  @{ Name = "stack_array_struct_stride"; Path = "tests/test_array_struct_stride.mettle"; ShouldSucceed = $true },
+  @{ Name = "int64_truncate"; Path = "tests/test_int64_truncate.mettle"; ShouldSucceed = $true },
+  @{ Name = "string_length"; Path = "tests/test_string_length.mettle"; ShouldSucceed = $true },
+  @{ Name = "struct_new_zeroed"; Path = "tests/test_struct_new_zeroed.mettle"; ShouldSucceed = $true },
+  @{ Name = "struct_field_offset"; Path = "tests/test_struct_field_offset.mettle"; ShouldSucceed = $true },
   @{
     Name          = "import_exported"
-    Path          = "tests/test_import_exported.meth"
+    Path          = "tests/test_import_exported.mettle"
+    ShouldSucceed = $true
+    Args          = @("-I", "tests/lib")
+  },
+  @{
+    Name          = "import_namespaced"
+    Path          = "tests/test_import_namespaced.mettle"
+    ShouldSucceed = $true
+    Args          = @("-I", "tests/lib")
+  },
+  @{ Name = "traits_generic_bound"; Path = "tests/test_traits_generic_bound.mettle"; ShouldSucceed = $true },
+  @{ Name = "traits_multiple_where_bounds"; Path = "tests/test_traits_multiple_where_bounds.mettle"; ShouldSucceed = $true },
+  @{ Name = "trait_methods_generic_dispatch"; Path = "tests/test_trait_methods_generic_dispatch.mettle"; ShouldSucceed = $true },
+  @{
+    Name          = "import_trait_bound"
+    Path          = "tests/test_import_trait_bound.mettle"
     ShouldSucceed = $true
     Args          = @("-I", "tests/lib")
   },
   @{
     Name          = "import_enum_switch"
-    Path          = "tests/test_import_enum_switch.meth"
+    Path          = "tests/test_import_enum_switch.mettle"
     ShouldSucceed = $true
     Args          = @("-I", "tests/lib")
   },
-  @{ Name = "extern_signed_param"; Path = "tests/test_extern_signed_param.meth"; ShouldSucceed = $true },
-  @{ Name = "extern_signed_return"; Path = "tests/test_extern_signed_return.meth"; ShouldSucceed = $true },
-  @{ Name = "extern_cstring"; Path = "tests/test_extern_cstring.meth"; ShouldSucceed = $true },
+  @{ Name = "tagged_enum_match"; Path = "tests/test_tagged_enum_match.mettle"; ShouldSucceed = $true },
+  @{ Name = "extern_signed_param"; Path = "tests/test_extern_signed_param.mettle"; ShouldSucceed = $true },
+  @{ Name = "extern_signed_return"; Path = "tests/test_extern_signed_return.mettle"; ShouldSucceed = $true },
+  @{ Name = "extern_cstring"; Path = "tests/test_extern_cstring.mettle"; ShouldSucceed = $true },
+  @{ Name = "extern_string_auto_cstring"; Path = "tests/test_extern_string_auto_cstring.mettle"; ShouldSucceed = $true },
+  @{ Name = "std_conv_format_i64"; Path = "tests/test_std_conv_format_i64.mettle"; ShouldSucceed = $true },
 
   # ABI tests (MS x64 on Windows; patterns may need adjustment for SysV/Linux)
   @{
     Name          = "abi_int4_regs"
-    Path          = "tests/test_abi_int4_regs.meth"
+    Path          = "tests/test_abi_int4_regs.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("Parameter 'a' arrived in register rcx", "Parameter 'b' arrived in register rdx", "Parameter 'c' arrived in register r8", "Parameter 'd' arrived in register r9")
   },
   @{
     Name          = "abi_int_stack"
-    Path          = "tests/test_abi_int_stack.meth"
+    Path          = "tests/test_abi_int_stack.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("Parameter 'e' arrived on stack", "Parameter 'f' arrived on stack", "\[rsp \+ \d+\]|\[rbp \+ \d+\]")
   },
   @{
     Name          = "abi_return_int"
-    Path          = "tests/test_abi_return_int.meth"
+    Path          = "tests/test_abi_return_int.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("\bmov (eax|rax),")
   },
   @{
     Name          = "abi_return_int64"
-    Path          = "tests/test_abi_return_int64.meth"
+    Path          = "tests/test_abi_return_int64.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("\bmov rax,")
   },
   @{
     Name          = "abi_float_args"
-    Path          = "tests/test_abi_float_args.meth"
+    Path          = "tests/test_abi_float_args.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("Parameter 'a' arrived in register xmm0", "Parameter 'b' arrived in register xmm1")
   },
   @{
     Name          = "abi_float_return"
-    Path          = "tests/test_abi_float_return.meth"
+    Path          = "tests/test_abi_float_return.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @(
       "Float return value in xmm0|xmm0.*return",
@@ -306,7 +453,7 @@ $cases = @(
   },
   @{
     Name            = "abi_float_symbol_args"
-    Path            = "tests/test_abi_float_symbol_args.meth"
+    Path            = "tests/test_abi_float_symbol_args.mettle"
     ShouldSucceed   = $true
     AsmMustMatch    = @(
       "(?s); IR call: sum5f \(5 args\).*movq xmm0, rax",
@@ -324,107 +471,154 @@ $cases = @(
   },
   @{
     Name          = "abi_mixed_args"
-    Path          = "tests/test_abi_mixed_args.meth"
+    Path          = "tests/test_abi_mixed_args.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("Parameter.*arrived in register (rcx|rdx|r8|r9|xmm0)")
   },
   @{
     Name          = "abi_shadow_space"
-    Path          = "tests/test_abi_shadow_space.meth"
+    Path          = "tests/test_abi_shadow_space.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("sub rsp, 32|Shadow space")
   },
   @{
     Name          = "abi_prologue"
-    Path          = "tests/test_abi_prologue.meth"
+    Path          = "tests/test_abi_prologue.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("push rbp", "mov rbp, rsp")
   },
   @{
     Name          = "abi_pointer_arg"
-    Path          = "tests/test_abi_pointer_arg.meth"
+    Path          = "tests/test_abi_pointer_arg.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("Parameter 'p' arrived in register rcx|mov \[rbp.*\], rcx")
   },
   @{
     Name          = "abi_extern_calling_convention"
-    Path          = "tests/test_abi_extern_calling_convention.meth"
+    Path          = "tests/test_abi_extern_calling_convention.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("extern ext_check", "\bcall ext_check\b")
   },
-  @{ Name = "abi_callee_saved"; Path = "tests/test_abi_callee_saved.meth"; ShouldSucceed = $true },
-  @{ Name = "abi_stack_alignment"; Path = "tests/test_abi_stack_alignment.meth"; ShouldSucceed = $true },
+  @{ Name = "abi_callee_saved"; Path = "tests/test_abi_callee_saved.mettle"; ShouldSucceed = $true },
+  @{ Name = "abi_stack_alignment"; Path = "tests/test_abi_stack_alignment.mettle"; ShouldSucceed = $true },
   @{
     Name          = "abi_float4_args"
-    Path          = "tests/test_abi_float4_args.meth"
+    Path          = "tests/test_abi_float4_args.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("xmm0", "xmm1", "xmm2", "xmm3")
   },
   @{
     Name          = "abi_float_stack"
-    Path          = "tests/test_abi_float_stack.meth"
+    Path          = "tests/test_abi_float_stack.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("Parameter 'e' arrived on stack|movsd \[rsp")
   },
-  @{ Name = "abi_void_return"; Path = "tests/test_abi_void_return.meth"; ShouldSucceed = $true },
+  @{ Name = "abi_void_return"; Path = "tests/test_abi_void_return.mettle"; ShouldSucceed = $true },
   @{
     Name          = "abi_small_int_args"
-    Path          = "tests/test_abi_small_int_args.meth"
+    Path          = "tests/test_abi_small_int_args.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("Parameter.*arrived in register (rcx|rdx)")
   },
-  @{ Name = "abi_nested_calls"; Path = "tests/test_abi_nested_calls.meth"; ShouldSucceed = $true },
-  @{ Name = "abi_indirect_call"; Path = "tests/test_abi_indirect_call.meth"; ShouldSucceed = $true },
+  @{ Name = "abi_nested_calls"; Path = "tests/test_abi_nested_calls.mettle"; ShouldSucceed = $true },
+  @{ Name = "abi_indirect_call"; Path = "tests/test_abi_indirect_call.mettle"; ShouldSucceed = $true },
 
-  @{ Name = "stress_integrated"; Path = "tests/test_stress_integrated.meth"; ShouldSucceed = $true },
-  @{ Name = "bitwise"; Path = "tests/test_bitwise.meth"; ShouldSucceed = $true },
-  @{ Name = "modulo"; Path = "tests/test_modulo.meth"; ShouldSucceed = $true },
-  @{ Name = "logical_not"; Path = "tests/test_logical_not.meth"; ShouldSucceed = $true },
+  @{ Name = "stress_integrated"; Path = "tests/test_stress_integrated.mettle"; ShouldSucceed = $true },
+  @{ Name = "bitwise"; Path = "tests/test_bitwise.mettle"; ShouldSucceed = $true },
+  @{ Name = "modulo"; Path = "tests/test_modulo.mettle"; ShouldSucceed = $true },
+  @{ Name = "logical_not"; Path = "tests/test_logical_not.mettle"; ShouldSucceed = $true },
   @{
     Name           = "optimize_ir_passes"
-    Path           = "tests/test_optimize_ir_passes.meth"
+    Path           = "tests/test_optimize_ir_passes.mettle"
     ShouldSucceed  = $true
     Args           = @("-O")
     AsmMustNotMatch = @("\bcall cold_path\b")
     IrMustMatch    = @("ASSIGN .* <- 42")
-    IrMustNotMatch = @("BRANCH_ZERO 0 ->", "CALL .*cold_path\(")
+    IrMustNotMatch = @("BRANCH_ZERO 0 ->", "CALL .*cold_path\(", "ASSIGN @result <- @result", "BRANCH_EQ @same, @same")
   },
   @{
     Name          = "opt_dead_temp"
-    Path          = "tests/test_opt_dead_temp.meth"
+    Path          = "tests/test_opt_dead_temp.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
     IrMustNotMatch = @("ASSIGN %t[0-9]+ <- 123456")
   },
   @{
     Name          = "opt_symbol_temp_forwarding"
-    Path          = "tests/test_opt_symbol_temp_forwarding.meth"
+    Path          = "tests/test_opt_symbol_temp_forwarding.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
     IrMustNotMatch = @("ASSIGN %t[0-9]+ <- @x")
     IrMustMatch   = @("BRANCH_ZERO @x ->")
   },
   @{
+    Name          = "opt_strength_cse"
+    Path          = "tests/test_optimize_strength_cse.mettle"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustMatch   = @("BINARY @x = @a << 3", "ASSIGN @y <- @x")
+    IrMustNotMatch = @("BINARY @y = 8 \\* @a", "BINARY @w = @b \\+ @a")
+  },
+  @{
+    Name          = "opt_mod_even_check"
+    Path          = "tests/test_opt_mod_even_check.mettle"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustMatch   = @("BINARY %t[0-9]+ = @n & 1")
+    IrMustNotMatch = @("BINARY %t[0-9]+ = @n % 2")
+  },
+  @{
+    Name          = "opt_branch_notzero_forward"
+    Path          = "tests/test_opt_branch_notzero_forward.mettle"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustMatch   = @("BRANCH_ZERO @x ->")
+    IrMustNotMatch = @("BINARY %t[0-9]+ = @x != 0")
+  },
+  @{
+    Name          = "opt_branch_eq_chain"
+    Path          = "tests/test_opt_branch_eq_chain.mettle"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustMatch   = @("BRANCH_EQ @x, 1 ->", "BRANCH_EQ @x, 2 ->")
+    IrMustNotMatch = @("BINARY %t[0-9]+ = @x == 1", "BINARY %t[0-9]+ = @x == 2")
+  },
+  @{
+    Name            = "opt_cfg_cleanup"
+    Path            = "tests/test_opt_cfg_cleanup.mettle"
+    ShouldSucceed   = $true
+    Args            = @("-O")
+    IrMustNotMatch  = @("1000")
+    AsmMustNotMatch = @("1000")
+  },
+  @{
+    Name          = "codegen_ir_fastpaths"
+    Path          = "tests/test_codegen_ir_fastpaths.mettle"
+    ShouldSucceed = $true
+    AsmMustMatch  = @("(?s)\bimul rax, r10\s+mov r11, rax", "\badd rax, 5\b", "\bcmp rax, 12\b", "\bshl rax, 2\b", "(?s)\band rax, 1\s+mov r11, rax\s+cmp r11, 0\s+jne\b")
+    AsmMustNotMatch = @("(?s)scheduled_sum8:.*mov \[rbp - (80|96|112)\], rax.*Lscheduled_sum8_exit")
+  },
+  @{
     Name            = "release_size_mode"
-    Path            = "tests/test_optimize_ir_passes.meth"
+    Path            = "tests/test_optimize_ir_passes.mettle"
     ShouldSucceed   = $true
     Args            = @("--release")
     AsmMustNotMatch = @("(?m)^\s*;", "\bcall cold_path\b", "(?m)^\s*global\s+cold_path\b")
   },
-  @{ Name = "string_concat"; Path = "tests/test_string_concat.meth"; ShouldSucceed = $true },
-  @{ Name = "defer_single"; Path = "tests/test_defer_single.meth"; ShouldSucceed = $true },
-  @{ Name = "defer_lifo"; Path = "tests/test_defer_lifo.meth"; ShouldSucceed = $true },
-  @{ Name = "defer_nested"; Path = "tests/test_defer_nested_control_flow.meth"; ShouldSucceed = $true },
-  @{ Name = "defer_early_return"; Path = "tests/test_defer_early_return.meth"; ShouldSucceed = $true },
+  @{ Name = "string_concat"; Path = "tests/test_string_concat.mettle"; ShouldSucceed = $true },
+  @{ Name = "defer_single"; Path = "tests/test_defer_single.mettle"; ShouldSucceed = $true },
+  @{ Name = "defer_lifo"; Path = "tests/test_defer_lifo.mettle"; ShouldSucceed = $true },
+  @{ Name = "defer_nested"; Path = "tests/test_defer_nested_control_flow.mettle"; ShouldSucceed = $true },
+  @{ Name = "defer_early_return"; Path = "tests/test_defer_early_return.mettle"; ShouldSucceed = $true },
   @{
     Name          = "defer_block_exit"
-    Path          = "tests/test_defer_block_exit.meth"
+    Path          = "tests/test_defer_block_exit.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("(?s)global main.*?main:.*?; IR call: inner_defer.*?; IR call: after_block.*?; IR call: outer_defer")
   },
   @{
     Name          = "defer_if_else_branch_exit"
-    Path          = "tests/test_defer_if_else_branch_exit.meth"
+    Path          = "tests/test_defer_if_else_branch_exit.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @(
       "(?s); IR call: then_body.*?; IR call: then_defer",
@@ -434,7 +628,7 @@ $cases = @(
   },
   @{
     Name          = "defer_loop_iteration"
-    Path          = "tests/test_defer_loop_iteration.meth"
+    Path          = "tests/test_defer_loop_iteration.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @(
       "(?s); IR call: iter_body.*?; IR call: iter_defer.*?\bjmp\b"
@@ -442,7 +636,7 @@ $cases = @(
   },
   @{
     Name          = "errdefer_runs_on_error"
-    Path          = "tests/test_errdefer_runs_on_error.meth"
+    Path          = "tests/test_errdefer_runs_on_error.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @(
       "(?s)global main\s*(\r\n|\n)\s*(\r\n|\n)main:.*?ir_errdefer_ok_\d+:",
@@ -452,7 +646,7 @@ $cases = @(
   },
   @{
     Name            = "errdefer_skipped_on_success"
-    Path            = "tests/test_errdefer_skipped_on_success.meth"
+    Path            = "tests/test_errdefer_skipped_on_success.mettle"
     ShouldSucceed   = $true
     AsmMustMatch    = @(
       "(?s)global main\s*(\r\n|\n)\s*(\r\n|\n)main:.*?ir_errdefer_ok_\d+:.*?; IR call: ok \(0 args\)"
@@ -463,27 +657,27 @@ $cases = @(
   },
   @{
     Name          = "errdefer_multiple_returns"
-    Path          = "tests/test_errdefer_multiple_returns.meth"
+    Path          = "tests/test_errdefer_multiple_returns.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @(
       "(?s); IR call: err.*?; IR call: ok",
       "(?s)errdefer_ok.*?; IR call: ok"
     )
   },
-  @{ Name = "web_server_import"; Path = "web/server.meth"; ShouldSucceed = $true },
+  @{ Name = "web_server_import"; Path = "web/server.mettle"; ShouldSucceed = $true },
 
   # New errdefer tests
-  @{ Name = "test_cast_expression"; Path = "tests/test_cast_expression.meth"; ShouldSucceed = $true },
-  @{ Name = "errdefer_interleaved_with_defer"; Path = "tests/test_errdefer_interleaved_with_defer.meth"; ShouldSucceed = $true },
-  @{ Name = "errdefer_block_exit"; Path = "tests/test_errdefer_block_exit.meth"; ShouldSucceed = $true },
-  @{ Name = "errdefer_nested_if_else"; Path = "tests/test_errdefer_nested_if_else.meth"; ShouldSucceed = $true },
-  @{ Name = "errdefer_loop_with_break_continue"; Path = "tests/test_errdefer_loop_with_break_continue.meth"; ShouldSucceed = $true },
-  @{ Name = "errdefer_top_level"; Path = "tests/test_errdefer_top_level.meth"; ShouldSucceed = $false; Pattern = "Defer statement outside of a function|Errdefer statement outside of a function" },
-  @{ Name = "defer_block_statement"; Path = "tests/test_defer_block_statement.meth"; ShouldSucceed = $true },
-  @{ Name = "errdefer_assignment_statement"; Path = "tests/test_errdefer_assignment_statement.meth"; ShouldSucceed = $true },
+  @{ Name = "test_cast_expression"; Path = "tests/test_cast_expression.mettle"; ShouldSucceed = $true },
+  @{ Name = "errdefer_interleaved_with_defer"; Path = "tests/test_errdefer_interleaved_with_defer.mettle"; ShouldSucceed = $true },
+  @{ Name = "errdefer_block_exit"; Path = "tests/test_errdefer_block_exit.mettle"; ShouldSucceed = $true },
+  @{ Name = "errdefer_nested_if_else"; Path = "tests/test_errdefer_nested_if_else.mettle"; ShouldSucceed = $true },
+  @{ Name = "errdefer_loop_with_break_continue"; Path = "tests/test_errdefer_loop_with_break_continue.mettle"; ShouldSucceed = $true },
+  @{ Name = "errdefer_top_level"; Path = "tests/test_errdefer_top_level.mettle"; ShouldSucceed = $false; Pattern = "Defer statement outside of a function|Errdefer statement outside of a function" },
+  @{ Name = "defer_block_statement"; Path = "tests/test_defer_block_statement.mettle"; ShouldSucceed = $true },
+  @{ Name = "errdefer_assignment_statement"; Path = "tests/test_errdefer_assignment_statement.mettle"; ShouldSucceed = $true },
   @{
     Name            = "errdefer_implicit_fallthrough"
-    Path            = "tests/test_errdefer_implicit_fallthrough.meth"
+    Path            = "tests/test_errdefer_implicit_fallthrough.mettle"
     ShouldSucceed   = $true
     AsmMustMatch    = @(
       "\bcall ok\b"
@@ -492,115 +686,139 @@ $cases = @(
       "\bcall err\b"
     )
   },
-  @{ Name = "defer_complex_interleaving"; Path = "tests/test_defer_complex_interleaving.meth"; ShouldSucceed = $true },
+  @{ Name = "defer_complex_interleaving"; Path = "tests/test_defer_complex_interleaving.mettle"; ShouldSucceed = $true },
   @{
     Name            = "warn_gc_escape_extern"
-    Path            = "tests/test_warn_gc_escape_extern.meth"
+    Path            = "tests/test_warn_gc_escape_extern.mettle"
     ShouldSucceed   = $true
     OutputMustMatch = @("Managed pointer passed to extern function 'sink' may escape GC visibility")
   },
   @{
     Name            = "warn_recv_buffer_extent"
-    Path            = "tests/test_warn_recv_buffer_extent.meth"
+    Path            = "tests/test_warn_recv_buffer_extent.mettle"
     ShouldSucceed   = $true
     OutputMustMatch = @("recv length 8192 exceeds tracked allocation 4096 bytes for 'buf'")
   },
   @{
     Name             = "no_warn_recv_within_extent"
-    Path             = "tests/test_no_warn_recv_within_extent.meth"
+    Path             = "tests/test_no_warn_recv_within_extent.mettle"
     ShouldSucceed    = $true
     OutputMustNotMatch = @("recv length .* exceeds tracked allocation")
   },
   @{
     Name            = "warn_memcpy_src_extent"
-    Path            = "tests/test_warn_memcpy_src_extent.meth"
+    Path            = "tests/test_warn_memcpy_src_extent.mettle"
     ShouldSucceed   = $true
     OutputMustMatch = @("memcpy length 200 exceeds known source extent 128 bytes")
   },
   @{
     Name            = "warn_memcpy_dst_extent"
-    Path            = "tests/test_warn_memcpy_dst_extent.meth"
+    Path            = "tests/test_warn_memcpy_dst_extent.mettle"
     ShouldSucceed   = $true
     OutputMustMatch = @("memcpy length 200 exceeds known destination extent 128 bytes")
   },
   @{
     Name              = "no_warn_memcpy_within_extent"
-    Path              = "tests/test_no_warn_memcpy_within_extent.meth"
+    Path              = "tests/test_no_warn_memcpy_within_extent.mettle"
     ShouldSucceed     = $true
     OutputMustNotMatch = @("memcpy length .* exceeds known (destination|source) extent")
   },
   @{
     Name            = "warn_memmove_src_extent"
-    Path            = "tests/test_warn_memmove_src_extent.meth"
+    Path            = "tests/test_warn_memmove_src_extent.mettle"
     ShouldSucceed   = $true
     OutputMustMatch = @("memmove length 200 exceeds known source extent 128 bytes")
   },
   @{
     Name            = "warn_memmove_dst_extent_offset"
-    Path            = "tests/test_warn_memmove_dst_extent_offset.meth"
+    Path            = "tests/test_warn_memmove_dst_extent_offset.mettle"
     ShouldSucceed   = $true
     OutputMustMatch = @("memmove length 220 exceeds known destination extent 192 bytes")
   },
   @{
     Name              = "no_warn_memmove_within_extent_offset"
-    Path              = "tests/test_no_warn_memmove_within_extent_offset.meth"
+    Path              = "tests/test_no_warn_memmove_within_extent_offset.mettle"
     ShouldSucceed     = $true
     OutputMustNotMatch = @("memmove length .* exceeds known (destination|source) extent")
   },
   @{
     Name            = "warn_cast_alignment_violation"
-    Path            = "tests/test_warn_cast_alignment_violation.meth"
+    Path            = "tests/test_warn_cast_alignment_violation.mettle"
     ShouldSucceed   = $true
     OutputMustMatch = @("Cast to int64\* may violate required 8-byte alignment")
   },
   @{
     Name              = "no_warn_cast_alignment_ok"
-    Path              = "tests/test_no_warn_cast_alignment_ok.meth"
+    Path              = "tests/test_no_warn_cast_alignment_ok.mettle"
     ShouldSucceed     = $true
     OutputMustNotMatch = @("Cast to int64\* may violate required 8-byte alignment")
   },
 
-  @{ Name = "err_unknown_char"; Path = "tests/err_unknown_char.meth"; ShouldSucceed = $false; Pattern = "Lexical error|error" },
-  @{ Name = "err_unknown_fnptr_return_type"; Path = "tests/err_unknown_fnptr_return_type.meth"; ShouldSucceed = $false; Pattern = "Unknown type|no_such_type" },
-  @{ Name = "err_invalid_hex"; Path = "tests/err_invalid_hex.meth"; ShouldSucceed = $false; Pattern = "Invalid hexadecimal literal" },
-  @{ Name = "err_invalid_bin"; Path = "tests/err_invalid_bin.meth"; ShouldSucceed = $false; Pattern = "Invalid binary literal" },
-  @{ Name = "err_missing_brace"; Path = "tests/err_missing_brace.meth"; ShouldSucceed = $false },
-  @{ Name = "err_undefined_var"; Path = "tests/err_undefined_var.meth"; ShouldSucceed = $false; Pattern = "Undefined variable" },
-  @{ Name = "err_top_level_return"; Path = "tests/err_top_level_return.meth"; ShouldSucceed = $false; Pattern = "Return statement outside of a function|Unsupported top-level construct in declaration context" },
-  @{ Name = "err_break_outside_loop"; Path = "tests/err_break_outside_loop.meth"; ShouldSucceed = $false; Pattern = "'break' can only be used inside a loop or switch" },
-  @{ Name = "err_continue_in_switch"; Path = "tests/err_continue_in_switch.meth"; ShouldSucceed = $false; Pattern = "'continue' can only be used inside a loop" },
-  @{ Name = "err_switch_duplicate_case"; Path = "tests/err_switch_duplicate_case.meth"; ShouldSucceed = $false; Pattern = "Duplicate case value|duplicate case" },
-  @{ Name = "err_switch_nonconst_case"; Path = "tests/err_switch_nonconst_case.meth"; ShouldSucceed = $false; Pattern = "compile-time integer constant expression" },
-  @{ Name = "err_forward_decl_mismatch"; Path = "tests/err_forward_decl_mismatch.meth"; ShouldSucceed = $false; Pattern = "does not match existing declaration" },
-  @{ Name = "err_forward_decl_pointer_mismatch"; Path = "tests/err_forward_decl_pointer_mismatch.meth"; ShouldSucceed = $false; Pattern = "does not match existing declaration" },
-  @{ Name = "err_extern_var_initializer"; Path = "tests/err_extern_var_initializer.meth"; ShouldSucceed = $false; Pattern = "Extern variable declarations cannot have an initializer|Expected string literal link name after '='" },
-  @{ Name = "err_extern_var_missing_type"; Path = "tests/err_extern_var_missing_type.meth"; ShouldSucceed = $false; Pattern = "Extern variable declarations require an explicit type" },
-  @{ Name = "err_nonextern_link_name"; Path = "tests/err_nonextern_link_name.meth"; ShouldSucceed = $false; Pattern = "Link-name suffix is only allowed on extern declarations" },
-  @{ Name = "err_extern_link_name_conflict"; Path = "tests/err_extern_link_name_conflict.meth"; ShouldSucceed = $false; Pattern = "conflicting link name" },
-  @{ Name = "err_deref_non_pointer"; Path = "tests/err_deref_non_pointer.meth"; ShouldSucceed = $false; Pattern = "Dereference operator requires a pointer operand" },
-  @{ Name = "err_address_of_non_lvalue"; Path = "tests/err_address_of_non_lvalue.meth"; ShouldSucceed = $false; Pattern = "Address-of operator requires an assignable expression" },
-  @{ Name = "err_pointer_type_mismatch"; Path = "tests/err_pointer_type_mismatch.meth"; ShouldSucceed = $false; Pattern = "Type mismatch" },
-  @{ Name = "err_use_before_init"; Path = "tests/err_use_before_init.meth"; ShouldSucceed = $false; Pattern = "before initialization" },
-  @{ Name = "err_array_index_oob_const"; Path = "tests/err_array_index_oob_const.meth"; ShouldSucceed = $false; Pattern = "out of bounds" },
-  @{ Name = "err_array_index_oob_const_negative"; Path = "tests/err_array_index_oob_const_negative.meth"; ShouldSucceed = $false; Pattern = "out of bounds" },
-  @{ Name = "err_null_deref_const"; Path = "tests/err_null_deref_const.meth"; ShouldSucceed = $false; Pattern = "Null pointer dereference" },
-  @{ Name = "err_codegen_member_expr"; Path = "tests/err_codegen_member_expr.meth"; ShouldSucceed = $false },
-  @{ Name = "err_function_arg_count"; Path = "tests/err_function_arg_count.meth"; ShouldSucceed = $false; Pattern = "expects .* arguments, got" },
-  @{ Name = "err_function_arg_type"; Path = "tests/err_function_arg_type.meth"; ShouldSucceed = $false; Pattern = "Type mismatch" },
-  @{ Name = "err_member_on_non_struct"; Path = "tests/err_member_on_non_struct.meth"; ShouldSucceed = $false; Pattern = "Cannot access field on non-struct type" },
-  @{ Name = "err_switch_multiple_default"; Path = "tests/err_switch_multiple_default.meth"; ShouldSucceed = $false; Pattern = "Only one default case is allowed|only contain one default clause" },
-  @{ Name = "err_return_type_mismatch"; Path = "tests/err_return_type_mismatch.meth"; ShouldSucceed = $false; Pattern = "Type mismatch" },
-  @{ Name = "err_defer_top_level"; Path = "tests/err_defer_top_level.meth"; ShouldSucceed = $false; Pattern = "Defer statement outside of a function" },
+  @{ Name = "err_unknown_char"; Path = "tests/err_unknown_char.mettle"; ShouldSucceed = $false; Pattern = "Lexical error|error" },
+  @{ Name = "err_unknown_fnptr_return_type"; Path = "tests/err_unknown_fnptr_return_type.mettle"; ShouldSucceed = $false; Pattern = "Unknown type|no_such_type" },
+  @{ Name = "err_invalid_hex"; Path = "tests/err_invalid_hex.mettle"; ShouldSucceed = $false; Pattern = "Invalid hexadecimal literal" },
+  @{ Name = "err_invalid_bin"; Path = "tests/err_invalid_bin.mettle"; ShouldSucceed = $false; Pattern = "Invalid binary literal" },
+  @{ Name = "err_missing_brace"; Path = "tests/err_missing_brace.mettle"; ShouldSucceed = $false },
+  @{ Name = "err_undefined_var"; Path = "tests/err_undefined_var.mettle"; ShouldSucceed = $false; Pattern = "Undefined variable" },
+  @{ Name = "err_undefined_var_typo"; Path = "tests/err_undefined_var_typo.mettle"; ShouldSucceed = $false; Pattern = "did you mean 'counter'" },
+  @{ Name = "err_top_level_return"; Path = "tests/err_top_level_return.mettle"; ShouldSucceed = $false; Pattern = "Return statement outside of a function|Unsupported top-level construct in declaration context" },
+  @{ Name = "err_break_outside_loop"; Path = "tests/err_break_outside_loop.mettle"; ShouldSucceed = $false; Pattern = "'break' can only be used inside a loop or switch" },
+  @{ Name = "err_break_unknown_label"; Path = "tests/err_break_unknown_label.mettle"; ShouldSucceed = $false; Pattern = "no matching labeled loop" },
+  @{ Name = "err_continue_in_switch"; Path = "tests/err_continue_in_switch.mettle"; ShouldSucceed = $false; Pattern = "'continue' can only be used inside a loop" },
+  @{ Name = "err_switch_duplicate_case"; Path = "tests/err_switch_duplicate_case.mettle"; ShouldSucceed = $false; Pattern = "Duplicate case value|duplicate case" },
+  @{ Name = "err_switch_nonconst_case"; Path = "tests/err_switch_nonconst_case.mettle"; ShouldSucceed = $false; Pattern = "compile-time integer constant expression" },
+  @{ Name = "err_forward_decl_mismatch"; Path = "tests/err_forward_decl_mismatch.mettle"; ShouldSucceed = $false; Pattern = "does not match existing declaration" },
+  @{ Name = "err_forward_decl_pointer_mismatch"; Path = "tests/err_forward_decl_pointer_mismatch.mettle"; ShouldSucceed = $false; Pattern = "does not match existing declaration" },
+  @{ Name = "err_extern_var_initializer"; Path = "tests/err_extern_var_initializer.mettle"; ShouldSucceed = $false; Pattern = "Extern variable declarations cannot have an initializer|Expected string literal link name after '='" },
+  @{ Name = "err_extern_var_missing_type"; Path = "tests/err_extern_var_missing_type.mettle"; ShouldSucceed = $false; Pattern = "Extern variable declarations require an explicit type" },
+  @{ Name = "err_nonextern_link_name"; Path = "tests/err_nonextern_link_name.mettle"; ShouldSucceed = $false; Pattern = "Link-name suffix is only allowed on extern declarations" },
+  @{ Name = "err_extern_link_name_conflict"; Path = "tests/err_extern_link_name_conflict.mettle"; ShouldSucceed = $false; Pattern = "conflicting link name" },
+  @{ Name = "err_deref_non_pointer"; Path = "tests/err_deref_non_pointer.mettle"; ShouldSucceed = $false; Pattern = "Dereference operator requires a pointer operand" },
+  @{ Name = "err_address_of_non_lvalue"; Path = "tests/err_address_of_non_lvalue.mettle"; ShouldSucceed = $false; Pattern = "Address-of operator requires an assignable expression" },
+  @{ Name = "err_pointer_type_mismatch"; Path = "tests/err_pointer_type_mismatch.mettle"; ShouldSucceed = $false; Pattern = "Type mismatch" },
+  @{ Name = "err_use_before_init"; Path = "tests/err_use_before_init.mettle"; ShouldSucceed = $false; Pattern = "before initialization" },
+  @{ Name = "err_array_index_oob_const"; Path = "tests/err_array_index_oob_const.mettle"; ShouldSucceed = $false; Pattern = "out of bounds" },
+  @{ Name = "err_array_index_oob_const_negative"; Path = "tests/err_array_index_oob_const_negative.mettle"; ShouldSucceed = $false; Pattern = "out of bounds" },
+  @{ Name = "err_null_deref_const"; Path = "tests/err_null_deref_const.mettle"; ShouldSucceed = $false; Pattern = "Null pointer dereference" },
+  @{ Name = "err_codegen_member_expr"; Path = "tests/err_codegen_member_expr.mettle"; ShouldSucceed = $false },
+  @{ Name = "err_function_arg_count"; Path = "tests/err_function_arg_count.mettle"; ShouldSucceed = $false; Pattern = "expects .* arguments, got" },
+  @{ Name = "err_function_arg_type"; Path = "tests/err_function_arg_type.mettle"; ShouldSucceed = $false; Pattern = "Type mismatch" },
+  @{ Name = "err_match_non_exhaustive"; Path = "tests/err_match_non_exhaustive.mettle"; ShouldSucceed = $false; Pattern = "Non-exhaustive match" },
+  @{ Name = "err_trait_bound_missing_impl"; Path = "tests/err_trait_bound_missing_impl.mettle"; ShouldSucceed = $false; Pattern = "does not implement trait 'Addable'" },
+  @{ Name = "err_trait_bound_missing_second_impl"; Path = "tests/err_trait_bound_missing_second_impl.mettle"; ShouldSucceed = $false; Pattern = "does not implement trait 'SignedNumber'" },
+  @{ Name = "err_trait_method_missing_impl"; Path = "tests/err_trait_method_missing_impl.mettle"; ShouldSucceed = $false; Pattern = "missing trait method 'next_value'" },
+  @{ Name = "err_member_on_non_struct"; Path = "tests/err_member_on_non_struct.mettle"; ShouldSucceed = $false; Pattern = "Cannot access field on non-struct type" },
+  @{ Name = "err_switch_multiple_default"; Path = "tests/err_switch_multiple_default.mettle"; ShouldSucceed = $false; Pattern = "Only one default case is allowed|only contain one default clause" },
+  @{ Name = "err_return_type_mismatch"; Path = "tests/err_return_type_mismatch.mettle"; ShouldSucceed = $false; Pattern = "Type mismatch" },
+  @{ Name = "err_static_assert_sizeof"; Path = "tests/err_static_assert_sizeof.mettle"; ShouldSucceed = $false; Pattern = "static_assert failed" },
+  @{ Name = "err_defer_top_level"; Path = "tests/err_defer_top_level.mettle"; ShouldSucceed = $false; Pattern = "Defer statement outside of a function" },
+  @{ Name = "err_await_non_future"; Path = "tests/err_await_non_future.mettle"; ShouldSucceed = $false; Pattern = "Await operator requires a Future<T> operand" },
   @{
     Name          = "err_import_private"
-    Path          = "tests/err_import_private.meth"
+    Path          = "tests/err_import_private.mettle"
     ShouldSucceed = $false
     Pattern       = "Undefined variable|not visible|private_func"
     Args          = @("-I", "tests/lib")
   },
   @{
+    Name               = "err_import_bad_syntax_location"
+    Path               = "tests/test_import_bad_syntax_location.mettle"
+    ShouldSucceed      = $false
+    Pattern            = "bad_syntax_module\.mettle"
+    OutputMustNotMatch = @("Parse error in imported file", "test_import_bad_syntax_location\.mettle:[0-9]+:[0-9]+")
+    Args               = @("-I", "tests/lib")
+  },
+  @{
+    Name            = "err_import_bad_semantic_location"
+    Path            = "tests/test_import_bad_semantic_location.mettle"
+    ShouldSucceed   = $false
+    Pattern         = "bad_semantic_module\.mettle"
+    OutputMustMatch = @("Undefined variable")
+    Args            = @("-I", "tests/lib")
+  },
+  @{
     Name          = "err_import_chain"
-    Path          = "tests/test_import_chain_error.meth"
+    Path          = "tests/test_import_chain_error.mettle"
     ShouldSucceed = $false
     Pattern       = "Could not resolve|import chain"
   }
@@ -762,6 +980,30 @@ foreach ($case in $cases) {
           $reason = "Failure message did not match expected pattern '$($case.Pattern)'"
         }
       }
+      if ($passed -and $case.ContainsKey("OutputMustMatch") -and $case.OutputMustMatch) {
+        foreach ($pattern in @($case.OutputMustMatch)) {
+          if ([string]::IsNullOrWhiteSpace($pattern)) {
+            continue
+          }
+          if ($output -notmatch $pattern) {
+            $passed = $false
+            $reason = "Failure output missing required pattern '$pattern'"
+            break
+          }
+        }
+      }
+      if ($passed -and $case.ContainsKey("OutputMustNotMatch") -and $case.OutputMustNotMatch) {
+        foreach ($pattern in @($case.OutputMustNotMatch)) {
+          if ([string]::IsNullOrWhiteSpace($pattern)) {
+            continue
+          }
+          if ($output -match $pattern) {
+            $passed = $false
+            $reason = "Failure output matched forbidden pattern '$pattern'"
+            break
+          }
+        }
+      }
     }
 
     if (-not $passed) {
@@ -781,6 +1023,98 @@ foreach ($case in $cases) {
   }
 }
 
+# Bundled stdlib resolution test: compile from a project directory with no local stdlib.
+$total++
+try {
+  $compilerFullPath = (Resolve-Path $CompilerPath).Path
+  $nativeStdlibDir = Join-Path $tmpDir "native-stdlib-project"
+  if (Test-Path $nativeStdlibDir) {
+    Remove-Item -Path $nativeStdlibDir -Recurse -Force
+  }
+  New-Item -Path $nativeStdlibDir -ItemType Directory | Out-Null
+
+  $nativeStdlibSource = Join-Path $nativeStdlibDir "main.mettle"
+  $nativeStdlibAsm = Join-Path $nativeStdlibDir "main.s"
+  @'
+import "std/io";
+
+function main() -> int32 {
+  var msg: string = "Bundled stdlib works";
+  println(cstr(msg));
+  return 0;
+}
+'@ | Set-Content -Path $nativeStdlibSource -Encoding ASCII
+
+  Push-Location $nativeStdlibDir
+  try {
+    $nativeStdlibOut = & $compilerFullPath .\main.mettle -o .\main.s 2>&1 | Out-String
+    $nativeStdlibExit = $LASTEXITCODE
+  }
+  finally {
+    Pop-Location
+  }
+
+  if ($nativeStdlibExit -ne 0) {
+    throw "Bundled stdlib compile failed outside the repo root: $nativeStdlibOut"
+  }
+  if (-not (Test-Path $nativeStdlibAsm)) {
+    throw "Bundled stdlib compile did not produce an assembly output"
+  }
+
+  Write-CaseResult -Name "bundled_stdlib_outside_project" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "bundled_stdlib_outside_project" -Passed $false -Reason $_.Exception.Message
+}
+
+# mettle.deps package resolution test: compile from a temp project using a package alias.
+$total++
+try {
+  $compilerFullPath = (Resolve-Path $CompilerPath).Path
+  $depsProjectDir = Join-Path $tmpDir "meth-deps-project"
+  if (Test-Path $depsProjectDir) {
+    Remove-Item -Path $depsProjectDir -Recurse -Force
+  }
+  New-Item -Path $depsProjectDir -ItemType Directory | Out-Null
+
+  $depsSource = Join-Path $depsProjectDir "main.mettle"
+  $depsAsm = Join-Path $depsProjectDir "main.s"
+  $depsFile = Join-Path $depsProjectDir "mettle.deps"
+  $packageRoot = Join-Path $repoRoot "tests\lib"
+
+  "testpkg=$packageRoot" | Set-Content -Path $depsFile -Encoding ASCII
+  @'
+import "testpkg/shared_math";
+
+function main() -> int32 {
+  return forty_two();
+}
+'@ | Set-Content -Path $depsSource -Encoding ASCII
+
+  Push-Location $depsProjectDir
+  try {
+    $depsOut = & $compilerFullPath .\main.mettle -o .\main.s 2>&1 | Out-String
+    $depsExit = $LASTEXITCODE
+  }
+  finally {
+    Pop-Location
+  }
+
+  if ($depsExit -ne 0) {
+    throw "mettle.deps package compile failed: $depsOut"
+  }
+  if (-not (Test-Path $depsAsm)) {
+    throw "mettle.deps package compile did not produce an assembly output"
+  }
+
+  Write-CaseResult -Name "meth_deps_package_resolution" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "meth_deps_package_resolution" -Passed $false -Reason $_.Exception.Message
+}
+
 # Function pointer test: compile, assemble, link, and run
 $total++
 try {
@@ -789,7 +1123,7 @@ try {
   $fpGc = Join-Path $tmpDir "test_function_pointer_gc.o"
   $fpExe = Join-Path $tmpDir "test_function_pointer.exe"
 
-  $fpOut = & $CompilerPath tests\test_function_pointer.meth -o $fpAsm 2>&1 | Out-String
+  $fpOut = & $CompilerPath tests\test_function_pointer.mettle -o $fpAsm 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Function pointer compile failed: $fpOut"
   }
@@ -821,13 +1155,335 @@ catch {
   Write-CaseResult -Name "function_pointer" -Passed $false -Reason $_.Exception.Message
 }
 
+# Struct new runtime test: verifies `new Struct` allocates full struct size.
+$total++
+try {
+  $structNewExe = Join-Path $tmpDir "test_struct_new_zeroed.exe"
+
+  $structNewOut = & $CompilerPath --build --linker internal tests\test_struct_new_zeroed.mettle -o $structNewExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Struct new build failed: $structNewOut"
+  }
+  if (-not (Test-Path $structNewExe)) {
+    throw "Struct new build did not produce an executable"
+  }
+
+  & $structNewExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 1) {
+    throw "Struct new executable exited with $LASTEXITCODE (expected 1)"
+  }
+
+  Write-CaseResult -Name "struct_new_runtime" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "struct_new_runtime" -Passed $false -Reason $_.Exception.Message
+}
+
+# Async runtime test: build with the internal linker and await a worker result.
+$total++
+try {
+  $asyncExe = Join-Path $tmpDir "test_async_await.exe"
+
+  $asyncOut = & $CompilerPath --build --linker internal tests\test_async_await.mettle -o $asyncExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Async await build failed: $asyncOut"
+  }
+  if (-not (Test-Path $asyncExe)) {
+    throw "Async await build did not produce an executable"
+  }
+
+  & $asyncExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Async await executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_build_await" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_build_await" -Passed $false -Reason $_.Exception.Message
+}
+
+# Async cancellation test: cancellation should propagate through the same Future contract.
+$total++
+try {
+  $asyncCancelExe = Join-Path $tmpDir "test_async_cancel.exe"
+
+  $asyncCancelOut = & $CompilerPath --build --linker internal tests\test_async_cancel.mettle -o $asyncCancelExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Async cancellation build failed: $asyncCancelOut"
+  }
+  if (-not (Test-Path $asyncCancelExe)) {
+    throw "Async cancellation build did not produce an executable"
+  }
+
+  & $asyncCancelExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 17) {
+    throw "Async cancellation executable exited with $LASTEXITCODE (expected 17)"
+  }
+
+  Write-CaseResult -Name "async_build_cancel" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_build_cancel" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async internal-await test: single 'return await expr;' should lower
+# into resumable coroutine entry logic and complete with expected value.
+$total++
+try {
+  $asyncCoroAwaitExe = Join-Path $tmpDir "test_async_coro_internal_await_return.exe"
+
+  $asyncCoroAwaitOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_internal_await_return.mettle -o $asyncCoroAwaitExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine internal-await build failed: $asyncCoroAwaitOut"
+  }
+  if (-not (Test-Path $asyncCoroAwaitExe)) {
+    throw "Coroutine internal-await build did not produce an executable"
+  }
+
+  & $asyncCoroAwaitExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine internal-await executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_internal_await_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_internal_await_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async internal-await test: single 'var x = await expr; return x;'
+# should lower into the same resumable coroutine pattern.
+$total++
+try {
+  $asyncCoroAwaitVarExe = Join-Path $tmpDir "test_async_coro_internal_await_var_return.exe"
+
+  $asyncCoroAwaitVarOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_internal_await_var_return.mettle -o $asyncCoroAwaitVarExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine internal-await(var-return) build failed: $asyncCoroAwaitVarOut"
+  }
+  if (-not (Test-Path $asyncCoroAwaitVarExe)) {
+    throw "Coroutine internal-await(var-return) build did not produce an executable"
+  }
+
+  & $asyncCoroAwaitVarExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine internal-await(var-return) executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_internal_await_var_return_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_internal_await_var_return_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async internal-await test: single 'var fut = future_expr; return await fut;'
+# should lower into the same resumable coroutine pattern.
+$total++
+try {
+  $asyncCoroFutureVarAwaitExe = Join-Path $tmpDir "test_async_coro_future_var_return_await.exe"
+
+  $asyncCoroFutureVarAwaitOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_future_var_return_await.mettle -o $asyncCoroFutureVarAwaitExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine internal-await(future-var-return-await) build failed: $asyncCoroFutureVarAwaitOut"
+  }
+  if (-not (Test-Path $asyncCoroFutureVarAwaitExe)) {
+    throw "Coroutine internal-await(future-var-return-await) build did not produce an executable"
+  }
+
+  & $asyncCoroFutureVarAwaitExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine internal-await(future-var-return-await) executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_future_var_return_await_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_future_var_return_await_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async internal-await test: single 'var fut = future_expr; var x = await fut; return x;'
+# should lower into the same resumable coroutine pattern.
+$total++
+try {
+  $asyncCoroFutureVarAwaitVarExe = Join-Path $tmpDir "test_async_coro_future_var_await_var_return.exe"
+
+  $asyncCoroFutureVarAwaitVarOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_future_var_await_var_return.mettle -o $asyncCoroFutureVarAwaitVarExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine internal-await(future-var-await-var-return) build failed: $asyncCoroFutureVarAwaitVarOut"
+  }
+  if (-not (Test-Path $asyncCoroFutureVarAwaitVarExe)) {
+    throw "Coroutine internal-await(future-var-await-var-return) build did not produce an executable"
+  }
+
+  & $asyncCoroFutureVarAwaitVarExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine internal-await(future-var-await-var-return) executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_future_var_await_var_return_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_future_var_await_var_return_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async two-await test: 'var x = await a(); return await b(x);'
+# should lower into a multi-state coroutine entry machine.
+$total++
+try {
+  $asyncCoroTwoAwaitExe = Join-Path $tmpDir "test_async_coro_two_await_chain.exe"
+
+  $asyncCoroTwoAwaitOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_two_await_chain.mettle -o $asyncCoroTwoAwaitExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine two-await(chain) build failed: $asyncCoroTwoAwaitOut"
+  }
+  if (-not (Test-Path $asyncCoroTwoAwaitExe)) {
+    throw "Coroutine two-await(chain) build did not produce an executable"
+  }
+
+  & $asyncCoroTwoAwaitExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine two-await(chain) executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_two_await_chain_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_two_await_chain_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async two-await pointer test: lifted pointer local from first await
+# must remain available through the resumed state machine when building second await.
+$total++
+try {
+  $asyncCoroTwoAwaitPtrExe = Join-Path $tmpDir "test_async_coro_two_await_pointer_chain.exe"
+
+  $asyncCoroTwoAwaitPtrOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_two_await_pointer_chain.mettle -o $asyncCoroTwoAwaitPtrExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine two-await(pointer-chain) build failed: $asyncCoroTwoAwaitPtrOut"
+  }
+  if (-not (Test-Path $asyncCoroTwoAwaitPtrExe)) {
+    throw "Coroutine two-await(pointer-chain) build did not produce an executable"
+  }
+
+  & $asyncCoroTwoAwaitPtrExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Coroutine two-await(pointer-chain) executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "async_coro_two_await_pointer_chain_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_two_await_pointer_chain_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Coroutine async generic-body test: non-linear internal await expression
+# should compile and execute through the unified coroutine lowering path.
+$total++
+try {
+  $asyncCoroNestedExprExe = Join-Path $tmpDir "test_async_coro_nested_expr_await.exe"
+
+  $asyncCoroNestedExprOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_nested_await.mettle -o $asyncCoroNestedExprExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Coroutine nested-expr-await build failed: $asyncCoroNestedExprOut"
+  }
+  if (-not (Test-Path $asyncCoroNestedExprExe)) {
+    throw "Coroutine nested-expr-await build did not produce an executable"
+  }
+
+  & $asyncCoroNestedExprExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 41) {
+    throw "Coroutine nested-expr-await executable exited with $LASTEXITCODE (expected 41)"
+  }
+
+  Write-CaseResult -Name "async_coro_nested_expr_await_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_coro_nested_expr_await_build" -Passed $false -Reason $_.Exception.Message
+}
+
+# Async nested-await test: with a single worker, parent-await-child would deadlock
+# under naive pooling unless the runtime prevents worker starvation.
+$total++
+try {
+  $asyncNestedExe = Join-Path $tmpDir "test_async_nested_await.exe"
+
+  $asyncNestedOut = & $CompilerPath --build --linker internal tests\test_async_nested_await.mettle -o $asyncNestedExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Async nested-await build failed: $asyncNestedOut"
+  }
+  if (-not (Test-Path $asyncNestedExe)) {
+    throw "Async nested-await build did not produce an executable"
+  }
+
+  $hadWorkersEnv = Test-Path Env:METH_ASYNC_WORKERS
+  $previousWorkersEnv = $env:METH_ASYNC_WORKERS
+  $env:METH_ASYNC_WORKERS = "1"
+  try {
+    & $asyncNestedExe 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 41) {
+      throw "Async nested-await executable exited with $LASTEXITCODE (expected 41)"
+    }
+  }
+  finally {
+    if ($hadWorkersEnv) {
+      $env:METH_ASYNC_WORKERS = $previousWorkersEnv
+    }
+    else {
+      Remove-Item Env:METH_ASYNC_WORKERS -ErrorAction SilentlyContinue
+    }
+  }
+
+  Write-CaseResult -Name "async_build_nested_await_single_worker" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "async_build_nested_await_single_worker" -Passed $false -Reason $_.Exception.Message
+}
+
+# Async direct-object test: Future<T> returns and async runtime helpers should
+# stay compatible with the COFF object backend too.
+$total++
+try {
+  $asyncDirectExe = Join-Path $tmpDir "test_async_direct_object.exe"
+
+  $asyncDirectOut = & $CompilerPath --build --emit-obj tests\test_async_await.mettle -o $asyncDirectExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Async direct-object build failed: $asyncDirectOut"
+  }
+  if (-not (Test-Path $asyncDirectExe)) {
+    throw "Async direct-object build did not produce an executable"
+  }
+
+  & $asyncDirectExe 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Async direct-object executable exited with $LASTEXITCODE (expected 42)"
+  }
+
+  Write-CaseResult -Name "direct_object_async_await" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_async_await" -Passed $false -Reason $_.Exception.Message
+}
+
 # Direct object backend test: emit COFF object directly, then build and run
 $total++
 try {
   $objPath = Join-Path $tmpDir "test_direct_object_return_const.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_return_const.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_return_const.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_return_const.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object compile failed: $objOut"
   }
@@ -843,7 +1499,7 @@ try {
     throw "Direct object symbol table did not contain main"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_return_const.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_return_const.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object build failed: $buildOut"
   }
@@ -869,7 +1525,7 @@ try {
   $objPath = Join-Path $tmpDir "test_direct_object_call_return.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_call_return.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_call_return.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_call_return.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object call compile failed: $objOut"
   }
@@ -885,7 +1541,7 @@ try {
     throw "Direct object relocation table did not contain a REL32 call to callee"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_call_return.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_call_return.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object call build failed: $buildOut"
   }
@@ -905,7 +1561,7 @@ catch {
   Write-CaseResult -Name "direct_object_call_return" -Passed $false -Reason $_.Exception.Message
 }
 
-# COFF reader test: parse Methlang and GCC-produced COFF objects
+# COFF reader test: parse Mettle and GCC-produced COFF objects
 $total++
 try {
   $coffReaderExe = Join-Path $tmpDir "coff_reader_test.exe"
@@ -920,17 +1576,17 @@ try {
     throw "COFF reader harness compile failed: $compileHarness"
   }
 
-  $basicOut = & $CompilerPath --emit-obj tests\test_direct_object_return_const.meth -o $basicObjPath 2>&1 | Out-String
+  $basicOut = & $CompilerPath --emit-obj tests\test_direct_object_return_const.mettle -o $basicObjPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "COFF reader basic object compile failed: $basicOut"
   }
 
-  $relocOut = & $CompilerPath --emit-obj tests\test_direct_object_call_return.meth -o $relocObjPath 2>&1 | Out-String
+  $relocOut = & $CompilerPath --emit-obj tests\test_direct_object_call_return.mettle -o $relocObjPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "COFF reader relocation object compile failed: $relocOut"
   }
 
-  $longOut = & $CompilerPath --emit-obj tests\test_direct_object_long_symbol_name.meth -o $longObjPath 2>&1 | Out-String
+  $longOut = & $CompilerPath --emit-obj tests\test_direct_object_long_symbol_name.mettle -o $longObjPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "COFF reader long-symbol object compile failed: $longOut"
   }
@@ -982,15 +1638,15 @@ try {
   }
 
   $cases = @(
-    @{ Path = "tests\test_linker_merge_entry.meth"; Out = $fnEntryObj; Label = "function-entry" },
-    @{ Path = "tests\test_linker_merge_provider.meth"; Out = $fnProviderObj; Label = "function-provider" },
-    @{ Path = "tests\test_linker_merge_data_entry.meth"; Out = $dataEntryObj; Label = "data-entry" },
-    @{ Path = "tests\test_linker_merge_data_provider.meth"; Out = $dataProviderObj; Label = "data-provider" },
-    @{ Path = "tests\test_linker_merge_bss_entry.meth"; Out = $bssEntryObj; Label = "bss-entry" },
-    @{ Path = "tests\test_linker_merge_bss_provider.meth"; Out = $bssProviderObj; Label = "bss-provider" },
-    @{ Path = "tests\test_linker_duplicate_a.meth"; Out = $dupAObj; Label = "duplicate-a" },
-    @{ Path = "tests\test_linker_duplicate_b.meth"; Out = $dupBObj; Label = "duplicate-b" },
-    @{ Path = "tests\test_linker_unresolved_entry.meth"; Out = $unresolvedObj; Label = "unresolved-entry" }
+    @{ Path = "tests\test_linker_merge_entry.mettle"; Out = $fnEntryObj; Label = "function-entry" },
+    @{ Path = "tests\test_linker_merge_provider.mettle"; Out = $fnProviderObj; Label = "function-provider" },
+    @{ Path = "tests\test_linker_merge_data_entry.mettle"; Out = $dataEntryObj; Label = "data-entry" },
+    @{ Path = "tests\test_linker_merge_data_provider.mettle"; Out = $dataProviderObj; Label = "data-provider" },
+    @{ Path = "tests\test_linker_merge_bss_entry.mettle"; Out = $bssEntryObj; Label = "bss-entry" },
+    @{ Path = "tests\test_linker_merge_bss_provider.mettle"; Out = $bssProviderObj; Label = "bss-provider" },
+    @{ Path = "tests\test_linker_duplicate_a.mettle"; Out = $dupAObj; Label = "duplicate-a" },
+    @{ Path = "tests\test_linker_duplicate_b.mettle"; Out = $dupBObj; Label = "duplicate-b" },
+    @{ Path = "tests\test_linker_unresolved_entry.mettle"; Out = $unresolvedObj; Label = "unresolved-entry" }
   )
 
   foreach ($case in $cases) {
@@ -1064,7 +1720,7 @@ $total++
 try {
   $exePath = Join-Path $tmpDir "internal_link_return_const.exe"
 
-  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_direct_object_return_const.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_direct_object_return_const.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Internal linker basic build failed: $buildOut"
   }
@@ -1084,12 +1740,173 @@ catch {
   Write-CaseResult -Name "internal_link_basic" -Passed $false -Reason $_.Exception.Message
 }
 
-# Internal linker extra-library test: --link-arg -lws2_32 resolves imports via the native linker
+# Float comparisons must use numeric FP ordering, not raw IEEE bit ordering.
+$total++
+try {
+  $asmExePath = Join-Path $tmpDir "internal_link_float_negative_comparison.exe"
+  $objExePath = Join-Path $tmpDir "internal_link_emit_obj_float_negative_comparison.exe"
+
+  $buildOut = & $CompilerPath --build --linker internal tests\test_float_negative_comparison.mettle -o $asmExePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker float-negative asm build failed: $buildOut"
+  }
+  if (-not (Test-Path $asmExePath)) {
+    throw "Internal linker float-negative asm build did not produce an executable"
+  }
+
+  & $asmExePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker float-negative asm executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_float_negative_comparison.mettle -o $objExePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker float-negative emit-obj build failed: $buildOut"
+  }
+  if (-not (Test-Path $objExePath)) {
+    throw "Internal linker float-negative emit-obj build did not produce an executable"
+  }
+
+  & $objExePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker float-negative emit-obj executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "internal_link_float_negative_comparison" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "internal_link_float_negative_comparison" -Passed $false -Reason $_.Exception.Message
+}
+
+# Whole-struct assignment must copy every byte, not just the first machine word.
+# Regression: structs > 8 bytes (ThreeI32, TwoF64, Mixed) used to keep only the
+# first 8 bytes; trailing fields were zero/garbage. Verify both asm and emit-obj
+# paths produce byte-perfect copies.
+$structCopyExpected = @(
+  "struct copy repro",
+  "two_i32_a 11",
+  "two_i32_b 22",
+  "three_i32_a 11",
+  "three_i32_b 22",
+  "three_i32_c 33",
+  "two_f64_a_mm -3500",
+  "two_f64_b_mm 22000",
+  "mixed_a 11",
+  "mixed_b_mm -3500",
+  "mixed_c 22"
+) -join "`r`n"
+
+foreach ($mode in @("asm", "emitobj")) {
+  $total++
+  $caseName = "internal_link_struct_copy_$mode"
+  try {
+    $exePath = Join-Path $tmpDir "$caseName.exe"
+    if ($mode -eq "asm") {
+      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_copy.mettle -o $exePath 2>&1 | Out-String
+    }
+    else {
+      $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_struct_copy.mettle -o $exePath 2>&1 | Out-String
+    }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct copy build failed ($mode): $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "Struct copy build ($mode) did not produce an executable"
+    }
+
+    $runOut = (& $exePath 2>&1 | Out-String).TrimEnd()
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct copy executable exited with $LASTEXITCODE ($mode)"
+    }
+    if ($runOut -ne $structCopyExpected) {
+      throw "Struct copy output mismatch ($mode):`n--- expected ---`n$structCopyExpected`n--- got ---`n$runOut"
+    }
+
+    Write-CaseResult -Name $caseName -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
+  }
+}
+
+# Companion repro: large structs containing float64 fields and engine-style
+# layouts (float64-first, trailing int32) plus heap allocation. Just verify the
+# repro builds and runs cleanly under both link modes; full byte-level scrutiny
+# of every line would be brittle if write_i64 formatting ever shifts.
+foreach ($mode in @("asm", "emitobj")) {
+  $total++
+  $caseName = "internal_link_struct_float_$mode"
+  try {
+    $exePath = Join-Path $tmpDir "$caseName.exe"
+    if ($mode -eq "asm") {
+      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_float.mettle -o $exePath 2>&1 | Out-String
+    }
+    else {
+      $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_struct_float.mettle -o $exePath 2>&1 | Out-String
+    }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct/float build failed ($mode): $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "Struct/float build ($mode) did not produce an executable"
+    }
+
+    $runOut = (& $exePath 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct/float executable exited with $LASTEXITCODE ($mode)"
+    }
+    # Every probe line that prints a copied float must show the non-zero scaled
+    # value, never 0 (which would indicate a truncated copy past the 8th byte).
+    foreach ($needle in @("lx_mm -3348000", "hz_mm 22000000", "marker 1234")) {
+      if ($runOut -notmatch [regex]::Escape($needle)) {
+        throw "Struct/float output missing '$needle' ($mode):`n$runOut"
+      }
+    }
+
+    Write-CaseResult -Name $caseName -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
+  }
+}
+
+# Emit-obj + MinGW gcc link (parity with asm path: nostartfiles + mettle_entry.o)
+$total++
+try {
+  $gccCmd = Get-Command gcc -ErrorAction SilentlyContinue
+  if (-not $gccCmd) {
+    Write-CaseResult -Name "direct_object_emit_obj_gcc_link" -Passed $true -Reason "skipped: gcc not on PATH"
+  }
+  else {
+    $exeGcc = Join-Path $tmpDir "direct_object_emit_obj_gcc_link.exe"
+    $buildGccOut = & $CompilerPath --build --emit-obj --linker gcc tests\test_direct_object_return_const.mettle -o $exeGcc 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "emit-obj gcc link build failed: $buildGccOut"
+    }
+    if (-not (Test-Path $exeGcc)) {
+      throw "emit-obj gcc link did not produce an executable"
+    }
+    & $exeGcc 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 7) {
+      throw "emit-obj gcc executable exited with $LASTEXITCODE (expected 7)"
+    }
+    Write-CaseResult -Name "direct_object_emit_obj_gcc_link" -Passed $true
+  }
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_emit_obj_gcc_link" -Passed $false -Reason $_.Exception.Message
+}
+
+# Internal linker explicit DLL test: --link-arg -lws2_32 remains supported
 $total++
 try {
   $exePath = Join-Path $tmpDir "internal_link_ws2_32.exe"
 
-  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_internal_link_ws2_32.meth -o $exePath --link-arg -lws2_32 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_internal_link_ws2_32.mettle -o $exePath --link-arg -lws2_32 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Internal linker ws2_32 build failed: $buildOut"
   }
@@ -1109,12 +1926,37 @@ catch {
   Write-CaseResult -Name "internal_link_ws2_32" -Passed $false -Reason $_.Exception.Message
 }
 
+# Internal linker native Win32 test: std/win32 resolves user32/kernel32 without link args
+$total++
+try {
+  $exePath = Join-Path $tmpDir "internal_link_win32_user32.exe"
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_internal_link_win32_user32.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker Win32 build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Internal linker Win32 build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker Win32 executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "internal_link_win32_user32" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "internal_link_win32_user32" -Passed $false -Reason $_.Exception.Message
+}
+
 # Internal linker UCRT test: std/io path resolves __acrt_iob_func via default DLL imports
 $total++
 try {
   $exePath = Join-Path $tmpDir "internal_link_std_io.exe"
 
-  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_std_io.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_std_io.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Internal linker std-io build failed: $buildOut"
   }
@@ -1139,7 +1981,7 @@ $total++
 try {
   $exePath = Join-Path $tmpDir "internal_link_thread_atomics.exe"
 
-  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_internal_link_thread_atomics.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_internal_link_thread_atomics.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Internal linker thread-atomics build failed: $buildOut"
   }
@@ -1184,7 +2026,7 @@ try {
   $originalPath = $env:PATH
   try {
     $env:PATH = "$wrapperDir;$system32Dir"
-    $buildOut = & $compilerFullPath --build --emit-obj tests\test_direct_object_return_const.meth -o $exePath 2>&1 | Out-String
+    $buildOut = & $compilerFullPath --build --emit-obj tests\test_direct_object_return_const.mettle -o $exePath 2>&1 | Out-String
   }
   finally {
     $env:PATH = $originalPath
@@ -1240,7 +2082,7 @@ int fallback_value(void) {
     throw "Static-library archive build failed: $arOut"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_auto_link_fallback_static_lib.meth -o $exePath --link-arg $libPath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_auto_link_fallback_static_lib.mettle -o $exePath --link-arg $libPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Auto linker fallback build failed: $buildOut"
   }
@@ -1269,7 +2111,7 @@ try {
   $objPath = Join-Path $tmpDir "test_direct_object_params.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_params.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_params.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_params.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object params compile failed: $objOut"
   }
@@ -1277,7 +2119,7 @@ try {
     throw "Direct object params compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_params.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_params.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object params build failed: $buildOut"
   }
@@ -1303,7 +2145,7 @@ try {
   $objPath = Join-Path $tmpDir "test_direct_object_control_flow.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_control_flow.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_control_flow.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_control_flow.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object control-flow compile failed: $objOut"
   }
@@ -1311,7 +2153,7 @@ try {
     throw "Direct object control-flow compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_control_flow.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_control_flow.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object control-flow build failed: $buildOut"
   }
@@ -1337,7 +2179,7 @@ try {
   $objPath = Join-Path $tmpDir "test_direct_object_abi_return_int.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_abi_return_int.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_abi_return_int.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_abi_return_int.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object ABI-return-int compile failed: $objOut"
   }
@@ -1345,7 +2187,7 @@ try {
     throw "Direct object ABI-return-int compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_abi_return_int.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_abi_return_int.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object ABI-return-int build failed: $buildOut"
   }
@@ -1371,7 +2213,7 @@ try {
   $objPath = Join-Path $tmpDir "test_direct_object_signed_arithmetic.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_signed_arithmetic.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_signed_arithmetic.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_signed_arithmetic.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object signed-arithmetic compile failed: $objOut"
   }
@@ -1379,7 +2221,7 @@ try {
     throw "Direct object signed-arithmetic compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_signed_arithmetic.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_signed_arithmetic.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object signed-arithmetic build failed: $buildOut"
   }
@@ -1405,7 +2247,7 @@ try {
   $objPath = Join-Path $tmpDir "test_direct_object_structured_control_flow.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_structured_control_flow.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_control_flow.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_control_flow.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object structured control-flow compile failed: $objOut"
   }
@@ -1413,7 +2255,7 @@ try {
     throw "Direct object structured control-flow compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_control_flow.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_control_flow.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object structured control-flow build failed: $buildOut"
   }
@@ -1439,7 +2281,7 @@ try {
   $objPath = Join-Path $tmpDir "test_direct_object_integer_matrix.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_integer_matrix.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_integer_matrix.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_integer_matrix.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object integer-matrix compile failed: $objOut"
   }
@@ -1447,7 +2289,7 @@ try {
     throw "Direct object integer-matrix compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_integer_matrix.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_integer_matrix.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object integer-matrix build failed: $buildOut"
   }
@@ -1467,13 +2309,61 @@ catch {
   Write-CaseResult -Name "direct_object_integer_matrix" -Passed $false -Reason $_.Exception.Message
 }
 
+# Direct object backend optimizer smoke: immediate ops, branch-chain scheduling,
+# and hot local promotion should show up in the object code, not just asm text.
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_codegen_fastpaths.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_codegen_fastpaths.exe"
+
+  $objOut = & $CompilerPath --emit-obj --release tests\test_codegen_ir_fastpaths.mettle -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object codegen-fastpaths compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object codegen-fastpaths compile did not produce an object file"
+  }
+
+  $disasm = & objdump -d $objPath 2>&1 | Out-String
+  $requiredPatterns = @(
+    'cmp\s+\$0xc,%rax',
+    'shl\s+\$0x2,%rax',
+    '(?s)<even_branch>.*and\s+\$0x1,%rax.*cmp\s+\$0x0,%rax.*jne',
+    '(?s)<fused_mul_add>.*%r12'
+  )
+  foreach ($pattern in $requiredPatterns) {
+    if ($disasm -notmatch $pattern) {
+      throw "Direct object codegen-fastpaths disassembly missing pattern: $pattern`n$disasm"
+    }
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal --release tests\test_codegen_ir_fastpaths.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object codegen-fastpaths build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object codegen-fastpaths build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object codegen-fastpaths executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "direct_object_codegen_fastpaths" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_codegen_fastpaths" -Passed $false -Reason $_.Exception.Message
+}
+
 # Direct object backend scalar cast test: integer truncation/extension and pointer reinterpretation
 $total++
 try {
   $objPath = Join-Path $tmpDir "test_direct_object_scalar_casts.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_scalar_casts.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_scalar_casts.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_scalar_casts.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object scalar-casts compile failed: $objOut"
   }
@@ -1481,7 +2371,7 @@ try {
     throw "Direct object scalar-casts compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_scalar_casts.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_scalar_casts.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object scalar-casts build failed: $buildOut"
   }
@@ -1503,13 +2393,13 @@ catch {
 
 # Direct object backend float/scalar coverage: Win64 float ABI plus float/int casts
 $directObjectFloatCases = @(
-  @{ Name = "direct_object_abi_float_return"; Path = "tests/test_abi_float_return.meth"; ExitCode = 1; Label = "float-return" },
-  @{ Name = "direct_object_abi_float_args"; Path = "tests/test_abi_float_args.meth"; ExitCode = 1; Label = "float-args" },
-  @{ Name = "direct_object_abi_mixed_args"; Path = "tests/test_abi_mixed_args.meth"; ExitCode = 1; Label = "mixed-args" },
-  @{ Name = "direct_object_abi_float_symbol_args"; Path = "tests/test_abi_float_symbol_args.meth"; ExitCode = 1; Label = "float-symbol-args" },
-  @{ Name = "direct_object_abi_float4_args"; Path = "tests/test_abi_float4_args.meth"; ExitCode = 1; Label = "float4-args" },
-  @{ Name = "direct_object_abi_float_stack"; Path = "tests/test_abi_float_stack.meth"; ExitCode = 1; Label = "float-stack" },
-  @{ Name = "direct_object_cast_expression"; Path = "tests/test_cast_expression.meth"; ExitCode = 0; Label = "cast-expression" }
+  @{ Name = "direct_object_abi_float_return"; Path = "tests/test_abi_float_return.mettle"; ExitCode = 1; Label = "float-return" },
+  @{ Name = "direct_object_abi_float_args"; Path = "tests/test_abi_float_args.mettle"; ExitCode = 1; Label = "float-args" },
+  @{ Name = "direct_object_abi_mixed_args"; Path = "tests/test_abi_mixed_args.mettle"; ExitCode = 1; Label = "mixed-args" },
+  @{ Name = "direct_object_abi_float_symbol_args"; Path = "tests/test_abi_float_symbol_args.mettle"; ExitCode = 1; Label = "float-symbol-args" },
+  @{ Name = "direct_object_abi_float4_args"; Path = "tests/test_abi_float4_args.mettle"; ExitCode = 1; Label = "float4-args" },
+  @{ Name = "direct_object_abi_float_stack"; Path = "tests/test_abi_float_stack.mettle"; ExitCode = 1; Label = "float-stack" },
+  @{ Name = "direct_object_cast_expression"; Path = "tests/test_cast_expression.mettle"; ExitCode = 0; Label = "cast-expression" }
 )
 
 foreach ($case in $directObjectFloatCases) {
@@ -1553,7 +2443,7 @@ try {
   $objPath = Join-Path $tmpDir "direct_object_ok_global_int.obj"
   $exePath = Join-Path $tmpDir "direct_object_ok_global_int.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\ok_global_int.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\ok_global_int.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object ok-global-int compile failed: $objOut"
   }
@@ -1561,7 +2451,7 @@ try {
     throw "Direct object ok-global-int compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\ok_global_int.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\ok_global_int.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object ok-global-int build failed: $buildOut"
   }
@@ -1586,7 +2476,7 @@ try {
   $objPath = Join-Path $tmpDir "direct_object_global_string.obj"
   $exePath = Join-Path $tmpDir "direct_object_global_string.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_global_string.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_global_string.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object global-string compile failed: $objOut"
   }
@@ -1594,7 +2484,7 @@ try {
     throw "Direct object global-string compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_global_string.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_global_string.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object global-string build failed: $buildOut"
   }
@@ -1618,7 +2508,7 @@ $total++
 try {
   $objPath = Join-Path $tmpDir "direct_object_extern_global_link_name.obj"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_extern_global_link_name.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_extern_global_link_name.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object extern-global-link-name compile failed: $objOut"
   }
@@ -1655,7 +2545,7 @@ try {
   $objPath = Join-Path $tmpDir "test_direct_object_pointer_param_address.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_pointer_param_address.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_pointer_param_address.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_pointer_param_address.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object pointer-param-address compile failed: $objOut"
   }
@@ -1663,7 +2553,7 @@ try {
     throw "Direct object pointer-param-address compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_pointer_param_address.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_pointer_param_address.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object pointer-param-address build failed: $buildOut"
   }
@@ -1689,7 +2579,7 @@ try {
   $objPath = Join-Path $tmpDir "test_direct_object_pointer_memory.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_pointer_memory.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_pointer_memory.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_pointer_memory.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object pointer-memory compile failed: $objOut"
   }
@@ -1697,7 +2587,7 @@ try {
     throw "Direct object pointer-memory compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_pointer_memory.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_pointer_memory.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object pointer-memory build failed: $buildOut"
   }
@@ -1723,7 +2613,7 @@ try {
   $objPath = Join-Path $tmpDir "test_direct_object_struct_field_offset.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_struct_field_offset.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_struct_field_offset.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_struct_field_offset.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object struct-field-offset compile failed: $objOut"
   }
@@ -1731,7 +2621,7 @@ try {
     throw "Direct object struct-field-offset compile did not produce an object file"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_struct_field_offset.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_struct_field_offset.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object struct-field-offset build failed: $buildOut"
   }
@@ -1751,13 +2641,47 @@ catch {
   Write-CaseResult -Name "direct_object_struct_field_offset" -Passed $false -Reason $_.Exception.Message
 }
 
+# Direct object: local array of struct — index scale must be sizeof(element), not 8
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_array_struct_stride.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_array_struct_stride.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_array_struct_stride.mettle -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object array-struct-stride compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object array-struct-stride compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_array_struct_stride.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object array-struct-stride build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object array-struct-stride build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 24) {
+    throw "Direct object array-struct-stride executable exited with $LASTEXITCODE (expected 24)"
+  }
+
+  Write-CaseResult -Name "direct_object_array_struct_stride" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_array_struct_stride" -Passed $false -Reason $_.Exception.Message
+}
+
 # Direct object backend function-pointer test: addr_of function plus indirect call
 $total++
 try {
   $objPath = Join-Path $tmpDir "test_direct_object_function_pointer.obj"
   $exePath = Join-Path $tmpDir "test_direct_object_function_pointer.exe"
 
-  $objOut = & $CompilerPath --emit-obj tests\test_function_pointer.meth -o $objPath 2>&1 | Out-String
+  $objOut = & $CompilerPath --emit-obj tests\test_function_pointer.mettle -o $objPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object function-pointer compile failed: $objOut"
   }
@@ -1776,7 +2700,7 @@ try {
     throw "Direct object function-pointer relocations did not contain multiply"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_function_pointer.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_function_pointer.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object function-pointer build failed: $buildOut"
   }
@@ -1801,7 +2725,7 @@ $total++
 try {
   $exePath = Join-Path $tmpDir "test_direct_object_runtime_null_deref.exe"
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_runtime_null_deref_check.meth -o $exePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_runtime_null_deref_check.mettle -o $exePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object runtime-null build failed: $buildOut"
   }
@@ -1824,7 +2748,7 @@ catch {
   Write-CaseResult -Name "direct_object_runtime_null_deref" -Passed $false -Reason $_.Exception.Message
 }
 
-# main(argc, argv) test: requires methlang_entry.o and shell32 on Windows
+# main(argc, argv) test: requires mettle_entry.o and shell32 on Windows
 $total++
 try {
   $avAsm = Join-Path $tmpDir "test_main_argc_argv.s"
@@ -1833,7 +2757,7 @@ try {
   $avEntry = Join-Path $tmpDir "test_main_argc_argv_entry.o"
   $avExe = Join-Path $tmpDir "test_main_argc_argv.exe"
 
-  $avOut = & $CompilerPath tests\test_main_argc_argv.meth -o $avAsm 2>&1 | Out-String
+  $avOut = & $CompilerPath tests\test_main_argc_argv.mettle -o $avAsm 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "main(argc,argv) compile failed: $avOut"
   }
@@ -1848,9 +2772,9 @@ try {
     throw "main(argc,argv) gc.c compile failed"
   }
 
-  & gcc -c src\runtime\methlang_entry.c -o $avEntry -Isrc 2>&1 | Out-Null
+  & gcc -c src\runtime\mettle_entry.c -o $avEntry -Isrc 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) {
-    throw "main(argc,argv) methlang_entry.c compile failed"
+    throw "main(argc,argv) mettle_entry.c compile failed"
   }
 
   & gcc -nostartfiles $avObj $avGc $avEntry -o $avExe -lkernel32 -lshell32 2>&1 | Out-Null
@@ -1877,7 +2801,7 @@ try {
   $nullGc = Join-Path $tmpDir "test_runtime_null_trace_gc.o"
   $nullExe = Join-Path $tmpDir "test_runtime_null_trace.exe"
 
-  $nullOut = & $CompilerPath -s tests\test_runtime_null_deref_check.meth -o $nullAsm 2>&1 | Out-String
+  $nullOut = & $CompilerPath -s tests\test_runtime_null_deref_check.mettle -o $nullAsm 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Runtime null trace compile failed: $nullOut"
   }
@@ -1925,7 +2849,7 @@ try {
   $avGc2 = Join-Path $tmpDir "test_runtime_av_trace_gc.o"
   $avExe2 = Join-Path $tmpDir "test_runtime_av_trace.exe"
 
-  $avTraceOut = & $CompilerPath -s tests\test_runtime_access_violation_trace.meth -o $avAsm 2>&1 | Out-String
+  $avTraceOut = & $CompilerPath -s tests\test_runtime_access_violation_trace.mettle -o $avAsm 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Runtime access-violation trace compile failed: $avTraceOut"
   }
@@ -1990,6 +2914,81 @@ if (-not $SkipRuntime) {
     $failed++
     Write-CaseResult -Name "gc_runtime" -Passed $false -Reason $_.Exception.Message
   }
+
+  $total++
+  try {
+    $asyncRuntimeExe = "bin\async_runtime_test.exe"
+    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\async_runtime_test.c src\runtime\async_runtime.c src\runtime\gc.c -Isrc -o $asyncRuntimeExe
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to compile async runtime pool test"
+    }
+
+    $asyncRuntimeOutput = & $asyncRuntimeExe 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "Async runtime pool test exited with code $LASTEXITCODE"
+    }
+
+    if ($asyncRuntimeOutput -notmatch "Async runtime pool tests passed") {
+      throw "Async runtime pool test output did not contain pass marker"
+    }
+
+    Write-CaseResult -Name "async_runtime_pool" -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "async_runtime_pool" -Passed $false -Reason $_.Exception.Message
+  }
+
+  $total++
+  try {
+    $coroIocpRuntimeExe = "bin\coro_iocp_runtime_test.exe"
+    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\coro_iocp_runtime_test.c src\runtime\async_runtime.c src\runtime\gc.c -Isrc -lpthread -o $coroIocpRuntimeExe
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to compile coroutine reactor runtime test"
+    }
+
+    $coroIocpRuntimeOutput = & $coroIocpRuntimeExe 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "Coroutine reactor runtime test exited with code $LASTEXITCODE"
+    }
+
+    if ($coroIocpRuntimeOutput -notmatch "Coroutine reactor runtime tests passed") {
+      throw "Coroutine reactor runtime test output did not contain pass marker"
+    }
+
+    Write-CaseResult -Name "coro_iocp_runtime" -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "coro_iocp_runtime" -Passed $false -Reason $_.Exception.Message
+  }
+}
+
+# Crash handler test. On Windows this compiles and runs but is a documented
+# no-op (the SEH crash path is already covered by runtime_null_trace /
+# runtime_access_violation_trace); the meaningful assertions run on POSIX.
+$total++
+try {
+  $crashHandlerExe = "bin\crash_handler_test.exe"
+  & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\crash_handler_test.c src\runtime\gc.c -Isrc -o $crashHandlerExe
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to compile crash handler test"
+  }
+
+  $crashHandlerOutput = & $crashHandlerExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Crash handler test exited with code $LASTEXITCODE"
+  }
+
+  if ($crashHandlerOutput -notmatch "Crash handler tests (passed|skipped)") {
+    throw "Crash handler test output did not contain pass/skip marker"
+  }
+
+  Write-CaseResult -Name "crash_handler" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "crash_handler" -Passed $false -Reason $_.Exception.Message
 }
 
 Write-Host ""

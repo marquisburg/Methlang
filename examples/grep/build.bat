@@ -1,19 +1,19 @@
 @echo off
-REM Build Methlang Grep benchmark
+REM Build Mettle Grep benchmark
 set APP=%~dp0
 set ROOT=%APP%..\..
 cd /d "%ROOT%"
 
-if not exist bin\methlang.exe (
-    echo Building Methlang compiler...
+if not exist bin\mettle.exe (
+    echo Building Mettle compiler...
     call build.bat
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
-echo Building grep.meth (native compiler backend)...
-bin\methlang.exe --build --emit-obj --linker internal --release examples\grep\grep.meth -o examples\grep\grep.exe --stdlib stdlib
+echo Building grep.mettle (native compiler backend)...
+bin\mettle.exe --build --emit-obj --linker internal --release examples\grep\grep.mettle -o examples\grep\grep.exe
 if %ERRORLEVEL% NEQ 0 (
-    echo Methlang build failed.
+    echo Mettle build failed.
     exit /b 1
 )
 
@@ -27,11 +27,11 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo Build successful!
-echo   Methlang: examples\grep\grep.exe
+echo   Mettle: examples\grep\grep.exe
 echo   C:       examples\grep\grep_c.exe
 echo.
-echo Running benchmark (Methlang vs C)...
-echo ===== Methlang (--release) =====
+echo Running benchmark (Mettle vs C)...
+echo ===== Mettle (--release) =====
 examples\grep\grep.exe
 echo.
 echo ========= C (gcc -O2) =========

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "mode": "meth-vs-c",
+  "outputs": {
+    "primary": "docs/benchmarks/latest.json",
+    "mirror_web": "web/benchmarks.json"
+  },
+  "benchmarks": [
+    {
+      "name": "fib",
+      "description": "Fibonacci fib(35) x 10M",
+      "build_script": "examples/fib/build.bat",
+      "meth_exe": "examples/fib/fib.exe",
+      "c_exe": "examples/fib/fib_c.exe"
+    },
+    {
+      "name": "word_count",
+      "description": "Word count 256 KB buffer x 500",
+      "build_script": "examples/word_count/build.bat",
+      "meth_exe": "examples/word_count/word_count.exe",
+      "c_exe": "examples/word_count/word_count_c.exe"
+    },
+    {
+      "name": "grep",
+      "description": "Grep ERROR 256 KB x 200",
+      "build_script": "examples/grep/build.bat",
+      "meth_exe": "examples/grep/grep.exe",
+      "c_exe": "examples/grep/grep_c.exe"
+    },
+    {
+      "name": "sum_squares",
+      "description": "Sum of squares 1..100000 x 500",
+      "build_script": "examples/sum_squares/build.bat",
+      "meth_exe": "examples/sum_squares/sum_squares.exe",
+      "c_exe": "examples/sum_squares/sum_squares_c.exe"
+    },
+    {
+      "name": "collatz",
+      "description": "Collatz steps 1..100000 x 10",
+      "build_script": "examples/collatz/build.bat",
+      "meth_exe": "examples/collatz/collatz.exe",
+      "c_exe": "examples/collatz/collatz_c.exe"
+    }
+  ]
+}

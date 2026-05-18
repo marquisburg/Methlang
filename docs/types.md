@@ -1,6 +1,6 @@
 # Types
 
-Methlang is statically typed. Every variable and function parameter has an explicit type. This document describes the type system.
+Mettle is statically typed. Every variable and function parameter has an explicit type. This document describes the type system.
 
 ## Type Sizes and Alignment
 
@@ -11,10 +11,10 @@ The following sizes and alignments apply on x86-64. Use these when laying out st
 | `int8`, `uint8` | 1 | 1 |
 | `int16`, `uint16` | 2 | 2 |
 | `int32`, `uint32`, `float32` | 4 | 4 |
-| `int64`, `uint64`, `float64`, pointers, enums | 8 | 8 |
+| `int64`, `uint64`, `float64`, pointers, `Future<T>`, plain enums | 8 | 8 |
 | `string` | 16 | 8 |
 
-Struct and array sizes are derived from their fields and element types. Pointers and enums are 8 bytes.
+Struct and array sizes are derived from their fields and element types. Pointers, futures, and plain integer-valued enums are 8 bytes. Tagged enums are sized from their tag and largest payload.
 
 ## Primitive Types
 
@@ -28,7 +28,7 @@ Signed integers: `int8`, `int16`, `int32`, `int64` (1, 2, 4, 8 bytes). Unsigned 
 
 Pointers use the `*` suffix. A pointer holds the address of a value of the base type. Multi-level pointers are supported.
 
-```meth
+```mettle
 var p: int32*;        // pointer to int32
 var pp: int32**;      // pointer to pointer to int32
 var sp: MyStruct*;    // pointer to struct
@@ -48,7 +48,7 @@ Function pointers are first-class values that can be stored, passed as arguments
 
 Function pointer types use the `fn` keyword with parameter types and return type:
 
-```meth
+```mettle
 var fp: fn(int32, int32) -> int32;  // pointer to function taking (int32, int32) returning int32
 var void_fn: fn() -> void;           // pointer to function taking nothing returning nothing
 ```
@@ -57,7 +57,7 @@ var void_fn: fn() -> void;           // pointer to function taking nothing retur
 
 Use the address-of operator `&` to create a function pointer:
 
-```meth
+```mettle
 function add(a: int32, b: int32) -> int32 {
   return a + b;
 }
@@ -70,7 +70,7 @@ fp = &add;  // & takes the address of a function
 
 Call a function pointer like a regular function:
 
-```meth
+```mettle
 var result: int32 = fp(3, 4);  // calls the function pointed to by fp
 ```
 
@@ -78,7 +78,7 @@ var result: int32 = fp(3, 4);  // calls the function pointed to by fp
 
 Function pointers are useful for callbacks, strategy patterns, and C interop:
 
-```meth
+```mettle
 // Callback pattern
 function apply(op: fn(int32, int32) -> int32, a: int32, b: int32) -> int32 {
   return op(a, b);
@@ -91,11 +91,33 @@ function main() -> int32 {
 
 **Type equality:** Two function pointer types are equal if they have the same parameter types and return type. `fn(int32) -> int32` is compatible with `fn(int32) -> int32` but not with `fn(int32, int32) -> int32`.
 
+## Future Types
+
+`Future<T>` is the built-in type produced by async function calls. It represents an in-flight asynchronous computation that will eventually produce a payload of type `T`.
+
+```mettle
+async fn load() -> int32 {
+  return 42;
+}
+
+var future: Future<int32> = load();
+var value: int32 = await future;
+```
+
+Key properties:
+
+- Calling `async fn f(...) -> T` yields `Future<T>`.
+- `await future` yields `T`.
+- `Future<void>` is valid for async functions with no payload result.
+- `Future<T>` is pointer-sized on x86-64 and should be treated as an opaque runtime handle.
+
+Futures are first-class values: they can be stored, passed to functions, and returned from functions. See [Async and Sync Execution](async.md) for the execution and threading contract behind them.
+
 ## Array Types
 
 Fixed-size arrays use `[N]` where N is a constant. Arrays are value types; the elements are laid out contiguously. Indexing is zero-based.
 
-```meth
+```mettle
 var arr: int32[10];
 var buf: uint8[256];
 ```
@@ -120,7 +142,7 @@ var buf: uint8[256];
 
 Structs group named fields. Fields are laid out in declaration order with appropriate alignment for the target. Structs can define methods (see [Declarations](declarations.md)).
 
-```meth
+```mettle
 struct Point {
   x: int32;
   y: int32;
@@ -140,7 +162,7 @@ For C interop, match the C struct layout exactly (field order, types, padding).
 
 Enums define a named type and a set of variants, each with an integer value. Variants without an explicit value continue from the previous variant (0 if first). Variant names are in scope after the enum is defined; use them directly (e.g. `North`, not `Direction.North`).
 
-```meth
+```mettle
 enum Direction {
   North,        // 0
   East = 2,     // 2
@@ -158,11 +180,40 @@ var b: Direction = East;
 
 Enums can be compared with integers and used in `switch` cases. They can be exported for use in other modules (see [Declarations](declarations.md)).
 
+## Tagged Enum Types
+
+Tagged enums associate a payload type with some variants. They are useful for values such as `Option`, `Result`, or message unions where each variant may carry different data.
+
+```mettle
+enum Option {
+  Some(int32),
+  None
+}
+
+var a: Option = Some(42);
+var b: Option = None();
+```
+
+**Constructors:** Each variant is constructed with function-call syntax. Payload variants take one argument, such as `Some(42)`. Payloadless variants are currently written with empty call syntax, such as `None()`.
+
+**Payload binding:** Use `match` to branch on a tagged enum and bind the payload from a specific variant. See [Control Flow](control-flow.md#match).
+
+**Representation:** A tagged enum stores a discriminant tag plus storage for the largest payload among its variants. Its size is not fixed like a plain enum, so avoid assuming it is 8 bytes in C interop or manual layout code.
+
+Tagged enums can also be generic:
+
+```mettle
+enum Result<T> {
+  Ok(T),
+  Err
+}
+```
+
 ## Generic Type Parameters
 
 Functions and structs can be generic. Type parameters are declared in angle brackets: `function f<T>(...)` or `struct S<T> { ... }`. Instantiation uses the same syntax: `f<int32>(args)` or `var x: Pair<int32, float64>`.
 
-```meth
+```mettle
 struct Pair<A, B> {
   first: A;
   second: B;
@@ -178,20 +229,47 @@ var n: int32 = identity<int32>(42);  // function call with type args
 
 The compiler performs **monomorphization** before type checking: each unique instantiation becomes a concrete type or function. There is no runtime generics; all type parameters are resolved at compile time.
 
-**Constraints:** Type parameters are unconstrained. Operations inside generic bodies must be valid for all possible type arguments. For example, `a + b` in `function add<T>(a: T, b: T) -> T` requires that `T` supports `+`; the type checker validates this when the generic is instantiated.
+**Constraints:** Trait bounds are supported. Declare a trait, satisfy it with `impl Trait for Type`, and constrain generic parameters with inline bounds such as `T: Name`, multiple inline bounds such as `T: Addable + SignedNumber`, or a trailing `where` clause.
+
+```mettle
+trait Incrementable {
+  function next_value(self: Self) -> Self;
+}
+
+impl Incrementable for int32 {
+  function next_value(self: Self) -> Self {
+    return self + 1;
+  }
+}
+
+function bump<T>(x: T) -> T where T: Incrementable {
+  return x.next_value();
+}
+```
 
 ## Type Conversions
 
 Widening conversions (e.g. `int32` to `int64`, `float32` to `float64`) are implicit. Narrowing conversions (e.g. `int32` to `int16`, `int64` to `int8`) are allowed implicitly for integer-to-integer and float-to-float. There is no implicit conversion between integers and floats, or between pointers and integers, except that `0` is valid as a null pointer initializer and in pointer comparisons.
 
-**Explicit casts:** Methlang provides an explicit cast syntax `(Type)expr`. This can be used to convert between numeric types, pointer types, and between integers and pointers. It is especially useful for pointer reinterpretation (e.g. treating `int32*` as `uint8*` for byte access) or converting floats to integers:
+**Explicit casts:** Mettle provides an explicit cast syntax `(Type)expr`. This can be used to convert between numeric types, pointer types, and between integers and pointers. It is especially useful for pointer reinterpretation (e.g. treating `int32*` as `uint8*` for byte access) or converting floats to integers:
 
-```meth
+```mettle
 var p: int32*;
 var bytes: uint8* = (uint8*)p;
 
 var f: float64 = 3.14;
 var i: int32 = (int32)f;
 ```
+
+Valid cast conversions include:
+
+- Any numeric type (integer or float) to any other numeric type.
+- Any pointer type to any other pointer type.
+- Any integer type to any pointer type, and vice versa.
+- `Future<T>` to/from pointers and integers.
+- `Future<A>` to `Future<B>` with an explicit cast.
+- Function pointers to other function pointers, or to/from regular pointers and integers.
+
+Casting across different sizes might result in zero-extension, sign-extension, or truncation, depending on the target type and the sign of the source type. Floating-point to integer conversions truncate towards zero.
 
 See [Expressions](expressions.md) for more details on cast conversions and evaluation behavior.

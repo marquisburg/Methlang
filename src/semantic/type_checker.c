@@ -18,6 +18,20 @@ typedef struct TrackedBufferExtent {
   struct TrackedBufferExtent *next;
 } TrackedBufferExtent;
 
+// Forward declarations for helper functions defined later in this file
+static Type *type_checker_build_tagged_enum_type(TypeChecker *checker,
+                                                 const char *type_name,
+                                                 EnumDeclaration *enum_decl);
+static Type *type_checker_instantiate_generic_enum(TypeChecker *checker,
+                                                   const char *generic_name,
+                                                   const char *type_arg_str);
+static Type *type_checker_parse_future_type(TypeChecker *checker,
+                                            const char *name);
+static int type_checker_process_tagged_enum(TypeChecker *checker,
+                                            ASTNode *enum_decl_node);
+static int type_checker_check_match_statement(TypeChecker *checker,
+                                               ASTNode *statement);
+
 static Type *type_checker_parse_array_type(TypeChecker *checker,
                                            const char *name) {
   if (!checker || !name)
@@ -133,6 +147,76 @@ static Type *type_checker_parse_pointer_type(TypeChecker *checker,
   return current;
 }
 
+static Type *type_checker_parse_future_type(TypeChecker *checker,
+                                            const char *name) {
+  if (!checker || !name || strncmp(name, "Future<", 7) != 0) {
+    return NULL;
+  }
+
+  size_t name_len = strlen(name);
+  if (name_len <= 8 || name[name_len - 1] != '>') {
+    return NULL;
+  }
+
+  size_t payload_len = name_len - 8;
+  char *payload_name = malloc(payload_len + 1);
+  if (!payload_name) {
+    return NULL;
+  }
+
+  memcpy(payload_name, name + 7, payload_len);
+  payload_name[payload_len] = '\0';
+
+  Type *payload_type = type_checker_get_type_by_name(checker, payload_name);
+  free(payload_name);
+  if (!payload_type) {
+    return NULL;
+  }
+
+  Type *future_type = type_create(TYPE_FUTURE, name);
+  if (!future_type) {
+    return NULL;
+  }
+
+  future_type->base_type = payload_type;
+  future_type->size = 8;
+  future_type->alignment = 8;
+  return future_type;
+}
+
+// Generic helper: parse "TypeName<Inner>" → kind with base_type=Inner
+static Type *type_checker_parse_generic1_type(TypeChecker *checker,
+                                              const char *name,
+                                              const char *prefix,
+                                              TypeKind kind) {
+  size_t prefix_len = strlen(prefix);
+  if (!checker || !name || strncmp(name, prefix, prefix_len) != 0)
+    return NULL;
+  size_t name_len = strlen(name);
+  if (name_len <= prefix_len + 1 || name[name_len - 1] != '>')
+    return NULL;
+
+  size_t inner_len = name_len - prefix_len - 1;
+  char *inner_name = malloc(inner_len + 1);
+  if (!inner_name)
+    return NULL;
+  memcpy(inner_name, name + prefix_len, inner_len);
+  inner_name[inner_len] = '\0';
+
+  Type *inner = type_checker_get_type_by_name(checker, inner_name);
+  free(inner_name);
+  if (!inner)
+    return NULL;
+
+  Type *t = type_create(kind, name);
+  if (!t)
+    return NULL;
+  t->base_type = inner;
+  t->size = 8;
+  t->alignment = 8;
+  return t;
+}
+
 static int type_checker_types_equal(const Type *lhs, const Type *rhs) {
   if (lhs == rhs) {
     return 1;
@@ -146,6 +230,13 @@ static int type_checker_types_equal(const Type *lhs, const Type *rhs) {
 
   switch (lhs->kind) {
   case TYPE_POINTER:
+  case TYPE_FUTURE:
+  case TYPE_THREAD:
+  case TYPE_MUTEX:
+  case TYPE_GUARD:
+  case TYPE_ATOMIC:
+  case TYPE_SENDER:
+  case TYPE_RECEIVER:
     return type_checker_types_equal(lhs->base_type, rhs->base_type);
   case TYPE_ARRAY:
     return lhs->array_size == rhs->array_size &&
@@ -196,8 +287,9 @@ static int type_checker_is_lvalue_expression(ASTNode *expression) {
   }
 }
 
-static int type_checker_eval_integer_constant(ASTNode *expression,
-                                              long long *out_value) {
+static int type_checker_eval_integer_constant_with_checker(TypeChecker *checker,
+                                                           ASTNode *expression,
+                                                           long long *out_value) {
   if (!expression || !out_value) {
     return 0;
   }
@@ -212,11 +304,50 @@ static int type_checker_eval_integer_constant(ASTNode *expression,
     return 1;
   }
 
+  case AST_IDENTIFIER: {
+    Identifier *identifier = (Identifier *)expression->data;
+    if (!identifier || !identifier->name) {
+      return 0;
+    }
+
+    Symbol *symbol = checker ? symbol_table_lookup(checker->symbol_table,
+                                                   identifier->name)
+                             : NULL;
+    if (!symbol || symbol->kind != SYMBOL_CONSTANT) {
+      return 0;
+    }
+
+    *out_value = symbol->data.constant.value;
+    return 1;
+  }
+
+  case AST_FUNCTION_CALL: {
+    CallExpression *call = (CallExpression *)expression->data;
+    if (!call || !call->function_name ||
+        strcmp(call->function_name, "sizeof") != 0 ||
+        call->argument_count != 1 || !call->arguments[0] ||
+        call->arguments[0]->type != AST_IDENTIFIER) {
+      return 0;
+    }
+
+    Identifier *type_id = (Identifier *)call->arguments[0]->data;
+    Type *type = (checker && type_id)
+                     ? type_checker_get_type_by_name(checker, type_id->name)
+                     : NULL;
+    if (!type || type->size > (size_t)LLONG_MAX) {
+      return 0;
+    }
+
+    *out_value = (long long)type->size;
+    return 1;
+  }
+
   case AST_UNARY_EXPRESSION: {
     UnaryExpression *unary_expr = (UnaryExpression *)expression->data;
     long long operand = 0;
     if (!unary_expr || !unary_expr->operator || !unary_expr->operand ||
-        !type_checker_eval_integer_constant(unary_expr->operand, &operand)) {
+        !type_checker_eval_integer_constant_with_checker(
+            checker, unary_expr->operand, &operand)) {
       return 0;
     }
 
@@ -237,8 +368,10 @@ static int type_checker_eval_integer_constant(ASTNode *expression,
     long long right = 0;
     if (!binary_expr || !binary_expr->operator || !binary_expr->left ||
         !binary_expr->right ||
-        !type_checker_eval_integer_constant(binary_expr->left, &left) ||
-        !type_checker_eval_integer_constant(binary_expr->right, &right)) {
+        !type_checker_eval_integer_constant_with_checker(
+            checker, binary_expr->left, &left) ||
+        !type_checker_eval_integer_constant_with_checker(
+            checker, binary_expr->right, &right)) {
       return 0;
     }
 
@@ -268,12 +401,114 @@ static int type_checker_eval_integer_constant(ASTNode *expression,
       *out_value = left % right;
       return 1;
     }
+    if (strcmp(binary_expr->operator, "==") == 0) {
+      *out_value = left == right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, "!=") == 0) {
+      *out_value = left != right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, "<") == 0) {
+      *out_value = left < right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, "<=") == 0) {
+      *out_value = left <= right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, ">") == 0) {
+      *out_value = left > right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, ">=") == 0) {
+      *out_value = left >= right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, "&&") == 0) {
+      *out_value = (left != 0) && (right != 0);
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, "||") == 0) {
+      *out_value = (left != 0) || (right != 0);
+      return 1;
+    }
     return 0;
   }
 
   default:
     return 0;
   }
+}
+
+static int type_checker_eval_integer_constant(ASTNode *expression,
+                                              long long *out_value) {
+  return type_checker_eval_integer_constant_with_checker(NULL, expression,
+                                                        out_value);
+}
+
+static Type *type_checker_resolve_sizeof_argument(TypeChecker *checker,
+                                                  CallExpression *call,
+                                                  SourceLocation location) {
+  if (!checker || !call) {
+    return NULL;
+  }
+
+  if (call->argument_count != 1) {
+    type_checker_set_error_at_location(
+        checker, location, "sizeof expects exactly one type argument");
+    return NULL;
+  }
+
+  ASTNode *arg = call->arguments ? call->arguments[0] : NULL;
+  if (!arg || arg->type != AST_IDENTIFIER) {
+    type_checker_set_error_at_location(
+        checker, location, "sizeof expects a type name");
+    return NULL;
+  }
+
+  Identifier *type_id = (Identifier *)arg->data;
+  Type *type = type_id ? type_checker_get_type_by_name(checker, type_id->name)
+                       : NULL;
+  if (!type) {
+    type_checker_set_error_at_location(
+        checker, arg->location, "Unknown type '%s' in sizeof",
+        type_id && type_id->name ? type_id->name : "<invalid>");
+    return NULL;
+  }
+
+  return type;
+}
+
+static int type_checker_validate_static_assert(TypeChecker *checker,
+                                               CallExpression *call,
+                                               SourceLocation location) {
+  if (!checker || !call) {
+    return 0;
+  }
+
+  if (call->argument_count != 1) {
+    type_checker_set_error_at_location(
+        checker, location, "static_assert expects exactly one condition");
+    return 0;
+  }
+
+  long long value = 0;
+  if (!type_checker_eval_integer_constant_with_checker(
+          checker, call->arguments[0], &value)) {
+    type_checker_set_error_at_location(
+        checker, call->arguments[0] ? call->arguments[0]->location : location,
+        "static_assert condition must be a compile-time integer expression");
+    return 0;
+  }
+
+  if (value == 0) {
+    type_checker_set_error_at_location(checker, location,
+                                       "static_assert failed");
+    return 0;
+  }
+
+  return 1;
 }
 
 static void type_checker_buffer_extent_clear(TypeChecker *checker) {
@@ -1057,11 +1292,14 @@ type_checker_create_with_error_reporter(SymbolTable *symbol_table,
   checker->builtin_uint16 = NULL;
   checker->builtin_uint32 = NULL;
   checker->builtin_uint64 = NULL;
+  checker->builtin_bool = NULL;
   checker->builtin_float32 = NULL;
   checker->builtin_float64 = NULL;
   checker->builtin_string = NULL;
   checker->builtin_cstring = NULL;
   checker->builtin_void = NULL;
+  checker->generic_enum_templates = NULL;
+  checker->generic_enum_template_count = 0;
 
   // Initialize built-in types
   type_checker_init_builtin_types(checker);
@@ -1080,11 +1318,13 @@ void type_checker_destroy(TypeChecker *checker) {
     type_destroy(checker->builtin_uint16);
     type_destroy(checker->builtin_uint32);
     type_destroy(checker->builtin_uint64);
+    type_destroy(checker->builtin_bool);
     type_destroy(checker->builtin_float32);
     type_destroy(checker->builtin_float64);
     type_destroy(checker->builtin_string);
     type_destroy(checker->builtin_cstring);
     type_destroy(checker->builtin_void);
+    free(checker->generic_enum_templates);
 
     for (size_t i = 0; i < checker->tracked_var_count; i++) {
       free(checker->tracked_var_names[i]);
@@ -1250,6 +1490,45 @@ Type *type_checker_infer_type(TypeChecker *checker, ASTNode *expression) {
   return type;
 }
 
+static Type *type_checker_default_integer_literal_type(TypeChecker *checker,
+                                                     NumberLiteral *literal) {
+  if (!checker || !literal || literal->is_float) {
+    return checker ? checker->builtin_int32 : NULL;
+  }
+
+  unsigned long long u_bitpat = (unsigned long long)literal->int_value;
+  unsigned char radix = literal->int_radix;
+  if (radix != 2u && radix != 16u) {
+    radix = 10u;
+  }
+
+  /*
+   * Decimal defaults follow signed widening so large magnitudes usable with
+   * unary minus (-2147483648 via -(int64)…). Hex/binary infer uint32 in the
+   * (INT32_MAX, UINT32_MAX] range so 0xFFFFFFFF and similar stay uint32-ish.
+   */
+  if (radix == 10u) {
+    if (literal->int_value >= INT32_MIN && literal->int_value <= INT32_MAX) {
+      return checker->builtin_int32;
+    }
+    if (u_bitpat <= (unsigned long long)INT64_MAX) {
+      return checker->builtin_int64;
+    }
+    return checker->builtin_uint64;
+  }
+
+  if (u_bitpat <= (unsigned long long)INT32_MAX) {
+    return checker->builtin_int32;
+  }
+  if (u_bitpat <= UINT32_MAX) {
+    return checker->builtin_uint32;
+  }
+  if (u_bitpat <= (unsigned long long)INT64_MAX) {
+    return checker->builtin_int64;
+  }
+  return checker->builtin_uint64;
+}
+
 static Type *type_checker_infer_type_internal(TypeChecker *checker,
                                               ASTNode *expression) {
   if (!checker || !expression)
@@ -1261,10 +1540,9 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     if (literal->is_float) {
       // Floating literals default to float64
       return checker->builtin_float64;
-    } else {
-      // Integer literals default to int32
-      return checker->builtin_int32;
     }
+
+    return type_checker_default_integer_literal_type(checker, literal);
   }
 
   case AST_STRING_LITERAL:
@@ -1311,6 +1589,20 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       type_checker_set_error_at_location(checker, expression->location,
                                          "Invalid unary expression");
       return NULL;
+    }
+
+    if (strcmp(unop->operator, "await") == 0) {
+      Type *operand_type = type_checker_infer_type(checker, unop->operand);
+      if (!operand_type) {
+        return NULL;
+      }
+      if (operand_type->kind != TYPE_FUTURE || !operand_type->base_type) {
+        type_checker_set_error_at_location(
+            checker, expression->location,
+            "Await operator requires a Future<T> operand");
+        return NULL;
+      }
+      return operand_type->base_type;
     }
 
     if (strcmp(unop->operator, "&") == 0) {
@@ -1437,6 +1729,287 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
 
   case AST_FUNCTION_CALL: {
     CallExpression *call = (CallExpression *)expression->data;
+    if (call && call->function_name) {
+      if (strcmp(call->function_name, "sizeof") == 0) {
+        Type *sized_type =
+            type_checker_resolve_sizeof_argument(checker, call,
+                                                 expression->location);
+        return sized_type ? checker->builtin_int64 : NULL;
+      }
+
+      if (strcmp(call->function_name, "static_assert") == 0) {
+        return type_checker_validate_static_assert(checker, call,
+                                                   expression->location)
+                   ? checker->builtin_void
+                   : NULL;
+      }
+
+      if (strcmp(call->function_name, "cancelled") == 0 ||
+          strcmp(call->function_name, "__meth_async_current_cancelled") == 0) {
+        if (call->argument_count != 0) {
+          type_checker_set_error_at_location(
+              checker, expression->location,
+              "Function '%s' expects 0 arguments, got %llu",
+              call->function_name, (unsigned long long)call->argument_count);
+          return NULL;
+        }
+        return checker->builtin_int32;
+      }
+
+      if (strcmp(call->function_name, "cancel") == 0 ||
+          strcmp(call->function_name, "__meth_async_cancel") == 0) {
+        if (call->argument_count != 1) {
+          type_checker_set_error_at_location(
+              checker, expression->location,
+              "Function '%s' expects 1 argument, got %llu",
+              call->function_name, (unsigned long long)call->argument_count);
+          return NULL;
+        }
+        Type *arg_type = type_checker_infer_type(checker, call->arguments[0]);
+        if (!arg_type) {
+          return NULL;
+        }
+        if (strcmp(call->function_name, "cancel") == 0 &&
+            arg_type->kind != TYPE_FUTURE) {
+          type_checker_set_error_at_location(
+              checker, call->arguments[0]->location,
+              "cancel expects a Future<T> argument");
+          return NULL;
+        }
+        return checker->builtin_int32;
+      }
+
+      if (strcmp(call->function_name, "__meth_async_start") == 0 ||
+          strcmp(call->function_name, "__meth_async_finish") == 0 ||
+          strcmp(call->function_name, "__meth_async_wait") == 0 ||
+          strcmp(call->function_name, "__meth_async_state") == 0) {
+        if (call->argument_count != 1) {
+          type_checker_set_error_at_location(
+              checker, expression->location,
+              "Function '%s' expects 1 argument, got %llu",
+              call->function_name, (unsigned long long)call->argument_count);
+          return NULL;
+        }
+        if (!type_checker_infer_type(checker, call->arguments[0])) {
+          return NULL;
+        }
+        return checker->builtin_int32;
+      }
+
+      if (strcmp(call->function_name, "__meth_coro_task_create") == 0) {
+        if (call->argument_count != 2) {
+          type_checker_set_error_at_location(
+              checker, expression->location,
+              "Function '%s' expects 2 arguments, got %llu",
+              call->function_name, (unsigned long long)call->argument_count);
+          return NULL;
+        }
+        for (size_t i = 0; i < call->argument_count; i++) {
+          if (!type_checker_infer_type(checker, call->arguments[i])) {
+            return NULL;
+          }
+        }
+        return checker->builtin_int64;
+      }
+
+      if (strcmp(call->function_name, "__meth_coro_task_schedule") == 0 ||
+          strcmp(call->function_name, "__meth_coro_task_bind_token") == 0 ||
+          strcmp(call->function_name, "__meth_coro_task_destroy") == 0 ||
+          strcmp(call->function_name, "__meth_coro_task_is_done") == 0 ||
+          strcmp(call->function_name, "__meth_coro_task_run_one") == 0) {
+        size_t expected_args = 0;
+        if (strcmp(call->function_name, "__meth_coro_task_schedule") == 0) {
+          expected_args = 4;
+        } else if (strcmp(call->function_name, "__meth_coro_task_bind_token") ==
+                   0) {
+          expected_args = 2;
+        } else {
+          expected_args = 1;
+        }
+
+        if (call->argument_count != expected_args) {
+          type_checker_set_error_at_location(
+              checker, expression->location,
+              "Function '%s' expects %llu arguments, got %llu",
+              call->function_name, (unsigned long long)expected_args,
+              (unsigned long long)call->argument_count);
+          return NULL;
+        }
+        for (size_t i = 0; i < call->argument_count; i++) {
+          if (!type_checker_infer_type(checker, call->arguments[i])) {
+            return NULL;
+          }
+        }
+        return checker->builtin_int32;
+      }
+    }
+
+    // Method calls on threading types:
+    // Thread.join(), Mutex.new(), mutex.lock(), guard (unlock via drop),
+    // Atomic.new(), atomic.load/store/fetch_add/fetch_sub/cas(),
+    // channel(), tx.send(), rx.recv()
+    if (call->object) {
+      Type *obj_type = type_checker_infer_type(checker, call->object);
+      if (!obj_type)
+        return NULL;
+
+      if (obj_type->kind == TYPE_THREAD) {
+        // thread.join() -> T (base_type)
+        if (strcmp(call->function_name, "join") == 0) {
+          if (call->argument_count != 0) {
+            type_checker_set_error_at_location(checker, expression->location,
+                "Thread.join() takes no arguments");
+            return NULL;
+          }
+          return obj_type->base_type ? obj_type->base_type : checker->builtin_void;
+        }
+        type_checker_set_error_at_location(checker, expression->location,
+            "Unknown method on Thread<T>: '%s'", call->function_name);
+        return NULL;
+      }
+
+      if (obj_type->kind == TYPE_MUTEX) {
+        // mutex.lock() -> Guard<T>
+        if (strcmp(call->function_name, "lock") == 0) {
+          if (call->argument_count != 0) {
+            type_checker_set_error_at_location(checker, expression->location,
+                "Mutex.lock() takes no arguments");
+            return NULL;
+          }
+          const char *inner = obj_type->base_type && obj_type->base_type->name
+                              ? obj_type->base_type->name : "void";
+          size_t gname_len = strlen("Guard<") + strlen(inner) + 2;
+          char *gname = malloc(gname_len);
+          if (!gname) return NULL;
+          snprintf(gname, gname_len, "Guard<%s>", inner);
+          Type *guard = type_create(TYPE_GUARD, gname);
+          free(gname);
+          if (!guard) return NULL;
+          guard->base_type = obj_type->base_type;
+          guard->size = 8; guard->alignment = 8;
+          return guard;
+        }
+        type_checker_set_error_at_location(checker, expression->location,
+            "Unknown method on Mutex<T>: '%s'", call->function_name);
+        return NULL;
+      }
+
+      if (obj_type->kind == TYPE_ATOMIC) {
+        // atomic.load() -> T
+        if (strcmp(call->function_name, "load") == 0) {
+          return obj_type->base_type ? obj_type->base_type : checker->builtin_int64;
+        }
+        // atomic.store(val) -> void
+        if (strcmp(call->function_name, "store") == 0) {
+          if (call->argument_count != 1) {
+            type_checker_set_error_at_location(checker, expression->location,
+                "Atomic.store() takes exactly 1 argument");
+            return NULL;
+          }
+          if (!type_checker_infer_type(checker, call->arguments[0]))
+            return NULL;
+          return checker->builtin_void;
+        }
+        // atomic.fetch_add/fetch_sub(delta) -> T (old value)
+        if (strcmp(call->function_name, "fetch_add") == 0 ||
+            strcmp(call->function_name, "fetch_sub") == 0) {
+          if (call->argument_count != 1) {
+            type_checker_set_error_at_location(checker, expression->location,
+                "Atomic.%s() takes exactly 1 argument", call->function_name);
+            return NULL;
+          }
+          if (!type_checker_infer_type(checker, call->arguments[0]))
+            return NULL;
+          return obj_type->base_type ? obj_type->base_type : checker->builtin_int64;
+        }
+        // atomic.cas(expected, desired) -> T (old value)
+        if (strcmp(call->function_name, "cas") == 0) {
+          if (call->argument_count != 2) {
+            type_checker_set_error_at_location(checker, expression->location,
+                "Atomic.cas() takes exactly 2 arguments");
+            return NULL;
+          }
+          for (size_t i = 0; i < 2; i++)
+            if (!type_checker_infer_type(checker, call->arguments[i]))
+              return NULL;
+          return obj_type->base_type ? obj_type->base_type : checker->builtin_int64;
+        }
+        type_checker_set_error_at_location(checker, expression->location,
+            "Unknown method on Atomic<T>: '%s'", call->function_name);
+        return NULL;
+      }
+
+      if (obj_type->kind == TYPE_SENDER) {
+        // tx.send(val) -> void
+        if (strcmp(call->function_name, "send") == 0) {
+          if (call->argument_count != 1) {
+            type_checker_set_error_at_location(checker, expression->location,
+                "Sender.send() takes exactly 1 argument");
+            return NULL;
+          }
+          if (!type_checker_infer_type(checker, call->arguments[0]))
+            return NULL;
+          return checker->builtin_void;
+        }
+        type_checker_set_error_at_location(checker, expression->location,
+            "Unknown method on Sender<T>: '%s'", call->function_name);
+        return NULL;
+      }
+
+      if (obj_type->kind == TYPE_RECEIVER) {
+        // rx.recv() -> T
+        if (strcmp(call->function_name, "recv") == 0) {
+          if (call->argument_count != 0) {
+            type_checker_set_error_at_location(checker, expression->location,
+                "Receiver.recv() takes no arguments");
+            return NULL;
+          }
+          return obj_type->base_type ? obj_type->base_type : checker->builtin_void;
+        }
+        // rx.try_recv() -> T (returns default-zero if empty; future: Option<T>)
+        if (strcmp(call->function_name, "try_recv") == 0) {
+          if (call->argument_count != 0) {
+            type_checker_set_error_at_location(checker, expression->location,
+                "Receiver.try_recv() takes no arguments");
+            return NULL;
+          }
+          return obj_type->base_type ? obj_type->base_type : checker->builtin_void;
+        }
+        type_checker_set_error_at_location(checker, expression->location,
+            "Unknown method on Receiver<T>: '%s'", call->function_name);
+        return NULL;
+      }
+    }
+
+    // Static methods: Mutex.new(), Atomic.new()
+    if (!call->object && call->function_name &&
+        strcmp(call->function_name, "new") == 0 &&
+        call->type_arg_count == 0 && call->argument_count <= 1) {
+      // Handled in IR lowering — the parser turns Mutex.new() into a call
+      // with function_name="new" and object=identifier("Mutex"). We can't
+      // reach here with object==NULL for those cases; but if somehow we do,
+      // fall through to symbol lookup which will fail gracefully.
+    }
+
+    // channel() / channel(N) builtin — returns (Sender<T>, Receiver<T>) pair
+    // We model it as returning void* since the pair is handled structurally
+    // in IR lowering; the user writes: var (tx, rx): (Sender<T>, Receiver<T>) = channel()
+    if (call->function_name &&
+        strcmp(call->function_name, "channel") == 0) {
+      if (call->argument_count > 1) {
+        type_checker_set_error_at_location(checker, expression->location,
+            "channel() expects 0 or 1 arguments (capacity)");
+        return NULL;
+      }
+      if (call->argument_count == 1 &&
+          !type_checker_infer_type(checker, call->arguments[0])) {
+        return NULL;
+      }
+      // Type is resolved from the variable declaration annotation;
+      // return an opaque cstring* placeholder that IR lowering replaces.
+      return checker->builtin_cstring;
+    }
+
     Symbol *func_symbol =
         symbol_table_lookup(checker->symbol_table, call->function_name);
     if (!func_symbol) {
@@ -1479,6 +2052,38 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       return fp_type->fn_return_type;
     }
 
+    if (func_symbol->kind == SYMBOL_TAGGED_ENUM_CONSTRUCTOR) {
+      Type *enum_type = func_symbol->data.constructor.enum_type;
+      Type *payload_type = func_symbol->data.constructor.payload_type;
+      size_t expected_args = payload_type ? 1 : 0;
+
+      if (call->argument_count != expected_args) {
+        char error_msg[512];
+        snprintf(error_msg, sizeof(error_msg),
+                 "Constructor '%s' expects %llu arguments, got %llu",
+                 call->function_name, (unsigned long long)expected_args,
+                 (unsigned long long)call->argument_count);
+        type_checker_set_error_at_location(checker, expression->location,
+                                           error_msg);
+        return NULL;
+      }
+
+      if (payload_type && call->argument_count == 1) {
+        Type *arg_type = type_checker_infer_type(checker, call->arguments[0]);
+        if (!arg_type) {
+          return NULL;
+        }
+        if (!type_checker_is_assignable(checker, payload_type, arg_type)) {
+          type_checker_report_type_mismatch(checker,
+                                            call->arguments[0]->location,
+                                            payload_type->name, arg_type->name);
+          return NULL;
+        }
+      }
+
+      return enum_type;
+    }
+
     if (func_symbol->kind != SYMBOL_FUNCTION) {
       const char *symbol_type =
           (func_symbol->kind == SYMBOL_VARIABLE) ? "variable"
@@ -1517,12 +2122,12 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       int is_null_pointer_arg =
           (param_type && param_type->kind == TYPE_POINTER &&
            type_checker_is_null_pointer_constant(call->arguments[i]));
-      // Allow implicit string literal -> cstring coercion.
-      // A string literal's .chars is always a valid null-terminated pointer.
+      // Allow implicit string -> cstring coercion on extern calls.
+      // Strings are backed by a null-terminated chars pointer suitable for C.
       int is_string_to_cstring =
-          (param_type && param_type->name &&
-           strcmp(param_type->name, "cstring") == 0 &&
-           call->arguments[i]->type == AST_STRING_LITERAL);
+          (func_symbol->is_extern && param_type && param_type->name &&
+           strcmp(param_type->name, "cstring") == 0 && arg_type &&
+           arg_type->kind == TYPE_STRING);
       if (!is_null_pointer_arg && !is_string_to_cstring &&
           !type_checker_is_assignable(checker, param_type, arg_type)) {
         type_checker_report_type_mismatch(checker, call->arguments[i]->location,
@@ -1800,6 +2405,34 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     return target_type;
   }
 
+  case AST_SPAWN_EXPRESSION: {
+    SpawnExpression *spawn = (SpawnExpression *)expression->data;
+    if (!spawn || !spawn->call) {
+      type_checker_set_error_at_location(checker, expression->location,
+                                         "Invalid spawn expression");
+      return NULL;
+    }
+    // Type-check the inner call so any argument errors surface
+    Type *call_return = type_checker_infer_type(checker, spawn->call);
+    if (!call_return)
+      return NULL;
+    // Build Thread<ReturnType>
+    const char *ret_name = call_return->name ? call_return->name : "void";
+    size_t tname_len = strlen("Thread<") + strlen(ret_name) + 2;
+    char *thread_name = malloc(tname_len);
+    if (!thread_name)
+      return NULL;
+    snprintf(thread_name, tname_len, "Thread<%s>", ret_name);
+    Type *t = type_create(TYPE_THREAD, thread_name);
+    free(thread_name);
+    if (!t)
+      return NULL;
+    t->base_type = call_return;
+    t->size = 8;
+    t->alignment = 8;
+    return t;
+  }
+
   default:
     return NULL;
   }
@@ -1841,6 +2474,13 @@ void type_checker_init_builtin_types(TypeChecker *checker) {
   checker->builtin_uint16 = type_create(TYPE_UINT16, "uint16");
   checker->builtin_uint32 = type_create(TYPE_UINT32, "uint32");
   checker->builtin_uint64 = type_create(TYPE_UINT64, "uint64");
+
+  // Create first-class bool type (1-byte integer, distinct from uint8)
+  checker->builtin_bool = type_create(TYPE_BOOL, "bool");
+  if (checker->builtin_bool) {
+    checker->builtin_bool->size = 1;
+    checker->builtin_bool->alignment = 1;
+  }
 
   // Create built-in floating-point types
   checker->builtin_float32 = type_create(TYPE_FLOAT32, "float32");
@@ -1884,6 +2524,25 @@ void type_checker_init_builtin_types(TypeChecker *checker) {
     checker->builtin_void->size = 0;
     checker->builtin_void->alignment = 1;
   }
+
+  // Register 'true' and 'false' as global bool constants so user code can
+  // reference them as plain identifiers without any extra keyword machinery.
+  if (checker->builtin_bool && checker->symbol_table) {
+    Symbol *true_sym =
+        symbol_create("true", SYMBOL_CONSTANT, checker->builtin_bool);
+    if (true_sym) {
+      true_sym->data.constant.value = 1;
+      true_sym->is_initialized = 1;
+      symbol_table_insert(checker->symbol_table, true_sym);
+    }
+    Symbol *false_sym =
+        symbol_create("false", SYMBOL_CONSTANT, checker->builtin_bool);
+    if (false_sym) {
+      false_sym->data.constant.value = 0;
+      false_sym->is_initialized = 1;
+      symbol_table_insert(checker->symbol_table, false_sym);
+    }
+  }
 }
 
 Type *type_checker_get_builtin_type(TypeChecker *checker, TypeKind kind) {
@@ -1907,6 +2566,8 @@ Type *type_checker_get_builtin_type(TypeChecker *checker, TypeKind kind) {
     return checker->builtin_uint32;
   case TYPE_UINT64:
     return checker->builtin_uint64;
+  case TYPE_BOOL:
+    return checker->builtin_bool;
   case TYPE_FLOAT32:
     return checker->builtin_float32;
   case TYPE_FLOAT64:
@@ -2145,6 +2806,8 @@ Type *type_checker_get_type_by_name(TypeChecker *checker, const char *name) {
     return NULL;
 
   // Check built-in types by name
+  if (strcmp(name, "bool") == 0)
+    return checker->builtin_bool;
   if (strcmp(name, "int8") == 0)
     return checker->builtin_int8;
   if (strcmp(name, "int16") == 0)
@@ -2171,6 +2834,35 @@ Type *type_checker_get_type_by_name(TypeChecker *checker, const char *name) {
     return checker->builtin_cstring;
   if (strcmp(name, "void") == 0)
     return checker->builtin_void;
+
+  if (strncmp(name, "Future<", 7) == 0) {
+    Type *future_type = type_checker_parse_future_type(checker, name);
+    if (future_type) {
+      return future_type;
+    }
+  }
+
+  // Thread generic types
+  {
+    static const struct { const char *prefix; TypeKind kind; } thread_types[] = {
+      { "Thread<",   TYPE_THREAD   },
+      { "Mutex<",    TYPE_MUTEX    },
+      { "Guard<",    TYPE_GUARD    },
+      { "Atomic<",   TYPE_ATOMIC   },
+      { "Sender<",   TYPE_SENDER   },
+      { "Receiver<", TYPE_RECEIVER },
+    };
+    for (int i = 0; i < 6; i++) {
+      if (strncmp(name, thread_types[i].prefix,
+                  strlen(thread_types[i].prefix)) == 0) {
+        Type *t = type_checker_parse_generic1_type(checker, name,
+                                                   thread_types[i].prefix,
+                                                   thread_types[i].kind);
+        if (t)
+          return t;
+      }
+    }
+  }
 
   // Check for function pointer types: fn(param1,param2)->returntype
   if (strncmp(name, "fn(", 3) == 0) {
@@ -2201,6 +2893,37 @@ Type *type_checker_get_type_by_name(TypeChecker *checker, const char *name) {
     return struct_symbol->type;
   }
 
+  // Check for generic enum instantiation: "Option<int32>", "Result<int64,string>"
+  // Syntax stored by the parser as "Name<arg>" or "Name<arg1,arg2>"
+  const char *lt = strchr(name, '<');
+  if (lt && name[strlen(name) - 1] == '>') {
+    size_t base_len = (size_t)(lt - name);
+    char *base_name = malloc(base_len + 1);
+    if (base_name) {
+      memcpy(base_name, name, base_len);
+      base_name[base_len] = '\0';
+      // Extract the single type argument (first one, up to ',' or '>')
+      const char *arg_start = lt + 1;
+      const char *arg_end = strchr(arg_start, ',');
+      if (!arg_end)
+        arg_end = name + strlen(name) - 1; // points to '>'
+      size_t arg_len = (size_t)(arg_end - arg_start);
+      char *arg_str = malloc(arg_len + 1);
+      if (arg_str) {
+        memcpy(arg_str, arg_start, arg_len);
+        arg_str[arg_len] = '\0';
+        Type *result =
+            type_checker_instantiate_generic_enum(checker, base_name, arg_str);
+        free(arg_str);
+        free(base_name);
+        if (result)
+          return result;
+      } else {
+        free(base_name);
+      }
+    }
+  }
+
   return NULL;
 }
 
@@ -2217,6 +2940,7 @@ int type_checker_is_integer_type(Type *type) {
   case TYPE_UINT16:
   case TYPE_UINT32:
   case TYPE_UINT64:
+  case TYPE_BOOL:
   case TYPE_ENUM:
     return 1;
   default:
@@ -2375,6 +3099,12 @@ int type_checker_is_cast_valid(Type *from, Type *to) {
     return 1;
   }
 
+  // Pointer ↔ future
+  if ((from->kind == TYPE_POINTER && to->kind == TYPE_FUTURE) ||
+      (from->kind == TYPE_FUTURE && to->kind == TYPE_POINTER)) {
+    return 1;
+  }
+
   // Integer ↔ function pointer
   if ((type_checker_is_integer_type(from) &&
        to->kind == TYPE_FUNCTION_POINTER) ||
@@ -2383,9 +3113,19 @@ int type_checker_is_cast_valid(Type *from, Type *to) {
     return 1;
   }
 
+  // Integer ↔ future
+  if ((type_checker_is_integer_type(from) && to->kind == TYPE_FUTURE) ||
+      (from->kind == TYPE_FUTURE && type_checker_is_integer_type(to))) {
+    return 1;
+  }
+
   // Function pointer ↔ function pointer
   if (from->kind == TYPE_FUNCTION_POINTER &&
       to->kind == TYPE_FUNCTION_POINTER) {
+    return 1;
+  }
+
+  if (from->kind == TYPE_FUTURE && to->kind == TYPE_FUTURE) {
     return 1;
   }
 
@@ -2489,10 +3229,11 @@ int type_checker_validate_function_call(TypeChecker *checker,
     int is_null_pointer_arg =
         (param_type && param_type->kind == TYPE_POINTER &&
          type_checker_is_null_pointer_constant(call->arguments[i]));
-    // Allow implicit string literal -> cstring coercion.
-    int is_string_to_cstring = (param_type && param_type->name &&
+    // Allow implicit string -> cstring coercion on extern calls.
+    int is_string_to_cstring = (func_symbol->is_extern && param_type &&
+                                param_type->name &&
                                 strcmp(param_type->name, "cstring") == 0 &&
-                                call->arguments[i]->type == AST_STRING_LITERAL);
+                                arg_type && arg_type->kind == TYPE_STRING);
     if (!is_null_pointer_arg && !is_string_to_cstring &&
         !type_checker_is_assignable(checker, param_type, arg_type)) {
       type_checker_set_error(
@@ -2636,6 +3377,368 @@ int type_checker_process_struct_declaration(TypeChecker *checker,
   return 1;
 }
 
+// ---------------------------------------------------------------------------
+// Helper: build a concrete TYPE_TAGGED_ENUM type and register its constructors.
+// Called for plain (non-generic) tagged enum declarations and from the
+// generic-instantiation path when we monomorphize "Option<int32>" on demand.
+//
+// The memory layout is:
+//   offset 0              : int32 _tag  (4 bytes)
+//   offset data_offset    : payload union (largest payload, alignment-padded)
+// ---------------------------------------------------------------------------
+static Type *type_checker_build_tagged_enum_type(TypeChecker *checker,
+                                                  const char *type_name,
+                                                  EnumDeclaration *enum_decl) {
+  if (!checker || !type_name || !enum_decl)
+    return NULL;
+
+  // Determine the max payload size and alignment
+  size_t max_payload_size = 0;
+  size_t max_payload_align = 1;
+  for (size_t i = 0; i < enum_decl->variant_count; i++) {
+    const char *pt = enum_decl->variants[i].payload_type;
+    if (!pt)
+      continue;
+    Type *payload_ty = type_checker_get_type_by_name(checker, pt);
+    if (!payload_ty)
+      continue;
+    if (payload_ty->size > max_payload_size)
+      max_payload_size = payload_ty->size;
+    if (payload_ty->alignment > max_payload_align)
+      max_payload_align = payload_ty->alignment;
+  }
+
+  // data starts at first offset >= 4 that satisfies alignment of payload
+  size_t data_align = max_payload_align < 4 ? 4 : max_payload_align;
+  // align_up(4, data_align) – tag is 4 bytes, then pad to data_align
+  size_t data_offset = (4 + data_align - 1) & ~(data_align - 1);
+  size_t total_size = max_payload_size > 0 ? data_offset + max_payload_size
+                                           : data_offset;
+  // Round up total to alignment
+  total_size = (total_size + data_align - 1) & ~(data_align - 1);
+  if (total_size < 8) total_size = 8; // at least 8 bytes
+
+  Type *te = type_create(TYPE_TAGGED_ENUM, type_name);
+  if (!te)
+    return NULL;
+
+  te->size = total_size;
+  te->alignment = data_align;
+  te->tagged_variant_count = enum_decl->variant_count;
+  te->tagged_data_offset = data_offset;
+  te->tagged_data_size = max_payload_size;
+
+  te->tagged_variant_names =
+      malloc(enum_decl->variant_count * sizeof(char *));
+  te->tagged_variant_tags =
+      malloc(enum_decl->variant_count * sizeof(int));
+  te->tagged_variant_payloads =
+      malloc(enum_decl->variant_count * sizeof(Type *));
+
+  if (!te->tagged_variant_names || !te->tagged_variant_tags ||
+      !te->tagged_variant_payloads) {
+    type_destroy(te);
+    return NULL;
+  }
+
+  for (size_t i = 0; i < enum_decl->variant_count; i++) {
+    te->tagged_variant_names[i] =
+        strdup(enum_decl->variants[i].name);
+    te->tagged_variant_tags[i] = (int)i;
+    const char *pt = enum_decl->variants[i].payload_type;
+    te->tagged_variant_payloads[i] =
+        pt ? type_checker_get_type_by_name(checker, pt) : NULL;
+  }
+
+  return te;
+}
+
+static int type_checker_process_tagged_enum(TypeChecker *checker,
+                                            ASTNode *enum_decl_node) {
+  EnumDeclaration *enum_decl = (EnumDeclaration *)enum_decl_node->data;
+
+  Type *te =
+      type_checker_build_tagged_enum_type(checker, enum_decl->name, enum_decl);
+  if (!te) {
+    type_checker_set_error_at_location(checker, enum_decl_node->location,
+                                       "Failed to create tagged enum type '%s'",
+                                       enum_decl->name);
+    return 0;
+  }
+
+  Symbol *enum_sym =
+      symbol_create(enum_decl->name, SYMBOL_ENUM, te);
+  if (!enum_sym) {
+    type_destroy(te);
+    return 0;
+  }
+  if (!symbol_table_declare(checker->symbol_table, enum_sym)) {
+    symbol_destroy(enum_sym);
+    return 0;
+  }
+
+  // Register a constructor symbol for each variant
+  for (size_t i = 0; i < enum_decl->variant_count; i++) {
+    Symbol *ctor = symbol_create(enum_decl->variants[i].name,
+                                 SYMBOL_TAGGED_ENUM_CONSTRUCTOR, te);
+    if (!ctor)
+      return 0;
+    ctor->data.constructor.enum_type = te;
+    ctor->data.constructor.tag_value = (int)i;
+    ctor->data.constructor.payload_type = te->tagged_variant_payloads[i];
+    ctor->is_initialized = 1;
+    symbol_table_insert(checker->symbol_table, ctor);
+  }
+
+  return 1;
+}
+
+// ---------------------------------------------------------------------------
+// Instantiate a generic enum template for a concrete type argument string.
+// e.g. "Option<int32>" → creates and registers Option__int32 if needed.
+// ---------------------------------------------------------------------------
+static Type *type_checker_instantiate_generic_enum(TypeChecker *checker,
+                                                    const char *generic_name,
+                                                    const char *type_arg_str) {
+  if (!checker || !generic_name || !type_arg_str)
+    return NULL;
+
+  // Build mangled name  e.g. Option__int32
+  size_t mangled_len =
+      strlen(generic_name) + 2 + strlen(type_arg_str) + 1;
+  char *mangled = malloc(mangled_len);
+  if (!mangled)
+    return NULL;
+  snprintf(mangled, mangled_len, "%s__%s", generic_name, type_arg_str);
+
+  // Return cached type if already instantiated
+  Type *existing = type_checker_get_type_by_name(checker, mangled);
+  if (existing) {
+    free(mangled);
+    return existing;
+  }
+
+  // Resolve the type argument
+  Type *arg_type = type_checker_get_type_by_name(checker, type_arg_str);
+  if (!arg_type) {
+    free(mangled);
+    return NULL;
+  }
+
+  // Find the matching generic enum template
+  ASTNode *template_node = NULL;
+  for (size_t i = 0; i < checker->generic_enum_template_count; i++) {
+    ASTNode *n = checker->generic_enum_templates[i];
+    if (!n) continue;
+    EnumDeclaration *ed = (EnumDeclaration *)n->data;
+    if (ed && ed->name && strcmp(ed->name, generic_name) == 0) {
+      template_node = n;
+      break;
+    }
+  }
+  if (!template_node) {
+    free(mangled);
+    return NULL;
+  }
+
+  EnumDeclaration *tmpl = (EnumDeclaration *)template_node->data;
+
+  // Build a transient EnumDeclaration with T substituted by the concrete type
+  EnumVariant *concrete_variants =
+      malloc(tmpl->variant_count * sizeof(EnumVariant));
+  if (!concrete_variants) {
+    free(mangled);
+    return NULL;
+  }
+  for (size_t i = 0; i < tmpl->variant_count; i++) {
+    concrete_variants[i].name = tmpl->variants[i].name;
+    concrete_variants[i].value = NULL;
+    // Substitute type parameter: if payload_type == type_param[0] → use arg
+    const char *orig_pt = tmpl->variants[i].payload_type;
+    if (orig_pt && tmpl->type_param_count > 0 &&
+        strcmp(orig_pt, tmpl->type_params[0]) == 0) {
+      concrete_variants[i].payload_type = (char *)type_arg_str;
+    } else {
+      concrete_variants[i].payload_type = (char *)orig_pt;
+    }
+  }
+
+  EnumDeclaration concrete_decl;
+  concrete_decl.name = mangled;
+  concrete_decl.variants = concrete_variants;
+  concrete_decl.variant_count = tmpl->variant_count;
+  concrete_decl.is_exported = 0;
+  concrete_decl.type_params = NULL;
+  concrete_decl.type_param_count = 0;
+
+  Type *te =
+      type_checker_build_tagged_enum_type(checker, mangled, &concrete_decl);
+  free(concrete_variants);
+
+  if (!te) {
+    free(mangled);
+    return NULL;
+  }
+
+  // Register type + constructors in symbol table
+  Symbol *enum_sym = symbol_create(mangled, SYMBOL_ENUM, te);
+  free(mangled);
+  if (!enum_sym) {
+    type_destroy(te);
+    return NULL;
+  }
+  symbol_table_insert(checker->symbol_table, enum_sym);
+
+  // Constructors use variant-qualified names: mangled__VariantName
+  for (size_t i = 0; i < tmpl->variant_count; i++) {
+    // Also register bare variant names if not already in scope
+    // (bare names are variant constructors for the first instantiation seen)
+    Symbol *existing_ctor = symbol_table_lookup(
+        checker->symbol_table, tmpl->variants[i].name);
+    if (!existing_ctor) {
+      Symbol *ctor = symbol_create(tmpl->variants[i].name,
+                                   SYMBOL_TAGGED_ENUM_CONSTRUCTOR, te);
+      if (ctor) {
+        ctor->data.constructor.enum_type = te;
+        ctor->data.constructor.tag_value = (int)i;
+        ctor->data.constructor.payload_type = te->tagged_variant_payloads[i];
+        ctor->is_initialized = 1;
+        symbol_table_insert(checker->symbol_table, ctor);
+      }
+    }
+  }
+
+  return te;
+}
+
+// ---------------------------------------------------------------------------
+// Type-check a match statement.
+// ---------------------------------------------------------------------------
+static int type_checker_check_match_statement(TypeChecker *checker,
+                                               ASTNode *statement) {
+  MatchStatement *match = (MatchStatement *)statement->data;
+  if (!match || !match->expression) {
+    type_checker_set_error_at_location(checker, statement->location,
+                                       "Invalid match statement");
+    return 0;
+  }
+
+  Type *subject_type = type_checker_infer_type(checker, match->expression);
+  if (!subject_type)
+    return 0;
+
+  if (subject_type->kind != TYPE_TAGGED_ENUM) {
+    type_checker_set_error_at_location(
+        checker, match->expression->location,
+        "match expression must be a tagged enum type, got '%s'",
+        subject_type->name);
+    return 0;
+  }
+
+  int seen_default = 0;
+  // Track which variant tags have been covered
+  int *covered = calloc(subject_type->tagged_variant_count, sizeof(int));
+  if (!covered) {
+    type_checker_set_error_at_location(checker, statement->location,
+                                       "Out of memory in match");
+    return 0;
+  }
+
+  for (size_t i = 0; i < match->arm_count; i++) {
+    MatchArm *arm = &match->arms[i];
+
+    if (arm->is_default) {
+      seen_default = 1;
+    } else {
+      // Find the variant index
+      int variant_idx = -1;
+      for (size_t v = 0; v < subject_type->tagged_variant_count; v++) {
+        if (subject_type->tagged_variant_names[v] &&
+            strcmp(subject_type->tagged_variant_names[v],
+                   arm->variant_name) == 0) {
+          variant_idx = (int)v;
+          break;
+        }
+      }
+      if (variant_idx < 0) {
+        type_checker_set_error_at_location(
+            checker, statement->location,
+            "Unknown variant '%s' for type '%s' in match",
+            arm->variant_name, subject_type->name);
+        free(covered);
+        return 0;
+      }
+      if (covered[variant_idx]) {
+        type_checker_set_error_at_location(
+            checker, statement->location,
+            "Duplicate match arm for variant '%s'", arm->variant_name);
+        free(covered);
+        return 0;
+      }
+      covered[variant_idx] = 1;
+
+      // If the arm has a binding, introduce it as a local variable
+      if (arm->binding_name) {
+        Type *payload =
+            subject_type->tagged_variant_payloads[variant_idx];
+        if (!payload) {
+          type_checker_set_error_at_location(
+              checker, statement->location,
+              "Variant '%s' carries no payload but binding '%s' was given",
+              arm->variant_name, arm->binding_name);
+          free(covered);
+          return 0;
+        }
+        symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK);
+        Symbol *binding =
+            symbol_create(arm->binding_name, SYMBOL_VARIABLE, payload);
+        if (binding) {
+          binding->is_initialized = 1;
+          symbol_table_declare(checker->symbol_table, binding);
+        }
+        int ok = arm->body ? type_checker_check_statement(checker, arm->body)
+                           : 1;
+        symbol_table_exit_scope(checker->symbol_table);
+        if (!ok) {
+          free(covered);
+          return 0;
+        }
+        continue;
+      }
+    }
+
+    // No binding: just check the body
+    if (arm->body && !type_checker_check_statement(checker, arm->body)) {
+      free(covered);
+      return 0;
+    }
+  }
+
+  // Exhaustiveness check
+  if (!seen_default) {
+    for (size_t v = 0; v < subject_type->tagged_variant_count; v++) {
+      if (!covered[v]) {
+        type_checker_set_error_at_location(
+            checker, statement->location,
+            "Non-exhaustive match on '%s': variant '%s' not covered; "
+            "add a 'case %s:' arm or a 'default:' arm",
+            subject_type->name,
+            subject_type->tagged_variant_names[v]
+                ? subject_type->tagged_variant_names[v]
+                : "?",
+            subject_type->tagged_variant_names[v]
+                ? subject_type->tagged_variant_names[v]
+                : "?");
+        free(covered);
+        return 0;
+      }
+    }
+  }
+
+  free(covered);
+  return 1;
+}
+
 int type_checker_process_enum_declaration(TypeChecker *checker,
                                           ASTNode *enum_decl_node) {
   if (!checker || !enum_decl_node ||
@@ -2650,6 +3753,29 @@ int type_checker_process_enum_declaration(TypeChecker *checker,
     return 0;
   }
 
+  // If this enum has type parameters it's a generic template — store the AST
+  // node for later monomorphization and do not register a concrete type now.
+  if (enum_decl->type_param_count > 0) {
+    ASTNode **new_tmpl = realloc(
+        checker->generic_enum_templates,
+        (checker->generic_enum_template_count + 1) * sizeof(ASTNode *));
+    if (!new_tmpl)
+      return 0;
+    checker->generic_enum_templates = new_tmpl;
+    checker->generic_enum_templates[checker->generic_enum_template_count++] =
+        enum_decl_node;
+    return 1;
+  }
+
+  // Check whether any variant carries a payload — if so, it's a tagged enum.
+  int is_tagged = 0;
+  for (size_t i = 0; i < enum_decl->variant_count; i++) {
+    if (enum_decl->variants[i].payload_type) {
+      is_tagged = 1;
+      break;
+    }
+  }
+
   // Check for duplicate type declaration
   if (type_checker_get_type_by_name(checker, enum_decl->name)) {
     type_checker_set_error_at_location(checker, enum_decl_node->location,
@@ -2658,29 +3784,32 @@ int type_checker_process_enum_declaration(TypeChecker *checker,
     return 0;
   }
 
-  // Create enum type (aliased to INT64 for simplicity in Methlang)
+  if (is_tagged) {
+    return type_checker_process_tagged_enum(checker, enum_decl_node);
+  }
+
+  // Plain (integer-valued) enum.
   Type *new_enum_type = type_create(TYPE_ENUM, enum_decl->name);
   if (!new_enum_type) {
     type_checker_set_error_at_location(checker, enum_decl_node->location,
                                        "Failed to create enum type");
     return 0;
   }
+  new_enum_type->size = 8;
+  new_enum_type->alignment = 8;
 
-  // Create and register the enum type symbol
   Symbol *enum_symbol =
       symbol_create(enum_decl->name, SYMBOL_ENUM, new_enum_type);
   if (!enum_symbol) {
     type_destroy(new_enum_type);
     return 0;
   }
-
   if (!symbol_table_declare(checker->symbol_table, enum_symbol)) {
     symbol_destroy(enum_symbol);
     return 0;
   }
 
   long long current_val = 0;
-
   for (size_t i = 0; i < enum_decl->variant_count; i++) {
     EnumVariant *variant = &enum_decl->variants[i];
 
@@ -2704,7 +3833,6 @@ int type_checker_process_enum_declaration(TypeChecker *checker,
       }
     }
 
-    // Check if variant name is already taken
     if (symbol_table_lookup_current_scope(checker->symbol_table,
                                           variant->name)) {
       type_checker_report_duplicate_declaration(
@@ -2713,13 +3841,11 @@ int type_checker_process_enum_declaration(TypeChecker *checker,
     }
 
     Symbol *sym = symbol_create(variant->name, SYMBOL_CONSTANT, new_enum_type);
-    if (!sym) {
+    if (!sym)
       return 0;
-    }
     sym->data.constant.value = current_val;
     sym->is_initialized = 1;
     symbol_table_insert(checker->symbol_table, sym);
-
     current_val++;
   }
 
@@ -2743,6 +3869,20 @@ int type_checker_process_declaration(TypeChecker *checker,
         checker, declaration->location,
         "Errdefer statement outside of a function");
     return 0;
+
+  case AST_FUNCTION_CALL: {
+    CallExpression *call = (CallExpression *)declaration->data;
+    if (call && call->function_name &&
+        strcmp(call->function_name, "static_assert") == 0) {
+      return type_checker_validate_static_assert(checker, call,
+                                                 declaration->location);
+    }
+    type_checker_set_error_at_location(
+        checker, declaration->location,
+        "Unsupported top-level construct in declaration context");
+    return 0;
+  }
+
   case AST_VAR_DECLARATION: {
     VarDeclaration *var_decl = (VarDeclaration *)declaration->data;
     if (!var_decl || !var_decl->name) {
@@ -3570,12 +4710,13 @@ void type_checker_report_type_mismatch(TypeChecker *checker,
   checker->error_message = strdup(error_msg);
 
   if (checker->error_reporter) {
-    const char *suggestion =
+    char *suggestion =
         error_reporter_suggest_for_type_mismatch(expected, actual);
     SourceSpan span = source_span_from_location(location, 1);
     if (suggestion) {
       error_reporter_add_error_with_span_and_suggestion(
           checker->error_reporter, ERROR_TYPE, span, error_msg, suggestion);
+      free(suggestion);
     } else {
       error_reporter_add_error_with_span(checker->error_reporter, ERROR_TYPE,
                                          span, error_msg);
@@ -3600,8 +4741,17 @@ void type_checker_report_undefined_symbol(TypeChecker *checker,
 
   if (checker->error_reporter) {
     char suggestion[256];
-    snprintf(suggestion, sizeof(suggestion), "declare '%s' before using it",
-             symbol_name);
+    char *closest = symbol_table_suggest_similar(checker->symbol_table,
+                                                 symbol_name, NULL, 0);
+    if (closest) {
+      snprintf(suggestion, sizeof(suggestion),
+               "did you mean '%s'? (or declare '%s' before using it)", closest,
+               symbol_name);
+      free(closest);
+    } else {
+      snprintf(suggestion, sizeof(suggestion), "declare '%s' before using it",
+               symbol_name);
+    }
     SourceSpan span = source_span_from_location(location, strlen(symbol_name));
     error_reporter_add_error_with_span_and_suggestion(
         checker->error_reporter, ERROR_SEMANTIC, span, error_msg, suggestion);
@@ -3746,6 +4896,12 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     // Function call as statement (no return value used)
     Type *return_type = type_checker_infer_type(checker, statement);
     return return_type != NULL; // Error already reported if NULL
+  }
+
+  case AST_SPAWN_EXPRESSION: {
+    // spawn foo() used as a fire-and-forget statement
+    Type *t = type_checker_infer_type(checker, statement);
+    return t != NULL;
   }
 
   case AST_RETURN_STATEMENT: {
@@ -4131,8 +5287,20 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
         }
 
         long long case_value = 0;
-        if (!type_checker_eval_integer_constant(case_clause->value,
-                                                &case_value)) {
+        int case_eval_ok =
+            type_checker_eval_integer_constant(case_clause->value, &case_value);
+        // Also resolve named constants (enum variants, bool true/false)
+        if (!case_eval_ok &&
+            case_clause->value->type == AST_IDENTIFIER) {
+          Identifier *cid = (Identifier *)case_clause->value->data;
+          Symbol *csym =
+              symbol_table_lookup(checker->symbol_table, cid->name);
+          if (csym && csym->kind == SYMBOL_CONSTANT) {
+            case_value = csym->data.constant.value;
+            case_eval_ok = 1;
+          }
+        }
+        if (!case_eval_ok) {
           type_checker_set_error_at_location(
               checker, case_clause->value->location,
               "Case value must be a compile-time integer constant expression");
@@ -4178,9 +5346,58 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     type_checker_init_tracker_restore(checker, init_snapshot,
                                       init_snapshot_count);
     free(init_snapshot);
+
+    // Exhaustiveness check for enum types: every variant must be covered or
+    // there must be a default case.
+    if (switch_type->kind == TYPE_ENUM && !seen_default) {
+      Scope *global = checker->symbol_table->global_scope;
+      for (size_t i = 0; i < global->symbol_count; i++) {
+        Symbol *sym = global->symbols[i];
+        if (!sym || sym->kind != SYMBOL_CONSTANT || sym->type != switch_type) {
+          continue;
+        }
+        int covered = 0;
+        for (size_t j = 0; j < case_value_count; j++) {
+          if (case_values[j] == sym->data.constant.value) {
+            covered = 1;
+            break;
+          }
+        }
+        if (!covered) {
+          type_checker_set_error_at_location(
+              checker, statement->location,
+              "Non-exhaustive switch on '%s': variant '%s' not covered; "
+              "add a 'case %s:' arm or a 'default:' arm",
+              switch_type->name, sym->name, sym->name);
+          free(case_values);
+          return 0;
+        }
+      }
+    }
+
+    // Exhaustiveness check for bool: must cover both true (1) and false (0).
+    if (switch_type->kind == TYPE_BOOL && !seen_default) {
+      int has_true = 0, has_false = 0;
+      for (size_t i = 0; i < case_value_count; i++) {
+        if (case_values[i] == 1) has_true = 1;
+        if (case_values[i] == 0) has_false = 1;
+      }
+      if (!has_true || !has_false) {
+        type_checker_set_error_at_location(
+            checker, statement->location,
+            "Non-exhaustive switch over 'bool': must cover both 'true' and "
+            "'false', or add a 'default:' arm");
+        free(case_values);
+        return 0;
+      }
+    }
+
     free(case_values);
     return 1;
   }
+
+  case AST_MATCH_STATEMENT:
+    return type_checker_check_match_statement(checker, statement);
 
   case AST_BREAK_STATEMENT:
     if (checker->loop_depth <= 0 && checker->switch_depth <= 0) {
@@ -4396,7 +5613,7 @@ Type *type_checker_check_binary_expression(TypeChecker *checker,
         return NULL;
       }
 
-      return checker->builtin_int32;
+      return checker->builtin_bool;
     }
 
     // Both operands should be comparable (same type or compatible)
@@ -4408,25 +5625,27 @@ Type *type_checker_check_binary_expression(TypeChecker *checker,
       return NULL;
     }
 
-    return checker->builtin_int32; // Comparison result is boolean (int32)
+    return checker->builtin_bool;
   }
 
   // Logical operators
   if (strcmp(op, "&&") == 0 || strcmp(op, "||") == 0) {
-    // Both operands should be numeric (treated as boolean)
-    if (!type_checker_is_numeric_type(left_type)) {
+    // Both operands should be bool or any integer (treated as boolean)
+    int left_ok = type_checker_is_numeric_type(left_type) ||
+                  left_type->kind == TYPE_BOOL;
+    int right_ok = type_checker_is_numeric_type(right_type) ||
+                   right_type->kind == TYPE_BOOL;
+    if (!left_ok) {
       type_checker_report_type_mismatch(checker, binop->left->location,
-                                        "numeric type", left_type->name);
+                                        "bool or numeric type", left_type->name);
       return NULL;
     }
-
-    if (!type_checker_is_numeric_type(right_type)) {
+    if (!right_ok) {
       type_checker_report_type_mismatch(checker, binop->right->location,
-                                        "numeric type", right_type->name);
+                                        "bool or numeric type", right_type->name);
       return NULL;
     }
-
-    return checker->builtin_int32; // Logical result is boolean (int32)
+    return checker->builtin_bool;
   }
 
   // Unknown operator

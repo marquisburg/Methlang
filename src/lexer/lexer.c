@@ -167,6 +167,7 @@ Lexer *lexer_create(const char *source) {
   lexer->length = strlen(source);
   lexer->error_message = NULL;
   lexer->has_error = 0;
+  lexer->continuation_depth = 0;
 
   return lexer;
 }
@@ -187,6 +188,12 @@ Token lexer_next_token(Lexer *lexer) {
   while (lexer->position < lexer->length &&
          isspace(lexer->source[lexer->position])) {
     if (lexer->source[lexer->position] == '\n') {
+      if (lexer->continuation_depth > 0) {
+        lexer->position++;
+        lexer->line++;
+        lexer->column = 1;
+        continue;
+      }
       token.type = TOKEN_NEWLINE;
       token.value = NULL;
       token_set_lexeme(&token, &lexer->source[lexer->position], 1);
@@ -222,6 +229,46 @@ Token lexer_next_token(Lexer *lexer) {
     }
 
     // Recursively get next token after comment
+    return lexer_next_token(lexer);
+  }
+
+  // Block comment /* ... */ with nesting support
+  if (current == '/' && lexer->position + 1 < lexer->length &&
+      lexer->source[lexer->position + 1] == '*') {
+    size_t start_line = lexer->line;
+    size_t start_column = lexer->column;
+    lexer->position += 2;
+    lexer->column += 2;
+    int depth = 1;
+    while (lexer->position < lexer->length && depth > 0) {
+      char c = lexer->source[lexer->position];
+      if (c == '/' && lexer->position + 1 < lexer->length &&
+          lexer->source[lexer->position + 1] == '*') {
+        depth++;
+        lexer->position += 2;
+        lexer->column += 2;
+      } else if (c == '*' && lexer->position + 1 < lexer->length &&
+                 lexer->source[lexer->position + 1] == '/') {
+        depth--;
+        lexer->position += 2;
+        lexer->column += 2;
+      } else if (c == '\n') {
+        lexer->position++;
+        lexer->line++;
+        lexer->column = 1;
+      } else {
+        lexer->position++;
+        lexer->column++;
+      }
+    }
+    if (depth != 0) {
+      token.type = TOKEN_ERROR;
+      token.line = start_line;
+      token.column = start_column;
+      token.value = strdup("Unterminated block comment");
+      lexer_set_error(lexer, token.value);
+      return token;
+    }
     return lexer_next_token(lexer);
   }
 
@@ -270,6 +317,15 @@ Token lexer_next_token(Lexer *lexer) {
         lexer->column += 2;
         return token;
       } else if (lexer->source[lexer->position + 1] == '<') {
+        if (lexer->position + 2 < lexer->length &&
+            lexer->source[lexer->position + 2] == '=') {
+          token.type = TOKEN_LSHIFT_EQUALS;
+          token.value = strdup("<<=");
+          token_set_lexeme(&token, &lexer->source[lexer->position], 3);
+          lexer->position += 3;
+          lexer->column += 3;
+          return token;
+        }
         token.type = TOKEN_LSHIFT;
         token.value = strdup("<<");
         token_set_lexeme(&token, &lexer->source[lexer->position], 2);
@@ -290,6 +346,15 @@ Token lexer_next_token(Lexer *lexer) {
         lexer->column += 2;
         return token;
       } else if (lexer->source[lexer->position + 1] == '>') {
+        if (lexer->position + 2 < lexer->length &&
+            lexer->source[lexer->position + 2] == '=') {
+          token.type = TOKEN_RSHIFT_EQUALS;
+          token.value = strdup(">>=");
+          token_set_lexeme(&token, &lexer->source[lexer->position], 3);
+          lexer->position += 3;
+          lexer->column += 3;
+          return token;
+        }
         token.type = TOKEN_RSHIFT;
         token.value = strdup(">>");
         token_set_lexeme(&token, &lexer->source[lexer->position], 2);
@@ -302,9 +367,12 @@ Token lexer_next_token(Lexer *lexer) {
     break;
   case '(':
     token.type = TOKEN_LPAREN;
+    lexer->continuation_depth++;
     break;
   case ')':
     token.type = TOKEN_RPAREN;
+    if (lexer->continuation_depth > 0)
+      lexer->continuation_depth--;
     break;
   case '{':
     token.type = TOKEN_LBRACE;
@@ -314,14 +382,35 @@ Token lexer_next_token(Lexer *lexer) {
     break;
   case '[':
     token.type = TOKEN_LBRACKET;
+    lexer->continuation_depth++;
     break;
   case ']':
     token.type = TOKEN_RBRACKET;
+    if (lexer->continuation_depth > 0)
+      lexer->continuation_depth--;
     break;
   case '+':
+    if (lexer->position + 1 < lexer->length &&
+        lexer->source[lexer->position + 1] == '=') {
+      token.type = TOKEN_PLUS_EQUALS;
+      token.value = strdup("+=");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
+      lexer->position += 2;
+      lexer->column += 2;
+      return token;
+    }
     token.type = TOKEN_PLUS;
     break;
   case '*':
+    if (lexer->position + 1 < lexer->length &&
+        lexer->source[lexer->position + 1] == '=') {
+      token.type = TOKEN_STAR_EQUALS;
+      token.value = strdup("*=");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
+      lexer->position += 2;
+      lexer->column += 2;
+      return token;
+    }
     token.type = TOKEN_MULTIPLY;
     break;
   case '&':
@@ -329,6 +418,15 @@ Token lexer_next_token(Lexer *lexer) {
         lexer->source[lexer->position + 1] == '&') {
       token.type = TOKEN_AND_AND;
       token.value = strdup("&&");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
+      lexer->position += 2;
+      lexer->column += 2;
+      return token;
+    }
+    if (lexer->position + 1 < lexer->length &&
+        lexer->source[lexer->position + 1] == '=') {
+      token.type = TOKEN_AMP_EQUALS;
+      token.value = strdup("&=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -346,19 +444,55 @@ Token lexer_next_token(Lexer *lexer) {
       lexer->column += 2;
       return token;
     }
+    if (lexer->position + 1 < lexer->length &&
+        lexer->source[lexer->position + 1] == '=') {
+      token.type = TOKEN_PIPE_EQUALS;
+      token.value = strdup("|=");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
+      lexer->position += 2;
+      lexer->column += 2;
+      return token;
+    }
     token.type = TOKEN_PIPE;
     break;
   case '^':
+    if (lexer->position + 1 < lexer->length &&
+        lexer->source[lexer->position + 1] == '=') {
+      token.type = TOKEN_CARET_EQUALS;
+      token.value = strdup("^=");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
+      lexer->position += 2;
+      lexer->column += 2;
+      return token;
+    }
     token.type = TOKEN_CARET;
     break;
   case '~':
     token.type = TOKEN_TILDE;
     break;
   case '/':
-    // Note: comments (//) are already handled above before this switch
+    // Note: comments (//, /* */) are already handled above before this switch
+    if (lexer->position + 1 < lexer->length &&
+        lexer->source[lexer->position + 1] == '=') {
+      token.type = TOKEN_SLASH_EQUALS;
+      token.value = strdup("/=");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
+      lexer->position += 2;
+      lexer->column += 2;
+      return token;
+    }
     token.type = TOKEN_DIVIDE;
     break;
   case '%':
+    if (lexer->position + 1 < lexer->length &&
+        lexer->source[lexer->position + 1] == '=') {
+      token.type = TOKEN_PERCENT_EQUALS;
+      token.value = strdup("%=");
+      token_set_lexeme(&token, &lexer->source[lexer->position], 2);
+      lexer->position += 2;
+      lexer->column += 2;
+      return token;
+    }
     token.type = TOKEN_PERCENT;
     break;
   case '.':
@@ -384,6 +518,17 @@ Token lexer_next_token(Lexer *lexer) {
     token.type = TOKEN_ARROW;
     token.value = malloc(3);
     strcpy(token.value, "->");
+    token_set_lexeme(&token, &lexer->source[lexer->position], 2);
+    lexer->position += 2;
+    lexer->column += 2;
+    return token;
+  }
+
+  // Compound minus assignment
+  if (current == '-' && lexer->position + 1 < lexer->length &&
+      lexer->source[lexer->position + 1] == '=') {
+    token.type = TOKEN_MINUS_EQUALS;
+    token.value = strdup("-=");
     token_set_lexeme(&token, &lexer->source[lexer->position], 2);
     lexer->position += 2;
     lexer->column += 2;
@@ -594,6 +739,12 @@ Token lexer_next_token(Lexer *lexer) {
       token.type = TOKEN_STRUCT;
     else if (strcmp(token.value, "enum") == 0)
       token.type = TOKEN_ENUM;
+    else if (strcmp(token.value, "trait") == 0)
+      token.type = TOKEN_TRAIT;
+    else if (strcmp(token.value, "impl") == 0)
+      token.type = TOKEN_IMPL;
+    else if (strcmp(token.value, "where") == 0)
+      token.type = TOKEN_WHERE;
     else if (strcmp(token.value, "method") == 0)
       token.type = TOKEN_METHOD;
     else if (strcmp(token.value, "return") == 0)
@@ -628,6 +779,16 @@ Token lexer_next_token(Lexer *lexer) {
       token.type = TOKEN_NEW;
     else if (strcmp(token.value, "fn") == 0)
       token.type = TOKEN_FN;
+    else if (strcmp(token.value, "match") == 0)
+      token.type = TOKEN_MATCH;
+    else if (strcmp(token.value, "async") == 0)
+      token.type = TOKEN_ASYNC;
+    else if (strcmp(token.value, "await") == 0)
+      token.type = TOKEN_AWAIT;
+    else if (strcmp(token.value, "spawn") == 0)
+      token.type = TOKEN_SPAWN;
+    else if (strcmp(token.value, "channel") == 0)
+      token.type = TOKEN_CHANNEL;
 
     // Type keywords
     else if (strcmp(token.value, "int8") == 0)
@@ -861,12 +1022,14 @@ Token lexer_peek_token(Lexer *lexer) {
   size_t saved_position = lexer->position;
   size_t saved_line = lexer->line;
   size_t saved_column = lexer->column;
+  size_t saved_continuation_depth = lexer->continuation_depth;
 
   Token token = lexer_next_token(lexer);
 
   lexer->position = saved_position;
   lexer->line = saved_line;
   lexer->column = saved_column;
+  lexer->continuation_depth = saved_continuation_depth;
 
   return token;
 }
@@ -917,12 +1080,14 @@ Token *lexer_tokenize(Lexer *lexer, size_t *token_count) {
   lexer->position = 0;
   lexer->line = 1;
   lexer->column = 1;
+  lexer->continuation_depth = 0;
 
   // First pass: count tokens
   size_t count = 0;
   size_t saved_position = lexer->position;
   size_t saved_line = lexer->line;
   size_t saved_column = lexer->column;
+  size_t saved_continuation_depth = lexer->continuation_depth;
 
   Token token;
   do {
@@ -935,6 +1100,7 @@ Token *lexer_tokenize(Lexer *lexer, size_t *token_count) {
   lexer->position = saved_position;
   lexer->line = saved_line;
   lexer->column = saved_column;
+  lexer->continuation_depth = saved_continuation_depth;
 
   // Allocate token array
   Token *tokens = malloc(count * sizeof(Token));

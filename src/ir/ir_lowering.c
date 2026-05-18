@@ -1,4 +1,5 @@
 #include "ir.h"
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +8,7 @@
 typedef struct {
   char *break_label;
   char *continue_label;
+  char *user_label; // optional source-level label for labeled break/continue
 } IRControlFrame;
 
 typedef struct {
@@ -19,6 +21,10 @@ typedef struct {
   TypeChecker *type_checker;
   SymbolTable *symbol_table;
   int emit_runtime_checks;
+  /* Declared return type name of the function currently being lowered. Used
+   * to give a width-less float literal in `return <lit>;` the correct
+   * single/double precision (literals always infer to float64 otherwise). */
+  const char *current_return_type_name;
 } IRLoweringContext;
 
 typedef struct {
@@ -56,6 +62,10 @@ static int ir_emit_bounds_check(IRLoweringContext *context,
 static int ir_push_control_frame(IRLoweringContext *context,
                                  const char *break_label,
                                  const char *continue_label);
+static int ir_push_labeled_control_frame(IRLoweringContext *context,
+                                         const char *break_label,
+                                         const char *continue_label,
+                                         const char *user_label);
 static void ir_pop_control_frame(IRLoweringContext *context);
 static int ir_emit_deferred_calls_filtered(IRLoweringContext *context,
                                            IRFunction *function,
@@ -71,6 +81,10 @@ static int ir_emit_return_with_defers(IRLoweringContext *context,
                                       IRFunction *function,
                                       IRDeferScope *defers, IROperand *value,
                                       SourceLocation location);
+static int ir_named_type_float_bits(IRLoweringContext *context,
+                                    const char *type_name);
+static void ir_assign_apply_float_bits(IRInstruction *instruction,
+                                       IROperand *value, int bits);
 static int ir_emit_jump_instruction(IRLoweringContext *context,
                                     IRFunction *function, const char *label,
                                     SourceLocation location);
@@ -90,8 +104,34 @@ static int ir_emit_condition_true_branch(IRLoweringContext *context,
                                          IRFunction *function,
                                          ASTNode *expression,
                                          const char *true_label);
+static Type *ir_infer_expression_type(IRLoweringContext *context,
+                                      ASTNode *expression);
+static int ir_emit_address_of_symbol(IRLoweringContext *context,
+                                     IRFunction *function, const char *name,
+                                     SourceLocation location,
+                                     IROperand *out_address);
+static int ir_type_storage_size(Type *type);
+static int ir_type_array_element_stride(Type *element_type);
 static int ir_lower_switch_statement(IRLoweringContext *context,
                                      IRFunction *function, ASTNode *statement);
+static int ir_lower_match_statement(IRLoweringContext *context,
+                                    IRFunction *function, ASTNode *statement,
+                                    IRDeferScope *defers);
+static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
+                                                 IRFunction *function,
+                                                 ASTNode *expression,
+                                                 Symbol *constructor_symbol,
+                                                 IROperand *out_value);
+static int ir_lower_thread_method_call(IRLoweringContext *context,
+                                       IRFunction *function,
+                                       ASTNode *expression,
+                                       CallExpression *call,
+                                       Type *obj_type,
+                                       IROperand *out_value);
+static int ir_lower_spawn_expression(IRLoweringContext *context,
+                                     IRFunction *function,
+                                     ASTNode *expression,
+                                     IROperand *out_value);
 
 static char *ir_strdup_local(const char *text) {
   if (!text) {
@@ -148,6 +188,7 @@ static int ir_lower_statement_or_expression(IRLoweringContext *context,
   case AST_WHILE_STATEMENT:
   case AST_FOR_STATEMENT:
   case AST_SWITCH_STATEMENT:
+  case AST_MATCH_STATEMENT:
   case AST_BREAK_STATEMENT:
   case AST_CONTINUE_STATEMENT:
   case AST_DEFER_STATEMENT:
@@ -162,6 +203,206 @@ static int ir_lower_statement_or_expression(IRLoweringContext *context,
     return ok;
   }
   }
+}
+
+static int ir_emit_local_declaration(IRLoweringContext *context,
+                                     IRFunction *function,
+                                     const char *name, const char *type_name,
+                                     SourceLocation location) {
+  if (!context || !function || !name || !type_name) {
+    return 0;
+  }
+
+  IRInstruction local = {0};
+  local.op = IR_OP_DECLARE_LOCAL;
+  local.location = location;
+  local.dest = ir_operand_symbol(name);
+  local.text = (char *)type_name;
+  if (!local.dest.name) {
+    ir_set_error(context, "Out of memory while declaring IR local '%s'", name);
+    return 0;
+  }
+
+  if (!ir_emit(context, function, &local)) {
+    ir_operand_destroy(&local.dest);
+    return 0;
+  }
+
+  ir_operand_destroy(&local.dest);
+  return 1;
+}
+
+static IROperand ir_clone_operand_local(const IROperand *operand) {
+  if (!operand) {
+    return ir_operand_none();
+  }
+
+  switch (operand->kind) {
+  case IR_OPERAND_TEMP:
+    return ir_operand_temp(operand->name);
+  case IR_OPERAND_SYMBOL:
+    return ir_operand_symbol(operand->name);
+  case IR_OPERAND_INT:
+    return ir_operand_int(operand->int_value);
+  case IR_OPERAND_FLOAT:
+    return ir_operand_float(operand->float_value);
+  case IR_OPERAND_STRING:
+    return ir_operand_string(operand->name);
+  case IR_OPERAND_LABEL:
+    return ir_operand_label(operand->name);
+  case IR_OPERAND_NONE:
+  default:
+    return ir_operand_none();
+  }
+}
+
+/* Whole-struct copy: IR_OP_ASSIGN only moves scalar width through RAX. When
+ * both sides are the same by-reference struct on stack, memcpy via IR_OP_STORE.
+ *
+ * The symbol table scope of the function body has typically been popped by the
+ * time IR lowering runs, so we cannot rely on symbol_table_lookup here. Instead
+ * callers thread the resolved struct Type * (cached on AST nodes or fetched via
+ * the type_checker by name). */
+static int ir_try_emit_aggregate_symbol_memcpy(
+    IRLoweringContext *context, IRFunction *function, const char *dest_name,
+    const IROperand *value, Type *dest_type, SourceLocation location) {
+  int nbytes = 0;
+
+  if (!context || !function || !dest_name || !value ||
+      value->kind != IR_OPERAND_SYMBOL || !value->name) {
+    return 0;
+  }
+  if (!dest_type || dest_type->kind != TYPE_STRUCT) {
+    return 0;
+  }
+  if (dest_type->size == 0 || dest_type->size > (size_t)INT_MAX) {
+    return 0;
+  }
+  nbytes = (int)dest_type->size;
+  if (nbytes <= 8) {
+    return 0;
+  }
+
+  {
+    IROperand dest_addr = ir_operand_none();
+    IROperand src_addr = ir_operand_none();
+    IRInstruction store = {0};
+    int ok = 0;
+
+    if (!ir_emit_address_of_symbol(context, function, dest_name, location,
+                                     &dest_addr)) {
+      return 0;
+    }
+    if (!ir_emit_address_of_symbol(context, function, value->name, location,
+                                   &src_addr)) {
+      ir_operand_destroy(&dest_addr);
+      return 0;
+    }
+
+    store.op = IR_OP_STORE;
+    store.location = location;
+    store.dest = dest_addr;
+    store.lhs = src_addr;
+    store.rhs = ir_operand_int((long long)nbytes);
+    ok = ir_emit(context, function, &store);
+    ir_operand_destroy(&dest_addr);
+    ir_operand_destroy(&src_addr);
+    return ok;
+  }
+}
+
+/* Resolve a named type via the type_checker (works even after scope pop). */
+static Type *ir_resolve_named_type(IRLoweringContext *context,
+                                   const char *name) {
+  if (!context || !context->type_checker || !name) {
+    return NULL;
+  }
+  return type_checker_get_type_by_name(context->type_checker, name);
+}
+
+/* Look up a symbol's type from the symbol's name; falls back to NULL once the
+ * scope is gone. Callers must handle NULL. */
+static Type *ir_lookup_symbol_type(IRLoweringContext *context,
+                                   const char *name) {
+  if (!context || !context->symbol_table || !name) {
+    return NULL;
+  }
+  Symbol *sym = symbol_table_lookup(context->symbol_table, name);
+  return sym ? sym->type : NULL;
+}
+
+static int ir_emit_symbol_assignment(IRLoweringContext *context,
+                                     IRFunction *function,
+                                     const char *name,
+                                     const IROperand *value,
+                                     SourceLocation location) {
+  if (!context || !function || !name || !value) {
+    return 0;
+  }
+
+  {
+    Type *dest_type = ir_lookup_symbol_type(context, name);
+    if (ir_try_emit_aggregate_symbol_memcpy(context, function, name, value,
+                                             dest_type, location)) {
+      return 1;
+    }
+  }
+
+  {
+    IRInstruction assign = {0};
+    assign.op = IR_OP_ASSIGN;
+    assign.location = location;
+    assign.dest = ir_operand_symbol(name);
+    assign.lhs = *value;
+    if (!assign.dest.name) {
+      ir_set_error(context, "Out of memory while assigning IR local '%s'", name);
+      return 0;
+    }
+
+    if (!ir_emit(context, function, &assign)) {
+      ir_operand_destroy(&assign.dest);
+      return 0;
+    }
+
+    ir_operand_destroy(&assign.dest);
+    return 1;
+  }
+}
+
+static int ir_emit_address_with_offset(IRLoweringContext *context,
+                                       IRFunction *function,
+                                       const IROperand *base_address,
+                                       size_t offset,
+                                       SourceLocation location,
+                                       IROperand *out_address) {
+  if (!context || !function || !base_address || !out_address) {
+    return 0;
+  }
+
+  if (offset == 0) {
+    *out_address = ir_clone_operand_local(base_address);
+    return 1;
+  }
+
+  IROperand address = ir_operand_none();
+  if (!ir_make_temp_operand(context, &address)) {
+    return 0;
+  }
+
+  IRInstruction add = {0};
+  add.op = IR_OP_BINARY;
+  add.location = location;
+  add.dest = address;
+  add.lhs = *base_address;
+  add.rhs = ir_operand_int((long long)offset);
+  add.text = "+";
+  if (!ir_emit(context, function, &add)) {
+    ir_operand_destroy(&address);
+    return 0;
+  }
+
+  *out_address = address;
+  return 1;
 }
 
 static int ir_lower_switch_statement(IRLoweringContext *context,
@@ -354,6 +595,418 @@ static int ir_lower_switch_statement(IRLoweringContext *context,
   return 1;
 }
 
+static int ir_lower_match_statement(IRLoweringContext *context,
+                                    IRFunction *function, ASTNode *statement,
+                                    IRDeferScope *defers) {
+  MatchStatement *match = NULL;
+  Type *subject_type = NULL;
+  IROperand subject_value = ir_operand_none();
+  IROperand subject_address = ir_operand_none();
+  IROperand tag_value = ir_operand_none();
+  char *owned_subject_name = NULL;
+  const char *subject_name = NULL;
+  char *end_label = NULL;
+  char **arm_labels = NULL;
+  char *default_label = NULL;
+  int ok = 0;
+
+  if (!context || !function || !statement ||
+      statement->type != AST_MATCH_STATEMENT) {
+    return 0;
+  }
+
+  match = (MatchStatement *)statement->data;
+  if (!match || !match->expression) {
+    ir_set_error(context, "Malformed match statement");
+    return 0;
+  }
+
+  subject_type = ir_infer_expression_type(context, match->expression);
+  if (!subject_type || subject_type->kind != TYPE_TAGGED_ENUM ||
+      !subject_type->name) {
+    ir_set_error(context, "IR match lowering requires a tagged-enum subject");
+    return 0;
+  }
+
+  if (!ir_lower_expression(context, function, match->expression,
+                           &subject_value)) {
+    return 0;
+  }
+
+  if (subject_value.kind == IR_OPERAND_SYMBOL && subject_value.name) {
+    subject_name = subject_value.name;
+  } else {
+    owned_subject_name = ir_new_label_name(context, "match_subject");
+    if (!owned_subject_name) {
+      ir_set_error(context,
+                   "Out of memory while allocating match subject storage");
+      goto cleanup;
+    }
+    if (!ir_emit_local_declaration(context, function, owned_subject_name,
+                                   subject_type->name, statement->location) ||
+        !ir_emit_symbol_assignment(context, function, owned_subject_name,
+                                   &subject_value, statement->location)) {
+      goto cleanup;
+    }
+    subject_name = owned_subject_name;
+  }
+
+  if (!ir_emit_address_of_symbol(context, function, subject_name,
+                                 match->expression->location,
+                                 &subject_address)) {
+    goto cleanup;
+  }
+
+  if (!ir_make_temp_operand(context, &tag_value)) {
+    goto cleanup;
+  }
+
+  {
+    IRInstruction load_tag = {0};
+    load_tag.op = IR_OP_LOAD;
+    load_tag.location = match->expression->location;
+    load_tag.dest = tag_value;
+    load_tag.lhs = subject_address;
+    load_tag.rhs = ir_operand_int(4);
+    if (!ir_emit(context, function, &load_tag)) {
+      goto cleanup;
+    }
+  }
+
+  end_label = ir_new_label_name(context, "match_end");
+  if (!end_label) {
+    ir_set_error(context, "Out of memory while allocating match labels");
+    goto cleanup;
+  }
+
+  if (match->arm_count > 0) {
+    arm_labels = calloc(match->arm_count, sizeof(char *));
+    if (!arm_labels) {
+      ir_set_error(context, "Out of memory while allocating match labels");
+      goto cleanup;
+    }
+    for (size_t i = 0; i < match->arm_count; i++) {
+      arm_labels[i] = ir_new_label_name(context, "match_arm");
+      if (!arm_labels[i]) {
+        ir_set_error(context, "Out of memory while allocating match labels");
+        goto cleanup;
+      }
+      if (match->arms[i].is_default) {
+        default_label = arm_labels[i];
+      }
+    }
+  }
+  if (!default_label) {
+    default_label = end_label;
+  }
+
+  for (size_t i = 0; i < match->arm_count; i++) {
+    MatchArm *arm = &match->arms[i];
+    int variant_idx = -1;
+
+    if (!arm || arm->is_default) {
+      continue;
+    }
+
+    for (size_t v = 0; v < subject_type->tagged_variant_count; v++) {
+      if (subject_type->tagged_variant_names[v] &&
+          strcmp(subject_type->tagged_variant_names[v], arm->variant_name) ==
+              0) {
+        variant_idx = (int)v;
+        break;
+      }
+    }
+
+    if (variant_idx < 0) {
+      ir_set_error(context, "Unknown tagged-enum variant '%s' in match",
+                   arm->variant_name ? arm->variant_name : "<unnamed>");
+      goto cleanup;
+    }
+
+    IRInstruction cmp = {0};
+    cmp.op = IR_OP_BRANCH_EQ;
+    cmp.location = statement->location;
+    cmp.lhs = tag_value;
+    cmp.rhs =
+        ir_operand_int((long long)subject_type->tagged_variant_tags[variant_idx]);
+    cmp.text = arm_labels[i];
+    if (!ir_emit(context, function, &cmp)) {
+      goto cleanup;
+    }
+  }
+
+  if (!ir_emit_jump_instruction(context, function, default_label,
+                                statement->location)) {
+    goto cleanup;
+  }
+
+  for (size_t i = 0; i < match->arm_count; i++) {
+    MatchArm *arm = &match->arms[i];
+    int variant_idx = -1;
+
+    if (!arm) {
+      continue;
+    }
+
+    if (!ir_emit_label_instruction(context, function, arm_labels[i],
+                                   arm->body ? arm->body->location
+                                             : statement->location)) {
+      goto cleanup;
+    }
+
+    if (!arm->is_default) {
+      for (size_t v = 0; v < subject_type->tagged_variant_count; v++) {
+        if (subject_type->tagged_variant_names[v] &&
+            strcmp(subject_type->tagged_variant_names[v], arm->variant_name) ==
+                0) {
+          variant_idx = (int)v;
+          break;
+        }
+      }
+    }
+
+    if (arm->binding_name && variant_idx >= 0) {
+      Type *payload_type = subject_type->tagged_variant_payloads[variant_idx];
+      int payload_size = 0;
+      IROperand payload_address = ir_operand_none();
+
+      if (!payload_type || !payload_type->name) {
+        ir_set_error(context, "Match binding '%s' has no payload to bind",
+                     arm->binding_name);
+        goto cleanup;
+      }
+
+      payload_size = (payload_type->size > 0) ? (int)payload_type->size
+                                              : ir_type_storage_size(payload_type);
+      if (!ir_emit_local_declaration(context, function, arm->binding_name,
+                                     payload_type->name, statement->location) ||
+          !ir_emit_address_with_offset(context, function, &subject_address,
+                                       subject_type->tagged_data_offset,
+                                       statement->location, &payload_address)) {
+        ir_operand_destroy(&payload_address);
+        goto cleanup;
+      }
+
+      if (payload_size > 8) {
+        IROperand binding_address = ir_operand_none();
+        IRInstruction copy = {0};
+
+        if (!ir_emit_address_of_symbol(context, function, arm->binding_name,
+                                       statement->location,
+                                       &binding_address)) {
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        copy.op = IR_OP_STORE;
+        copy.location = statement->location;
+        copy.dest = binding_address;
+        copy.lhs = payload_address;
+        copy.rhs = ir_operand_int(payload_size);
+        if (!ir_emit(context, function, &copy)) {
+          ir_operand_destroy(&binding_address);
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        ir_operand_destroy(&binding_address);
+      } else {
+        IROperand payload_value = ir_operand_none();
+        IRInstruction load = {0};
+
+        if (!ir_make_temp_operand(context, &payload_value)) {
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        load.op = IR_OP_LOAD;
+        load.location = statement->location;
+        load.dest = payload_value;
+        load.lhs = payload_address;
+        load.rhs = ir_operand_int(payload_size);
+        if (!ir_emit(context, function, &load) ||
+            !ir_emit_symbol_assignment(context, function, arm->binding_name,
+                                       &payload_value, statement->location)) {
+          ir_operand_destroy(&payload_value);
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        ir_operand_destroy(&payload_value);
+      }
+
+      ir_operand_destroy(&payload_address);
+    }
+
+    if (arm->body &&
+        !ir_lower_statement_with_defers(context, function, arm->body, defers)) {
+      goto cleanup;
+    }
+
+    if (!ir_emit_jump_instruction(context, function, end_label,
+                                  statement->location)) {
+      goto cleanup;
+    }
+  }
+
+  if (!ir_emit_label_instruction(context, function, end_label,
+                                 statement->location)) {
+    goto cleanup;
+  }
+
+  ok = 1;
+
+cleanup:
+  if (arm_labels) {
+    for (size_t i = 0; i < match->arm_count; i++) {
+      free(arm_labels[i]);
+    }
+    free(arm_labels);
+  }
+  free(end_label);
+  free(owned_subject_name);
+  ir_operand_destroy(&tag_value);
+  ir_operand_destroy(&subject_address);
+  ir_operand_destroy(&subject_value);
+  return ok;
+}
+
+static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
+                                                 IRFunction *function,
+                                                 ASTNode *expression,
+                                                 Symbol *constructor_symbol,
+                                                 IROperand *out_value) {
+  CallExpression *call = NULL;
+  Type *enum_type = NULL;
+  Type *payload_type = NULL;
+  char *local_name = NULL;
+  IROperand enum_address = ir_operand_none();
+
+  if (!context || !function || !expression || !constructor_symbol ||
+      !out_value) {
+    return 0;
+  }
+
+  call = (CallExpression *)expression->data;
+  enum_type = constructor_symbol->data.constructor.enum_type;
+  payload_type = constructor_symbol->data.constructor.payload_type;
+  if (!call || !enum_type || !enum_type->name) {
+    ir_set_error(context, "Malformed tagged-enum constructor call");
+    return 0;
+  }
+
+  local_name = ir_new_label_name(context, "tagged_ctor");
+  if (!local_name) {
+    ir_set_error(context,
+                 "Out of memory while allocating tagged-enum constructor");
+    return 0;
+  }
+
+  if (!ir_emit_local_declaration(context, function, local_name, enum_type->name,
+                                 expression->location) ||
+      !ir_emit_address_of_symbol(context, function, local_name,
+                                 expression->location, &enum_address)) {
+    ir_operand_destroy(&enum_address);
+    free(local_name);
+    return 0;
+  }
+
+  {
+    IRInstruction store_tag = {0};
+    store_tag.op = IR_OP_STORE;
+    store_tag.location = expression->location;
+    store_tag.dest = enum_address;
+    store_tag.lhs =
+        ir_operand_int((long long)constructor_symbol->data.constructor.tag_value);
+    store_tag.rhs = ir_operand_int(4);
+    if (!ir_emit(context, function, &store_tag)) {
+      ir_operand_destroy(&enum_address);
+      free(local_name);
+      return 0;
+    }
+  }
+
+  if (payload_type) {
+    int payload_size =
+        (payload_type->size > 0) ? (int)payload_type->size
+                                 : ir_type_storage_size(payload_type);
+    IROperand payload_value = ir_operand_none();
+    IROperand payload_address = ir_operand_none();
+    IROperand payload_source = ir_operand_none();
+    char *payload_temp_name = NULL;
+
+    if (call->argument_count != 1 ||
+        !ir_lower_expression(context, function, call->arguments[0],
+                             &payload_value) ||
+        !ir_emit_address_with_offset(context, function, &enum_address,
+                                     enum_type->tagged_data_offset,
+                                     expression->location, &payload_address)) {
+      ir_operand_destroy(&payload_address);
+      ir_operand_destroy(&payload_value);
+      ir_operand_destroy(&enum_address);
+      free(local_name);
+      return 0;
+    }
+
+    if (payload_size > 8) {
+      payload_temp_name = ir_new_label_name(context, "tagged_payload");
+      if (!payload_temp_name ||
+          !ir_emit_local_declaration(context, function, payload_temp_name,
+                                     payload_type->name, expression->location) ||
+          !ir_emit_symbol_assignment(context, function, payload_temp_name,
+                                     &payload_value, expression->location) ||
+          !ir_emit_address_of_symbol(context, function, payload_temp_name,
+                                     expression->location, &payload_source)) {
+        free(payload_temp_name);
+        ir_operand_destroy(&payload_source);
+        ir_operand_destroy(&payload_address);
+        ir_operand_destroy(&payload_value);
+        ir_operand_destroy(&enum_address);
+        free(local_name);
+        return 0;
+      }
+    } else {
+      payload_source = payload_value;
+    }
+
+    {
+      IRInstruction store_payload = {0};
+      store_payload.op = IR_OP_STORE;
+      store_payload.location = expression->location;
+      store_payload.dest = payload_address;
+      store_payload.lhs = payload_source;
+      store_payload.rhs = ir_operand_int(payload_size);
+      if (!ir_emit(context, function, &store_payload)) {
+        free(payload_temp_name);
+        ir_operand_destroy(&payload_source);
+        ir_operand_destroy(&payload_address);
+        ir_operand_destroy(&payload_value);
+        ir_operand_destroy(&enum_address);
+        free(local_name);
+        return 0;
+      }
+    }
+
+    free(payload_temp_name);
+    if (payload_size > 8) {
+      ir_operand_destroy(&payload_source);
+    }
+    ir_operand_destroy(&payload_address);
+    ir_operand_destroy(&payload_value);
+  }
+
+  ir_operand_destroy(&enum_address);
+  *out_value = ir_operand_symbol(local_name);
+  free(local_name);
+  if (out_value->kind != IR_OPERAND_SYMBOL || !out_value->name) {
+    ir_set_error(context,
+                 "Out of memory while returning tagged-enum constructor");
+    return 0;
+  }
+
+  return 1;
+}
+
 static int ir_emit_deferred_calls(IRLoweringContext *context,
                                   IRFunction *function,
                                   const IRDeferStack *stack) {
@@ -459,6 +1112,14 @@ static int ir_emit_return_with_defers(IRLoweringContext *context,
   instruction.op = IR_OP_RETURN;
   instruction.location = location;
   instruction.lhs = *value;
+  if (value->kind != IR_OPERAND_NONE) {
+    int return_bits =
+        ir_named_type_float_bits(context, context->current_return_type_name);
+    if (return_bits) {
+      ir_assign_apply_float_bits(&instruction, &instruction.lhs, return_bits);
+      value->float_bits = instruction.lhs.float_bits;
+    }
+  }
   if (!ir_emit(context, function, &instruction)) {
     return 0;
   }
@@ -694,9 +1355,10 @@ static int ir_emit_bounds_check(IRLoweringContext *context,
   return 1;
 }
 
-static int ir_push_control_frame(IRLoweringContext *context,
-                                 const char *break_label,
-                                 const char *continue_label) {
+static int ir_push_labeled_control_frame(IRLoweringContext *context,
+                                         const char *break_label,
+                                         const char *continue_label,
+                                         const char *user_label) {
   if (!context) {
     return 0;
   }
@@ -718,7 +1380,15 @@ static int ir_push_control_frame(IRLoweringContext *context,
   IRControlFrame *frame = &context->control_stack[context->control_count++];
   frame->break_label = ir_strdup_local(break_label);
   frame->continue_label = ir_strdup_local(continue_label);
+  frame->user_label = ir_strdup_local(user_label);
   return 1;
+}
+
+static int ir_push_control_frame(IRLoweringContext *context,
+                                 const char *break_label,
+                                 const char *continue_label) {
+  return ir_push_labeled_control_frame(context, break_label, continue_label,
+                                       NULL);
 }
 
 static void ir_pop_control_frame(IRLoweringContext *context) {
@@ -729,8 +1399,10 @@ static void ir_pop_control_frame(IRLoweringContext *context) {
   IRControlFrame *frame = &context->control_stack[context->control_count - 1];
   free(frame->break_label);
   free(frame->continue_label);
+  free(frame->user_label);
   frame->break_label = NULL;
   frame->continue_label = NULL;
+  frame->user_label = NULL;
   context->control_count--;
 }
 
@@ -750,6 +1422,34 @@ static const char *ir_current_continue_label(IRLoweringContext *context) {
     const char *label = context->control_stack[i - 1].continue_label;
     if (label) {
       return label;
+    }
+  }
+  return NULL;
+}
+
+static const char *ir_find_labeled_break(IRLoweringContext *context,
+                                         const char *user_label) {
+  if (!context || !user_label) {
+    return NULL;
+  }
+  for (size_t i = context->control_count; i > 0; i--) {
+    const IRControlFrame *frame = &context->control_stack[i - 1];
+    if (frame->user_label && strcmp(frame->user_label, user_label) == 0) {
+      return frame->break_label;
+    }
+  }
+  return NULL;
+}
+
+static const char *ir_find_labeled_continue(IRLoweringContext *context,
+                                            const char *user_label) {
+  if (!context || !user_label) {
+    return NULL;
+  }
+  for (size_t i = context->control_count; i > 0; i--) {
+    const IRControlFrame *frame = &context->control_stack[i - 1];
+    if (frame->user_label && strcmp(frame->user_label, user_label) == 0) {
+      return frame->continue_label;
     }
   }
   return NULL;
@@ -841,6 +1541,150 @@ static int ir_expression_is_floating(IRLoweringContext *context,
   return type->kind == TYPE_FLOAT32 || type->kind == TYPE_FLOAT64;
 }
 
+/* True only for a true 8-byte float64. The backend's "known float64" path
+ * reinterprets the loaded 64 bits via `movq xmm, r64`; that is correct for
+ * float64 but wrong for float32 or integer-width types, so gate strictly. */
+static int ir_type_is_float64(Type *type) {
+  return type && type->kind == TYPE_FLOAT64 && type->size == 8;
+}
+
+/* IEEE-754 width for a floating type: 32 for float32, otherwise 64. Callers
+ * must already know the type is floating (use ir_type_is_float* / the type
+ * checker). Returns 64 for NULL so non-float contexts get the safe default. */
+static int ir_type_float_bits(Type *type) {
+  return (type && type->kind == TYPE_FLOAT32) ? 32 : 64;
+}
+
+/* Float width for a named type (e.g. a declared variable / parameter type).
+ * Returns 0 when the name does not resolve to a floating type, else 32/64. */
+static int ir_named_type_float_bits(IRLoweringContext *context,
+                                    const char *type_name) {
+  Type *type = NULL;
+  if (!context || !context->type_checker || !type_name) {
+    return 0;
+  }
+  type = type_checker_get_type_by_name(context->type_checker, type_name);
+  if (!type || (type->kind != TYPE_FLOAT32 && type->kind != TYPE_FLOAT64)) {
+    return 0;
+  }
+  return ir_type_float_bits(type);
+}
+
+/* Stamp a freshly produced float operand with the requested IEEE-754 width.
+ * No-op for non-float operands or when bits is 0. When narrowing a float64
+ * literal to float32, round the constant through float so the stored bits are
+ * the true single-precision value, not a truncated double pattern. */
+static void ir_operand_apply_float_bits(IROperand *operand, int bits) {
+  if (!operand || operand->kind != IR_OPERAND_FLOAT ||
+      (bits != 32 && bits != 64)) {
+    return;
+  }
+  if (bits == 32) {
+    operand->float_value = (double)(float)operand->float_value;
+  }
+  operand->float_bits = bits;
+}
+
+/* Float width of a declared symbol (variable/parameter). 0 if not floating. */
+static int ir_symbol_float_bits(IRLoweringContext *context, const char *name) {
+  Symbol *symbol = NULL;
+  if (!context || !context->symbol_table || !name) {
+    return 0;
+  }
+  symbol = symbol_table_lookup(context->symbol_table, name);
+  if (!symbol || !symbol->type ||
+      (symbol->type->kind != TYPE_FLOAT32 &&
+       symbol->type->kind != TYPE_FLOAT64)) {
+    return 0;
+  }
+  return ir_type_float_bits(symbol->type);
+}
+
+/* Record, on an ASSIGN/STORE, the TARGET float precision (bits = 32/64) of the
+ * destination. instruction->float_bits is the destination width; the source
+ * value operand keeps its own width so the backend can detect a precision
+ * mismatch (e.g. a float64 expression assigned to a float32 variable) and
+ * emit the cvtsd2ss / cvtss2sd it needs. A bare float literal has no runtime
+ * width, so re-round it to the target precision in place — no conversion is
+ * required for it. No-op when bits is 0 (target is not floating). */
+static void ir_assign_apply_float_bits(IRInstruction *instruction,
+                                       IROperand *value, int bits) {
+  if (!instruction || bits == 0) {
+    return;
+  }
+  instruction->is_float = 1;
+  instruction->float_bits = (bits == 32) ? 32 : 64;
+  if (value && value->kind == IR_OPERAND_FLOAT) {
+    ir_operand_apply_float_bits(value, instruction->float_bits);
+    instruction->lhs.float_bits = value->float_bits;
+  } else if (value) {
+    /* Preserve the value's own width; the backend converts if it differs
+     * from instruction->float_bits. */
+    instruction->lhs.float_bits = value->float_bits;
+  }
+}
+
+/* Mark a LOAD instruction (and its destination temp) as floating when the
+ * loaded type is float32/float64, recording the width. Backends key off this
+ * to pick movss/cvtss* vs movsd/cvtsd* and 4- vs 8-byte memory access. */
+static void ir_load_apply_float_type(IRInstruction *load, Type *loaded_type) {
+  if (!load || !loaded_type) {
+    return;
+  }
+  if (loaded_type->kind != TYPE_FLOAT32 && loaded_type->kind != TYPE_FLOAT64) {
+    return;
+  }
+  load->is_float = 1;
+  load->float_bits = ir_type_float_bits(loaded_type);
+  load->dest.float_bits = load->float_bits;
+}
+
+/* Resolve the float width of an expression via the type checker. Returns 0
+ * when the expression is not floating, else 32 or 64. */
+static int ir_expression_float_bits(IRLoweringContext *context,
+                                    ASTNode *expression) {
+  Type *type = NULL;
+  if (!context || !context->type_checker || !expression) {
+    return 0;
+  }
+  type = type_checker_infer_type(context->type_checker, expression);
+  if (!type || (type->kind != TYPE_FLOAT32 && type->kind != TYPE_FLOAT64)) {
+    return 0;
+  }
+  return ir_type_float_bits(type);
+}
+
+static int ir_binary_operator_is_comparison(const char *op) {
+  return op && (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+                strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+                strcmp(op, ">") == 0 || strcmp(op, ">=") == 0);
+}
+
+static int ir_binary_expression_operation_float_bits(IRLoweringContext *context,
+                                                    ASTNode *expression,
+                                                    BinaryExpression *binary) {
+  int expression_bits = ir_expression_float_bits(context, expression);
+  int left_bits = 0;
+  int right_bits = 0;
+
+  if (expression_bits != 0) {
+    return expression_bits;
+  }
+  if (!binary || !ir_binary_operator_is_comparison(binary->operator)) {
+    return 0;
+  }
+
+  left_bits = ir_expression_float_bits(context, binary->left);
+  right_bits = ir_expression_float_bits(context, binary->right);
+  if (left_bits == 64 || right_bits == 64) {
+    return 64;
+  }
+  if (left_bits == 32 || right_bits == 32) {
+    return 32;
+  }
+  return 0;
+}
+
 static int ir_type_storage_size(Type *type) {
   if (!type || type->size == 0) {
     return 8;
@@ -852,6 +1696,17 @@ static int ir_type_storage_size(Type *type) {
   }
 
   return 8;
+}
+
+/* Memory stride between consecutive elements in an array — must match
+ * laid-out sizeof(element), including structs > 8 bytes. Prefer this over
+ * ir_type_storage_size() for base + index * stride address math only. */
+static int ir_type_array_element_stride(Type *element_type) {
+  if (!element_type || element_type->size == 0 ||
+      element_type->size > (size_t)INT_MAX) {
+    return 8;
+  }
+  return (int)element_type->size;
 }
 
 static int ir_make_temp_operand(IRLoweringContext *context,
@@ -1009,18 +1864,418 @@ static int ir_emit_condition_true_branch(IRLoweringContext *context,
   return 1;
 }
 
+// Emit a call to a runtime thread helper with N operand args, returning dest.
+// args[] ownership is consumed (cleared to NONE after emit).
+static int ir_emit_thread_runtime_call(IRLoweringContext *context,
+                                       IRFunction *function,
+                                       SourceLocation loc,
+                                       const char *runtime_fn,
+                                       IROperand *args, size_t arg_count,
+                                       IROperand *out_dest) {
+  IROperand dest = ir_operand_none();
+  if (!ir_make_temp_operand(context, &dest))
+    return 0;
+
+  IROperand *arg_copy = NULL;
+  if (arg_count > 0) {
+    arg_copy = calloc(arg_count, sizeof(IROperand));
+    if (!arg_copy) {
+      ir_operand_destroy(&dest);
+      return 0;
+    }
+    for (size_t i = 0; i < arg_count; i++)
+      arg_copy[i] = ir_clone_operand_local(&args[i]);
+  }
+
+  IRInstruction instr = {0};
+  instr.op = IR_OP_CALL;
+  instr.location = loc;
+  instr.dest = dest;
+  instr.text = (char *)runtime_fn;
+  instr.arguments = arg_copy;
+  instr.argument_count = arg_count;
+
+  if (!ir_emit(context, function, &instr)) {
+    for (size_t i = 0; i < arg_count; i++) ir_operand_destroy(&arg_copy[i]);
+    free(arg_copy);
+    ir_operand_destroy(&dest);
+    return 0;
+  }
+
+  for (size_t i = 0; i < arg_count; i++) ir_operand_destroy(&arg_copy[i]);
+  free(arg_copy);
+  *out_dest = dest;
+  return 1;
+}
+
+// Lower method calls on threading types: thread.join(), mutex.lock(),
+// atomic.load/store/fetch_add/fetch_sub/cas(), tx.send(), rx.recv()
+static int ir_lower_thread_method_call(IRLoweringContext *context,
+                                       IRFunction *function,
+                                       ASTNode *expression,
+                                       CallExpression *call,
+                                       Type *obj_type,
+                                       IROperand *out_value) {
+  SourceLocation loc = expression->location;
+
+  // Evaluate the receiver object
+  IROperand receiver = ir_operand_none();
+  if (!ir_lower_expression(context, function, call->object, &receiver))
+    return 0;
+
+  IROperand arg1 = ir_operand_none();
+  IROperand arg2 = ir_operand_none();
+
+  if (call->argument_count >= 1) {
+    if (!ir_lower_expression(context, function, call->arguments[0], &arg1)) {
+      ir_operand_destroy(&receiver);
+      return 0;
+    }
+  }
+  if (call->argument_count >= 2) {
+    if (!ir_lower_expression(context, function, call->arguments[1], &arg2)) {
+      ir_operand_destroy(&receiver);
+      ir_operand_destroy(&arg1);
+      return 0;
+    }
+  }
+
+  const char *runtime_fn = NULL;
+  IROpcode opcode = IR_OP_NOP;
+  (void)opcode;
+
+  if (obj_type->kind == TYPE_THREAD &&
+      strcmp(call->function_name, "join") == 0) {
+    runtime_fn = "__meth_thread_join";
+  } else if (obj_type->kind == TYPE_MUTEX &&
+             strcmp(call->function_name, "lock") == 0) {
+    runtime_fn = "__meth_mutex_lock";
+  } else if (obj_type->kind == TYPE_ATOMIC) {
+    if (strcmp(call->function_name, "load") == 0)
+      runtime_fn = "__meth_atomic_load";
+    else if (strcmp(call->function_name, "store") == 0)
+      runtime_fn = "__meth_atomic_store";
+    else if (strcmp(call->function_name, "fetch_add") == 0)
+      runtime_fn = "__meth_atomic_fetch_add";
+    else if (strcmp(call->function_name, "fetch_sub") == 0)
+      runtime_fn = "__meth_atomic_fetch_sub";
+    else if (strcmp(call->function_name, "cas") == 0)
+      runtime_fn = "__meth_atomic_cas";
+  } else if (obj_type->kind == TYPE_SENDER &&
+             strcmp(call->function_name, "send") == 0) {
+    runtime_fn = "__meth_chan_send";
+  } else if (obj_type->kind == TYPE_RECEIVER) {
+    if (strcmp(call->function_name, "recv") == 0)
+      runtime_fn = "__meth_chan_recv";
+    else if (strcmp(call->function_name, "try_recv") == 0)
+      runtime_fn = "__meth_chan_try_recv";
+  }
+
+  if (!runtime_fn) {
+    ir_set_error(context, "Unknown method on threading type: '%s'",
+                 call->function_name);
+    ir_operand_destroy(&receiver);
+    ir_operand_destroy(&arg1);
+    ir_operand_destroy(&arg2);
+    return 0;
+  }
+
+  // Build args array: receiver [, arg1 [, arg2]]
+  IROperand args[3];
+  size_t nargs = 0;
+  args[nargs++] = receiver;
+  if (call->argument_count >= 1) args[nargs++] = arg1;
+  if (call->argument_count >= 2) args[nargs++] = arg2;
+
+  IROperand dest = ir_operand_none();
+  int ok = ir_emit_thread_runtime_call(context, function, loc, runtime_fn,
+                                       args, nargs, &dest);
+
+  ir_operand_destroy(&receiver);
+  ir_operand_destroy(&arg1);
+  ir_operand_destroy(&arg2);
+
+  if (!ok) return 0;
+  *out_value = dest;
+  return 1;
+}
+
+// Lower: spawn fn(args)  →  IR_OP_THREAD_SPAWN dest, fn_name, [args]
+static int ir_lower_spawn_expression(IRLoweringContext *context,
+                                     IRFunction *function,
+                                     ASTNode *expression,
+                                     IROperand *out_value) {
+  SpawnExpression *spawn = (SpawnExpression *)expression->data;
+  if (!spawn || !spawn->call) {
+    ir_set_error(context, "Invalid spawn expression");
+    return 0;
+  }
+
+  // The inner node must be a function call
+  ASTNode *call_node = spawn->call;
+  if (call_node->type != AST_FUNCTION_CALL) {
+    ir_set_error(context, "spawn requires a direct function call");
+    return 0;
+  }
+  CallExpression *call = (CallExpression *)call_node->data;
+  if (!call || !call->function_name) {
+    ir_set_error(context, "spawn: malformed inner call");
+    return 0;
+  }
+
+  // Lower each argument
+  IROperand *args = NULL;
+  if (call->argument_count > 0) {
+    args = calloc(call->argument_count, sizeof(IROperand));
+    if (!args) {
+      ir_set_error(context, "Out of memory in spawn argument lowering");
+      return 0;
+    }
+  }
+  for (size_t i = 0; i < call->argument_count; i++) {
+    if (!ir_lower_expression(context, function, call->arguments[i], &args[i])) {
+      for (size_t j = 0; j < i; j++) ir_operand_destroy(&args[j]);
+      free(args);
+      return 0;
+    }
+  }
+
+  IROperand dest = ir_operand_none();
+  if (!ir_make_temp_operand(context, &dest)) {
+    for (size_t i = 0; i < call->argument_count; i++) ir_operand_destroy(&args[i]);
+    free(args);
+    return 0;
+  }
+
+  // Clone args for instruction ownership
+  IROperand *arg_copy = NULL;
+  if (call->argument_count > 0) {
+    arg_copy = calloc(call->argument_count, sizeof(IROperand));
+    if (!arg_copy) {
+      for (size_t i = 0; i < call->argument_count; i++) ir_operand_destroy(&args[i]);
+      free(args);
+      ir_operand_destroy(&dest);
+      return 0;
+    }
+    for (size_t i = 0; i < call->argument_count; i++)
+      arg_copy[i] = ir_clone_operand_local(&args[i]);
+  }
+
+  IRInstruction instr = {0};
+  instr.op = IR_OP_THREAD_SPAWN;
+  instr.location = expression->location;
+  instr.dest = dest;
+  instr.text = call->function_name; // function name to spawn
+  instr.arguments = arg_copy;
+  instr.argument_count = call->argument_count;
+
+  if (!ir_emit(context, function, &instr)) {
+    for (size_t i = 0; i < call->argument_count; i++) {
+      ir_operand_destroy(&args[i]);
+      if (arg_copy) ir_operand_destroy(&arg_copy[i]);
+    }
+    free(args);
+    free(arg_copy);
+    ir_operand_destroy(&dest);
+    return 0;
+  }
+
+  for (size_t i = 0; i < call->argument_count; i++) ir_operand_destroy(&args[i]);
+  free(args);
+  for (size_t i = 0; i < call->argument_count; i++) ir_operand_destroy(&arg_copy[i]);
+  free(arg_copy);
+
+  *out_value = dest;
+  return 1;
+}
+
 static int ir_lower_call_expression(IRLoweringContext *context,
                                     IRFunction *function, ASTNode *expression,
                                     IROperand *out_value) {
   CallExpression *call = (CallExpression *)expression->data;
+  Symbol *callee_symbol = NULL;
+  const char *runtime_builtin_name = NULL;
   if (!call || !call->function_name) {
     ir_set_error(context, "Malformed call expression");
     return 0;
   }
+
+  if (strcmp(call->function_name, "sizeof") == 0) {
+    if (call->argument_count != 1 || !call->arguments ||
+        !call->arguments[0] || call->arguments[0]->type != AST_IDENTIFIER) {
+      ir_set_error(context, "Malformed sizeof expression");
+      return 0;
+    }
+
+    Identifier *type_id = (Identifier *)call->arguments[0]->data;
+    Type *type = (context->type_checker && type_id && type_id->name)
+                     ? type_checker_get_type_by_name(context->type_checker,
+                                                     type_id->name)
+                     : NULL;
+    if (!type || type->size > (size_t)LLONG_MAX) {
+      ir_set_error(context, "Unable to lower sizeof expression");
+      return 0;
+    }
+
+    *out_value = ir_operand_int((long long)type->size);
+    return 1;
+  }
+
+  if (strcmp(call->function_name, "static_assert") == 0) {
+    *out_value = ir_operand_none();
+    return 1;
+  }
+
   if (call->object) {
+    // Threading method calls — handled natively here, not name-mangled
+    Type *obj_type = ir_infer_expression_type(context, call->object);
+    if (obj_type && (obj_type->kind == TYPE_THREAD ||
+                     obj_type->kind == TYPE_MUTEX  ||
+                     obj_type->kind == TYPE_GUARD  ||
+                     obj_type->kind == TYPE_ATOMIC ||
+                     obj_type->kind == TYPE_SENDER ||
+                     obj_type->kind == TYPE_RECEIVER)) {
+      return ir_lower_thread_method_call(context, function, expression,
+                                        call, obj_type, out_value);
+    }
     ir_set_error(context, "Method calls should be mangled directly, unresolved "
                           "method object in lower pass");
     return 0;
+  }
+
+  if (strcmp(call->function_name, "cancelled") == 0) {
+    runtime_builtin_name = "__meth_async_current_cancelled";
+  } else if (strcmp(call->function_name, "cancel") == 0) {
+    runtime_builtin_name = "__meth_async_cancel";
+  } else if (strcmp(call->function_name, "__meth_async_start") == 0 ||
+             strcmp(call->function_name, "__meth_async_finish") == 0 ||
+             strcmp(call->function_name, "__meth_async_wait") == 0 ||
+             strcmp(call->function_name, "__meth_async_cancel") == 0 ||
+             strcmp(call->function_name,
+                    "__meth_async_current_cancelled") == 0) {
+    runtime_builtin_name = call->function_name;
+  } else if (strcmp(call->function_name, "channel") == 0) {
+    // channel() or channel(N) — emit IR_OP_CHAN_NEW
+    IROperand cap = (call->argument_count == 1)
+                    ? ir_operand_none() : ir_operand_none();
+    if (call->argument_count == 1) {
+      if (!ir_lower_expression(context, function, call->arguments[0], &cap))
+        return 0;
+    } else {
+      cap = ir_operand_int(0); // 0 = unbounded
+    }
+    IROperand dest = ir_operand_none();
+    if (!ir_make_temp_operand(context, &dest)) {
+      ir_operand_destroy(&cap);
+      return 0;
+    }
+    IRInstruction instr = {0};
+    instr.op = IR_OP_CHAN_NEW;
+    instr.location = expression->location;
+    instr.dest = dest;
+    instr.lhs = cap;
+    if (!ir_emit(context, function, &instr)) {
+      ir_operand_destroy(&cap);
+      ir_operand_destroy(&dest);
+      return 0;
+    }
+    ir_operand_destroy(&cap);
+    *out_value = dest;
+    return 1;
+  } else if (strcmp(call->function_name, "new") == 0 && call->object) {
+    // Mutex.new() / Atomic.new(val)
+    Type *static_type = ir_infer_expression_type(context, call->object);
+    if (static_type) {
+      const char *runtime_new = NULL;
+      if (static_type->kind == TYPE_MUTEX ||
+          (call->object->type == AST_IDENTIFIER &&
+           strcmp(((Identifier *)call->object->data)->name, "Mutex") == 0))
+        runtime_new = "__meth_mutex_new";
+      else if (static_type->kind == TYPE_ATOMIC ||
+               (call->object->type == AST_IDENTIFIER &&
+                strcmp(((Identifier *)call->object->data)->name, "Atomic") == 0))
+        runtime_new = "__meth_atomic_new";
+      if (runtime_new) {
+        IROperand init = ir_operand_none();
+        size_t nargs = 0;
+        if (call->argument_count == 1) {
+          if (!ir_lower_expression(context, function, call->arguments[0], &init))
+            return 0;
+          nargs = 1;
+        }
+        IROperand dest = ir_operand_none();
+        int ok = ir_emit_thread_runtime_call(context, function,
+                                             expression->location, runtime_new,
+                                             nargs ? &init : NULL, nargs, &dest);
+        ir_operand_destroy(&init);
+        if (!ok) return 0;
+        *out_value = dest;
+        return 1;
+      }
+    }
+  }
+
+  if (runtime_builtin_name) {
+    IROperand destination = ir_operand_none();
+    if (!ir_make_temp_operand(context, &destination)) {
+      return 0;
+    }
+
+    IROperand *arguments = NULL;
+    if (call->argument_count > 0) {
+      arguments = calloc(call->argument_count, sizeof(IROperand));
+      if (!arguments) {
+        ir_operand_destroy(&destination);
+        ir_set_error(context,
+                     "Out of memory while lowering async runtime call");
+        return 0;
+      }
+    }
+
+    for (size_t i = 0; i < call->argument_count; i++) {
+      if (!ir_lower_expression(context, function, call->arguments[i],
+                               &arguments[i])) {
+        for (size_t j = 0; j < i; j++) {
+          ir_operand_destroy(&arguments[j]);
+        }
+        free(arguments);
+        ir_operand_destroy(&destination);
+        return 0;
+      }
+    }
+
+    IRInstruction instruction = {0};
+    instruction.op = IR_OP_CALL;
+    instruction.location = expression->location;
+    instruction.dest = destination;
+    instruction.text = (char *)runtime_builtin_name;
+    instruction.arguments = arguments;
+    instruction.argument_count = call->argument_count;
+    if (!ir_emit(context, function, &instruction)) {
+      for (size_t i = 0; i < call->argument_count; i++) {
+        ir_operand_destroy(&arguments[i]);
+      }
+      free(arguments);
+      ir_operand_destroy(&destination);
+      return 0;
+    }
+
+    for (size_t i = 0; i < call->argument_count; i++) {
+      ir_operand_destroy(&arguments[i]);
+    }
+    free(arguments);
+    *out_value = destination;
+    return 1;
+  }
+
+  callee_symbol = context->symbol_table
+                      ? symbol_table_lookup(context->symbol_table,
+                                            call->function_name)
+                      : NULL;
+  if (callee_symbol &&
+      callee_symbol->kind == SYMBOL_TAGGED_ENUM_CONSTRUCTOR) {
+    return ir_lower_tagged_enum_constructor_call(
+        context, function, expression, callee_symbol, out_value);
   }
 
   int is_func_ptr_var = call->is_indirect_call;
@@ -1049,6 +2304,22 @@ static int ir_lower_call_expression(IRLoweringContext *context,
       free(arguments);
       ir_operand_destroy(&destination);
       return 0;
+    }
+  }
+
+  /* Give width-less float literal arguments the declared parameter precision
+   * so a float32 parameter receives a single-precision value, not a truncated
+   * double. Only direct calls expose declared parameter types. */
+  if (callee_symbol && callee_symbol->kind == SYMBOL_FUNCTION) {
+    size_t typed = callee_symbol->data.function.parameter_count;
+    for (size_t i = 0; i < call->argument_count && i < typed; i++) {
+      Type *ptype = callee_symbol->data.function.parameter_types
+                        ? callee_symbol->data.function.parameter_types[i]
+                        : NULL;
+      if (ptype && (ptype->kind == TYPE_FLOAT32 ||
+                    ptype->kind == TYPE_FLOAT64)) {
+        ir_operand_apply_float_bits(&arguments[i], ir_type_float_bits(ptype));
+      }
     }
   }
 
@@ -1325,7 +2596,7 @@ static int ir_lower_lvalue_address(IRLoweringContext *context,
       return 0;
     }
 
-    int element_size = ir_type_storage_size(array_type->base_type);
+    int element_size = ir_type_array_element_stride(array_type->base_type);
     IRInstruction multiply = {0};
     multiply.op = IR_OP_BINARY;
     multiply.location = expression->location;
@@ -1776,7 +3047,16 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     instruction.lhs = left;
     instruction.rhs = right;
     instruction.text = binary->operator;
-    instruction.is_float = ir_expression_is_floating(context, expression);
+    int operation_float_bits = ir_binary_expression_operation_float_bits(
+        context, expression, binary);
+    instruction.is_float = operation_float_bits != 0;
+    if (instruction.is_float) {
+      instruction.float_bits = operation_float_bits;
+      if (!ir_binary_operator_is_comparison(binary->operator)) {
+        instruction.dest.float_bits = instruction.float_bits;
+        destination.float_bits = instruction.float_bits;
+      }
+    }
 
     if (!ir_emit(context, function, &instruction)) {
       ir_operand_destroy(&destination);
@@ -1796,6 +3076,145 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     if (!unary || !unary->operator || !unary->operand) {
       ir_set_error(context, "Malformed unary expression");
       return 0;
+    }
+
+    if (strcmp(unary->operator, "await") == 0) {
+      Type *future_type = ir_infer_expression_type(context, unary->operand);
+      Type *payload_type = future_type ? future_type->base_type : NULL;
+      IROperand future_value = ir_operand_none();
+      if (!future_type || future_type->kind != TYPE_FUTURE || !payload_type ||
+          !ir_lower_expression(context, function, unary->operand,
+                               &future_value)) {
+        ir_operand_destroy(&future_value);
+        ir_set_error(context, "Await requires a lowered Future<T> operand");
+        return 0;
+      }
+
+      IROperand wait_result = ir_operand_none();
+      if (!ir_make_temp_operand(context, &wait_result)) {
+        ir_operand_destroy(&future_value);
+        return 0;
+      }
+
+      IROperand *wait_args = calloc(1, sizeof(IROperand));
+      if (!wait_args) {
+        ir_operand_destroy(&wait_result);
+        ir_operand_destroy(&future_value);
+        ir_set_error(context, "Out of memory while lowering await");
+        return 0;
+      }
+      wait_args[0] = ir_clone_operand_local(&future_value);
+
+      IRInstruction wait_call = {0};
+      wait_call.op = IR_OP_CALL;
+      wait_call.location = expression->location;
+      wait_call.dest = wait_result;
+      wait_call.text = "__meth_async_wait";
+      wait_call.arguments = wait_args;
+      wait_call.argument_count = 1;
+      if (!ir_emit(context, function, &wait_call)) {
+        ir_operand_destroy(&wait_args[0]);
+        free(wait_args);
+        ir_operand_destroy(&wait_result);
+        return 0;
+      }
+      ir_operand_destroy(&wait_args[0]);
+      free(wait_args);
+      ir_operand_destroy(&wait_result);
+
+      if (payload_type->kind == TYPE_VOID) {
+        ir_operand_destroy(&future_value);
+        *out_value = ir_operand_none();
+        return 1;
+      }
+
+      IROperand offset_address = ir_operand_none();
+      IROperand result_offset = ir_operand_none();
+      IROperand result_address = ir_operand_none();
+      IROperand loaded_value = ir_operand_none();
+
+      if (!ir_make_temp_operand(context, &offset_address) ||
+          !ir_make_temp_operand(context, &result_offset) ||
+          !ir_make_temp_operand(context, &result_address) ||
+          !ir_make_temp_operand(context, &loaded_value)) {
+        ir_operand_destroy(&future_value);
+        ir_operand_destroy(&offset_address);
+        ir_operand_destroy(&result_offset);
+        ir_operand_destroy(&result_address);
+        ir_operand_destroy(&loaded_value);
+        return 0;
+      }
+
+      IRInstruction add_offset_address = {0};
+      add_offset_address.op = IR_OP_BINARY;
+      add_offset_address.location = expression->location;
+      add_offset_address.dest = offset_address;
+      add_offset_address.lhs = future_value;
+      add_offset_address.rhs = ir_operand_int(16);
+      add_offset_address.text = "+";
+      if (!ir_emit(context, function, &add_offset_address)) {
+        ir_operand_destroy(&future_value);
+        ir_operand_destroy(&offset_address);
+        ir_operand_destroy(&result_offset);
+        ir_operand_destroy(&result_address);
+        ir_operand_destroy(&loaded_value);
+        return 0;
+      }
+
+      IRInstruction load_offset = {0};
+      load_offset.op = IR_OP_LOAD;
+      load_offset.location = expression->location;
+      load_offset.dest = result_offset;
+      load_offset.lhs = offset_address;
+      load_offset.rhs = ir_operand_int(8);
+      if (!ir_emit(context, function, &load_offset)) {
+        ir_operand_destroy(&future_value);
+        ir_operand_destroy(&offset_address);
+        ir_operand_destroy(&result_offset);
+        ir_operand_destroy(&result_address);
+        ir_operand_destroy(&loaded_value);
+        return 0;
+      }
+
+      IRInstruction add_result_address = {0};
+      add_result_address.op = IR_OP_BINARY;
+      add_result_address.location = expression->location;
+      add_result_address.dest = result_address;
+      add_result_address.lhs = future_value;
+      add_result_address.rhs = result_offset;
+      add_result_address.text = "+";
+      if (!ir_emit(context, function, &add_result_address)) {
+        ir_operand_destroy(&future_value);
+        ir_operand_destroy(&offset_address);
+        ir_operand_destroy(&result_offset);
+        ir_operand_destroy(&result_address);
+        ir_operand_destroy(&loaded_value);
+        return 0;
+      }
+
+      IRInstruction load_result = {0};
+      load_result.op = IR_OP_LOAD;
+      load_result.location = expression->location;
+      load_result.dest = loaded_value;
+      load_result.lhs = result_address;
+      load_result.rhs = ir_operand_int(ir_type_storage_size(payload_type));
+      ir_load_apply_float_type(&load_result, payload_type);
+      loaded_value.float_bits = load_result.dest.float_bits;
+      if (!ir_emit(context, function, &load_result)) {
+        ir_operand_destroy(&future_value);
+        ir_operand_destroy(&offset_address);
+        ir_operand_destroy(&result_offset);
+        ir_operand_destroy(&result_address);
+        ir_operand_destroy(&loaded_value);
+        return 0;
+      }
+
+      ir_operand_destroy(&future_value);
+      ir_operand_destroy(&offset_address);
+      ir_operand_destroy(&result_offset);
+      ir_operand_destroy(&result_address);
+      *out_value = loaded_value;
+      return 1;
     }
 
     if (strcmp(unary->operator, "&") == 0) {
@@ -1832,11 +3251,13 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       load.dest = destination;
       load.lhs = address;
       load.rhs = ir_operand_int(ir_type_storage_size(target_type));
+      ir_load_apply_float_type(&load, target_type);
       if (!ir_emit(context, function, &load)) {
         ir_operand_destroy(&destination);
         ir_operand_destroy(&address);
         return 0;
       }
+      destination.float_bits = load.dest.float_bits;
 
       ir_operand_destroy(&address);
       *out_value = destination;
@@ -1861,6 +3282,14 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     instruction.lhs = operand;
     instruction.text = unary->operator;
     instruction.is_float = ir_expression_is_floating(context, expression);
+    if (instruction.is_float) {
+      instruction.float_bits = ir_expression_float_bits(context, expression);
+      if (instruction.float_bits == 0) {
+        instruction.float_bits = 64;
+      }
+      instruction.dest.float_bits = instruction.float_bits;
+      destination.float_bits = instruction.float_bits;
+    }
 
     if (!ir_emit(context, function, &instruction)) {
       ir_operand_destroy(&destination);
@@ -1899,11 +3328,13 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     load.dest = destination;
     load.lhs = address;
     load.rhs = ir_operand_int(ir_type_storage_size(value_type));
+    ir_load_apply_float_type(&load, value_type);
     if (!ir_emit(context, function, &load)) {
       ir_operand_destroy(&destination);
       ir_operand_destroy(&address);
       return 0;
     }
+    destination.float_bits = load.dest.float_bits;
 
     ir_operand_destroy(&address);
     *out_value = destination;
@@ -1917,12 +3348,32 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       return 0;
     }
 
-    Type *allocated_type =
-        context->type_checker
-            ? type_checker_get_type_by_name(context->type_checker,
-                                            new_expression->type_name)
-            : NULL;
-    int allocation_size = ir_type_storage_size(allocated_type);
+    Type *allocated_type = NULL;
+    if (context->type_checker) {
+      /*
+       * Prefer the already-resolved expression type: `new T` infers to `T*`,
+       * and using that avoids scope-sensitive type-name lookups here.
+       */
+      Type *new_expr_type =
+          type_checker_infer_type(context->type_checker, expression);
+      if (new_expr_type && new_expr_type->kind == TYPE_POINTER) {
+        allocated_type = new_expr_type->base_type;
+      }
+      if (!allocated_type) {
+        allocated_type = type_checker_get_type_by_name(context->type_checker,
+                                                       new_expression->type_name);
+      }
+    }
+    /*
+     * Allocation must use the full concrete type size.
+     * ir_type_storage_size() intentionally normalizes many operations to
+     * register-width storage, which is incorrect for `new` on structs/arrays.
+     */
+    int allocation_size =
+        (allocated_type && allocated_type->size > 0 &&
+         allocated_type->size <= (size_t)INT_MAX)
+            ? (int)allocated_type->size
+            : 8;
 
     IROperand destination = ir_operand_none();
     if (!ir_make_temp_operand(context, &destination)) {
@@ -1970,6 +3421,26 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     instruction.text = cast_expr->type_name;
     instruction.is_float =
         ir_expression_is_floating(context, cast_expr->operand);
+    if (instruction.is_float) {
+      /* float_bits on a CAST records the SOURCE operand width so the backend
+       * can pick cvttss2si/cvtss2sd (f32) vs cvttsd2si (f64). The TARGET
+       * width is resolved separately from instruction->text. */
+      instruction.float_bits =
+          ir_expression_float_bits(context, cast_expr->operand);
+      if (instruction.float_bits == 0) {
+        instruction.float_bits = 64;
+      }
+    }
+    {
+      /* Tag the destination with the target float width so a value produced
+       * by e.g. (float32)x is recognized as float32 by later consumers. */
+      int target_bits =
+          ir_named_type_float_bits(context, cast_expr->type_name);
+      if (target_bits) {
+        instruction.dest.float_bits = target_bits;
+        destination.float_bits = target_bits;
+      }
+    }
 
     if (!ir_emit(context, function, &instruction)) {
       ir_operand_destroy(&destination);
@@ -1981,6 +3452,9 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     *out_value = destination;
     return 1;
   }
+
+  case AST_SPAWN_EXPRESSION:
+    return ir_lower_spawn_expression(context, function, expression, out_value);
 
   case AST_FUNCTION_CALL:
     return ir_lower_call_expression(context, function, expression, out_value);
@@ -2135,24 +3609,39 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
                                &value)) {
         return 0;
       }
-      IRInstruction assign = {0};
-      assign.op = IR_OP_ASSIGN;
-      assign.location = statement->location;
-      assign.dest = ir_operand_symbol(declaration->name);
-      assign.lhs = value;
-      if (!assign.dest.name) {
-        ir_operand_destroy(&value);
-        ir_set_error(context,
-                     "Out of memory while lowering variable initializer");
-        return 0;
+      Type *decl_type = ir_resolve_named_type(context, declaration->type_name);
+      if (!decl_type) {
+        decl_type = declaration->initializer
+                        ? declaration->initializer->resolved_type
+                        : NULL;
       }
-      if (!ir_emit(context, function, &assign)) {
+      if (ir_try_emit_aggregate_symbol_memcpy(context, function,
+                                              declaration->name, &value,
+                                              decl_type, statement->location)) {
+        ir_operand_destroy(&value);
+      } else {
+        IRInstruction assign = {0};
+        assign.op = IR_OP_ASSIGN;
+        assign.location = statement->location;
+        assign.dest = ir_operand_symbol(declaration->name);
+        assign.lhs = value;
+        ir_assign_apply_float_bits(
+            &assign, &assign.lhs,
+            ir_named_type_float_bits(context, declaration->type_name));
+        if (!assign.dest.name) {
+          ir_operand_destroy(&value);
+          ir_set_error(context,
+                       "Out of memory while lowering variable initializer");
+          return 0;
+        }
+        if (!ir_emit(context, function, &assign)) {
+          ir_operand_destroy(&assign.dest);
+          ir_operand_destroy(&value);
+          return 0;
+        }
         ir_operand_destroy(&assign.dest);
         ir_operand_destroy(&value);
-        return 0;
       }
-      ir_operand_destroy(&assign.dest);
-      ir_operand_destroy(&value);
     }
     return 1;
   }
@@ -2170,26 +3659,43 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     }
 
     if (assignment->variable_name) {
-      IRInstruction assign = {0};
-      assign.op = IR_OP_ASSIGN;
-      assign.location = statement->location;
-      assign.dest = ir_operand_symbol(assignment->variable_name);
-      assign.lhs = value;
-      if (!assign.dest.name) {
+      Type *assign_type =
+          ir_lookup_symbol_type(context, assignment->variable_name);
+      if (!assign_type && assignment->value) {
+        assign_type = assignment->value->resolved_type;
+      }
+      if (ir_try_emit_aggregate_symbol_memcpy(
+              context, function, assignment->variable_name, &value,
+              assign_type, statement->location)) {
         ir_operand_destroy(&value);
-        ir_set_error(context, "Out of memory while lowering assignment target");
-        return 0;
+        return 1;
       }
 
-      if (!ir_emit(context, function, &assign)) {
+      {
+        IRInstruction assign = {0};
+        assign.op = IR_OP_ASSIGN;
+        assign.location = statement->location;
+        assign.dest = ir_operand_symbol(assignment->variable_name);
+        assign.lhs = value;
+        ir_assign_apply_float_bits(
+            &assign, &assign.lhs,
+            ir_symbol_float_bits(context, assignment->variable_name));
+        if (!assign.dest.name) {
+          ir_operand_destroy(&value);
+          ir_set_error(context, "Out of memory while lowering assignment target");
+          return 0;
+        }
+
+        if (!ir_emit(context, function, &assign)) {
+          ir_operand_destroy(&assign.dest);
+          ir_operand_destroy(&value);
+          return 0;
+        }
+
         ir_operand_destroy(&assign.dest);
         ir_operand_destroy(&value);
-        return 0;
+        return 1;
       }
-
-      ir_operand_destroy(&assign.dest);
-      ir_operand_destroy(&value);
-      return 1;
     }
 
     if (!assignment->target) {
@@ -2219,6 +3725,11 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     store.dest = address;
     store.lhs = value;
     store.rhs = ir_operand_int(ir_type_storage_size(target_type));
+    if (target_type->kind == TYPE_FLOAT32 ||
+        target_type->kind == TYPE_FLOAT64) {
+      ir_assign_apply_float_bits(&store, &store.lhs,
+                                 ir_type_float_bits(target_type));
+    }
     if (!ir_emit(context, function, &store)) {
       ir_operand_destroy(&address);
       ir_operand_destroy(&value);
@@ -2230,7 +3741,8 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     return 1;
   }
 
-  case AST_FUNCTION_CALL: {
+  case AST_FUNCTION_CALL:
+  case AST_SPAWN_EXPRESSION: {
     IROperand ignored = ir_operand_none();
     int ok = ir_lower_expression(context, function, statement, &ignored);
     ir_operand_destroy(&ignored);
@@ -2372,7 +3884,8 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
       return 0;
     }
 
-    if (!ir_push_control_frame(context, loop_end, loop_start)) {
+    if (!ir_push_labeled_control_frame(context, loop_end, loop_start,
+                                       while_data->label)) {
       free(loop_start);
       free(loop_end);
       return 0;
@@ -2445,7 +3958,8 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
       }
     }
 
-    if (!ir_push_control_frame(context, end_label, step_label)) {
+    if (!ir_push_labeled_control_frame(context, end_label, step_label,
+                                       for_data->label)) {
       free(condition_label);
       free(step_label);
       free(end_label);
@@ -2497,10 +4011,21 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
   case AST_SWITCH_STATEMENT:
     return ir_lower_switch_statement(context, function, statement);
 
+  case AST_MATCH_STATEMENT:
+    return ir_lower_match_statement(context, function, statement, defers);
+
   case AST_BREAK_STATEMENT: {
-    const char *target = ir_current_break_label(context);
+    LoopControlStatement *ctrl = (LoopControlStatement *)statement->data;
+    const char *user_label = ctrl ? ctrl->target_label : NULL;
+    const char *target = user_label ? ir_find_labeled_break(context, user_label)
+                                    : ir_current_break_label(context);
     if (!target) {
-      ir_set_error(context, "'break' used outside loop/switch");
+      if (user_label) {
+        ir_set_error(context, "'break %s' has no matching labeled loop",
+                     user_label);
+      } else {
+        ir_set_error(context, "'break' used outside loop/switch");
+      }
       return 0;
     }
     return ir_emit_jump_instruction(context, function, target,
@@ -2508,9 +4033,18 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
   }
 
   case AST_CONTINUE_STATEMENT: {
-    const char *target = ir_current_continue_label(context);
+    LoopControlStatement *ctrl = (LoopControlStatement *)statement->data;
+    const char *user_label = ctrl ? ctrl->target_label : NULL;
+    const char *target = user_label
+                             ? ir_find_labeled_continue(context, user_label)
+                             : ir_current_continue_label(context);
     if (!target) {
-      ir_set_error(context, "'continue' used outside loop");
+      if (user_label) {
+        ir_set_error(context, "'continue %s' has no matching labeled loop",
+                     user_label);
+      } else {
+        ir_set_error(context, "'continue' used outside loop");
+      }
       return 0;
     }
     return ir_emit_jump_instruction(context, function, target,
@@ -2565,6 +4099,8 @@ static IRFunction *ir_lower_function(IRLoweringContext *context,
     ir_set_error(context, "Malformed function declaration");
     return NULL;
   }
+
+  context->current_return_type_name = function_data->return_type;
 
   IRFunction *function = ir_function_create(function_data->name);
   if (!function) {
@@ -2670,6 +4206,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       for (size_t j = 0; j < context.control_count; j++) {
         free(context.control_stack[j].break_label);
         free(context.control_stack[j].continue_label);
+        free(context.control_stack[j].user_label);
       }
       free(context.control_stack);
       if (error_message) {
@@ -2694,6 +4231,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       for (size_t j = 0; j < context.control_count; j++) {
         free(context.control_stack[j].break_label);
         free(context.control_stack[j].continue_label);
+        free(context.control_stack[j].user_label);
       }
       free(context.control_stack);
       if (error_message) {
@@ -2713,6 +4251,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       for (size_t j = 0; j < context.control_count; j++) {
         free(context.control_stack[j].break_label);
         free(context.control_stack[j].continue_label);
+        free(context.control_stack[j].user_label);
       }
       free(context.control_stack);
       if (error_message) {
@@ -2729,6 +4268,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
   for (size_t j = 0; j < context.control_count; j++) {
     free(context.control_stack[j].break_label);
     free(context.control_stack[j].continue_label);
+    free(context.control_stack[j].user_label);
   }
   free(context.control_stack);
 

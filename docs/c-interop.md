@@ -1,12 +1,12 @@
 # C Interoperability
 
-Methlang can call C functions and access C globals. This document describes the C interop facilities and conventions.
+Mettle can call C functions and access C globals, but Windows programs should prefer `std/win32`, `std/thread`, and `std/net` for common OS APIs. Those modules keep Win32 declarations in the standard library and let the internal PE linker resolve common DLL exports directly.
 
 ## Calling C Functions
 
-Declare C functions with `extern function`. Use the `= "symbol"` suffix to specify the C link name when it differs from the Methlang name. Parameters and return types must match the C ABI. On Windows, the Microsoft x64 ABI applies. On Linux and macOS, the System V AMD64 ABI applies.
+Declare C functions with `extern function`. Use the `= "symbol"` suffix to specify the C link name when it differs from the Mettle name. Parameters and return types must match the target ABI. On Windows, the Microsoft x64 ABI applies. On Linux and macOS, the System V AMD64 ABI applies.
 
-```meth
+```mettle
 extern function puts(msg: cstring) -> int32 = "puts";
 extern function malloc(size: int64) -> cstring = "malloc";
 
@@ -17,15 +17,37 @@ function main() -> int32 {
 }
 ```
 
+## Native Win32
+
+For Win32 APIs, import `std/win32` instead of repeating raw extern declarations:
+
+```mettle
+import "std/win32";
+
+function main() -> int32 {
+  win32_write_stdout("hello\n", 6);
+  win32_sleep_ms(10);
+  return 0;
+}
+```
+
+With the internal linker, common Windows DLLs are probed directly:
+
+```bash
+mettle --build --emit-obj --linker internal main.mettle -o main.exe
+```
+
+The default native import set includes `kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, `ucrtbase`, and `msvcrt`. If you call APIs from another DLL, pass it with `--link-arg -lname` for DLL export probing or a `.lib` path for import-library resolution.
+
 ## cstring
 
-`cstring` is an alias for `uint8*`. Use it for C `char*`, `void*`, or opaque pointers. `cstring` and `uint8*` are interchangeable. When passing a Methlang `string` to a C function that expects `char*`, use `s.chars` or the `cstr` helper from `std/io`.
+`cstring` is an alias for `uint8*`. Use it for C `char*`, `void*`, or opaque pointers. `cstring` and `uint8*` are interchangeable. When passing a Mettle `string` to a C function that expects `char*`, use `s.chars` or the `cstr` helper from `std/io`.
 
 ## Passing Structs to C
 
 Structs are laid out in declaration order. For C interop, define the struct to match the C layout exactly. Field order, types, and alignment must be compatible. Padding between fields follows the target ABI. Avoid passing large structs by value to C; the ABI may pass them by pointer. When a C API expects a pointer to a struct, pass `&my_struct` or a `T*` variable. On MS x64, the first four arguments go in RCX, RDX, R8, R9; structs larger than 8 bytes are often passed by pointer.
 
-```meth
+```mettle
 struct SockAddrIn {
   sin_family: int16;
   sin_port: uint16;
@@ -36,27 +58,27 @@ struct SockAddrIn {
 
 ## Linking
 
-On Windows, the recommended path is to let Methlang do the assemble/link step for you:
+On Windows, the recommended path is to let Mettle do the assemble/link step for you:
 
 ```bash
-methlang --build main.meth -o main.exe
-methlang --build main.meth -o main.exe --link-arg -lws2_32
+mettle --build main.mettle -o main.exe
+mettle --build --emit-obj --linker internal main.mettle -o main.exe
 ```
+
+When using the internal linker, common Win32 APIs and the C runtime resolve without external C toolchains. Use `--link-arg -lcustomdll` or `--link-arg path/to/custom.lib` for additional DLLs/import libraries.
 
 If you use the manual assembly/link flow, link the compiled assembly with the C runtime and any required libraries. For programs using `new` (GC), include the bundled `gc.o` in the link. Example:
 
 ```bash
-# Windows (Winsock2)
+# Windows (manual GCC link)
 gcc -nostartfiles main.o gc.o -o main -lws2_32 -lkernel32
 ```
 
-Use `-nostartfiles` when the program provides its own entry point (e.g. `_start` that calls `main`).
+Use `-nostartfiles` when the program provides its own entry point, such as `_start` or `mainCRTStartup`.
 
 ## POSIX Networking (Linux / macOS)
 
-For networking on Linux or macOS, use `stdlib/std/net_posix.meth`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
-
-**Link command:**
+For networking on Linux or macOS, use `stdlib/std/net_posix.mettle`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
 
 ```bash
 # Linux
@@ -66,85 +88,11 @@ gcc -o myapp output.s stdlib/posix_helpers.c -lpthread
 gcc -o myapp output.s stdlib/posix_helpers.c
 ```
 
-**With GC runtime:**
+The helper file provides:
 
-```bash
-# Linux
-gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o -lpthread
+- `posix_get_errno()` for thread-safe errno access
+- `posix_cas_i32()` for atomic compare-and-swap
+- `posix_yield()` for CPU yield in spin locks
+- `posix_atomic_exchange_i32()` for atomic exchange
 
-# macOS
-gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o
-```
-
-The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `recv`, `close`) are in libc on both Linux and macOS, so no extra libraries are needed beyond the C runtime. The `posix_helpers.c` file provides:
-
-- `posix_get_errno()` – thread-safe errno access
-- `posix_cas_i32()` – atomic compare-and-swap
-- `posix_yield()` – CPU yield for spin locks
-- `posix_atomic_exchange_i32()` – atomic exchange
-
-**Note:** On macOS, `SOL_SOCKET` is 0xFFFF and `SO_REUSEADDR` is 4. On Linux, they are 1 and 2 respectively. Use the constants from `std/net_posix` (which default to Linux values) or override them at call site for macOS.
-
-## POSIX Networking (Linux / macOS)
-
-For networking on Linux or macOS, use `stdlib/std/net_posix.meth`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
-
-**Link command:**
-
-```bash
-# Linux
-gcc -o myapp output.s stdlib/posix_helpers.c -lpthread
-
-# macOS
-gcc -o myapp output.s stdlib/posix_helpers.c
-```
-
-**With GC runtime:**
-
-```bash
-# Linux
-gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o -lpthread
-
-# macOS
-gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o
-```
-
-The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `recv`, `close`) are in libc on both Linux and macOS, so no extra libraries are needed beyond the C runtime. The `posix_helpers.c` file provides:
-
-- `posix_get_errno()` – thread-safe errno access
-- `posix_cas_i32()` – atomic compare-and-swap
-- `posix_yield()` – CPU yield for spin locks
-- `posix_atomic_exchange_i32()` – atomic exchange
-
-**Note:** On macOS, `SOL_SOCKET` is 0xFFFF and `SO_REUSEADDR` is 4. On Linux, they are 1 and 2 respectively. Use the constants from `std/net_posix` (which default to Linux values) or override them at call site for macOS.
-
-
-For networking on Linux or macOS, use `stdlib/std/net_posix.meth`. This module provides POSIX socket bindings and requires the C helper functions in `stdlib/posix_helpers.c` for thread-safe errno access and atomic operations.
-
-**Link command:**
-
-```bash
-# Linux
-gcc -o myapp output.s stdlib/posix_helpers.c -lpthread
-
-# macOS
-gcc -o myapp output.s stdlib/posix_helpers.c
-```
-
-**With GC runtime:**
-
-```bash
-# Linux
-gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o -lpthread
-
-# macOS
-gcc -o myapp output.s stdlib/posix_helpers.c path/to/runtime/gc.o
-```
-
-The socket functions (`socket`, `connect`, `bind`, `listen`, `accept`, `send`, `recv`, `close`) are in libc on both Linux and macOS, so no extra libraries are needed beyond the C runtime. The `posix_helpers.c` file provides:
-- `posix_get_errno()` – thread-safe errno access
-- `posix_cas_i32()` – atomic compare-and-swap
-- `posix_yield()` – CPU yield for spin locks
-- `posix_atomic_exchange_i32()` – atomic exchange
-
-**Note:** On macOS, `SOL_SOCKET` is 0xFFFF and `SO_REUSEADDR` is 4. On Linux, they are 1 and 2 respectively. Use the constants from `std/net_posix` (which default to Linux values) or override them at call site for macOS.
+On macOS, `SOL_SOCKET` is `0xFFFF` and `SO_REUSEADDR` is `4`. On Linux, they are `1` and `2` respectively. Use the constants from `std/net_posix` or override them at the call site for macOS.

@@ -26,11 +26,16 @@ typedef struct {
   Type *builtin_uint16;
   Type *builtin_uint32;
   Type *builtin_uint64;
+  Type *builtin_bool;
   Type *builtin_float32;
   Type *builtin_float64;
   Type *builtin_string;
   Type *builtin_cstring;
   Type *builtin_void;
+
+  // Generic enum template cache: uninstantiated enum AST nodes
+  ASTNode **generic_enum_templates;
+  size_t generic_enum_template_count;
   Symbol *current_function;
   ASTNode *current_function_decl;
   int loop_depth;

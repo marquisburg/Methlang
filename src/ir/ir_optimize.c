@@ -21,6 +21,20 @@ typedef struct {
 } IRTempValueMap;
 
 typedef struct {
+  char *label;
+  IRTempValueMap in_map;
+  int initialized;
+} IRLabelValueEntry;
+
+typedef struct {
+  IRLabelValueEntry *items;
+  size_t count;
+  size_t capacity;
+} IRLabelValueMap;
+
+static int ir_operand_equals(const IROperand *lhs, const IROperand *rhs);
+
+typedef struct {
   char *name;
   size_t use_count;
 } IRTempUseEntry;
@@ -47,6 +61,12 @@ typedef struct {
   size_t count;
   size_t capacity;
 } IRInstructionVector;
+
+typedef struct {
+  size_t *items;
+  size_t count;
+  size_t capacity;
+} IRIndexVector;
 
 typedef enum {
   IR_EXPR_BINARY,
@@ -98,6 +118,7 @@ static int ir_operand_clone(const IROperand *source, IROperand *out) {
   out->kind = source->kind;
   out->int_value = source->int_value;
   out->float_value = source->float_value;
+  out->float_bits = source->float_bits;
 
   switch (source->kind) {
   case IR_OPERAND_TEMP:
@@ -266,6 +287,19 @@ static int ir_instruction_writes_temp(const IRInstruction *instruction) {
   case IR_OP_CALL_INDIRECT:
   case IR_OP_NEW:
   case IR_OP_CAST:
+  case IR_OP_THREAD_SPAWN:
+  case IR_OP_THREAD_JOIN:
+  case IR_OP_MUTEX_NEW:
+  case IR_OP_MUTEX_LOCK:
+  case IR_OP_MUTEX_UNLOCK:
+  case IR_OP_ATOMIC_LOAD:
+  case IR_OP_ATOMIC_STORE:
+  case IR_OP_ATOMIC_FETCH_ADD:
+  case IR_OP_ATOMIC_FETCH_SUB:
+  case IR_OP_ATOMIC_CAS:
+  case IR_OP_CHAN_NEW:
+  case IR_OP_CHAN_SEND:
+  case IR_OP_CHAN_RECV:
     return 1;
   default:
     return 0;
@@ -288,6 +322,19 @@ static int ir_instruction_writes_symbol(const IRInstruction *instruction) {
   case IR_OP_CALL_INDIRECT:
   case IR_OP_NEW:
   case IR_OP_CAST:
+  case IR_OP_THREAD_SPAWN:
+  case IR_OP_THREAD_JOIN:
+  case IR_OP_MUTEX_NEW:
+  case IR_OP_MUTEX_LOCK:
+  case IR_OP_MUTEX_UNLOCK:
+  case IR_OP_ATOMIC_LOAD:
+  case IR_OP_ATOMIC_STORE:
+  case IR_OP_ATOMIC_FETCH_ADD:
+  case IR_OP_ATOMIC_FETCH_SUB:
+  case IR_OP_ATOMIC_CAS:
+  case IR_OP_CHAN_NEW:
+  case IR_OP_CHAN_SEND:
+  case IR_OP_CHAN_RECV:
     return 1;
   default:
     return 0;
@@ -309,6 +356,19 @@ static int ir_instruction_writes_destination(const IRInstruction *instruction) {
   case IR_OP_CALL_INDIRECT:
   case IR_OP_NEW:
   case IR_OP_CAST:
+  case IR_OP_THREAD_SPAWN:
+  case IR_OP_THREAD_JOIN:
+  case IR_OP_MUTEX_NEW:
+  case IR_OP_MUTEX_LOCK:
+  case IR_OP_MUTEX_UNLOCK:
+  case IR_OP_ATOMIC_LOAD:
+  case IR_OP_ATOMIC_STORE:
+  case IR_OP_ATOMIC_FETCH_ADD:
+  case IR_OP_ATOMIC_FETCH_SUB:
+  case IR_OP_ATOMIC_CAS:
+  case IR_OP_CHAN_NEW:
+  case IR_OP_CHAN_SEND:
+  case IR_OP_CHAN_RECV:
     return 1;
   default:
     return 0;
@@ -454,6 +514,35 @@ static void ir_instruction_vector_destroy(IRInstructionVector *vector) {
   vector->capacity = 0;
 }
 
+static int ir_index_vector_append(IRIndexVector *vector, size_t value) {
+  if (!vector) {
+    return 0;
+  }
+
+  if (vector->count >= vector->capacity) {
+    size_t new_capacity = vector->capacity == 0 ? 16 : vector->capacity * 2;
+    size_t *new_items = realloc(vector->items, new_capacity * sizeof(size_t));
+    if (!new_items) {
+      return 0;
+    }
+    vector->items = new_items;
+    vector->capacity = new_capacity;
+  }
+
+  vector->items[vector->count++] = value;
+  return 1;
+}
+
+static void ir_index_vector_destroy(IRIndexVector *vector) {
+  if (!vector) {
+    return;
+  }
+  free(vector->items);
+  vector->items = NULL;
+  vector->count = 0;
+  vector->capacity = 0;
+}
+
 static int ir_rewrite_to_assign_operand(IRInstruction *instruction,
                                         const IROperand *value, int *changed) {
   IROperand cloned = ir_operand_none();
@@ -471,6 +560,9 @@ static int ir_rewrite_to_assign_operand(IRInstruction *instruction,
   instruction->lhs = cloned;
   instruction->rhs = ir_operand_none();
   instruction->is_float = (cloned.kind == IR_OPERAND_FLOAT) ? 1 : 0;
+  if (instruction->is_float) {
+    instruction->float_bits = (cloned.float_bits == 32) ? 32 : 64;
+  }
   instruction->ast_ref = NULL;
 
   if (changed) {
@@ -642,6 +734,157 @@ static void ir_temp_value_map_destroy(IRTempValueMap *map) {
   map->capacity = 0;
 }
 
+static int ir_temp_value_map_clone(IRTempValueMap *dest,
+                                   const IRTempValueMap *src) {
+  if (!dest || !src) {
+    return 0;
+  }
+
+  ir_temp_value_map_clear(dest);
+  for (size_t i = 0; i < src->count; i++) {
+    if (!ir_temp_value_map_set(dest, src->items[i].name, &src->items[i].value)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int ir_temp_value_map_intersect_with(IRTempValueMap *dest,
+                                            const IRTempValueMap *other,
+                                            int *changed) {
+  if (!dest || !other) {
+    return 0;
+  }
+
+  size_t i = 0;
+  while (i < dest->count) {
+    IRTempValueEntry *entry = &dest->items[i];
+    const IROperand *other_value =
+        ir_temp_value_map_lookup(other, entry->name);
+    if (!other_value || !ir_operand_equals(&entry->value, other_value)) {
+      ir_temp_value_map_remove(dest, entry->name);
+      if (changed) {
+        *changed = 1;
+      }
+      continue;
+    }
+    i++;
+  }
+
+  return 1;
+}
+
+static int ir_label_value_map_init(IRLabelValueMap *map) {
+  if (!map) {
+    return 0;
+  }
+  map->items = NULL;
+  map->count = 0;
+  map->capacity = 0;
+  return 1;
+}
+
+static int ir_label_value_map_find(const IRLabelValueMap *map,
+                                   const char *label) {
+  if (!map || !label) {
+    return -1;
+  }
+  for (size_t i = 0; i < map->count; i++) {
+    if (map->items[i].label && strcmp(map->items[i].label, label) == 0) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+static IRLabelValueEntry *ir_label_value_map_get_or_add(IRLabelValueMap *map,
+                                                        const char *label) {
+  if (!map || !label) {
+    return NULL;
+  }
+
+  int existing = ir_label_value_map_find(map, label);
+  if (existing >= 0) {
+    return &map->items[existing];
+  }
+
+  if (map->count >= map->capacity) {
+    size_t new_capacity = map->capacity == 0 ? 16 : map->capacity * 2;
+    IRLabelValueEntry *new_items =
+        realloc(map->items, new_capacity * sizeof(IRLabelValueEntry));
+    if (!new_items) {
+      return NULL;
+    }
+    map->items = new_items;
+    map->capacity = new_capacity;
+  }
+
+  IRLabelValueEntry *entry = &map->items[map->count];
+  memset(entry, 0, sizeof(*entry));
+  entry->label = ir_opt_strdup(label);
+  if (!entry->label || !ir_temp_value_map_init(&entry->in_map)) {
+    free(entry->label);
+    entry->label = NULL;
+    return NULL;
+  }
+  entry->initialized = 0;
+  map->count++;
+  return entry;
+}
+
+static int ir_label_value_map_merge_incoming(IRLabelValueMap *map,
+                                             const char *label,
+                                             const IRTempValueMap *incoming,
+                                             int *changed) {
+  if (!map || !label || !incoming) {
+    return 0;
+  }
+
+  IRLabelValueEntry *entry = ir_label_value_map_get_or_add(map, label);
+  if (!entry) {
+    return 0;
+  }
+
+  if (!entry->initialized) {
+    if (!ir_temp_value_map_clone(&entry->in_map, incoming)) {
+      return 0;
+    }
+    entry->initialized = 1;
+    if (changed) {
+      *changed = 1;
+    }
+    return 1;
+  }
+
+  return ir_temp_value_map_intersect_with(&entry->in_map, incoming, changed);
+}
+
+static const IRLabelValueEntry *ir_label_value_map_lookup(
+    const IRLabelValueMap *map, const char *label) {
+  if (!map || !label) {
+    return NULL;
+  }
+  int index = ir_label_value_map_find(map, label);
+  if (index < 0) {
+    return NULL;
+  }
+  return &map->items[index];
+}
+
+static void ir_label_value_map_destroy(IRLabelValueMap *map) {
+  if (!map) {
+    return;
+  }
+  for (size_t i = 0; i < map->count; i++) {
+    free(map->items[i].label);
+    ir_temp_value_map_destroy(&map->items[i].in_map);
+  }
+  free(map->items);
+  map->items = NULL;
+  map->count = 0;
+  map->capacity = 0;
+}
+
 static int ir_operand_equals(const IROperand *lhs, const IROperand *rhs) {
   if (!lhs || !rhs || lhs->kind != rhs->kind) {
     return 0;
@@ -653,7 +896,12 @@ static int ir_operand_equals(const IROperand *lhs, const IROperand *rhs) {
   case IR_OPERAND_INT:
     return lhs->int_value == rhs->int_value;
   case IR_OPERAND_FLOAT:
-    return lhs->float_value == rhs->float_value;
+    /* Same numeric value at different IEEE-754 widths is NOT the same operand
+     * for CSE/propagation purposes: a float32 0.1 and float64 0.1 have
+     * distinct bit patterns and must not be coalesced. Treat unspecified (0)
+     * as the default 64 so legacy float64-only IR keeps matching. */
+    return lhs->float_value == rhs->float_value &&
+           ((lhs->float_bits == 32) == (rhs->float_bits == 32));
   case IR_OPERAND_TEMP:
   case IR_OPERAND_SYMBOL:
   case IR_OPERAND_STRING:
@@ -665,6 +913,16 @@ static int ir_operand_equals(const IROperand *lhs, const IROperand *rhs) {
   default:
     return 0;
   }
+}
+
+static int ir_binary_op_is_commutative(const char *op_text) {
+  if (!op_text) {
+    return 0;
+  }
+  return strcmp(op_text, "+") == 0 || strcmp(op_text, "*") == 0 ||
+         strcmp(op_text, "&") == 0 || strcmp(op_text, "|") == 0 ||
+         strcmp(op_text, "^") == 0 || strcmp(op_text, "==") == 0 ||
+         strcmp(op_text, "!=") == 0;
 }
 
 static void ir_expression_entry_destroy(IRExpressionEntry *entry) {
@@ -735,11 +993,21 @@ static int ir_expression_entry_matches_instruction(
 
   switch (entry->kind) {
   case IR_EXPR_BINARY:
-    return instruction->op == IR_OP_BINARY && instruction->text &&
-           entry->op_text && strcmp(entry->op_text, instruction->text) == 0 &&
-           entry->is_float == instruction->is_float &&
-           ir_operand_equals(&entry->lhs, &instruction->lhs) &&
-           ir_operand_equals(&entry->rhs, &instruction->rhs);
+    if (instruction->op != IR_OP_BINARY || !instruction->text ||
+        !entry->op_text || strcmp(entry->op_text, instruction->text) != 0 ||
+        entry->is_float != instruction->is_float) {
+      return 0;
+    }
+    if (ir_operand_equals(&entry->lhs, &instruction->lhs) &&
+        ir_operand_equals(&entry->rhs, &instruction->rhs)) {
+      return 1;
+    }
+    if (ir_binary_op_is_commutative(instruction->text) &&
+        ir_operand_equals(&entry->lhs, &instruction->rhs) &&
+        ir_operand_equals(&entry->rhs, &instruction->lhs)) {
+      return 1;
+    }
+    return 0;
   case IR_EXPR_UNARY:
     return instruction->op == IR_OP_UNARY && instruction->text &&
            entry->op_text && strcmp(entry->op_text, instruction->text) == 0 &&
@@ -1297,6 +1565,7 @@ static int ir_clone_instruction_plain(const IRInstruction *source,
   out->op = source->op;
   out->location = source->location;
   out->is_float = source->is_float;
+  out->float_bits = source->float_bits;
   out->ast_ref = source->ast_ref;
 
   if (!ir_operand_clone(&source->dest, &out->dest) ||
@@ -1347,6 +1616,7 @@ static int ir_clone_instruction_for_inline(const IRInstruction *source,
   out->op = source->op;
   out->location = source->location;
   out->is_float = source->is_float;
+  out->float_bits = source->float_bits;
   out->ast_ref = NULL;
 
   if (!ir_inline_rewrite_operand(&source->dest, &out->dest, symbol_map,
@@ -1823,52 +2093,96 @@ static int ir_copy_and_constant_propagation_pass(IRFunction *function,
     return 0;
   }
 
-  for (size_t i = 0; i < function->instruction_count; i++) {
-    IRInstruction *instruction = &function->instructions[i];
+  IRLabelValueMap label_in;
+  if (!ir_label_value_map_init(&label_in)) {
+    ir_temp_value_map_destroy(&map);
+    return 0;
+  }
 
-    if (instruction->op == IR_OP_LABEL) {
-      ir_temp_value_map_clear(&map);
-    }
+  int any_changed = 0;
+  for (int iteration = 0; iteration < 8; iteration++) {
+    int flow_changed = 0;
+    ir_temp_value_map_clear(&map);
 
-    if (!ir_propagate_instruction_operands(&map, instruction, changed)) {
-      ir_temp_value_map_destroy(&map);
-      return 0;
-    }
+    for (size_t i = 0; i < function->instruction_count; i++) {
+      IRInstruction *instruction = &function->instructions[i];
 
-    if (ir_instruction_writes_temp(instruction) && instruction->dest.name) {
-      ir_temp_value_map_remove(&map, instruction->dest.name);
+      if (instruction->op == IR_OP_LABEL && instruction->text) {
+        const IRLabelValueEntry *entry =
+            ir_label_value_map_lookup(&label_in, instruction->text);
+        if (entry && entry->initialized) {
+          if (!ir_temp_value_map_clone(&map, &entry->in_map)) {
+            ir_label_value_map_destroy(&label_in);
+            ir_temp_value_map_destroy(&map);
+            return 0;
+          }
+        } else {
+          ir_temp_value_map_clear(&map);
+        }
+      }
 
-      if (instruction->op == IR_OP_ASSIGN &&
-          ir_operand_is_propagatable_value(&instruction->lhs)) {
-        if (instruction->lhs.kind == IR_OPERAND_TEMP && instruction->lhs.name &&
-            strcmp(instruction->lhs.name, instruction->dest.name) == 0) {
-          ir_temp_value_map_remove(&map, instruction->dest.name);
-        } else if (!ir_temp_value_map_set(&map, instruction->dest.name,
-                                          &instruction->lhs)) {
+      if (!ir_propagate_instruction_operands(&map, instruction, &any_changed)) {
+        ir_label_value_map_destroy(&label_in);
+        ir_temp_value_map_destroy(&map);
+        return 0;
+      }
+
+      if (ir_instruction_writes_temp(instruction) && instruction->dest.name) {
+        ir_temp_value_map_remove(&map, instruction->dest.name);
+
+        if (instruction->op == IR_OP_ASSIGN &&
+            ir_operand_is_propagatable_value(&instruction->lhs)) {
+          if (instruction->lhs.kind == IR_OPERAND_TEMP &&
+              instruction->lhs.name &&
+              strcmp(instruction->lhs.name, instruction->dest.name) == 0) {
+            ir_temp_value_map_remove(&map, instruction->dest.name);
+          } else if (!ir_temp_value_map_set(&map, instruction->dest.name,
+                                            &instruction->lhs)) {
+            ir_label_value_map_destroy(&label_in);
+            ir_temp_value_map_destroy(&map);
+            return 0;
+          }
+        }
+      }
+
+      if (ir_instruction_writes_symbol(instruction) && instruction->dest.name) {
+        ir_temp_value_map_remove_symbol_values(&map, instruction->dest.name);
+      }
+
+      if (instruction->op == IR_OP_STORE || instruction->op == IR_OP_CALL ||
+          instruction->op == IR_OP_CALL_INDIRECT ||
+          instruction->op == IR_OP_INLINE_ASM) {
+        // Unknown memory effects: symbol-backed temp forwarding is no longer
+        // safe.
+        ir_temp_value_map_remove_symbol_values(&map, NULL);
+      }
+
+      if ((instruction->op == IR_OP_JUMP || instruction->op == IR_OP_BRANCH_ZERO ||
+           instruction->op == IR_OP_BRANCH_EQ) &&
+          instruction->text) {
+        if (!ir_label_value_map_merge_incoming(&label_in, instruction->text,
+                                               &map, &flow_changed)) {
+          ir_label_value_map_destroy(&label_in);
           ir_temp_value_map_destroy(&map);
           return 0;
         }
       }
+
+      if (instruction->op == IR_OP_JUMP || instruction->op == IR_OP_RETURN) {
+        ir_temp_value_map_clear(&map);
+      }
     }
 
-    if (ir_instruction_writes_symbol(instruction) && instruction->dest.name) {
-      ir_temp_value_map_remove_symbol_values(&map, instruction->dest.name);
-    }
-
-    if (instruction->op == IR_OP_STORE || instruction->op == IR_OP_CALL ||
-        instruction->op == IR_OP_CALL_INDIRECT ||
-        instruction->op == IR_OP_INLINE_ASM) {
-      // Unknown memory effects: symbol-backed temp forwarding is no longer safe.
-      ir_temp_value_map_remove_symbol_values(&map, NULL);
-    }
-
-    if (instruction->op == IR_OP_JUMP || instruction->op == IR_OP_BRANCH_ZERO ||
-        instruction->op == IR_OP_BRANCH_EQ ||
-        instruction->op == IR_OP_RETURN) {
-      ir_temp_value_map_clear(&map);
+    if (!flow_changed) {
+      break;
     }
   }
 
+  if (changed && any_changed) {
+    *changed = 1;
+  }
+
+  ir_label_value_map_destroy(&label_in);
   ir_temp_value_map_destroy(&map);
   return 1;
 }
@@ -1941,6 +2255,55 @@ static int ir_try_evaluate_integer_binary(const char *op, long long lhs,
   return 1;
 }
 
+static int ir_try_get_positive_pow2_shift(long long value, long long *shift) {
+  if (!shift || value <= 0) {
+    return 0;
+  }
+
+  unsigned long long u = (unsigned long long)value;
+  if ((u & (u - 1ull)) != 0ull) {
+    return 0;
+  }
+
+  long long amount = 0;
+  while (u > 1ull) {
+    u >>= 1u;
+    amount++;
+  }
+  *shift = amount;
+  return 1;
+}
+
+static int ir_rewrite_to_shift_left(IRInstruction *instruction,
+                                    const IROperand *value, long long shift,
+                                    int *changed) {
+  if (!instruction || !value || instruction->op != IR_OP_BINARY ||
+      instruction->is_float || shift < 0 || shift >= 64) {
+    return 0;
+  }
+
+  IROperand lhs = ir_operand_none();
+  if (!ir_operand_clone(value, &lhs)) {
+    return 0;
+  }
+
+  ir_operand_destroy(&instruction->lhs);
+  ir_operand_destroy(&instruction->rhs);
+  instruction->lhs = lhs;
+  instruction->rhs = ir_operand_int(shift);
+
+  free(instruction->text);
+  instruction->text = ir_opt_strdup("<<");
+  if (!instruction->text) {
+    return 0;
+  }
+
+  if (changed) {
+    *changed = 1;
+  }
+  return 1;
+}
+
 static int ir_try_fold_integer_binary(IRInstruction *instruction, int *changed) {
   if (!instruction || instruction->op != IR_OP_BINARY || instruction->is_float ||
       !instruction->text) {
@@ -1962,6 +2325,28 @@ static int ir_try_fold_integer_binary(IRInstruction *instruction, int *changed) 
     }
   }
 
+  if (ir_operand_equals(&instruction->lhs, &instruction->rhs)) {
+    if (strcmp(instruction->text, "-") == 0 ||
+        strcmp(instruction->text, "^") == 0) {
+      return ir_rewrite_to_assign_int(instruction, 0, changed);
+    }
+    if (strcmp(instruction->text, "|") == 0 ||
+        strcmp(instruction->text, "&") == 0) {
+      return ir_rewrite_to_assign_operand(instruction, &instruction->lhs,
+                                          changed);
+    }
+    if (strcmp(instruction->text, "==") == 0 ||
+        strcmp(instruction->text, "<=") == 0 ||
+        strcmp(instruction->text, ">=") == 0) {
+      return ir_rewrite_to_assign_int(instruction, 1, changed);
+    }
+    if (strcmp(instruction->text, "!=") == 0 ||
+        strcmp(instruction->text, "<") == 0 ||
+        strcmp(instruction->text, ">") == 0) {
+      return ir_rewrite_to_assign_int(instruction, 0, changed);
+    }
+  }
+
   if (strcmp(instruction->text, "+") == 0) {
     if (instruction->rhs.kind == IR_OPERAND_INT &&
         instruction->rhs.int_value == 0) {
@@ -1980,6 +2365,19 @@ static int ir_try_fold_integer_binary(IRInstruction *instruction, int *changed) 
                                           changed);
     }
   } else if (strcmp(instruction->text, "*") == 0) {
+    long long shift = 0;
+    if (instruction->rhs.kind == IR_OPERAND_INT &&
+        ir_try_get_positive_pow2_shift(instruction->rhs.int_value, &shift) &&
+        shift > 0) {
+      return ir_rewrite_to_shift_left(instruction, &instruction->lhs, shift,
+                                      changed);
+    }
+    if (instruction->lhs.kind == IR_OPERAND_INT &&
+        ir_try_get_positive_pow2_shift(instruction->lhs.int_value, &shift) &&
+        shift > 0) {
+      return ir_rewrite_to_shift_left(instruction, &instruction->rhs, shift,
+                                      changed);
+    }
     if ((instruction->lhs.kind == IR_OPERAND_INT &&
          instruction->lhs.int_value == 0) ||
         (instruction->rhs.kind == IR_OPERAND_INT &&
@@ -2048,6 +2446,383 @@ static int ir_try_fold_integer_binary(IRInstruction *instruction, int *changed) 
   return 1;
 }
 
+static int ir_find_temp_producer_in_block(const IRFunction *function,
+                                          size_t before_index,
+                                          const char *temp_name,
+                                          size_t *producer_index_out) {
+  if (!function || !temp_name || !producer_index_out ||
+      before_index > function->instruction_count) {
+    return 0;
+  }
+
+  size_t i = before_index;
+  while (i > 0) {
+    i--;
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_NOP) {
+      continue;
+    }
+    if (instruction->op == IR_OP_LABEL) {
+      break;
+    }
+    if (ir_instruction_writes_temp(instruction) && instruction->dest.name &&
+        strcmp(instruction->dest.name, temp_name) == 0) {
+      *producer_index_out = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int ir_try_rewrite_mod_pow2_compare_zero(IRFunction *function,
+                                                const IRTempUseMap *uses,
+                                                size_t compare_index,
+                                                int *changed) {
+  if (!function || !uses || compare_index >= function->instruction_count) {
+    return 0;
+  }
+
+  IRInstruction *compare = &function->instructions[compare_index];
+  if (compare->op != IR_OP_BINARY || compare->is_float || !compare->text) {
+    return 1;
+  }
+  if (strcmp(compare->text, "==") != 0 && strcmp(compare->text, "!=") != 0) {
+    return 1;
+  }
+
+  const IROperand *temp_operand = NULL;
+  if (compare->lhs.kind == IR_OPERAND_TEMP && compare->lhs.name &&
+      compare->rhs.kind == IR_OPERAND_INT && compare->rhs.int_value == 0) {
+    temp_operand = &compare->lhs;
+  } else if (compare->rhs.kind == IR_OPERAND_TEMP && compare->rhs.name &&
+             compare->lhs.kind == IR_OPERAND_INT &&
+             compare->lhs.int_value == 0) {
+    temp_operand = &compare->rhs;
+  } else {
+    return 1;
+  }
+
+  if (ir_temp_use_map_get(uses, temp_operand->name) != 1) {
+    return 1;
+  }
+
+  size_t producer_index = 0;
+  if (!ir_find_temp_producer_in_block(function, compare_index,
+                                      temp_operand->name, &producer_index)) {
+    return 1;
+  }
+
+  IRInstruction *producer = &function->instructions[producer_index];
+  if (producer->op != IR_OP_BINARY || producer->is_float || !producer->text ||
+      strcmp(producer->text, "%") != 0 ||
+      producer->rhs.kind != IR_OPERAND_INT) {
+    return 1;
+  }
+
+  long long shift = 0;
+  if (!ir_try_get_positive_pow2_shift(producer->rhs.int_value, &shift) ||
+      shift <= 0 || shift >= 63) {
+    return 1;
+  }
+
+  long long mask = ((long long)1 << shift) - 1;
+  producer->rhs.int_value = mask;
+  free(producer->text);
+  producer->text = ir_opt_strdup("&");
+  if (!producer->text) {
+    return 0;
+  }
+
+  if (changed) {
+    *changed = 1;
+  }
+  return 1;
+}
+
+static int ir_mod_even_bitcheck_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  IRTempUseMap uses;
+  if (!ir_temp_use_map_init(&uses)) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (!ir_collect_instruction_temp_uses(&uses, &function->instructions[i])) {
+      ir_temp_use_map_destroy(&uses);
+      return 0;
+    }
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (!ir_try_rewrite_mod_pow2_compare_zero(function, &uses, i, changed)) {
+      ir_temp_use_map_destroy(&uses);
+      return 0;
+    }
+  }
+
+  ir_temp_use_map_destroy(&uses);
+  return 1;
+}
+
+static int ir_find_next_non_nop_in_block(const IRFunction *function,
+                                         size_t start_index, size_t *out_index) {
+  if (!function || !out_index || start_index >= function->instruction_count) {
+    return 0;
+  }
+
+  size_t i = start_index;
+  while (i < function->instruction_count) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_LABEL) {
+      return 0;
+    }
+    if (instruction->op != IR_OP_NOP) {
+      *out_index = i;
+      return 1;
+    }
+    i++;
+  }
+  return 0;
+}
+
+static int ir_find_next_non_nop(const IRFunction *function, size_t start_index,
+                                size_t *out_index) {
+  if (!function || !out_index || start_index >= function->instruction_count) {
+    return 0;
+  }
+
+  size_t i = start_index;
+  while (i < function->instruction_count) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op != IR_OP_NOP) {
+      *out_index = i;
+      return 1;
+    }
+    i++;
+  }
+  return 0;
+}
+
+static int ir_find_label_index(const IRFunction *function, const char *label,
+                               size_t *out_index) {
+  if (!function || !label || !out_index) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_LABEL && instruction->text &&
+        strcmp(instruction->text, label) == 0) {
+      *out_index = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int ir_branch_zero_not_equal_zero_forwarding_pass(IRFunction *function,
+                                                         int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  IRTempUseMap uses;
+  if (!ir_temp_use_map_init(&uses)) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (!ir_collect_instruction_temp_uses(&uses, &function->instructions[i])) {
+      ir_temp_use_map_destroy(&uses);
+      return 0;
+    }
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRInstruction *cmp = &function->instructions[i];
+    if (cmp->op != IR_OP_BINARY || cmp->is_float || !cmp->text ||
+        strcmp(cmp->text, "!=") != 0 || cmp->dest.kind != IR_OPERAND_TEMP ||
+        !cmp->dest.name) {
+      continue;
+    }
+
+    if (ir_temp_use_map_get(&uses, cmp->dest.name) != 1) {
+      continue;
+    }
+
+    const IROperand *forward = NULL;
+    if (cmp->rhs.kind == IR_OPERAND_INT && cmp->rhs.int_value == 0) {
+      forward = &cmp->lhs;
+    } else if (cmp->lhs.kind == IR_OPERAND_INT && cmp->lhs.int_value == 0) {
+      forward = &cmp->rhs;
+    } else {
+      continue;
+    }
+
+    size_t branch_index = 0;
+    if (!ir_find_next_non_nop_in_block(function, i + 1, &branch_index)) {
+      continue;
+    }
+
+    IRInstruction *branch = &function->instructions[branch_index];
+    if (branch->op != IR_OP_BRANCH_ZERO || branch->lhs.kind != IR_OPERAND_TEMP ||
+        !branch->lhs.name || strcmp(branch->lhs.name, cmp->dest.name) != 0) {
+      continue;
+    }
+
+    IROperand cloned = ir_operand_none();
+    if (!ir_operand_clone(forward, &cloned)) {
+      ir_temp_use_map_destroy(&uses);
+      return 0;
+    }
+    ir_operand_destroy(&branch->lhs);
+    branch->lhs = cloned;
+
+    ir_instruction_make_nop(cmp);
+    if (changed) {
+      *changed = 1;
+    }
+  }
+
+  ir_temp_use_map_destroy(&uses);
+  return 1;
+}
+
+static int ir_rewrite_branch_eq_shortcut(IRInstruction *producer,
+                                         IRInstruction *branch_zero,
+                                         IRInstruction *jump_true,
+                                         int *changed) {
+  if (!producer || !branch_zero || !jump_true || !jump_true->text) {
+    return 0;
+  }
+
+  IROperand lhs = ir_operand_none();
+  IROperand rhs = ir_operand_none();
+  if (!ir_operand_clone(&producer->lhs, &lhs) ||
+      !ir_operand_clone(&producer->rhs, &rhs)) {
+    ir_operand_destroy(&lhs);
+    ir_operand_destroy(&rhs);
+    return 0;
+  }
+
+  char *target = ir_opt_strdup(jump_true->text);
+  if (!target) {
+    ir_operand_destroy(&lhs);
+    ir_operand_destroy(&rhs);
+    return 0;
+  }
+
+  ir_operand_destroy(&branch_zero->lhs);
+  ir_operand_destroy(&branch_zero->rhs);
+  free(branch_zero->text);
+  ir_instruction_clear_arguments(branch_zero);
+  branch_zero->op = IR_OP_BRANCH_EQ;
+  branch_zero->lhs = lhs;
+  branch_zero->rhs = rhs;
+  branch_zero->text = target;
+  branch_zero->is_float = producer->is_float;
+  branch_zero->ast_ref = NULL;
+
+  ir_instruction_make_nop(producer);
+  ir_instruction_make_nop(jump_true);
+  if (changed) {
+    *changed = 1;
+  }
+  return 1;
+}
+
+static int ir_branch_eq_chain_shortcut_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  IRTempUseMap uses;
+  if (!ir_temp_use_map_init(&uses)) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (!ir_collect_instruction_temp_uses(&uses, &function->instructions[i])) {
+      ir_temp_use_map_destroy(&uses);
+      return 0;
+    }
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRInstruction *producer = &function->instructions[i];
+    if (producer->op != IR_OP_BINARY || producer->is_float || !producer->text ||
+        strcmp(producer->text, "==") != 0 ||
+        producer->dest.kind != IR_OPERAND_TEMP || !producer->dest.name) {
+      continue;
+    }
+
+    if (ir_temp_use_map_get(&uses, producer->dest.name) != 1) {
+      continue;
+    }
+
+    size_t branch_index = 0;
+    if (!ir_find_next_non_nop_in_block(function, i + 1, &branch_index)) {
+      continue;
+    }
+    IRInstruction *branch = &function->instructions[branch_index];
+    if (branch->op != IR_OP_BRANCH_ZERO || branch->lhs.kind != IR_OPERAND_TEMP ||
+        !branch->lhs.name ||
+        strcmp(branch->lhs.name, producer->dest.name) != 0 || !branch->text) {
+      continue;
+    }
+
+    size_t jump_index = 0;
+    if (!ir_find_next_non_nop_in_block(function, branch_index + 1, &jump_index)) {
+      continue;
+    }
+    IRInstruction *jump_true = &function->instructions[jump_index];
+    if (jump_true->op != IR_OP_JUMP || !jump_true->text) {
+      continue;
+    }
+
+    size_t false_label_index = 0;
+    if (!ir_find_next_non_nop(function, jump_index + 1, &false_label_index)) {
+      continue;
+    }
+    IRInstruction *false_label = &function->instructions[false_label_index];
+    if (false_label->op != IR_OP_LABEL || !false_label->text ||
+        strcmp(false_label->text, branch->text) != 0) {
+      continue;
+    }
+
+    if (!ir_rewrite_branch_eq_shortcut(producer, branch, jump_true, changed)) {
+      ir_temp_use_map_destroy(&uses);
+      return 0;
+    }
+  }
+
+  ir_temp_use_map_destroy(&uses);
+  return 1;
+}
+
+static int ir_simplify_redundant_assign(IRInstruction *instruction,
+                                        int *changed) {
+  if (!instruction || instruction->op != IR_OP_ASSIGN ||
+      instruction->dest.kind == IR_OPERAND_NONE ||
+      instruction->lhs.kind == IR_OPERAND_NONE) {
+    return 1;
+  }
+
+  if (ir_operand_equals(&instruction->dest, &instruction->lhs)) {
+    ir_instruction_make_nop(instruction);
+    if (changed) {
+      *changed = 1;
+    }
+  }
+
+  return 1;
+}
+
 static int ir_try_fold_integer_unary(IRInstruction *instruction, int *changed) {
   if (!instruction || instruction->op != IR_OP_UNARY || instruction->is_float ||
       !instruction->text || instruction->lhs.kind != IR_OPERAND_INT) {
@@ -2103,6 +2878,12 @@ static int ir_simplify_branch(IRInstruction *instruction, int *changed) {
     if (changed) {
       *changed = 1;
     }
+  } else if (instruction->op == IR_OP_BRANCH_EQ &&
+             ir_operand_equals(&instruction->lhs, &instruction->rhs)) {
+    ir_instruction_make_jump(instruction);
+    if (changed) {
+      *changed = 1;
+    }
   }
 
   return 1;
@@ -2114,10 +2895,21 @@ static int ir_constant_and_branch_simplify_pass(IRFunction *function,
     return 0;
   }
 
+  if (!ir_mod_even_bitcheck_pass(function, changed)) {
+    return 0;
+  }
+  if (!ir_branch_eq_chain_shortcut_pass(function, changed)) {
+    return 0;
+  }
+  if (!ir_branch_zero_not_equal_zero_forwarding_pass(function, changed)) {
+    return 0;
+  }
+
   for (size_t i = 0; i < function->instruction_count; i++) {
     IRInstruction *instruction = &function->instructions[i];
     if (!ir_try_fold_integer_binary(instruction, changed) ||
         !ir_try_fold_integer_unary(instruction, changed) ||
+        !ir_simplify_redundant_assign(instruction, changed) ||
         !ir_simplify_branch(instruction, changed)) {
       return 0;
     }
@@ -2147,6 +2939,220 @@ static int ir_remove_redundant_jumps_pass(IRFunction *function, int *changed) {
         function->instructions[next].op == IR_OP_LABEL &&
         function->instructions[next].text &&
         strcmp(function->instructions[next].text, instruction->text) == 0) {
+      ir_instruction_make_nop(instruction);
+      if (changed) {
+        *changed = 1;
+      }
+    }
+  }
+
+  return 1;
+}
+
+static int ir_thread_jump_targets_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRInstruction *instruction = &function->instructions[i];
+    if ((instruction->op != IR_OP_JUMP &&
+         instruction->op != IR_OP_BRANCH_ZERO &&
+         instruction->op != IR_OP_BRANCH_EQ) ||
+        !instruction->text) {
+      continue;
+    }
+
+    const char *current_target = instruction->text;
+    for (int depth = 0; depth < 32; depth++) {
+      size_t label_index = 0;
+      if (!ir_find_label_index(function, current_target, &label_index)) {
+        break;
+      }
+
+      size_t next_index = 0;
+      if (!ir_find_next_non_nop(function, label_index + 1, &next_index)) {
+        break;
+      }
+
+      IRInstruction *next = &function->instructions[next_index];
+      if (next->op != IR_OP_JUMP || !next->text ||
+          strcmp(next->text, current_target) == 0) {
+        break;
+      }
+
+      current_target = next->text;
+    }
+
+    if (strcmp(current_target, instruction->text) != 0) {
+      char *target_copy = ir_opt_strdup(current_target);
+      if (!target_copy) {
+        return 0;
+      }
+      free(instruction->text);
+      instruction->text = target_copy;
+      if (changed) {
+        *changed = 1;
+      }
+    }
+  }
+
+  return 1;
+}
+
+static int ir_remove_redundant_fallthrough_branches_pass(IRFunction *function,
+                                                         int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRInstruction *instruction = &function->instructions[i];
+    if ((instruction->op != IR_OP_BRANCH_ZERO &&
+         instruction->op != IR_OP_BRANCH_EQ) ||
+        !instruction->text) {
+      continue;
+    }
+
+    size_t next = i + 1;
+    while (next < function->instruction_count &&
+           function->instructions[next].op == IR_OP_NOP) {
+      next++;
+    }
+
+    if (next < function->instruction_count &&
+        function->instructions[next].op == IR_OP_LABEL &&
+        function->instructions[next].text &&
+        strcmp(function->instructions[next].text, instruction->text) == 0) {
+      ir_instruction_make_nop(instruction);
+      if (changed) {
+        *changed = 1;
+      }
+    }
+  }
+
+  return 1;
+}
+
+static int ir_reachable_enqueue_label(const IRFunction *function,
+                                      const char *label,
+                                      IRIndexVector *worklist) {
+  size_t label_index = 0;
+  if (!label || !ir_find_label_index(function, label, &label_index)) {
+    return 1;
+  }
+  return ir_index_vector_append(worklist, label_index);
+}
+
+static int ir_eliminate_unreachable_blocks_pass(IRFunction *function,
+                                                int *changed) {
+  if (!function) {
+    return 0;
+  }
+  if (function->instruction_count == 0) {
+    return 1;
+  }
+
+  unsigned char *reachable = calloc(function->instruction_count, 1);
+  if (!reachable) {
+    return 0;
+  }
+
+  IRIndexVector worklist = {0};
+  if (!ir_index_vector_append(&worklist, 0)) {
+    ir_index_vector_destroy(&worklist);
+    free(reachable);
+    return 0;
+  }
+
+  for (size_t work_index = 0; work_index < worklist.count; work_index++) {
+    size_t i = worklist.items[work_index];
+    while (i < function->instruction_count) {
+      if (reachable[i]) {
+        break;
+      }
+
+      IRInstruction *instruction = &function->instructions[i];
+      reachable[i] = 1;
+
+      if (instruction->op == IR_OP_JUMP) {
+        if (!ir_reachable_enqueue_label(function, instruction->text,
+                                        &worklist)) {
+          ir_index_vector_destroy(&worklist);
+          free(reachable);
+          return 0;
+        }
+        break;
+      }
+
+      if (instruction->op == IR_OP_BRANCH_ZERO ||
+          instruction->op == IR_OP_BRANCH_EQ) {
+        if (!ir_reachable_enqueue_label(function, instruction->text,
+                                        &worklist)) {
+          ir_index_vector_destroy(&worklist);
+          free(reachable);
+          return 0;
+        }
+      } else if (instruction->op == IR_OP_RETURN) {
+        break;
+      }
+
+      i++;
+    }
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (!reachable[i] && function->instructions[i].op != IR_OP_NOP) {
+      ir_instruction_make_nop(&function->instructions[i]);
+      if (changed) {
+        *changed = 1;
+      }
+    }
+  }
+
+  ir_index_vector_destroy(&worklist);
+  free(reachable);
+  return 1;
+}
+
+static int ir_instruction_references_label(const IRInstruction *instruction,
+                                           const char *label) {
+  if (!instruction || !label || !instruction->text) {
+    return 0;
+  }
+
+  if (instruction->op != IR_OP_JUMP && instruction->op != IR_OP_BRANCH_ZERO &&
+      instruction->op != IR_OP_BRANCH_EQ) {
+    return 0;
+  }
+
+  return strcmp(instruction->text, label) == 0;
+}
+
+static int ir_label_is_referenced(const IRFunction *function,
+                                  const char *label) {
+  if (!function || !label) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (ir_instruction_references_label(&function->instructions[i], label)) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int ir_remove_unused_labels_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_LABEL && instruction->text &&
+        !ir_label_is_referenced(function, instruction->text)) {
       ir_instruction_make_nop(instruction);
       if (changed) {
         *changed = 1;
@@ -2204,8 +3210,12 @@ static int ir_optimize_function(IRFunction *function) {
         !ir_common_subexpression_elimination_pass(function, &changed) ||
         !ir_constant_and_branch_simplify_pass(function, &changed) ||
         !ir_eliminate_dead_temp_writes_pass(function, &changed) ||
+        !ir_thread_jump_targets_pass(function, &changed) ||
+        !ir_remove_redundant_fallthrough_branches_pass(function, &changed) ||
         !ir_remove_redundant_jumps_pass(function, &changed) ||
-        !ir_eliminate_unreachable_straightline_pass(function, &changed)) {
+        !ir_eliminate_unreachable_straightline_pass(function, &changed) ||
+        !ir_eliminate_unreachable_blocks_pass(function, &changed) ||
+        !ir_remove_unused_labels_pass(function, &changed)) {
       return 0;
     }
 

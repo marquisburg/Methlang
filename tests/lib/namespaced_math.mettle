@@ -1,0 +1,30 @@
+export struct Pair {
+  left: int32;
+  right: int32;
+}
+
+export enum Magic {
+  FortyTwo = 42,
+  Seven = 7
+}
+
+export var seed: int32 = 40;
+
+function private_bonus() -> int32 {
+  return 2;
+}
+
+export function make_pair(left: int32, right: int32) -> Pair* {
+  var pair: Pair* = new Pair;
+  pair->left = left;
+  pair->right = right;
+  return pair;
+}
+
+export function total(pair: Pair*) -> int32 {
+  return pair->left + pair->right;
+}
+
+export function answer() -> int32 {
+  return seed + private_bonus();
+}

@@ -1,0 +1,12 @@
+async fn child(value: int32): int32 {
+    return value * 2;
+}
+
+async fn parent(value: int32): int32 {
+    var f: Future<int32> = child(value);
+    return await f + 1;
+}
+
+function main(): int32 {
+    return await parent(20);
+}

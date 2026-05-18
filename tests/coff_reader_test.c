@@ -39,7 +39,7 @@ static int expect_basic_meth_object(const char *path) {
   int result = 1;
 
   if (!coff_object_read(path, &object, &error_message)) {
-    result = report_failure("Failed to parse Methlang object", error_message);
+    result = report_failure("Failed to parse Mettle object", error_message);
     goto cleanup;
   }
 

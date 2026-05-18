@@ -22,6 +22,11 @@ typedef struct {
   char *name;
   long long int_value;
   double float_value;
+  /* IEEE-754 width of a floating operand: 32 or 64. 0 means "not a float /
+   * unspecified" and callers must treat it as the default double width (64).
+   * Carried so backends never have to re-derive single vs double precision
+   * from scattered symbol/type lookups. */
+  int float_bits;
 } IROperand;
 
 typedef enum {
@@ -42,7 +47,21 @@ typedef enum {
   IR_OP_NEW,
   IR_OP_RETURN,
   IR_OP_INLINE_ASM,
-  IR_OP_CAST
+  IR_OP_CAST,
+  // Threading opcodes
+  IR_OP_THREAD_SPAWN,   // dest = spawn fn(args...)  — lhs=fn name (text), args=arguments
+  IR_OP_THREAD_JOIN,    // dest = join(thread_handle) — lhs=handle operand
+  IR_OP_MUTEX_NEW,      // dest = Mutex.new()
+  IR_OP_MUTEX_LOCK,     // dest = mutex.lock()  — returns Guard, lhs=mutex operand
+  IR_OP_MUTEX_UNLOCK,   // mutex.unlock(guard) — lhs=guard operand
+  IR_OP_ATOMIC_LOAD,    // dest = atomic.load() — lhs=atomic operand
+  IR_OP_ATOMIC_STORE,   // atomic.store(val)    — lhs=atomic operand, rhs=value
+  IR_OP_ATOMIC_FETCH_ADD, // dest = atomic.fetch_add(val) — lhs=atomic, rhs=delta
+  IR_OP_ATOMIC_FETCH_SUB,
+  IR_OP_ATOMIC_CAS,     // dest=old, lhs=atomic, rhs=expected, arguments[0]=desired
+  IR_OP_CHAN_NEW,        // dest = channel(cap)  — lhs=capacity (INT, 0=unbounded)
+  IR_OP_CHAN_SEND,       // chan.send(val)        — lhs=chan operand, rhs=value
+  IR_OP_CHAN_RECV        // dest = chan.recv()    — lhs=chan operand
 } IROpcode;
 
 typedef struct {
@@ -55,6 +74,10 @@ typedef struct {
   IROperand *arguments;
   size_t argument_count;
   int is_float;
+  /* Width of the floating result when is_float is set: 32 or 64. 0 means
+   * unspecified and is treated as 64 (double) for backward compatibility with
+   * code paths that only ever produced float64. */
+  int float_bits;
   ASTNode *ast_ref;
 } IRInstruction;
 
@@ -78,7 +101,11 @@ IROperand ir_operand_none(void);
 IROperand ir_operand_temp(const char *name);
 IROperand ir_operand_symbol(const char *name);
 IROperand ir_operand_int(long long value);
+/* Defaults float_bits to 64 (double) for backward compatibility. */
 IROperand ir_operand_float(double value);
+/* Like ir_operand_float but tags the IEEE-754 width (32 or 64). Any other
+ * value is normalized to 64. */
+IROperand ir_operand_float_sized(double value, int float_bits);
 IROperand ir_operand_string(const char *value);
 IROperand ir_operand_label(const char *name);
 void ir_operand_destroy(IROperand *operand);

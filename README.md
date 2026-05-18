@@ -1,6 +1,11 @@
-# Methlang
+<p align="left">
+  <img src="mettle.svg#gh-light-mode-only" alt="Mettle" width="96" height="96">
+  <img src="mettle-syntax/icons/mettle-dark.svg#gh-dark-mode-only" alt="Mettle" width="96" height="96">
+</p>
 
-Methlang is a typed, low-level language that compiles `.meth` source files to x86-64 NASM assembly and, on Windows, native COFF objects for direct PE linking.
+# Mettle
+
+Mettle is a typed, low-level language that compiles `.mettle` source files to x86-64 NASM assembly and, on Windows, native COFF objects for direct PE linking.
 
 It is designed for systems-style control with stronger semantics than raw assembly: structured control flow, static type checking, modules, generics, and C interop.
 
@@ -8,18 +13,22 @@ It is designed for systems-style control with stronger semantics than raw assemb
 
 - Compiles to x86-64 NASM assembly and Windows COFF objects
 - Strong typing with pointers, arrays, structs, enums, and function pointers
-- Control flow: `if`, `while`, `for`, `switch`, `defer`, `errdefer`
+- Control flow: `if`, `while`, `for`, `switch`, `match`, `defer`, `errdefer`, and labeled `break`/`continue`
+- Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`); line (`//`) and nesting block (`/* */`) comments
+- Async execution with `async`, `await`, `Future<T>`, and cooperative cancellation (default **pool** executor; optional experimental **`--async-model coroutine`** with a portable reactor — IOCP on Windows, `poll(2)` on POSIX — see `docs/async.md`)
 - C interop via `extern` and `cstring`
 - Optional conservative GC runtime for `new` and GC-backed string concatenation
 - Standard library modules for I/O, conversion, networking, process, threading, and more
+- Developer-friendly diagnostics: stable error codes, source snippets with carets, and scope-aware "did you mean?" suggestions for typos
+- Cross-platform symbolized crash tracebacks (Windows SEH and POSIX signal handlers)
 
 ## Hello World
 
-```meth
+```mettle
 import "std/io";
 
 function main() -> int32 {
-  println("Hello, Methlang!");
+  println("Hello, Mettle!");
   return 0;
 }
 ```
@@ -35,18 +44,18 @@ function main() -> int32 {
 1. Build an executable with the native Windows path:
 
 ```powershell
-.\bin\methlang.exe --build --emit-obj --linker internal hello.meth -o hello.exe
+.\bin\mettle.exe --build --emit-obj --linker internal hello.mettle -o hello.exe
 .\hello.exe
 ```
 
 This path does not require `NASM`, `gcc`, or `link.exe` for the target build. Plain `--build` still defaults to the assembly-based auto path unless you also pass `--emit-obj`.
 
-No project-local `stdlib/` folder is required. The compiler auto-loads the stdlib bundled with the Methlang installation/build output. Use `--stdlib <dir>` only when you want to override that.
+No project-local `stdlib/` folder is required. The compiler auto-loads the stdlib bundled with the Mettle installation/build output. Use `--stdlib <dir>` only when you want to override that.
 
 For production builds, use `--release`:
 
 ```powershell
-.\bin\methlang.exe --build --emit-obj --linker internal --release hello.meth -o hello.exe
+.\bin\mettle.exe --build --emit-obj --linker internal --release hello.mettle -o hello.exe
 ```
 
 `--release` enables `-O`, strips assembly comments, removes unreachable functions, and lowers without generated runtime null/bounds trap checks.
@@ -54,19 +63,19 @@ For production builds, use `--release`:
 1. Optional: emit assembly only:
 
 ```powershell
-.\bin\methlang.exe hello.meth -o hello.s
+.\bin\mettle.exe hello.mettle -o hello.s
 nasm -f win64 hello.s -o hello.o
-gcc -nostartfiles hello.o "$env:ProgramFiles\Methlang\runtime\gc.o" -o hello.exe -lkernel32
+gcc -nostartfiles hello.o "$env:ProgramFiles\Mettle\runtime\gc.o" -o hello.exe -lkernel32
 .\hello.exe
 ```
 
-Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime entry. Manual assembly/linking is mainly for advanced cases; the default workflow is `methlang --build`.
+Use `-nostartfiles` so Mettle's entry point (`mainCRTStartup`) is used instead of the C runtime entry. Manual assembly/linking is mainly for advanced cases; the default workflow is `mettle --build`.
 
 ## Quick Start (Linux)
 
 ```bash
 make
-./bin/methlang hello.meth -o hello.s
+./bin/mettle hello.mettle -o hello.s
 nasm -f elf64 hello.s -o hello.o
 gcc -nostartfiles hello.o /usr/local/runtime/gc.o -o hello
 ./hello
@@ -74,7 +83,7 @@ gcc -nostartfiles hello.o /usr/local/runtime/gc.o -o hello
 
 ## Toolchain
 
-- Methlang compiler (`bin/methlang.exe` on Windows, `bin/methlang` on Linux)
+- Mettle compiler (`bin/mettle.exe` on Windows, `bin/mettle` on Linux)
 - NASM assembler for assembly-based builds
 - System C toolchain/linker (`gcc`/`clang`) for external-link fallback and manual assembly/object flows
 
@@ -83,22 +92,23 @@ gcc -nostartfiles hello.o /usr/local/runtime/gc.o -o hello
 Use the CLI help/docs commands to jump to the right topic quickly:
 
 ```powershell
-.\bin\methlang.exe help
-.\bin\methlang.exe help gc
-.\bin\methlang.exe help build
-.\bin\methlang.exe docs
+.\bin\mettle.exe help
+.\bin\mettle.exe help gc
+.\bin\mettle.exe help build
+.\bin\mettle.exe docs
 ```
 
 Available topics: `build`, `gc`, `interop`, `stdlib`, `web`.
 
 ## Runtime and Linking Notes
 
-- `methlang --build --emit-obj --linker internal` uses the bundled runtime objects plus Methlang's internal PE linker on Windows.
-- `methlang --build` in `auto` mode tries the internal linker first and falls back to external linkers if needed.
-- If you use the manual assembly/link flow, link bundled `runtime/gc.o` from your Methlang installation when using `new` or string concatenation.
+- `mettle --build --emit-obj --linker internal` uses the bundled runtime objects plus Mettle's internal PE linker on Windows.
+- `mettle --build` in `auto` mode tries the internal linker first and falls back to external linkers if needed.
+- If you use the manual assembly/link flow, link bundled `runtime/gc.o` from your Mettle installation when using `new` or string concatenation.
+- If you use async features, also link bundled `runtime/async_runtime.o`.
 - Compile with `-s` to embed runtime crash traceback support, or use `-d` to enable it alongside normal debug output.
 - On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated runtime traps with Meth function/source frames.
-- Networking examples may require extra libraries (for example `--link-arg -lws2_32` on Windows).
+- The internal PE linker resolves common Win32 DLLs directly; use `--link-arg` only for additional DLLs/import libraries.
 - For GC use from worker threads, use `gc_thread_attach` and `gc_thread_detach`.
 
 Example runtime crash output:
@@ -108,8 +118,8 @@ Unhandled runtime exception 0xC0000005 (access violation)
 Exception address: 0x00007FF7DFD71046
 write access violation at 0x0000000000000001
 Stack trace:
-  #0 leaf_crash at app.meth:2:3 (0x00007FF7DFD71046)
-  #1 main at app.meth:8:3 (0x00007FF7DFD71080)
+  #0 leaf_crash at app.mettle:2:3 (0x00007FF7DFD71046)
+  #1 main at app.mettle:8:3 (0x00007FF7DFD71080)
 ```
 
 ## Compiler Snapshot
@@ -149,6 +159,7 @@ See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](d
 - Types: [docs/types.md](docs/types.md)
 - Expressions: [docs/expressions.md](docs/expressions.md)
 - Control flow: [docs/control-flow.md](docs/control-flow.md)
+- Async and sync execution: [docs/async.md](docs/async.md)
 - C interop: [docs/c-interop.md](docs/c-interop.md)
 - Garbage collector: [docs/garbage-collector.md](docs/garbage-collector.md)
 - Standard library: [docs/standard-library.md](docs/standard-library.md)

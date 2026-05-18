@@ -1,0 +1,56 @@
+{
+  "name": "mettle-syntax",
+  "displayName": "Mettle Syntax Highlighting",
+  "description": "Syntax highlighting, folding, bracket matching, and linting for Mettle (.mettle) — a typed language that compiles to x86-64 assembly. See README for links to the language docs.",
+  "version": "0.5.1",
+  "publisher": "GhostDragonWasTaken",
+  "engines": { "vscode": "^1.74.0" },
+  "categories": ["Programming Languages"],
+  "keywords": ["mettle", "assembly", "x86-64"],
+  "activationEvents": ["onLanguage:mettle"],
+  "main": "extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "mettle",
+        "aliases": ["Mettle"],
+        "extensions": [".mettle"],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/mettle-light.svg",
+          "dark": "./icons/mettle-dark.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mettle",
+        "scopeName": "source.mettle",
+        "path": "./syntaxes/mettle.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Mettle",
+      "properties": {
+        "mettle.linter.compilerEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the Mettle compiler on save for semantic diagnostics (types, scope, undefined symbols).",
+          "markdownDescription": "When enabled, the extension runs the `mettle` compiler **on save** and shows real compiler errors and warnings in the Problems panel. Regex-based checks still run while you type.\n\nRequires a `mettle` binary (workspace `bin/` or `PATH`)."
+        },
+        "mettle.linter.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the mettle executable. Empty: auto-detect workspace bin/, then PATH.",
+          "markdownDescription": "Path to the Mettle executable. Can be relative to the workspace folder or absolute.\n\nIf empty, the extension looks for `bin/mettle` or `bin/mettle.exe` (and a few fallbacks) under the workspace, then uses `mettle` / `mettle.exe` on your `PATH`.\n\nSee the repo `docs/compilation.md` for how to build or install the compiler."
+        },
+        "mettle.linter.stdlibPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional --stdlib directory override for the linter invocation.",
+          "markdownDescription": "If set, passed to the compiler as `--stdlib <dir>` when linting. Use when you maintain a custom standard library layout.\n\nLeave empty to use the compiler’s default bundled stdlib resolution (see `docs/compilation.md`)."
+        }
+      }
+    }
+  }
+}

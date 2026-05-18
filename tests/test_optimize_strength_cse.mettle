@@ -1,0 +1,16 @@
+function main() -> int32 {
+  var a: int32 = 7;
+  var b: int32 = 9;
+
+  var x: int32 = a * 8;
+  var y: int32 = 8 * a;
+
+  var z: int32 = a + b;
+  var w: int32 = b + a;
+
+  if (z != w) {
+    return 1;
+  }
+
+  return x + y;
+}

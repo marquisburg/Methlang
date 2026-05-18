@@ -1,0 +1,13 @@
+// Decimal widens above int32_max to int64; hex infers uint32 in high range.
+function main() -> int32 {
+  var u32_max_dec: uint32 = 4294967295;
+  var u32_max_hex: uint32 = 0xFFFFFFFF;
+  var as_i64: int64 = 4294967295;
+  var vkish: int32 = 1000123000;
+  var neg_i32_min: int32 = -(2147483648);
+  var four_bits: uint32 = 0b1111;
+  if (u32_max_dec == u32_max_hex && as_i64 == 4294967295 && vkish > 2147483647 && neg_i32_min == -2147483648 && four_bits == 15) {
+    return 1;
+  }
+  return 0;
+}

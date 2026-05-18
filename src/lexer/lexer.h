@@ -39,6 +39,11 @@ typedef enum {
   TOKEN_IMPL,
   TOKEN_WHERE,
   TOKEN_FN,
+  TOKEN_MATCH,
+  TOKEN_ASYNC,
+  TOKEN_AWAIT,
+  TOKEN_SPAWN,
+  TOKEN_CHANNEL,
 
   // Type keywords
   TOKEN_INT8,
@@ -58,6 +63,16 @@ typedef enum {
   TOKEN_SEMICOLON,
   TOKEN_COMMA,
   TOKEN_EQUALS,
+  TOKEN_PLUS_EQUALS,
+  TOKEN_MINUS_EQUALS,
+  TOKEN_STAR_EQUALS,
+  TOKEN_SLASH_EQUALS,
+  TOKEN_PERCENT_EQUALS,
+  TOKEN_AMP_EQUALS,
+  TOKEN_PIPE_EQUALS,
+  TOKEN_CARET_EQUALS,
+  TOKEN_LSHIFT_EQUALS,
+  TOKEN_RSHIFT_EQUALS,
   TOKEN_EQUALS_EQUALS,
   TOKEN_NOT_EQUALS,
   TOKEN_LESS_THAN,
@@ -166,6 +181,7 @@ typedef struct {
   size_t length;
   char *error_message;
   int has_error;
+  size_t continuation_depth;
 } Lexer;
 
 // Function declarations

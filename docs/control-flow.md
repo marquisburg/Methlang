@@ -1,12 +1,12 @@
 # Control Flow
 
-Methlang provides structured control flow: conditionals, loops, and switches. All control structures use braces for the body.
+Mettle provides structured control flow: conditionals, loops, and switches. All control structures use braces for the body.
 
 ## Assignment
 
 Assignment uses `=`. The left side must be an lvalue (variable, struct field, array element, or dereferenced pointer). Assignment is a statement; it does not produce a value for use in larger expressions.
 
-```meth
+```mettle
 x = 42;
 ptr->field = value;
 arr[i] = x;
@@ -20,7 +20,7 @@ arr[i] = x;
 
 The `if` statement evaluates a condition. If true, the then branch runs. The optional `else` branch runs when the condition is false. The condition must be a **numeric type** (integer or floating-point); zero is false, non-zero is true. Pointers are not valid as conditions—use an explicit comparison: `if (ptr != 0)` to check for non-null, not `if (ptr)`.
 
-```meth
+```mettle
 if (x > 0) {
   // ...
 } else if (x < 0) {
@@ -36,7 +36,7 @@ if (x > 0) {
 
 The `while` loop evaluates the condition. If true, the body runs and the condition is evaluated again. The loop exits when the condition is false.
 
-```meth
+```mettle
 while (condition) {
   // ...
 }
@@ -44,7 +44,7 @@ while (condition) {
 
 Common patterns:
 
-```meth
+```mettle
 // Iterate over an array
 var i: int32 = 0;
 while (i < len) {
@@ -64,7 +64,7 @@ An infinite loop is written `while (1)`; the condition is always true.
 
 The `for` loop has an initializer, condition, and increment. The initializer runs once. The condition is evaluated before each iteration; if false, the loop exits. The increment runs after each iteration. The initializer can declare a variable. Condition and increment are optional—`for (;;)` is a valid infinite loop.
 
-```meth
+```mettle
 for (var i: int32 = 0; i < 10; i = i + 1) {
   // ...
 }
@@ -76,13 +76,13 @@ for (var i: int32 = 0; i < 10; i = i + 1) {
 
 ## Switch
 
-The `switch` statement evaluates an expression and compares it to each `case` value. Case values must be compile-time constant integer expressions (including enum variants). When a case matches, its body runs. Use `break` to exit the switch. Use `continue` inside a loop that contains the switch to continue the loop. Only one `default` clause is allowed.
+The `switch` statement evaluates an expression and compares it to each `case` value. Case values must be compile-time constant integer expressions (including enum variants and `true`/`false`). When a case matches, its body runs. Use `break` to exit the switch. Use `continue` inside a loop that contains the switch to continue the loop. Only one `default` clause is allowed.
 
-**Fall-through:** Unlike some languages, Methlang does not enforce `break`. If you omit it, execution falls through to the next case (C-style behavior). To avoid accidental bugs, always end each case with `break` explicitly unless you intend fall-through.
+**Fall-through:** Unlike some languages, Mettle does not enforce `break`. If you omit it, execution falls through to the next case (C-style behavior). To avoid accidental bugs, always end each case with `break` explicitly unless you intend fall-through.
 
-**No case matches, no default:** If no case matches and there is no `default` clause, execution continues silently after the switch. No error is raised.
+**Exhaustiveness:** `switch` over raw integers may omit matching cases and continue after the statement if no case matches. `switch` over `enum` or `bool` must be exhaustive unless a `default` clause is present.
 
-```meth
+```mettle
 switch (expr) {
   case 1:
     // ...
@@ -95,13 +95,36 @@ switch (expr) {
 }
 ```
 
+## Match
+
+The `match` statement branches on a tagged enum and optionally binds the payload of a variant. The subject expression must have a tagged-enum type.
+
+```mettle
+match (value) {
+  case Some(v): {
+    return v;
+  }
+  case None: {
+    return 0;
+  }
+}
+```
+
+**Arms:** Each `case` arm has a variant name and a block body. Use `case VariantName(binding):` when that variant carries a payload and you want to bind it to a local name. Use `case VariantName:` for payloadless variants.
+
+**Default arm:** `default:` is allowed. Without `default`, the match must cover every variant of the tagged enum.
+
+**No fall-through:** `match` arms do not fall through. Once an arm matches, its block runs and control continues after the `match`.
+
+**Statement-only:** `match` is currently a statement, not an expression. Use assignments or `return` inside the arm bodies when you want to produce a value.
+
 ## Break and Continue
 
 `break` exits the innermost loop or switch. `continue` skips to the next iteration of the innermost loop. Both are context-checked; they are valid only inside loops or switches. Using them elsewhere is a compile error.
 
 **Important:** `break` and `continue` always target the **innermost** enclosing loop or switch. Inside nested loops, `break` exits only the inner loop. Inside a `switch` that is inside a loop, `break` exits the switch, not the loop—use `continue` to skip to the next loop iteration.
 
-```meth
+```mettle
 while (1) {
   switch (cmd) {
     case 0:
@@ -115,22 +138,89 @@ while (1) {
 }
 ```
 
-**Labeled break/continue** (e.g. `break outer` to exit an outer loop) is not supported. To break out of nested loops, use a flag or restructure the code.
+### Labeled break and continue
+
+A `while` or `for` loop may carry a label, written `name:` immediately before
+the loop keyword. `break name` then exits that labeled loop, and
+`continue name` jumps to the next iteration of that labeled loop, regardless of
+how deeply nested the statement is:
+
+```mettle
+outer: for (var i: int32 = 0; i < n; i = i + 1) {
+  for (var j: int32 = 0; j < m; j = j + 1) {
+    if (grid[i][j] == target) {
+      break outer;     // exits BOTH loops
+    }
+    if (skip[j]) {
+      continue outer;  // next i, abandoning the rest of the j loop
+    }
+  }
+}
+```
+
+Rules and limits:
+
+- Labels attach only to `while` and `for` loops. Writing `name:` before any
+  other statement is a compile error.
+- The label in `break name` / `continue name` must match the label of an
+  enclosing loop; an unknown label is a compile error
+  (`'break NAME' has no matching labeled loop`).
+- `continue name` requires the target to be a loop (every labeled loop is, so
+  this always holds for valid labels).
+- Unlabeled `break`/`continue` still target the innermost loop or switch as
+  before.
+- Labels live in their own namespace and do not collide with variable or
+  function names.
+- Deferred statements are still emitted before the jump, the same as for
+  unlabeled `break`/`continue`.
 
 ## Return
 
 `return` exits the current function. A function with a return type must provide a value: `return value`. A void function uses `return` with no value.
 
-```meth
+```mettle
 return;
 return value;
 ```
+
+## Async Waiting and Cancellation
+
+Async execution composes with ordinary control flow, but the current model is blocking and thread-backed rather than coroutine-based.
+
+```mettle
+async fn worker() -> int32 {
+  while (cancelled() == 0) {
+    // do work
+  }
+  return 0;
+}
+
+function main() -> int32 {
+  var future: Future<int32> = worker();
+
+  if (should_stop) {
+    cancel(future);
+  }
+
+  return await future;
+}
+```
+
+Important control-flow consequences:
+
+- `await` blocks the current thread until the awaited future completes.
+- In a synchronous function, that means the caller thread blocks.
+- In an asynchronous function, that means the async worker thread blocks.
+- `cancel(future)` requests cancellation but does not force an immediate exit.
+- A cancelable async loop must poll `cancelled()` explicitly.
+
+See [Async and Sync Execution](async.md) and [Expressions](expressions.md#sync-vs-async-calls) for the full runtime model.
 
 ## Short-Circuit Evaluation
 
 Logical operators `&&` and `||` support short-circuit evaluation. For pointer checks like `ptr != 0 && ptr->field > 0`, a single condition is safe:
 
-```meth
+```mettle
 if (ptr != 0 && ptr->field > 0) {
   // ...
 }
@@ -144,14 +234,14 @@ if (ptr != 0 && ptr->field > 0) {
 
 Defer statements use the `defer` or `errdefer` keyword followed by a statement:
 
-```meth
+```mettle
 defer cleanup();          // Always runs on scope exit
 errdefer rollback();      // Runs on non-zero return
 ```
 
 The current compiler accepts function calls, assignments, and blocks:
 
-```meth
+```mettle
 defer puts("cleanup");
 defer count = count + 1;
 defer {
@@ -214,7 +304,7 @@ The same success/error split is used for explicit `return` and for implicit fall
 
 Deferred statements execute in reverse order of declaration. This is crucial for resource management where cleanup must happen in reverse of acquisition:
 
-```meth
+```mettle
 func example() {
   defer puts("first");    // Executes third
   defer puts("second");   // Executes second  
@@ -226,7 +316,7 @@ func example() {
 ```
 
 **Mixed defer and errdefer:**
-```meth
+```mettle
 func mixed_example() {
   defer puts("always 1");
   errdefer puts("error only");
@@ -246,7 +336,7 @@ func mixed_example() {
 
 **Block scope:** defer/errdefer execute when the block exits, including if/else branches, loop bodies, and switch cases:
 
-```meth
+```mettle
 func demo() {
   defer puts("function exit");
   
@@ -267,7 +357,7 @@ func demo() {
 
 **Loops:** Each iteration gets its own defer scope. Deferred statements run at the end of each iteration. **Beware:** variables used in deferred statements are captured by reference (see pitfall above)—use a temporary if you need the value at defer time.
 
-```meth
+```mettle
 func loop_example() {
   defer puts("function cleanup");
   
@@ -290,7 +380,7 @@ func loop_example() {
 
 **Switch statements:** Each case that creates a block gets its own defer scope:
 
-```meth
+```mettle
 func switch_demo(value: int32) {
   defer puts("function cleanup");
   
@@ -317,7 +407,7 @@ Because `switch` allows fall-through, cleanup order becomes harder to reason abo
 
 **Break and Continue:** These statements trigger deferred statement emission before jumping:
 
-```meth
+```mettle
 func control_flow_demo() {
   defer puts("function cleanup");
   
@@ -338,7 +428,7 @@ func control_flow_demo() {
 ### Error Handling Patterns
 
 **Resource cleanup with error recovery:**
-```meth
+```mettle
 func process_file(filename: string) {
   var file: File* = fopen(filename, "r");
   if (file == 0) {
@@ -363,7 +453,7 @@ func process_file(filename: string) {
 ```
 
 **Nested error handling:**
-```meth
+```mettle
 func nested_operations() {
   defer puts("outer cleanup");
   
@@ -398,7 +488,7 @@ func nested_operations() {
 
 **Top-level defer:** defer/errdefer can only be used inside functions:
 
-```meth
+```mettle
 // ERROR: defer outside function
 defer puts("this fails");
 
@@ -409,7 +499,7 @@ func valid_function() {
 
 **Supported deferred statements:** `defer` and `errdefer` currently support function calls, assignments, and blocks:
 
-```meth
+```mettle
 func example() {
   defer close_file(file);    // OK
   errdefer update_value(x);  // OK
@@ -423,7 +513,7 @@ func example() {
 
 **Variable capture:** Deferred statements capture variables by reference, not value (see the warning callout above). In a loop, `defer print_int(i)` reads `i` when the defer runs, so you get the value at scope exit—not at defer declaration time. Use a temporary so each iteration has its own variable:
 
-```meth
+```mettle
 while (i < 3) {
   var current: int32 = i;
   defer print_int(current);  // current holds the value from start of iteration
@@ -436,7 +526,7 @@ while (i < 3) {
 ### Resource Management Patterns
 
 **File handling with multiple resources:**
-```meth
+```mettle
 func copy_file(src: string, dst: string) {
   var src_file: File* = fopen(src, "r");
   if (src_file == 0) {
@@ -471,7 +561,7 @@ func copy_file(src: string, dst: string) {
 ```
 
 **Socket management in servers:**
-```meth
+```mettle
 func handle_client_connection(client_socket: int32) {
   defer close_socket(client_socket);
   
@@ -503,7 +593,7 @@ func handle_client_connection(client_socket: int32) {
 ```
 
 **Memory allocation chains:**
-```meth
+```mettle
 func complex_allocation_chain() {
   var resource1: Resource* = allocate_resource();
   if (resource1 == 0) {

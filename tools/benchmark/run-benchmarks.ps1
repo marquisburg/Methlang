@@ -1,83 +1,129 @@
-# Methlang vs C Benchmark Script
+# Dedicated Mettle benchmark harness against C.
 #
-# Builds all benchmarks using the native compiler backend (--build --emit-obj
-# --linker internal), runs Methlang and C counterparts, parses timing, and
-# writes web/benchmarks.json for the benchmarks page.
+# - Reads benchmark matrix from docs/benchmarks/harness.json
+# - Builds each suite via its build script
+# - Executes Meth and C binaries
+# - Parses "Time: <N> ms" output
+# - Writes canonical JSON to docs/benchmarks/latest.json
+# - Mirrors JSON to web/benchmarks.json for the web server
 #
-# Usage: .\tools\benchmark\run-benchmarks.ps1
-#        .\tools\benchmark\run-benchmarks.ps1 -BuildCompiler
-#
-# Requires: Methlang compiler (or -BuildCompiler), gcc (for C counterparts).
-#           No NASM needed—Methlang uses the native COFF object/internal linker path.
+# Usage:
+#   .\tools\benchmark\run-benchmarks.ps1
+#   .\tools\benchmark\run-benchmarks.ps1 -BuildCompiler
+#   .\tools\benchmark\run-benchmarks.ps1 -Quiet
 
 param(
-    [switch]$BuildCompiler
+    [switch]$BuildCompiler,
+    [switch]$Quiet,
+    [string]$ConfigPath = "docs/benchmarks/harness.json"
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $Root
 
+function Write-Log {
+    param([string]$Message)
+    if (-not $Quiet) { Write-Host $Message }
+}
+
+function Normalize-Path {
+    param([string]$PathValue)
+    return ($PathValue -replace "/", "\\")
+}
+
+function Parse-TimeMs {
+    param([string]$Output)
+
+    if ([string]::IsNullOrWhiteSpace($Output)) { return $null }
+
+    $patterns = @(
+        "(?im)^\s*Time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms\b",
+        "(?im)^\s*Elapsed(?:\s+time)?\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*ms\b",
+        "(?im)\b([0-9]+(?:\.[0-9]+)?)\s*ms\b"
+    )
+
+    foreach ($pattern in $patterns) {
+        if ($Output -match $pattern) {
+            return [int][math]::Round([double]$Matches[1], 0)
+        }
+    }
+
+    return $null
+}
+
+function Invoke-ProgramCapture {
+    param([string]$ExePath)
+
+    if (-not (Test-Path $ExePath)) {
+        return @{
+            output = ""
+            exit_code = -1
+        }
+    }
+
+    $output = & $ExePath 2>&1 | Out-String
+    return @{
+        output = $output
+        exit_code = $LASTEXITCODE
+    }
+}
+
+$configFullPath = Join-Path $Root (Normalize-Path $ConfigPath)
+if (-not (Test-Path $configFullPath)) {
+    Write-Error "Harness config not found: $configFullPath"
+    exit 1
+}
+
+$config = Get-Content -Raw -Path $configFullPath | ConvertFrom-Json
+if ($null -eq $config -or $null -eq $config.benchmarks -or $config.benchmarks.Count -eq 0) {
+    Write-Error "Harness config has no benchmarks: $configFullPath"
+    exit 1
+}
+
 if ($BuildCompiler) {
-    Write-Host "Building compiler..."
+    Write-Log "Building compiler..."
     & .\build.bat
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
-if (-not (Test-Path ".\bin\methlang.exe")) {
+if (-not (Test-Path ".\bin\mettle.exe")) {
     Write-Error "Compiler not found. Run with -BuildCompiler or build manually."
     exit 1
-}
-
-# Benchmark definitions: name, meth path, c path, build script
-$benchmarks = @(
-    @{ Name = "fib"; Description = "Fibonacci fib(35) x 10M"; BuildScript = "examples\fib\build.bat"; MethExe = "examples\fib\fib.exe"; CExe = "examples\fib\fib_c.exe" },
-    @{ Name = "word_count"; Description = "Word count 256 KB buffer x 500"; BuildScript = "examples\word_count\build.bat"; MethExe = "examples\word_count\word_count.exe"; CExe = "examples\word_count\word_count_c.exe" },
-    @{ Name = "grep"; Description = "Grep ERROR 256 KB x 200"; BuildScript = "examples\grep\build.bat"; MethExe = "examples\grep\grep.exe"; CExe = "examples\grep\grep_c.exe" },
-    @{ Name = "sum_squares"; Description = "Sum of squares 1..100000 x 500"; BuildScript = "examples\sum_squares\build.bat"; MethExe = "examples\sum_squares\sum_squares.exe"; CExe = "examples\sum_squares\sum_squares_c.exe" },
-    @{ Name = "collatz"; Description = "Collatz steps 1..100000 x 10"; BuildScript = "examples\collatz\build.bat"; MethExe = "examples\collatz\collatz.exe"; CExe = "examples\collatz\collatz_c.exe" }
-)
-
-function Parse-TimeMs {
-    param([string]$Output)
-    if ($Output -match "Time:\s*(\d+)\s*ms") {
-        return [int]$Matches[1]
-    }
-    return $null
 }
 
 $results = @()
 $failed = @()
 
-foreach ($bench in $benchmarks) {
-    Write-Host "Building $($bench.Name)..."
-    $null = & cmd /c $bench.BuildScript 2>&1
+foreach ($bench in $config.benchmarks) {
+    $name = [string]$bench.name
+    $description = [string]$bench.description
+    $buildScript = Normalize-Path ([string]$bench.build_script)
+    $methExe = Normalize-Path ([string]$bench.meth_exe)
+    $cExe = Normalize-Path ([string]$bench.c_exe)
+
+    Write-Log "Building $name..."
+    $null = & cmd /c $buildScript 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "  Build failed: $($bench.Name)"
-        $failed += $bench.Name
+        Write-Log "  Build failed: $name"
+        $failed += $name
         continue
     }
 
-    $methMs = $null
-    $cMs = $null
+    $methRun = Invoke-ProgramCapture -ExePath $methExe
+    $cRun = Invoke-ProgramCapture -ExePath $cExe
 
-    if (Test-Path $bench.MethExe) {
-        $methOut = & $bench.MethExe 2>&1 | Out-String
-        $methMs = Parse-TimeMs $methOut
-    }
-    if (Test-Path $bench.CExe) {
-        $cOut = & $bench.CExe 2>&1 | Out-String
-        $cMs = Parse-TimeMs $cOut
-    }
+    $methMs = if ($methRun.exit_code -eq 0) { Parse-TimeMs $methRun.output } else { $null }
+    $cMs = if ($cRun.exit_code -eq 0) { Parse-TimeMs $cRun.output } else { $null }
 
     $relative = $null
     if ($null -ne $methMs -and $null -ne $cMs -and $cMs -gt 0) {
-      $relative = [math]::Round($methMs / $cMs, 2)
+        $relative = [math]::Round(($methMs / $cMs), 2)
     }
 
-    $results += @{
-        name = $bench.Name
-        description = $bench.Description
+    $results += [ordered]@{
+        name = $name
+        description = $description
         meth_ms = $methMs
         c_ms = $cMs
         relative = $relative
@@ -86,17 +132,38 @@ foreach ($bench in $benchmarks) {
     $status = if ($null -ne $methMs) { "Meth: $methMs ms" } else { "Meth: FAIL" }
     $status += " | "
     $status += if ($null -ne $cMs) { "C: $cMs ms" } else { "C: FAIL" }
-    if ($relative) { $status += " | $relative`x vs C" }
-    Write-Host "  $status"
+    if ($null -ne $relative) { $status += " | $relative`x vs C" }
+    Write-Log "  $status"
 }
 
-$json = @{
-    generated = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+$payload = [ordered]@{
+    generated = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    harness = [ordered]@{
+        config = $ConfigPath
+        mode = if ($null -ne $config.mode) { [string]$config.mode } else { "meth-vs-c" }
+    }
     benchmarks = $results
     failed = $failed
-} | ConvertTo-Json -Depth 4
+}
 
-$outPath = Join-Path $Root "web\benchmarks.json"
-$json | Set-Content -Path $outPath -Encoding UTF8
-Write-Host ""
-Write-Host "Wrote $outPath"
+$json = $payload | ConvertTo-Json -Depth 10
+
+$primaryOutput = Normalize-Path ([string]$config.outputs.primary)
+$primaryOutputPath = Join-Path $Root $primaryOutput
+$primaryDir = Split-Path -Parent $primaryOutputPath
+if (-not (Test-Path $primaryDir)) { New-Item -ItemType Directory -Path $primaryDir -Force | Out-Null }
+$json | Set-Content -Path $primaryOutputPath -Encoding UTF8
+
+$mirrorOutput = Normalize-Path ([string]$config.outputs.mirror_web)
+if (-not [string]::IsNullOrWhiteSpace($mirrorOutput)) {
+    $mirrorPath = Join-Path $Root $mirrorOutput
+    $mirrorDir = Split-Path -Parent $mirrorPath
+    if (-not (Test-Path $mirrorDir)) { New-Item -ItemType Directory -Path $mirrorDir -Force | Out-Null }
+    $json | Set-Content -Path $mirrorPath -Encoding UTF8
+}
+
+Write-Log ""
+Write-Log "Wrote $primaryOutputPath"
+if (-not [string]::IsNullOrWhiteSpace($mirrorOutput)) {
+    Write-Log "Mirrored to $(Join-Path $Root $mirrorOutput)"
+}

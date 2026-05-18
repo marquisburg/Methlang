@@ -16,6 +16,7 @@ typedef struct {
   char *error_message;
   ErrorReporter *error_reporter;
   int error_recovery_mode;
+  const char *source_filename;
 } Parser;
 
 // Function declarations
@@ -41,6 +42,8 @@ ASTNode *parser_parse_var_declaration(Parser *parser);
 ASTNode *parser_parse_function_declaration(Parser *parser);
 ASTNode *parser_parse_struct_declaration(Parser *parser);
 ASTNode *parser_parse_enum_declaration(Parser *parser);
+ASTNode *parser_parse_trait_declaration(Parser *parser);
+ASTNode *parser_parse_impl_declaration(Parser *parser);
 ASTNode *parser_parse_method_declaration(Parser *parser);
 ASTNode *parser_parse_inline_asm(Parser *parser);
 ASTNode *parser_parse_assignment(Parser *parser);
@@ -49,6 +52,7 @@ ASTNode *parser_parse_if_statement(Parser *parser);
 ASTNode *parser_parse_while_statement(Parser *parser);
 ASTNode *parser_parse_for_statement(Parser *parser);
 ASTNode *parser_parse_switch_statement(Parser *parser);
+ASTNode *parser_parse_match_statement(Parser *parser);
 ASTNode *parser_parse_break_statement(Parser *parser);
 ASTNode *parser_parse_continue_statement(Parser *parser);
 ASTNode *parser_parse_defer_statement(Parser *parser);
@@ -70,5 +74,6 @@ int parser_is_binary_operator(TokenType type);
 int parser_is_unary_operator(TokenType type);
 int parser_is_identifier_like(TokenType type);
 int parser_is_type_keyword(TokenType type);
+int parser_is_assignment_token(TokenType type);
 
 #endif // PARSER_H

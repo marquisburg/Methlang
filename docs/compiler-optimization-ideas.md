@@ -1,6 +1,6 @@
 # Compiler Optimization Ideas
 
-This document outlines optimizations you could implement in the Methlang compiler to improve generated code quality, especially for hot loops like `grep_count`.
+This document outlines optimizations you could implement in the Mettle compiler to improve generated code quality, especially for hot loops like `grep_count`.
 
 ## Current Optimization Pipeline
 
@@ -153,9 +153,9 @@ These run in a fixed-point loop (up to 8 iterations) until no changes.
 
 ## Debugging / Validation
 
-- Use `--perf-report -O` on `examples/grep/grep.meth` to compare before/after
+- Use `--perf-report -O` on `examples/grep/grep.mettle` to compare before/after
 - Emit IR with `-o out.s.ir` (if supported) to inspect IR changes
-- Compare assembly output: `methlang -O grep.meth -o before.s` vs after your pass
+- Compare assembly output: `mettle -O grep.mettle -o before.s` vs after your pass
 - Run `tests/run_tests.ps1` to avoid regressions
 - Use `tools/perf/compare-perf-runs.ps1` for benchmark comparison
 

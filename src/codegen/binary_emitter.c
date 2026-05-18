@@ -199,12 +199,96 @@ static int binary_section_reserve(BinaryEmitter *emitter, BinarySection *section
   return 1;
 }
 
+static uint64_t binary_emitter_hash_name(const char *name) {
+  /* FNV-1a 64-bit. unsigned long is 32-bit on Windows, so use a fixed width. */
+  uint64_t hash = 1469598103934665603ULL;
+  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+    hash ^= (uint64_t)*p;
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+/* Rebuilds the symbol hash index from scratch over the current symbol array.
+ * Called when the index would exceed a 0.7 load factor. */
+static int binary_emitter_symbol_index_rehash(BinaryEmitter *emitter,
+                                              size_t new_bucket_count) {
+  size_t *buckets = calloc(new_bucket_count, sizeof(size_t));
+  if (!buckets) {
+    return 0;
+  }
+  size_t mask = new_bucket_count - 1;
+  for (size_t i = 0; i < emitter->symbol_count; i++) {
+    if (!emitter->symbols[i].name) {
+      continue;
+    }
+    size_t pos =
+        (size_t)(binary_emitter_hash_name(emitter->symbols[i].name) &
+                 (uint64_t)mask);
+    while (buckets[pos] != 0) {
+      pos = (pos + 1) & mask;
+    }
+    buckets[pos] = i + 1;
+  }
+  free(emitter->symbol_index_buckets);
+  emitter->symbol_index_buckets = buckets;
+  emitter->symbol_index_bucket_count = new_bucket_count;
+  return 1;
+}
+
+/* Records that emitter->symbols[symbol_index] now exists in the hash index.
+ * Grows the bucket array first if needed. */
+static int binary_emitter_symbol_index_insert(BinaryEmitter *emitter,
+                                              size_t symbol_index) {
+  size_t live = symbol_index + 1;
+  if (emitter->symbol_index_bucket_count == 0 ||
+      (live * 10) >= (emitter->symbol_index_bucket_count * 7)) {
+    size_t next = emitter->symbol_index_bucket_count == 0
+                      ? 256
+                      : emitter->symbol_index_bucket_count * 2;
+    if (!binary_emitter_symbol_index_rehash(emitter, next)) {
+      return 0;
+    }
+    /* Rehash already placed every existing symbol, including this one if it
+     * was appended before the call. Re-insert below is still safe because the
+     * caller invokes this exactly once per new symbol. */
+  }
+  size_t mask = emitter->symbol_index_bucket_count - 1;
+  const char *name = emitter->symbols[symbol_index].name;
+  size_t pos = (size_t)(binary_emitter_hash_name(name) & (uint64_t)mask);
+  while (emitter->symbol_index_buckets[pos] != 0) {
+    if (emitter->symbol_index_buckets[pos] == symbol_index + 1) {
+      return 1; /* already present (placed by a rehash) */
+    }
+    pos = (pos + 1) & mask;
+  }
+  emitter->symbol_index_buckets[pos] = symbol_index + 1;
+  return 1;
+}
+
 static int binary_emitter_find_symbol_index(const BinaryEmitter *emitter,
                                             const char *name) {
   if (!emitter || !name) {
     return -1;
   }
 
+  if (emitter->symbol_index_buckets &&
+      emitter->symbol_index_bucket_count > 0) {
+    size_t mask = emitter->symbol_index_bucket_count - 1;
+    size_t pos =
+        (size_t)(binary_emitter_hash_name(name) & (uint64_t)mask);
+    while (emitter->symbol_index_buckets[pos] != 0) {
+      size_t idx = emitter->symbol_index_buckets[pos] - 1;
+      if (emitter->symbols[idx].name &&
+          strcmp(emitter->symbols[idx].name, name) == 0) {
+        return (int)idx;
+      }
+      pos = (pos + 1) & mask;
+    }
+    return -1;
+  }
+
+  /* Index not built yet (no symbols defined) — linear fallback. */
   for (size_t i = 0; i < emitter->symbol_count; i++) {
     if (emitter->symbols[i].name &&
         strcmp(emitter->symbols[i].name, name) == 0) {
@@ -340,6 +424,9 @@ void binary_emitter_reset(BinaryEmitter *emitter) {
   emitter->section_count = 0;
   emitter->symbol_count = 0;
   emitter->relocation_count = 0;
+  free(emitter->symbol_index_buckets);
+  emitter->symbol_index_buckets = NULL;
+  emitter->symbol_index_bucket_count = 0;
   free(emitter->error_message);
   emitter->error_message = NULL;
 }
@@ -542,7 +629,16 @@ int binary_emitter_define_symbol(BinaryEmitter *emitter, const char *name,
   symbol->section_index = section_index;
   symbol->value = value;
   symbol->size = size;
+  size_t new_index = emitter->symbol_count;
   emitter->symbol_count++;
+  if (!binary_emitter_symbol_index_insert(emitter, new_index)) {
+    emitter->symbol_count--;
+    free(symbol->name);
+    symbol->name = NULL;
+    binary_emitter_set_error(emitter,
+                             "Out of memory while indexing symbol name");
+    return 0;
+  }
   return 1;
 }
 
@@ -627,6 +723,10 @@ int binary_emitter_write_object_file(BinaryEmitter *emitter,
     binary_emitter_set_error(emitter, "Failed to open object output file");
     return 0;
   }
+  /* The COFF writer emits the header, section table, and symbol table as many
+   * tiny 2/4-byte fwrites. A large stdio buffer collapses those into memory
+   * copies instead of one libc/syscall round trip per field. */
+  setvbuf(file, NULL, _IOFBF, 1 << 20);
 
   uint32_t *section_name_offsets = NULL;
   uint32_t *symbol_name_offsets = NULL;
@@ -757,30 +857,80 @@ int binary_emitter_write_object_file(BinaryEmitter *emitter,
     }
   }
 
-  for (size_t i = 0; i < emitter->section_count; i++) {
+  /* Emit relocations grouped by section. The previous implementation rescanned
+   * every relocation once per section (O(sections * relocations)). Instead do
+   * a single counting sort: compute each section's start index in a combined
+   * ordering, then place every relocation in one O(relocations) pass. Combined
+   * with the O(1) symbol-name hash index this drops the whole step from
+   * O(sections * relocations * symbols) to O(relocations). */
+  if (emitter->relocation_count > 0) {
+    size_t *section_reloc_start =
+        calloc(emitter->section_count + 1, sizeof(size_t));
+    size_t *ordered_relocations =
+        calloc(emitter->relocation_count, sizeof(size_t));
+    if (!section_reloc_start || !ordered_relocations) {
+      free(section_reloc_start);
+      free(ordered_relocations);
+      binary_emitter_set_error(emitter,
+                               "Out of memory while ordering relocations");
+      goto cleanup;
+    }
+
+    /* Prefix sums of per-section counts give each section's slot range. */
+    for (size_t i = 0; i < emitter->section_count; i++) {
+      section_reloc_start[i + 1] =
+          section_reloc_start[i] + section_reloc_counts[i];
+    }
+
+    /* Stable bucket placement preserves original within-section order. */
+    size_t *cursor = calloc(emitter->section_count, sizeof(size_t));
+    if (!cursor) {
+      free(section_reloc_start);
+      free(ordered_relocations);
+      binary_emitter_set_error(emitter,
+                               "Out of memory while ordering relocations");
+      goto cleanup;
+    }
     for (size_t r = 0; r < emitter->relocation_count; r++) {
-      const BinaryRelocation *relocation = &emitter->relocations[r];
-      if (relocation->section_index != i) {
-        continue;
-      }
+      size_t sec = emitter->relocations[r].section_index;
+      size_t dst = section_reloc_start[sec] + cursor[sec]++;
+      ordered_relocations[dst] = r;
+    }
+    free(cursor);
+
+    int order_ok = 1;
+    for (size_t k = 0; k < emitter->relocation_count && order_ok; k++) {
+      const BinaryRelocation *relocation =
+          &emitter->relocations[ordered_relocations[k]];
 
       int symbol_index =
           binary_emitter_find_symbol_index(emitter, relocation->symbol_name);
       if (symbol_index < 0) {
-        binary_emitter_set_error(emitter,
-                                 "Relocation refers to an undefined symbol");
-        goto cleanup;
+        char error_buffer[256];
+        snprintf(error_buffer, sizeof(error_buffer),
+                 "Relocation refers to an undefined symbol '%s'",
+                 relocation->symbol_name ? relocation->symbol_name : "<null>");
+        binary_emitter_set_error(emitter, error_buffer);
+        order_ok = 0;
+        break;
       }
 
       if (!binary_emitter_write_u32(file, (uint32_t)relocation->offset) ||
-          !binary_emitter_write_u32(file,
-                                    symbol_table_indices[(size_t)symbol_index]) ||
+          !binary_emitter_write_u32(
+              file, symbol_table_indices[(size_t)symbol_index]) ||
           !binary_emitter_write_u16(
               file, binary_emitter_map_relocation_kind(relocation->kind))) {
         binary_emitter_set_error(emitter,
                                  "Failed while writing COFF relocations");
-        goto cleanup;
+        order_ok = 0;
+        break;
       }
+    }
+
+    free(section_reloc_start);
+    free(ordered_relocations);
+    if (!order_ok) {
+      goto cleanup;
     }
   }
 
