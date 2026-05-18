@@ -1,3 +1,8 @@
+<p align="left">
+  <img src="mettle.svg#gh-light-mode-only" alt="Mettle" width="96" height="96">
+  <img src="mettle-syntax/icons/mettle-dark.svg#gh-dark-mode-only" alt="Mettle" width="96" height="96">
+</p>
+
 # Mettle
 
 Mettle is a typed, low-level language that compiles `.mettle` source files to x86-64 NASM assembly and, on Windows, native COFF objects for direct PE linking.
