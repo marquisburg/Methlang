@@ -1,0 +1,9 @@
+function main() -> int32 {
+  var x: int32 = 0;
+
+  while (0) {
+    x = x + 1000;
+  }
+
+  return x;
+}

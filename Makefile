@@ -21,7 +21,7 @@ RUNTIME_SOURCES = $(SRCDIR)/runtime/gc.c $(SRCDIR)/runtime/async_runtime.c $(SRC
 SOURCES = $(LEXER_SOURCES) $(PARSER_SOURCES) $(SEMANTIC_SOURCES) $(IR_SOURCES) $(CODEGEN_SOURCES) $(LINKER_SOURCES) $(ERROR_SOURCES) $(DEBUG_SOURCES) $(RUNTIME_SOURCES) $(MAIN_SOURCES)
 OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-TARGET = $(BINDIR)/methlang
+TARGET = $(BINDIR)/mettle
 
 .PHONY: all clean test install bundle-stdlib bundle-runtime
 

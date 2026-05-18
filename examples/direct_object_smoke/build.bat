@@ -6,19 +6,19 @@ set APP=%~dp0
 set ROOT=%APP%..\..
 cd /d "%ROOT%"
 
-set SRC=examples\direct_object_smoke\direct_object_smoke.meth
+set SRC=examples\direct_object_smoke\direct_object_smoke.mettle
 set OBJ=examples\direct_object_smoke\direct_object_smoke.obj
 set EXE=examples\direct_object_smoke\direct_object_smoke.exe
 set EXPECTED_EXIT=17
 
-if not exist bin\methlang.exe (
-    echo Building Methlang compiler...
+if not exist bin\mettle.exe (
+    echo Building Mettle compiler...
     call build.bat
     if %ERRORLEVEL% NEQ 0 exit /b 1
 )
 
 echo Emitting COFF object with the direct-object backend...
-bin\methlang.exe --emit-obj "%SRC%" -o "%OBJ%"
+bin\mettle.exe --emit-obj "%SRC%" -o "%OBJ%"
 if %ERRORLEVEL% NEQ 0 (
     echo Direct object emission failed.
     exit /b 1
@@ -36,7 +36,7 @@ if %ERRORLEVEL% EQU 0 (
 
 echo.
 echo Building executable from the emitted object...
-bin\methlang.exe --build --emit-obj "%SRC%" -o "%EXE%"
+bin\mettle.exe --build --emit-obj "%SRC%" -o "%EXE%"
 if %ERRORLEVEL% NEQ 0 (
     echo Direct object build failed.
     exit /b 1

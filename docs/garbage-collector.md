@@ -1,6 +1,6 @@
 # Garbage Collector
 
-Methlang provides an optional conservative mark-and-sweep garbage collector for heap allocation. On Windows, `methlang --build` links the bundled GC/runtime automatically. Programs that use only stack allocation and C `malloc` do not need it.
+Mettle provides an optional conservative mark-and-sweep garbage collector for heap allocation. On Windows, `mettle --build` links the bundled GC/runtime automatically. Programs that use only stack allocation and C `malloc` do not need it.
 
 ## When to Use GC
 
@@ -19,7 +19,7 @@ Async functions also participate in the managed runtime model: the future/task c
 When your program uses `new` or async features, the default Windows flow is:
 
 ```bat
-methlang --build main.meth -o main.exe
+mettle --build main.mettle -o main.exe
 ```
 
 This automatically assembles and links the bundled runtime objects for you.
@@ -29,7 +29,7 @@ This automatically assembles and links the bundled runtime objects for you.
 If you are using the manual assembly/link pipeline, link the bundled GC runtime object. Async programs also need `async_runtime.o`:
 
 ```bash
-methlang main.meth -o main.s
+mettle main.mettle -o main.s
 nasm -f win64 main.s -o main.o
 gcc -nostartfiles main.o path/to/runtime/gc.o -o main -lkernel32
 ```
@@ -64,9 +64,9 @@ The GC scans each attached thread stack from a captured current stack pointer (s
 - **Pointers stored inside structs on the heap** are traced automatically during the mark phase. When an allocation is marked, its payload is scanned for pointer-sized values; any value that falls within heap bounds is treated as a pointer and the target allocation is marked. So a struct field that holds a pointer to another GC object is followed without explicit registration.
 - For pointers stored in **non-stack, non-heap** locations (e.g. C globals, static variables in C code), use `gc_register_root` and `gc_unregister_root` so the GC can find them.
 
-**Example (registering a root from Methlang):** When C code stores a managed pointer in a variable the GC cannot otherwise see, declare the extern and pass the address of that variable. The parameter is a double pointer because the GC needs the address of the slot containing the pointer, not the pointer itself, so it can read an updated value if the variable is reassigned.
+**Example (registering a root from Mettle):** When C code stores a managed pointer in a variable the GC cannot otherwise see, declare the extern and pass the address of that variable. The parameter is a double pointer because the GC needs the address of the slot containing the pointer, not the pointer itself, so it can read an updated value if the variable is reassigned.
 
-```meth
+```mettle
 struct Data { x: int32; y: int32; }
 
 var c_storage: Data* = 0;  // C code will store a managed pointer here
@@ -131,7 +131,7 @@ The GC runtime (`gc.h`) exposes these functions for advanced use:
 
 ## Programs Without GC
 
-Programs that do not use `new` or string concatenation do not need to link the GC runtime. The Windows forum server ([server.meth](/g:/Projects/MethASM/web/server.meth)) relies on `string + string`, so it must link the GC runtime; simple CLI utilities that stick to stack and `malloc` can still be built without it.
+Programs that do not use `new` or string concatenation do not need to link the GC runtime. The Windows forum server ([server.mettle](/g:/Projects/Mettle/web/server.mettle)) relies on `string + string`, so it must link the GC runtime; simple CLI utilities that stick to stack and `malloc` can still be built without it.
 
 If you use `new` but forget to link the GC runtime, the linker will report undefined references:
 
@@ -140,7 +140,7 @@ undefined reference to `gc_alloc'
 undefined reference to `gc_init'
 ```
 
-Resolve by linking the bundled `gc.o` or by using `methlang --build`.
+Resolve by linking the bundled `gc.o` or by using `mettle --build`.
 
 ## GC and Threads
 
@@ -150,7 +150,7 @@ The runtime supports cooperative multi-threaded collection:
 - Attached threads should reach `gc_safepoint()` periodically so stop-the-world collection can capture thread stacks.
 - Collection is still stop-the-world (not concurrent/incremental), but allocation and collection are synchronized internally.
 
-Async worker threads created by Methlang's async runtime call `gc_thread_attach()` and `gc_thread_detach()` automatically. You only need to manage attach/detach yourself for threads you create manually through C interop or thread libraries.
+Async worker threads created by Mettle's async runtime call `gc_thread_attach()` and `gc_thread_detach()` automatically. You only need to manage attach/detach yourself for threads you create manually through C interop or thread libraries.
 
 `gc_thread_detach()` now reclaims thread bookkeeping immediately. The detached thread record does not stay resident until `gc_shutdown`. Any TLAB chunks that still contain live objects remain tracked by the runtime and are reclaimed when fully dead (or at shutdown).
 
@@ -159,7 +159,7 @@ Async worker threads created by Methlang's async runtime call `gc_thread_attach(
 Conservative correctness depends on roots being visible to the scanner at safepoints.
 
 - Baseline x86-64 mode spills GPRs and `xmm0..xmm15` around generated safepoint calls.
-- Optional wider spill mode supports AVX-512 register files: define `Methlang_SAFEPOINT_SPILL_XMM31` when building the compiler to spill `xmm0..xmm31`.
+- Optional wider spill mode supports AVX-512 register files: define `Mettle_SAFEPOINT_SPILL_XMM31` when building the compiler to spill `xmm0..xmm31`.
 
 If your deployment baseline is AVX2-era machines, `xmm0..xmm15` is sufficient.
 

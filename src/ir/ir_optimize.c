@@ -62,6 +62,12 @@ typedef struct {
   size_t capacity;
 } IRInstructionVector;
 
+typedef struct {
+  size_t *items;
+  size_t count;
+  size_t capacity;
+} IRIndexVector;
+
 typedef enum {
   IR_EXPR_BINARY,
   IR_EXPR_UNARY,
@@ -501,6 +507,35 @@ static void ir_instruction_vector_destroy(IRInstructionVector *vector) {
 
   for (size_t i = 0; i < vector->count; i++) {
     ir_instruction_destroy_storage(&vector->items[i]);
+  }
+  free(vector->items);
+  vector->items = NULL;
+  vector->count = 0;
+  vector->capacity = 0;
+}
+
+static int ir_index_vector_append(IRIndexVector *vector, size_t value) {
+  if (!vector) {
+    return 0;
+  }
+
+  if (vector->count >= vector->capacity) {
+    size_t new_capacity = vector->capacity == 0 ? 16 : vector->capacity * 2;
+    size_t *new_items = realloc(vector->items, new_capacity * sizeof(size_t));
+    if (!new_items) {
+      return 0;
+    }
+    vector->items = new_items;
+    vector->capacity = new_capacity;
+  }
+
+  vector->items[vector->count++] = value;
+  return 1;
+}
+
+static void ir_index_vector_destroy(IRIndexVector *vector) {
+  if (!vector) {
+    return;
   }
   free(vector->items);
   vector->items = NULL;
@@ -2572,6 +2607,24 @@ static int ir_find_next_non_nop(const IRFunction *function, size_t start_index,
   return 0;
 }
 
+static int ir_find_label_index(const IRFunction *function, const char *label,
+                               size_t *out_index) {
+  if (!function || !label || !out_index) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_LABEL && instruction->text &&
+        strcmp(instruction->text, label) == 0) {
+      *out_index = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
 static int ir_branch_zero_not_equal_zero_forwarding_pass(IRFunction *function,
                                                          int *changed) {
   if (!function) {
@@ -2896,6 +2949,220 @@ static int ir_remove_redundant_jumps_pass(IRFunction *function, int *changed) {
   return 1;
 }
 
+static int ir_thread_jump_targets_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRInstruction *instruction = &function->instructions[i];
+    if ((instruction->op != IR_OP_JUMP &&
+         instruction->op != IR_OP_BRANCH_ZERO &&
+         instruction->op != IR_OP_BRANCH_EQ) ||
+        !instruction->text) {
+      continue;
+    }
+
+    const char *current_target = instruction->text;
+    for (int depth = 0; depth < 32; depth++) {
+      size_t label_index = 0;
+      if (!ir_find_label_index(function, current_target, &label_index)) {
+        break;
+      }
+
+      size_t next_index = 0;
+      if (!ir_find_next_non_nop(function, label_index + 1, &next_index)) {
+        break;
+      }
+
+      IRInstruction *next = &function->instructions[next_index];
+      if (next->op != IR_OP_JUMP || !next->text ||
+          strcmp(next->text, current_target) == 0) {
+        break;
+      }
+
+      current_target = next->text;
+    }
+
+    if (strcmp(current_target, instruction->text) != 0) {
+      char *target_copy = ir_opt_strdup(current_target);
+      if (!target_copy) {
+        return 0;
+      }
+      free(instruction->text);
+      instruction->text = target_copy;
+      if (changed) {
+        *changed = 1;
+      }
+    }
+  }
+
+  return 1;
+}
+
+static int ir_remove_redundant_fallthrough_branches_pass(IRFunction *function,
+                                                         int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRInstruction *instruction = &function->instructions[i];
+    if ((instruction->op != IR_OP_BRANCH_ZERO &&
+         instruction->op != IR_OP_BRANCH_EQ) ||
+        !instruction->text) {
+      continue;
+    }
+
+    size_t next = i + 1;
+    while (next < function->instruction_count &&
+           function->instructions[next].op == IR_OP_NOP) {
+      next++;
+    }
+
+    if (next < function->instruction_count &&
+        function->instructions[next].op == IR_OP_LABEL &&
+        function->instructions[next].text &&
+        strcmp(function->instructions[next].text, instruction->text) == 0) {
+      ir_instruction_make_nop(instruction);
+      if (changed) {
+        *changed = 1;
+      }
+    }
+  }
+
+  return 1;
+}
+
+static int ir_reachable_enqueue_label(const IRFunction *function,
+                                      const char *label,
+                                      IRIndexVector *worklist) {
+  size_t label_index = 0;
+  if (!label || !ir_find_label_index(function, label, &label_index)) {
+    return 1;
+  }
+  return ir_index_vector_append(worklist, label_index);
+}
+
+static int ir_eliminate_unreachable_blocks_pass(IRFunction *function,
+                                                int *changed) {
+  if (!function) {
+    return 0;
+  }
+  if (function->instruction_count == 0) {
+    return 1;
+  }
+
+  unsigned char *reachable = calloc(function->instruction_count, 1);
+  if (!reachable) {
+    return 0;
+  }
+
+  IRIndexVector worklist = {0};
+  if (!ir_index_vector_append(&worklist, 0)) {
+    ir_index_vector_destroy(&worklist);
+    free(reachable);
+    return 0;
+  }
+
+  for (size_t work_index = 0; work_index < worklist.count; work_index++) {
+    size_t i = worklist.items[work_index];
+    while (i < function->instruction_count) {
+      if (reachable[i]) {
+        break;
+      }
+
+      IRInstruction *instruction = &function->instructions[i];
+      reachable[i] = 1;
+
+      if (instruction->op == IR_OP_JUMP) {
+        if (!ir_reachable_enqueue_label(function, instruction->text,
+                                        &worklist)) {
+          ir_index_vector_destroy(&worklist);
+          free(reachable);
+          return 0;
+        }
+        break;
+      }
+
+      if (instruction->op == IR_OP_BRANCH_ZERO ||
+          instruction->op == IR_OP_BRANCH_EQ) {
+        if (!ir_reachable_enqueue_label(function, instruction->text,
+                                        &worklist)) {
+          ir_index_vector_destroy(&worklist);
+          free(reachable);
+          return 0;
+        }
+      } else if (instruction->op == IR_OP_RETURN) {
+        break;
+      }
+
+      i++;
+    }
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (!reachable[i] && function->instructions[i].op != IR_OP_NOP) {
+      ir_instruction_make_nop(&function->instructions[i]);
+      if (changed) {
+        *changed = 1;
+      }
+    }
+  }
+
+  ir_index_vector_destroy(&worklist);
+  free(reachable);
+  return 1;
+}
+
+static int ir_instruction_references_label(const IRInstruction *instruction,
+                                           const char *label) {
+  if (!instruction || !label || !instruction->text) {
+    return 0;
+  }
+
+  if (instruction->op != IR_OP_JUMP && instruction->op != IR_OP_BRANCH_ZERO &&
+      instruction->op != IR_OP_BRANCH_EQ) {
+    return 0;
+  }
+
+  return strcmp(instruction->text, label) == 0;
+}
+
+static int ir_label_is_referenced(const IRFunction *function,
+                                  const char *label) {
+  if (!function || !label) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (ir_instruction_references_label(&function->instructions[i], label)) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int ir_remove_unused_labels_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_LABEL && instruction->text &&
+        !ir_label_is_referenced(function, instruction->text)) {
+      ir_instruction_make_nop(instruction);
+      if (changed) {
+        *changed = 1;
+      }
+    }
+  }
+
+  return 1;
+}
+
 static int ir_eliminate_unreachable_straightline_pass(IRFunction *function,
                                                        int *changed) {
   if (!function) {
@@ -2943,8 +3210,12 @@ static int ir_optimize_function(IRFunction *function) {
         !ir_common_subexpression_elimination_pass(function, &changed) ||
         !ir_constant_and_branch_simplify_pass(function, &changed) ||
         !ir_eliminate_dead_temp_writes_pass(function, &changed) ||
+        !ir_thread_jump_targets_pass(function, &changed) ||
+        !ir_remove_redundant_fallthrough_branches_pass(function, &changed) ||
         !ir_remove_redundant_jumps_pass(function, &changed) ||
-        !ir_eliminate_unreachable_straightline_pass(function, &changed)) {
+        !ir_eliminate_unreachable_straightline_pass(function, &changed) ||
+        !ir_eliminate_unreachable_blocks_pass(function, &changed) ||
+        !ir_remove_unused_labels_pass(function, &changed)) {
       return 0;
     }
 

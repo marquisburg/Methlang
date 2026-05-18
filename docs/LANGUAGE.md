@@ -1,6 +1,6 @@
-# Methlang Language Reference
+# Mettle Language Reference
 
-Methlang is a typed, assembly-inspired language that compiles to x86-64 assembly. This reference is split into focused documents for cohesion and clarity.
+Mettle is a typed, assembly-inspired language that compiles to x86-64 assembly. This reference is split into focused documents for cohesion and clarity.
 
 ## Table of Contents
 

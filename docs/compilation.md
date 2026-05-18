@@ -1,13 +1,13 @@
 # Compilation
 
-This document describes how to compile Methlang programs and the available compiler options.
+This document describes how to compile Mettle programs and the available compiler options.
 
 ## Compiler Usage
 
 ```bash
-methlang [options] <input.meth>
-methlang help [topic]
-methlang docs [topic]
+mettle [options] <input.mettle>
+mettle help [topic]
+mettle docs [topic]
 ```
 
 The input file is the main source file. Imports are resolved relative to it. By default the compiler produces assembly (`output.s`). On Windows, `--emit-obj` produces a COFF object, and `--build` produces an executable.
@@ -18,10 +18,10 @@ The input file is the main source file. Imports are resolved relative to it. By 
 
 The compiler includes topic-oriented help commands:
 
-- `methlang help` prints CLI usage.
-- `methlang help build` explains the Windows build flow.
-- `methlang help gc` explains how the bundled GC/runtime is linked.
-- `methlang docs` lists the main documentation entry points and their paths.
+- `mettle help` prints CLI usage.
+- `mettle help build` explains the Windows build flow.
+- `mettle help gc` explains how the bundled GC/runtime is linked.
+- `mettle docs` lists the main documentation entry points and their paths.
 
 Available topics: `build`, `gc`, `interop`, `stdlib`, `web`.
 
@@ -59,11 +59,11 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 
 ### Recommended Windows Flow
 
-1. Native object/internal-link build: `methlang --build --emit-obj --linker internal main.meth -o main.exe`
-2. Optional extra libraries: `methlang --build --emit-obj --linker internal main.meth -o main.exe --link-arg -lcustomdll`
-3. Assembly/auto path: `methlang --build main.meth -o main.exe`
+1. Native object/internal-link build: `mettle --build --emit-obj --linker internal main.mettle -o main.exe`
+2. Optional extra libraries: `mettle --build --emit-obj --linker internal main.mettle -o main.exe --link-arg -lcustomdll`
+3. Assembly/auto path: `mettle --build main.mettle -o main.exe`
 
-`--build --emit-obj --linker internal` keeps the target build inside Methlang's object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. The internal linker probes common Win32 DLLs directly (`kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, `ucrtbase`, and `msvcrt`), so `std/win32`, `std/thread`, and `std/net` work without hand-written C bridge objects or default import-library flags. `--build` with `--linker auto` tries the internal linker first and falls back to external linkers if needed. If you do not pass `--emit-obj`, the build still goes through assembly and requires `NASM`. The packaged runtime is part of the Methlang installation/build output; you do not need to add `gc.c` or `async_runtime.c` to each project manually.
+`--build --emit-obj --linker internal` keeps the target build inside Mettle's object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. The internal linker probes common Win32 DLLs directly (`kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, `ucrtbase`, and `msvcrt`), so `std/win32`, `std/thread`, and `std/net` work without hand-written C bridge objects or default import-library flags. `--build` with `--linker auto` tries the internal linker first and falls back to external linkers if needed. If you do not pass `--emit-obj`, the build still goes through assembly and requires `NASM`. The packaged runtime is part of the Mettle installation/build output; you do not need to add `gc.c` or `async_runtime.c` to each project manually.
 
 ### Async Executor Runtime Tuning
 
@@ -86,9 +86,9 @@ Call async shutdown before `gc_shutdown()` so worker threads are detached and jo
 
 ### Manual Assembly/Link Flow
 
-1. Compile: `methlang main.meth -o main.s`
+1. Compile: `mettle main.mettle -o main.s`
 2. Assemble: `nasm -f win64 main.s -o main.o` (or `-f elf64` on Linux)
-3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Methlang's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, string concatenation, or async features, link the bundled runtime objects from your Methlang installation/build output. See [Garbage Collector](garbage-collector.md) and [Async and Sync Execution](async.md).
+3. Link: `gcc -nostartfiles main.o gc.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Mettle's entry point (`mainCRTStartup`) is used instead of the C runtime's. If your program uses `new`, string concatenation, or async features, link the bundled runtime objects from your Mettle installation/build output. See [Garbage Collector](garbage-collector.md) and [Async and Sync Execution](async.md).
 
 Programs that use async features also need the bundled async runtime object:
 
@@ -98,7 +98,7 @@ gcc -nostartfiles main.o path/to/runtime/gc.o path/to/runtime/async_runtime.o -o
 
 On POSIX toolchains, the bundled async runtime uses a pthread-backed implementation. Add pthread linkage as required by your environment.
 
-**Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, you must also link bundled `runtime/methlang_entry.o` from your Methlang installation/build output. On Windows, link with `-lshell32` as well: `gcc -nostartfiles main.o gc.o methlang_entry.o -o main -lkernel32 -lshell32`.
+**Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, you must also link bundled `runtime/mettle_entry.o` from your Mettle installation/build output. On Windows, link with `-lshell32` as well: `gcc -nostartfiles main.o gc.o mettle_entry.o -o main -lkernel32 -lshell32`.
 
 The output format depends on the target. Use `-f win64` for Windows, `-f elf64` for Linux. NASM is required for assembly; install from https://www.nasm.us/ if needed. On Linux and macOS, use `make` to build the compiler and run tests. The web server example in `web/` is Windows-only (Winsock). See [Standard Library](standard-library.md#platform-support) for Linux support details.
 
@@ -124,7 +124,7 @@ suggests it:
 
 ```text
 error[E0003]: Undefined variable 'countr'
-  --> app.meth:5:10
+  --> app.mettle:5:10
   |
 4 |   var counter: int32 = 41;
 5 |   return countr + 1;
@@ -155,9 +155,9 @@ Unhandled runtime exception 0xC0000005 (access violation)
 Exception address: 0x00007FF7DFD71046
 write access violation at 0x0000000000000001
 Stack trace:
-  #0 leaf_crash at app.meth:2:3 (0x00007FF7DFD71046)
-  #1 intermediate at app.meth:6:3 (0x00007FF7DFD71080)
-  #2 main at app.meth:10:3 (0x00007FF7DFD710A0)
+  #0 leaf_crash at app.mettle:2:3 (0x00007FF7DFD71046)
+  #1 intermediate at app.mettle:6:3 (0x00007FF7DFD71080)
+  #2 main at app.mettle:10:3 (0x00007FF7DFD710A0)
 ```
 
 POSIX example (null dereference via SIGSEGV):
@@ -167,8 +167,8 @@ Unhandled runtime signal 11 (segmentation fault (invalid memory access))
 Faulting address: 0x0000000000000000  (null pointer dereference)
 Fault instruction: 0x000057AD4388733D
 Stack trace:
-  #0 compute_total at app.meth:12:5 (0x000057AD4388733D)
-  #1 main at app.meth:20:3 (0x000057AD438873CE)
+  #0 compute_total at app.mettle:12:5 (0x000057AD4388733D)
+  #1 main at app.mettle:20:3 (0x000057AD438873CE)
 ```
 
 Compiler-generated runtime traps are formatted the same on both platforms:
@@ -176,7 +176,7 @@ Compiler-generated runtime traps are formatted the same on both platforms:
 ```text
 Fatal error: Null pointer dereference
 Stack trace:
-  #0 main at app.meth:9:10 (0x00007FF7DFD71046)
+  #0 main at app.mettle:9:10 (0x00007FF7DFD71046)
 ```
 
 The signal handler runs on a dedicated alternate stack so that a stack-overflow `SIGSEGV` can still be reported rather than silently re-faulting, and uses only async-signal-safe primitives.
@@ -193,7 +193,7 @@ Then open http://localhost:5000 in a browser.
 
 ### Web Server Reliability Notes
 
-When modifying `web/server.meth` or `web/index.html`, use these rules to avoid runtime crashes:
+When modifying `web/server.mettle` or `web/index.html`, use these rules to avoid runtime crashes:
 
 1. Prefer streaming responses with `send_all` instead of building large dynamic response buffers on the stack.
 2. If you use `Content-Length`, compute it exactly and ensure any header buffer is large enough for worst-case digits and header text.
@@ -210,7 +210,7 @@ These checks catch the common failure mode where only one route (often `/`) cras
 
 The compiler emits a warning for unusually large function stack frames (currently 256 KiB). This is intended as an early signal for stack overflow risk in deeply nested calls or thread stacks with limited reserve.
 
-On Windows x64, Methlang now emits stack probing (`___chkstk_ms`) for large frame allocations (>4 KiB) before subtracting `rsp`, to avoid guard-page skips.
+On Windows x64, Mettle now emits stack probing (`___chkstk_ms`) for large frame allocations (>4 KiB) before subtracting `rsp`, to avoid guard-page skips.
 
 The warning threshold is currently fixed and may become configurable in a future release.
 

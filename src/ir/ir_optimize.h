@@ -10,7 +10,9 @@
 // - Dead temporary write elimination for side-effect-free instructions
 // - Constant branch simplification
 // - Redundant jump cleanup
+// - Jump target threading and redundant fallthrough branch cleanup
 // - Straight-line unreachable code elimination
+// - CFG-based unreachable block and unused label elimination
 // Returns 1 on success, 0 on error.
 int ir_optimize_program(IRProgram *program);
 
