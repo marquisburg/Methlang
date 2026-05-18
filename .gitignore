@@ -1,5 +1,6 @@
 bin/
 obj/
+.claude/
 
 # Build artifacts
 *.exe
@@ -8,4 +9,3 @@ obj/
 *.s
 *.s.ir
 docs/linker-implementation-todo.md
-.claude/
