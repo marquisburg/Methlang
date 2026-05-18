@@ -6,20 +6,22 @@
 <h1 align="center">The Mettle Programming Language</h1>
 
 <p align="center">
-  <a href="#why-mettle">Why Mettle</a> |
-  <a href="#quick-start-windows">Getting started</a> |
-  <a href="docs/LANGUAGE.md">Language reference</a> |
-  <a href="docs/quick-reference.md">Examples</a> |
-  <a href="#documentation">Documentation</a>
+  <b><a href="docs/LANGUAGE.md">Docs</a></b> &nbsp;·&nbsp;
+  <b><a href="#built-in-help">Help</a></b> &nbsp;·&nbsp;
+  <a href="#quick-start-windows">Getting started</a> &nbsp;·&nbsp;
+  <a href="docs/quick-reference.md">Examples</a> &nbsp;·&nbsp;
+  <a href="#why-mettle">Why Mettle</a>
 </p>
 
 This is the main source code repository for Mettle. It contains the compiler, standard library, runtime, and documentation.
+
+> **New to Mettle?** Start with the **[Language Reference](docs/LANGUAGE.md)** for a guided tour, or run `mettle help` for built-in CLI docs (`build`, `gc`, `interop`, `stdlib`, `web`).
 
 ## Why Mettle?
 
 Hand-written x86-64 is fast and predictable, but it gives you no type checking, no modules, no generics, and no way to call into C without ceremony. High-level languages give you those things but hide the machine behind a runtime you don't control.
 
-Mettle sits in between: a statically typed, low-level language that compiles straight to x86-64 — with structured control flow, generics, async/await, and first-class C interop. On Windows it emits native COFF objects and links them with a built-in PE linker, so you can build a real executable with **no NASM, no gcc, no `link.exe`** on the machine.
+Mettle sits in between: a statically typed, low-level language that compiles straight to x86-64, with structured control flow, generics, async/await, and first-class C interop. On Windows it emits native COFF objects and links them with a built-in PE linker, so you can build a real executable with **no NASM, no gcc, no `link.exe`** on the machine.
 
 ```mettle
 import "std/io";
@@ -41,7 +43,7 @@ function main() -> int32 {
 - Strong typing with pointers, arrays, structs, enums, and function pointers
 - Control flow: `if`, `while`, `for`, `switch`, `match`, `defer`, `errdefer`, and labeled `break`/`continue`
 - Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`); line (`//`) and nesting block (`/* */`) comments
-- Async execution with `async`, `await`, `Future<T>`, and cooperative cancellation (default **pool** executor; optional experimental **`--async-model coroutine`** with a portable reactor — IOCP on Windows, `poll(2)` on POSIX — see `docs/async.md`)
+- Async execution with `async`, `await`, `Future<T>`, and cooperative cancellation (default **pool** executor; optional experimental **`--async-model coroutine`** with a portable reactor: IOCP on Windows, `poll(2)` on POSIX; see `docs/async.md`)
 - C interop via `extern` and `cstring`
 - Optional conservative GC runtime for `new` and GC-backed string concatenation
 - Standard library modules for I/O, conversion, networking, process, threading, and more
