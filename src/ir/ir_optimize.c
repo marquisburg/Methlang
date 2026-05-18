@@ -4,10 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define IR_INLINE_MAX_NON_NOP_INSTRUCTIONS 64
+#define IR_INLINE_MAX_NON_NOP_INSTRUCTIONS 128
 #define IR_INLINE_MAX_PARAMETERS 16
 #define IR_INLINE_MAX_ROUNDS 4
-#define IR_INLINE_MAX_CALLER_NON_NOP_INSTRUCTIONS 160
+#define IR_INLINE_MAX_CALLER_NON_NOP_INSTRUCTIONS 256
+#define IR_UNROLL_MAX_TRIP_COUNT 64
 
 typedef struct {
   char *name;
@@ -1494,7 +1495,6 @@ static int ir_function_is_inline_candidate(const IRFunction *function) {
   }
 
   size_t non_nop_count = 0;
-  size_t label_count = 0;
   size_t errdefer_label_count = 0;
   int errdefer_branch_count = 0;
   int has_return = 0;
@@ -1530,16 +1530,6 @@ static int ir_function_is_inline_candidate(const IRFunction *function) {
       continue;
     }
 
-    if (instruction->op == IR_OP_JUMP || instruction->op == IR_OP_BRANCH_ZERO ||
-        instruction->op == IR_OP_BRANCH_EQ) {
-      return 0;
-    }
-    if (instruction->op == IR_OP_LABEL) {
-      label_count++;
-      if (label_count > 1) {
-        return 0;
-      }
-    }
     if (instruction->op == IR_OP_RETURN) {
       has_return = 1;
     }
@@ -3216,6 +3206,83 @@ static int ir_remove_redundant_fallthrough_branches_pass(IRFunction *function,
   return 1;
 }
 
+static int ir_remove_empty_conditional_diamonds_pass(IRFunction *function,
+                                                     int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRInstruction *branch = &function->instructions[i];
+    if ((branch->op != IR_OP_BRANCH_ZERO && branch->op != IR_OP_BRANCH_EQ) ||
+        !branch->text) {
+      continue;
+    }
+
+    size_t jump_index = 0;
+    if (!ir_find_next_non_nop_in_block(function, i + 1, &jump_index)) {
+      continue;
+    }
+
+    IRInstruction *jump = &function->instructions[jump_index];
+    if (jump->op != IR_OP_JUMP || !jump->text) {
+      continue;
+    }
+
+    if (strcmp(branch->text, jump->text) == 0) {
+      ir_instruction_make_nop(branch);
+      ir_instruction_make_nop(jump);
+      if (changed) {
+        *changed = 1;
+      }
+      continue;
+    }
+
+    size_t cursor = jump_index + 1;
+    while (cursor < function->instruction_count &&
+           function->instructions[cursor].op == IR_OP_NOP) {
+      cursor++;
+    }
+
+    if (cursor >= function->instruction_count ||
+        function->instructions[cursor].op != IR_OP_LABEL ||
+        !function->instructions[cursor].text ||
+        strcmp(function->instructions[cursor].text, branch->text) != 0) {
+      continue;
+    }
+
+    cursor++;
+    int reaches_jump_target_with_no_body = 0;
+    while (cursor < function->instruction_count) {
+      IRInstruction *probe = &function->instructions[cursor];
+      if (probe->op == IR_OP_NOP) {
+        cursor++;
+        continue;
+      }
+      if (probe->op != IR_OP_LABEL || !probe->text) {
+        break;
+      }
+      if (strcmp(probe->text, jump->text) == 0) {
+        reaches_jump_target_with_no_body = 1;
+        break;
+      }
+      cursor++;
+    }
+
+    if (!reaches_jump_target_with_no_body) {
+      continue;
+    }
+
+    ir_instruction_make_nop(branch);
+    ir_instruction_make_nop(jump);
+    if (changed) {
+      *changed = 1;
+    }
+  }
+
+  return 1;
+}
+
 static int ir_reachable_enqueue_label(const IRFunction *function,
                                       const char *label,
                                       IRIndexVector *worklist) {
@@ -3485,7 +3552,7 @@ static int ir_fuse_rotate_add_pass(IRFunction *function, int *changed) {
   return 1;
 }
 
-static int ir_strength_reduce_fib_loop_pass(IRFunction *function, int *changed) {
+static int ir_strength_reduce_rotate_loops_pass(IRFunction *function, int *changed) {
   if (!function) {
     return 0;
   }
@@ -3552,36 +3619,558 @@ static int ir_strength_reduce_fib_loop_pass(IRFunction *function, int *changed) 
   return 1;
 }
 
-static int ir_specialize_fib35_call_pass(IRFunction *function, int *changed) {
-  if (!function) {
+static int ir_operand_resolve_symbol_int(const IRSymbolValueMap *symbol_map,
+                                         const IROperand *operand,
+                                         long long *out_value) {
+  if (!operand || !out_value) {
+    return 0;
+  }
+
+  if (operand->kind == IR_OPERAND_INT) {
+    *out_value = operand->int_value;
+    return 1;
+  }
+
+  if (operand->kind == IR_OPERAND_SYMBOL && operand->name && symbol_map) {
+    const IROperand *mapped =
+        ir_temp_value_map_lookup(symbol_map, operand->name);
+    if (mapped && mapped->kind == IR_OPERAND_INT) {
+      *out_value = mapped->int_value;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int ir_build_symbol_int_map_before(const IRFunction *function,
+                                          size_t before_index,
+                                          IRSymbolValueMap *symbol_map) {
+  if (!function || !symbol_map) {
+    return 0;
+  }
+
+  ir_temp_value_map_clear(symbol_map);
+
+  for (size_t i = 0; i < before_index && i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_NOP) {
+      continue;
+    }
+
+    if (instruction->op == IR_OP_CALL || instruction->op == IR_OP_CALL_INDIRECT ||
+        instruction->op == IR_OP_STORE || instruction->op == IR_OP_INLINE_ASM) {
+      ir_temp_value_map_clear(symbol_map);
+      continue;
+    }
+
+    if (instruction->op == IR_OP_ASSIGN &&
+        instruction->dest.kind == IR_OPERAND_SYMBOL && instruction->dest.name) {
+      if (instruction->lhs.kind == IR_OPERAND_INT) {
+        if (!ir_temp_value_map_set(symbol_map, instruction->dest.name,
+                                   &instruction->lhs)) {
+          return 0;
+        }
+      } else if (instruction->lhs.kind == IR_OPERAND_SYMBOL &&
+                 instruction->lhs.name) {
+        const IROperand *mapped =
+            ir_temp_value_map_lookup(symbol_map, instruction->lhs.name);
+        if (mapped && mapped->kind == IR_OPERAND_INT) {
+          if (!ir_temp_value_map_set(symbol_map, instruction->dest.name, mapped)) {
+            return 0;
+          }
+        } else {
+          ir_temp_value_map_remove(symbol_map, instruction->dest.name);
+        }
+      } else {
+        ir_temp_value_map_remove(symbol_map, instruction->dest.name);
+      }
+    }
+
+    if (instruction->op == IR_OP_ROTATE_ADD) {
+      if (instruction->dest.name) {
+        ir_temp_value_map_remove(symbol_map, instruction->dest.name);
+      }
+      if (instruction->lhs.name) {
+        ir_temp_value_map_remove(symbol_map, instruction->lhs.name);
+      }
+      if (instruction->rhs.name) {
+        ir_temp_value_map_remove(symbol_map, instruction->rhs.name);
+      }
+    }
+  }
+
+  return 1;
+}
+
+static int ir_loop_body_opcode_is_unroll_safe(IROpcode op) {
+  switch (op) {
+  case IR_OP_NOP:
+  case IR_OP_BINARY:
+  case IR_OP_UNARY:
+  case IR_OP_ASSIGN:
+  case IR_OP_CAST:
+  case IR_OP_ROTATE_ADD:
+  case IR_OP_DECLARE_LOCAL:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+static int ir_find_last_writer_before(const IRFunction *function, size_t before_index,
+                                      IROperandKind kind, const char *name,
+                                      size_t *writer_index) {
+  if (!function || !name || !writer_index || before_index == 0) {
+    return 0;
+  }
+
+  for (size_t i = before_index; i > 0; ) {
+    i--;
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_NOP) {
+      continue;
+    }
+
+    if (ir_instruction_writes_destination(instruction) &&
+        instruction->dest.kind == kind && instruction->dest.name &&
+        strcmp(instruction->dest.name, name) == 0) {
+      *writer_index = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int ir_try_parse_loop_increment(const IRFunction *function, size_t body_start,
+                                       size_t body_end, const char *counter_symbol,
+                                       size_t *increment_index, int *step_out) {
+  if (!function || !counter_symbol || !increment_index || !step_out) {
+    return 0;
+  }
+
+  for (size_t i = body_end; i > body_start; ) {
+    i--;
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_NOP) {
+      continue;
+    }
+
+    if (instruction->op == IR_OP_BINARY && !instruction->is_float && instruction->text &&
+        strcmp(instruction->text, "+") == 0 &&
+        instruction->dest.kind == IR_OPERAND_SYMBOL && instruction->dest.name &&
+        strcmp(instruction->dest.name, counter_symbol) == 0) {
+      if (instruction->lhs.kind == IR_OPERAND_SYMBOL && instruction->lhs.name &&
+          strcmp(instruction->lhs.name, counter_symbol) == 0 &&
+          instruction->rhs.kind == IR_OPERAND_INT) {
+        if (instruction->rhs.int_value == 1) {
+          *step_out = 1;
+          *increment_index = i;
+          return 1;
+        }
+        if (instruction->rhs.int_value == -1) {
+          *step_out = -1;
+          *increment_index = i;
+          return 1;
+        }
+      }
+    }
+
+    if (instruction->op == IR_OP_ASSIGN &&
+        instruction->dest.kind == IR_OPERAND_SYMBOL && instruction->dest.name &&
+        strcmp(instruction->dest.name, counter_symbol) == 0) {
+      if (instruction->lhs.kind == IR_OPERAND_TEMP && instruction->lhs.name) {
+        size_t producer_index = 0;
+        if (!ir_find_last_writer_before(function, i, IR_OPERAND_TEMP,
+                                        instruction->lhs.name, &producer_index)) {
+          return 0;
+        }
+
+        const IRInstruction *producer = &function->instructions[producer_index];
+        if (producer->op != IR_OP_BINARY || producer->is_float || !producer->text ||
+            strcmp(producer->text, "+") != 0) {
+          return 0;
+        }
+
+        if (producer->lhs.kind == IR_OPERAND_SYMBOL && producer->lhs.name &&
+            strcmp(producer->lhs.name, counter_symbol) == 0 &&
+            producer->rhs.kind == IR_OPERAND_INT) {
+          if (producer->rhs.int_value == 1) {
+            *step_out = 1;
+            *increment_index = i;
+            return 1;
+          }
+          if (producer->rhs.int_value == -1) {
+            *step_out = -1;
+            *increment_index = i;
+            return 1;
+          }
+        }
+
+        if (producer->rhs.kind == IR_OPERAND_SYMBOL && producer->rhs.name &&
+            strcmp(producer->rhs.name, counter_symbol) == 0 &&
+            producer->lhs.kind == IR_OPERAND_INT) {
+          if (producer->lhs.int_value == 1) {
+            *step_out = 1;
+            *increment_index = i;
+            return 1;
+          }
+          if (producer->lhs.int_value == -1) {
+            *step_out = -1;
+            *increment_index = i;
+            return 1;
+          }
+        }
+      }
+
+      return 0;
+    }
+
+    return 0;
+  }
+
+  return 0;
+}
+
+static int ir_try_parse_counted_while_loop(const IRFunction *function,
+                                           size_t header_index,
+                                           const IRSymbolValueMap *symbol_map,
+                                           const char **counter_symbol_out,
+                                           long long *start_value_out,
+                                           long long *limit_value_out,
+                                           int *inclusive_out, int *step_out,
+                                           size_t *branch_index_out,
+                                           size_t *body_start_out,
+                                           size_t *body_end_out,
+                                           size_t *jump_index_out,
+                                           size_t *increment_index_out) {
+  if (!function || !symbol_map || !counter_symbol_out || !start_value_out ||
+      !limit_value_out || !inclusive_out || !step_out || !branch_index_out ||
+      !body_start_out || !body_end_out || !jump_index_out ||
+      !increment_index_out) {
+    return 0;
+  }
+
+  const IRInstruction *header = &function->instructions[header_index];
+  if (header->op != IR_OP_LABEL || !header->text) {
+    return 0;
+  }
+
+  const char *loop_label = header->text;
+  size_t branch_index = 0;
+  if (!ir_find_next_non_nop(function, header_index + 1, &branch_index)) {
+    return 0;
+  }
+
+  const IRInstruction *branch = &function->instructions[branch_index];
+  if (branch->op != IR_OP_BRANCH_ZERO || !branch->text) {
+    size_t probe_index = branch_index;
+    if (!ir_find_next_non_nop(function, branch_index + 1, &probe_index)) {
+      return 0;
+    }
+    branch = &function->instructions[probe_index];
+    branch_index = probe_index;
+    if (branch->op != IR_OP_BRANCH_ZERO || !branch->text) {
+      return 0;
+    }
+  }
+
+  const char *end_label = branch->text;
+  size_t jump_index = (size_t)-1;
+  for (size_t j = branch_index + 1; j < function->instruction_count; j++) {
+    const IRInstruction *probe = &function->instructions[j];
+    if (probe->op == IR_OP_JUMP && probe->text &&
+        strcmp(probe->text, loop_label) == 0) {
+      jump_index = j;
+      break;
+    }
+    if (probe->op == IR_OP_LABEL) {
+      if (probe->text && strcmp(probe->text, end_label) == 0) {
+        break;
+      }
+      return 0;
+    }
+  }
+
+  if (jump_index == (size_t)-1) {
+    return 0;
+  }
+
+  size_t compare_index = 0;
+  const IRInstruction *compare = NULL;
+  if (branch->lhs.kind == IR_OPERAND_TEMP && branch->lhs.name) {
+    if (!ir_find_last_writer_before(function, branch_index, IR_OPERAND_TEMP,
+                                    branch->lhs.name, &compare_index)) {
+      return 0;
+    }
+    compare = &function->instructions[compare_index];
+  } else if (branch->lhs.kind == IR_OPERAND_INT) {
+    return 0;
+  } else {
+    return 0;
+  }
+
+  if (compare->op != IR_OP_BINARY || compare->is_float || !compare->text) {
+    return 0;
+  }
+
+  const char *counter_symbol = NULL;
+  long long limit_value = 0;
+  int inclusive = 0;
+
+  if (strcmp(compare->text, "<=") == 0) {
+    inclusive = 1;
+  } else if (strcmp(compare->text, "<") == 0) {
+    inclusive = 0;
+  } else if (strcmp(compare->text, ">=") == 0) {
+    inclusive = 1;
+    counter_symbol =
+        compare->rhs.kind == IR_OPERAND_SYMBOL ? compare->rhs.name : NULL;
+    if (!ir_operand_resolve_symbol_int(symbol_map, &compare->lhs, &limit_value) ||
+        !counter_symbol) {
+      return 0;
+    }
+    goto parsed_compare;
+  } else if (strcmp(compare->text, ">") == 0) {
+    inclusive = 0;
+    counter_symbol =
+        compare->rhs.kind == IR_OPERAND_SYMBOL ? compare->rhs.name : NULL;
+    if (!ir_operand_resolve_symbol_int(symbol_map, &compare->lhs, &limit_value) ||
+        !counter_symbol) {
+      return 0;
+    }
+    goto parsed_compare;
+  } else {
+    return 0;
+  }
+
+  counter_symbol =
+      compare->lhs.kind == IR_OPERAND_SYMBOL ? compare->lhs.name : NULL;
+  if (!counter_symbol ||
+      !ir_operand_resolve_symbol_int(symbol_map, &compare->rhs, &limit_value)) {
+    return 0;
+  }
+
+parsed_compare: {
+  IROperand counter_operand = ir_operand_symbol(counter_symbol);
+  if (!counter_operand.name ||
+      !ir_operand_resolve_symbol_int(symbol_map, &counter_operand,
+                                     start_value_out)) {
+    return 0;
+  }
+}
+
+  size_t body_start = branch_index + 1;
+  size_t body_end = jump_index;
+  int step = 0;
+  size_t increment_index = 0;
+  if (!ir_try_parse_loop_increment(function, body_start, body_end, counter_symbol,
+                                 &increment_index, &step)) {
+    return 0;
+  }
+
+  for (size_t j = body_start; j < body_end; j++) {
+    if (!ir_loop_body_opcode_is_unroll_safe(function->instructions[j].op)) {
+      return 0;
+    }
+  }
+
+  *counter_symbol_out = counter_symbol;
+  *limit_value_out = limit_value;
+  *inclusive_out = inclusive;
+  *step_out = step;
+  *branch_index_out = branch_index;
+  *body_start_out = body_start;
+  *body_end_out = body_end;
+  *jump_index_out = jump_index;
+  *increment_index_out = increment_index;
+  return 1;
+}
+
+static int ir_symbol_used_in_range(const IRFunction *function, size_t start,
+                                   size_t end, const char *symbol_name,
+                                   size_t skip_index) {
+  if (!function || !symbol_name) {
+    return 0;
+  }
+
+  for (size_t i = start; i < end; i++) {
+    if (i == skip_index) {
+      continue;
+    }
+
+    const IRInstruction *instruction = &function->instructions[i];
+    const IROperand *operands[4];
+    size_t operand_count = 0;
+    operands[operand_count++] = &instruction->dest;
+    operands[operand_count++] = &instruction->lhs;
+    operands[operand_count++] = &instruction->rhs;
+    for (size_t a = 0; a < instruction->argument_count; a++) {
+      if (operand_count < 4) {
+        operands[operand_count++] = &instruction->arguments[a];
+      }
+    }
+
+    for (size_t o = 0; o < operand_count; o++) {
+      const IROperand *operand = operands[o];
+      if (operand->kind == IR_OPERAND_SYMBOL && operand->name &&
+          strcmp(operand->name, symbol_name) == 0) {
+        return 1;
+      }
+    }
+  }
+
+  return 0;
+}
+
+static int ir_function_replace_instructions(IRFunction *function,
+                                            IRInstructionVector *vector) {
+  if (!function || !vector) {
     return 0;
   }
 
   for (size_t i = 0; i < function->instruction_count; i++) {
-    IRInstruction *instruction = &function->instructions[i];
-    if (instruction->op != IR_OP_CALL || !instruction->text ||
-        strcmp(instruction->text, "fib") != 0 ||
-        instruction->argument_count != 1) {
-      continue;
-    }
+    ir_instruction_destroy_storage(&function->instructions[i]);
+  }
+  free(function->instructions);
 
-    const IROperand *arg = &instruction->arguments[0];
-    if (arg->kind != IR_OPERAND_INT || arg->int_value != 35) {
-      continue;
-    }
+  function->instructions = vector->items;
+  function->instruction_count = vector->count;
+  function->instruction_capacity = vector->capacity;
+  vector->items = NULL;
+  vector->count = 0;
+  vector->capacity = 0;
+  return 1;
+}
 
-    free(instruction->text);
-    instruction->text = ir_opt_strdup("fib35");
-    if (!instruction->text) {
+static int ir_try_unroll_loop_at(IRFunction *function, size_t header_index,
+                                 int *changed) {
+  IRSymbolValueMap symbol_map;
+  if (!ir_temp_value_map_init(&symbol_map)) {
+    return 0;
+  }
+  if (!ir_build_symbol_int_map_before(function, header_index, &symbol_map)) {
+    ir_temp_value_map_destroy(&symbol_map);
+    return 0;
+  }
+
+  const char *counter_symbol = NULL;
+  long long start_value = 0;
+  long long limit_value = 0;
+  int inclusive = 0;
+  int step = 0;
+  size_t branch_index = 0;
+  size_t body_start = 0;
+  size_t body_end = 0;
+  size_t jump_index = 0;
+  size_t increment_index = 0;
+
+  if (!ir_try_parse_counted_while_loop(function, header_index, &symbol_map,
+                                       &counter_symbol, &start_value,
+                                       &limit_value, &inclusive, &step,
+                                       &branch_index, &body_start, &body_end,
+                                       &jump_index, &increment_index)) {
+    ir_temp_value_map_destroy(&symbol_map);
+    return 1;
+  }
+
+  long long trips = 0;
+  if (step > 0) {
+    trips = inclusive ? (limit_value - start_value + 1)
+                      : (limit_value - start_value);
+  } else if (step < 0) {
+    trips = inclusive ? (start_value - limit_value + 1)
+                      : (start_value - limit_value);
+  }
+
+  if (trips <= 0 || trips > IR_UNROLL_MAX_TRIP_COUNT) {
+    ir_temp_value_map_destroy(&symbol_map);
+    return 1;
+  }
+
+  int counter_used_in_body =
+      ir_symbol_used_in_range(function, body_start, body_end, counter_symbol,
+                              increment_index);
+
+  IRInstructionVector vector = {0};
+  for (size_t i = 0; i < header_index; i++) {
+    IRInstruction cloned = {0};
+    if (!ir_clone_instruction_plain(&function->instructions[i], &cloned) ||
+        !ir_instruction_vector_append_move(&vector, &cloned)) {
+      ir_instruction_destroy_storage(&cloned);
+      ir_instruction_vector_destroy(&vector);
+      ir_temp_value_map_destroy(&symbol_map);
       return 0;
-    }
-
-    ir_instruction_clear_arguments(instruction);
-    if (changed) {
-      *changed = 1;
     }
   }
 
+  for (long long trip = 0; trip < trips; trip++) {
+    for (size_t b = body_start; b < body_end; b++) {
+      if (!counter_used_in_body && b == increment_index) {
+        continue;
+      }
+
+      IRInstruction cloned = {0};
+      if (!ir_clone_instruction_plain(&function->instructions[b], &cloned) ||
+          !ir_instruction_vector_append_move(&vector, &cloned)) {
+        ir_instruction_destroy_storage(&cloned);
+        ir_instruction_vector_destroy(&vector);
+        ir_temp_value_map_destroy(&symbol_map);
+        return 0;
+      }
+    }
+  }
+
+  for (size_t i = jump_index + 1; i < function->instruction_count; i++) {
+    IRInstruction cloned = {0};
+    if (!ir_clone_instruction_plain(&function->instructions[i], &cloned) ||
+        !ir_instruction_vector_append_move(&vector, &cloned)) {
+      ir_instruction_destroy_storage(&cloned);
+      ir_instruction_vector_destroy(&vector);
+      ir_temp_value_map_destroy(&symbol_map);
+      return 0;
+    }
+  }
+
+  if (!ir_function_replace_instructions(function, &vector)) {
+    ir_instruction_vector_destroy(&vector);
+    ir_temp_value_map_destroy(&symbol_map);
+    return 0;
+  }
+
+  ir_temp_value_map_destroy(&symbol_map);
+  if (changed) {
+    *changed = 1;
+  }
+  return 1;
+}
+
+static int ir_unroll_small_const_bound_loops_pass(IRFunction *function,
+                                                  int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  int local_changed = 0;
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (function->instructions[i].op != IR_OP_LABEL) {
+      continue;
+    }
+
+    int unrolled = 0;
+    if (!ir_try_unroll_loop_at(function, i, &unrolled)) {
+      return 0;
+    }
+    if (unrolled) {
+      local_changed = 1;
+      break;
+    }
+  }
+
+  if (local_changed && changed) {
+    *changed = 1;
+  }
   return 1;
 }
 
@@ -3602,12 +4191,14 @@ static int ir_optimize_function(IRFunction *function) {
 
     if (!ir_copy_and_constant_propagation_pass(function, &changed) ||
         !ir_fuse_rotate_add_pass(function, &changed) ||
-        !ir_strength_reduce_fib_loop_pass(function, &changed) ||
+        !ir_strength_reduce_rotate_loops_pass(function, &changed) ||
+        !ir_unroll_small_const_bound_loops_pass(function, &changed) ||
         !ir_coalesce_single_use_temp_assign_pass(function, &changed) ||
         !ir_common_subexpression_elimination_pass(function, &changed) ||
         !ir_constant_and_branch_simplify_pass(function, &changed) ||
         !ir_eliminate_dead_temp_writes_pass(function, &changed) ||
         !ir_thread_jump_targets_pass(function, &changed) ||
+        !ir_remove_empty_conditional_diamonds_pass(function, &changed) ||
         !ir_remove_redundant_fallthrough_branches_pass(function, &changed) ||
         !ir_remove_redundant_jumps_pass(function, &changed) ||
         !ir_eliminate_unreachable_straightline_pass(function, &changed) ||
@@ -3627,13 +4218,6 @@ static int ir_optimize_function(IRFunction *function) {
 int ir_optimize_program(IRProgram *program) {
   if (!program) {
     return 0;
-  }
-
-  for (size_t i = 0; i < program->function_count; i++) {
-    int specialized = 0;
-    if (!ir_specialize_fib35_call_pass(program->functions[i], &specialized)) {
-      return 0;
-    }
   }
 
   {

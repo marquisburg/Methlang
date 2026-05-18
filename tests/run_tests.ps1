@@ -560,6 +560,13 @@ $cases = @(
     IrMustNotMatch = @("BINARY @y = 8 \\* @a", "BINARY @w = @b \\+ @a")
   },
   @{
+    Name          = "opt_loop_unroll"
+    Path          = "tests/test_optimize_loop_unroll.mettle"
+    ShouldSucceed = $true
+    Args          = @("-O")
+    IrMustNotMatch = @("jump ir_while")
+  },
+  @{
     Name          = "opt_mod_even_check"
     Path          = "tests/test_opt_mod_even_check.mettle"
     ShouldSucceed = $true

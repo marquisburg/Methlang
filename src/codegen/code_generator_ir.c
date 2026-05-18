@@ -2086,6 +2086,10 @@ static int code_generator_emit_ir_binary_extend_r11(
   return 1;
 }
 
+static int code_generator_find_next_non_nop_in_block(const IRFunction *function,
+                                                     size_t start_index,
+                                                     size_t *out_index);
+
 static int code_generator_try_emit_ir_binary_expression_chain(
     CodeGenerator *generator, const IRFunction *function, size_t start_index,
     const IRTempUseMap *temp_use_map, IRTempTable *temp_table,
@@ -2150,6 +2154,22 @@ static int code_generator_try_emit_ir_binary_expression_chain(
     }
   }
 
+  size_t return_index = last;
+  int consumes_return = 0;
+  if (!consumes_branch && last_instruction->dest.kind == IR_OPERAND_TEMP &&
+      last_instruction->dest.name) {
+    size_t next_index = 0;
+    if (code_generator_find_next_non_nop_in_block(function, last + 1,
+                                                  &next_index)) {
+      const IRInstruction *ret = &function->instructions[next_index];
+      if (ret->op == IR_OP_RETURN && ret->lhs.kind == IR_OPERAND_TEMP &&
+          ret->lhs.name && strcmp(ret->lhs.name, last_instruction->dest.name) == 0) {
+        consumes_return = 1;
+        return_index = next_index;
+      }
+    }
+  }
+
   if (!code_generator_compute_ir_binary_to_r11(generator, first, temp_table)) {
     return 0;
   }
@@ -2174,6 +2194,12 @@ static int code_generator_try_emit_ir_binary_expression_chain(
     const IRInstruction *branch = &function->instructions[last + 1];
     code_generator_emit(generator, "    test r11, r11\n");
     code_generator_emit(generator, "    jz %s\n", branch->text);
+  } else if (consumes_return) {
+    code_generator_emit(generator, "    mov rax, r11\n");
+    code_generator_emit(generator, "    jmp L%s_exit\n",
+                        generator->current_function_name
+                            ? generator->current_function_name
+                            : "function");
   } else {
     code_generator_emit(generator, "    mov rax, r11\n");
     if (!code_generator_store_ir_destination(generator,
@@ -2184,10 +2210,86 @@ static int code_generator_try_emit_ir_binary_expression_chain(
   }
 
   if (last_index_out) {
-    *last_index_out = last;
+    *last_index_out = consumes_return ? return_index : last;
   }
   if (consumed_branch_out) {
     *consumed_branch_out = consumes_branch;
+  }
+  if (emitted) {
+    *emitted = 1;
+  }
+  return 1;
+}
+
+static int code_generator_find_next_non_nop_in_block(const IRFunction *function,
+                                                     size_t start_index,
+                                                     size_t *out_index) {
+  if (!function || !out_index || start_index >= function->instruction_count) {
+    return 0;
+  }
+
+  for (size_t i = start_index; i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_LABEL) {
+      return 0;
+    }
+    if (instruction->op != IR_OP_NOP) {
+      *out_index = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int code_generator_try_emit_ir_binary_return_temp(
+    CodeGenerator *generator, const IRFunction *function, size_t start_index,
+    const IRTempUseMap *temp_use_map, IRTempTable *temp_table,
+    size_t *return_index_out, int *emitted) {
+  if (emitted) {
+    *emitted = 0;
+  }
+  if (return_index_out) {
+    *return_index_out = start_index;
+  }
+  if (!generator || !function || !temp_use_map || !temp_table ||
+      start_index >= function->instruction_count) {
+    return 0;
+  }
+
+  const IRInstruction *instruction = &function->instructions[start_index];
+  if (!instruction || instruction->op != IR_OP_BINARY || instruction->ast_ref ||
+      instruction->dest.kind != IR_OPERAND_TEMP || !instruction->dest.name ||
+      ir_temp_use_map_get(temp_use_map, instruction->dest.name) != 1) {
+    return 1;
+  }
+
+  size_t return_index = 0;
+  if (!code_generator_find_next_non_nop_in_block(function, start_index + 1,
+                                                 &return_index)) {
+    return 1;
+  }
+
+  const IRInstruction *ret = &function->instructions[return_index];
+  if (ret->op != IR_OP_RETURN || ret->lhs.kind != IR_OPERAND_TEMP ||
+      !ret->lhs.name || strcmp(ret->lhs.name, instruction->dest.name) != 0) {
+    return 1;
+  }
+
+  IRInstruction value_instruction = *instruction;
+  value_instruction.dest = ir_operand_none();
+  if (!code_generator_emit_ir_binary_fallback(generator, &value_instruction,
+                                              temp_table)) {
+    return 0;
+  }
+
+  code_generator_emit(generator, "    jmp L%s_exit\n",
+                      generator->current_function_name
+                          ? generator->current_function_name
+                          : "function");
+
+  if (return_index_out) {
+    *return_index_out = return_index;
   }
   if (emitted) {
     *emitted = 1;
@@ -4140,6 +4242,18 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
         if (instruction->op == IR_OP_BINARY &&
             instruction->dest.kind == IR_OPERAND_TEMP &&
             instruction->dest.name) {
+          size_t return_index = i;
+          int emitted_return = 0;
+          if (!code_generator_try_emit_ir_binary_return_temp(
+                  generator, ir_function, i, &temp_use_map, &temp_table,
+                  &return_index, &emitted_return)) {
+            break;
+          }
+          if (emitted_return) {
+            i = return_index;
+            continue;
+          }
+
           size_t chain_last = i;
           int chain_consumed_branch = 0;
           int emitted_chain = 0;
