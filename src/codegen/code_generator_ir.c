@@ -785,6 +785,18 @@ static int code_generator_try_emit_ir_compare_branch_register_fastpath(
   return 1;
 }
 
+static int ir_call_skips_entry_safepoint(const char *callee_name) {
+  if (!callee_name) {
+    return 0;
+  }
+  /* Pure native helpers: no GC roots, no cooperative safepoint contract. */
+  if (strcmp(callee_name, "meth_runtime_debug_trap") == 0 ||
+      strcmp(callee_name, "GetTickCount64") == 0) {
+    return 1;
+  }
+  return 0;
+}
+
 static int ir_function_requires_entry_safepoint(const IRFunction *function) {
   if (!function) {
     return 0;
@@ -797,10 +809,7 @@ static int ir_function_requires_entry_safepoint(const IRFunction *function) {
     }
 
     if (instruction->op == IR_OP_CALL) {
-      // Runtime trap helpers are cold terminal paths and should not force every
-      // hot invocation through entry safepoint spill/restore.
-      if (instruction->text &&
-          strcmp(instruction->text, "meth_runtime_debug_trap") == 0) {
+      if (instruction->text && ir_call_skips_entry_safepoint(instruction->text)) {
         continue;
       }
       return 1;
@@ -2685,6 +2694,108 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
   return !generator->has_error;
 }
 
+static int code_generator_emit_ir_rotate_add(CodeGenerator *generator,
+                                             const IRInstruction *instruction,
+                                             IRTempTable *temp_table) {
+  if (!generator || !instruction) {
+    return 0;
+  }
+
+  Symbol *sym_next =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->dest);
+  Symbol *sym_a =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->lhs);
+  Symbol *sym_b =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->rhs);
+
+  if (sym_next && sym_a && sym_b) {
+    const char *reg_next =
+        code_generator_ir_symbol_register_name(sym_next, 64);
+    const char *reg_a = code_generator_ir_symbol_register_name(sym_a, 64);
+    const char *reg_b = code_generator_ir_symbol_register_name(sym_b, 64);
+    if (!reg_next || !reg_a || !reg_b) {
+      code_generator_set_error(generator,
+                               "Invalid register in IR rotate_add fast path");
+      return 0;
+    }
+    code_generator_emit(generator, "    lea %s, [%s + %s]\n", reg_next, reg_a,
+                        reg_b);
+    code_generator_emit(generator, "    mov %s, %s\n", reg_a, reg_b);
+    code_generator_emit(generator, "    mov %s, %s\n", reg_b, reg_next);
+    return 1;
+  }
+
+  if (!instruction->dest.name || !instruction->lhs.name ||
+      !instruction->rhs.name) {
+    code_generator_set_error(generator, "Malformed IR rotate_add operands");
+    return 0;
+  }
+
+  code_generator_load_variable(generator, instruction->lhs.name);
+  if (generator->has_error) {
+    return 0;
+  }
+
+  if (sym_b) {
+    const char *reg_b = code_generator_ir_symbol_register_name(sym_b, 64);
+    if (!reg_b) {
+      code_generator_set_error(generator,
+                               "Invalid RHS register in IR rotate_add");
+      return 0;
+    }
+    code_generator_emit(generator, "    add rax, %s\n", reg_b);
+  } else {
+    code_generator_load_variable(generator, instruction->rhs.name);
+    if (generator->has_error) {
+      return 0;
+    }
+    code_generator_emit(generator, "    add rax, rbx\n");
+  }
+
+  code_generator_emit(generator, "    mov r11, rax\n");
+
+  if (sym_next) {
+    const char *reg_next =
+        code_generator_ir_symbol_register_name(sym_next, 64);
+    if (!reg_next) {
+      code_generator_set_error(generator,
+                               "Invalid next register in IR rotate_add");
+      return 0;
+    }
+    code_generator_emit(generator, "    mov %s, r11\n", reg_next);
+  } else {
+    code_generator_store_variable(generator, instruction->dest.name, "r11");
+  }
+
+  if (sym_a && sym_b) {
+    const char *reg_a = code_generator_ir_symbol_register_name(sym_a, 64);
+    const char *reg_b = code_generator_ir_symbol_register_name(sym_b, 64);
+    code_generator_emit(generator, "    mov %s, %s\n", reg_a, reg_b);
+  } else if (sym_a) {
+    const char *reg_a = code_generator_ir_symbol_register_name(sym_a, 64);
+    code_generator_load_variable(generator, instruction->rhs.name);
+    if (generator->has_error) {
+      return 0;
+    }
+    code_generator_emit(generator, "    mov %s, rax\n", reg_a);
+  } else {
+    code_generator_load_variable(generator, instruction->rhs.name);
+    if (generator->has_error) {
+      return 0;
+    }
+    code_generator_store_variable(generator, instruction->lhs.name, "rax");
+  }
+
+  if (sym_b) {
+    const char *reg_b = code_generator_ir_symbol_register_name(sym_b, 64);
+    code_generator_emit(generator, "    mov %s, r11\n", reg_b);
+  } else {
+    code_generator_store_variable(generator, instruction->rhs.name, "r11");
+  }
+
+  return !generator->has_error;
+}
+
 static int code_generator_emit_ir_cast(CodeGenerator *generator,
                                        const IRInstruction *instruction,
                                        IRTempTable *temp_table) {
@@ -3097,10 +3208,13 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
         return 0;
       }
       return code_generator_store_ir_destination(generator, &instruction->dest,
-                                                 temp_table);
+                                               temp_table);
     }
     return code_generator_emit_ir_binary_fallback(generator, instruction,
                                                   temp_table);
+
+  case IR_OP_ROTATE_ADD:
+    return code_generator_emit_ir_rotate_add(generator, instruction, temp_table);
 
   case IR_OP_UNARY:
     if (instruction->ast_ref) {
@@ -3520,9 +3634,50 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
     return 0;
   }
 
-  for (size_t reg_index = 0;
-       reg_index < (sizeof(IR_PROMOTION_REGISTERS) /
-                    sizeof(IR_PROMOTION_REGISTERS[0]));
+  const size_t max_promoted =
+      sizeof(IR_PROMOTION_REGISTERS) / sizeof(IR_PROMOTION_REGISTERS[0]);
+  int function_has_no_calls = !ir_function_requires_entry_safepoint(ir_function);
+
+  if (function_has_no_calls) {
+    for (size_t insn_i = 0;
+         insn_i < ir_function->instruction_count &&
+         promoted_symbol_count < max_promoted;
+         insn_i++) {
+      const IRInstruction *insn = &ir_function->instructions[insn_i];
+      if (insn->op != IR_OP_ROTATE_ADD) {
+        continue;
+      }
+
+      const IROperand *operands[3] = {&insn->dest, &insn->lhs, &insn->rhs};
+      for (size_t op_i = 0;
+           op_i < 3 && promoted_symbol_count < max_promoted;
+           op_i++) {
+        const IROperand *operand = operands[op_i];
+        if (operand->kind != IR_OPERAND_SYMBOL || !operand->name ||
+            ir_promoted_symbol_find(promoted_symbols, promoted_symbol_count,
+                                    operand->name) >= 0 ||
+            ir_symbol_stats_map_is_address_taken(&symbol_stats,
+                                                 operand->name)) {
+          continue;
+        }
+
+        Symbol *sym = symbol_table_lookup_current_scope(generator->symbol_table,
+                                                        operand->name);
+        if (!sym || sym->kind != SYMBOL_VARIABLE ||
+            !ir_is_integer_or_pointer_promotable(sym->type)) {
+          continue;
+        }
+
+        promoted_symbols[promoted_symbol_count].name = operand->name;
+        promoted_symbols[promoted_symbol_count].reg =
+            IR_PROMOTION_REGISTERS[promoted_symbol_count];
+        promoted_symbol_count++;
+      }
+    }
+  }
+
+  for (size_t reg_index = promoted_symbol_count;
+       reg_index < max_promoted;
        reg_index++) {
     const char *best_name = NULL;
     size_t best_use_count = 0;
@@ -3574,7 +3729,6 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       }
     }
 
-    // Avoid paying save/restore cost for trivially-used symbols.
     if (!best_name || best_use_count < 3) {
       break;
     }

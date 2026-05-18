@@ -6,7 +6,7 @@ No top-level constant expressions. Use functions that return constant values ins
 
 Traits and constrained generics support inline bounds, multiple bounds, trailing `where` clauses on functions and structs, explicit impls, and trait method declarations with concrete impl method bodies. Generic trait-method calls on named values are monomorphized to concrete impl functions.
 
-`match` on tagged enums is implemented as a **statement** only. There is no `match` expression form that yields a value.
+`match` on tagged enums supports both a **statement** form (arm bodies are `{ ... }` blocks) and an **expression** form that yields a value. In expression form each arm body is a single value-yielding expression (e.g. `match (o) { case Some(v): v + 1, default: 0 }`); all arm types must unify and the match must be exhaustive (a `default:` arm or all variants covered) since it must always produce a value.
 
 Tagged-enum constructors are currently function-like. Payload variants use `Some(x)`, and payloadless variants use empty call syntax such as `None()`.
 

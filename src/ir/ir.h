@@ -42,6 +42,8 @@ typedef enum {
   IR_OP_STORE,
   IR_OP_BINARY,
   IR_OP_UNARY,
+  /* Fibonacci-style rotate: dest=next, lhs=a, rhs=b => next=a+b; a=b; b=next */
+  IR_OP_ROTATE_ADD,
   IR_OP_CALL,
   IR_OP_CALL_INDIRECT,
   IR_OP_NEW,

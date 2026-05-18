@@ -1606,6 +1606,8 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
     }
     return expr;
   }
+  case TOKEN_MATCH:
+    return parser_parse_match_expression(parser);
   case TOKEN_THIS: {
     parser_advance(parser);
     return ast_create_identifier("this", location);
@@ -3986,11 +3988,14 @@ ASTNode *parser_parse_switch_statement(Parser *parser) {
 }
 
 // Parse: match (expr) {
-//   case VariantName(binding): { body }
+//   case VariantName(binding): { body }   (statement form; body is a block)
 //   case VariantName: { body }
 //   default: { body }
 // }
-ASTNode *parser_parse_match_statement(Parser *parser) {
+// In expression form (is_expression=1) each arm body is a value-yielding
+// expression instead of a block:
+//   match (expr) { case Some(v): v + 1, default: 0 }
+static ASTNode *parser_parse_match_core(Parser *parser, int is_expression) {
   if (!parser)
     return NULL;
 
@@ -4073,13 +4078,25 @@ ASTNode *parser_parse_match_statement(Parser *parser) {
       break;
     }
 
-    arm.body = parser_parse_block(parser);
-    if (!arm.body) {
-      if (!parser->has_error)
-        parser_set_error(parser, "Expected '{' block body in match arm");
-      free(arm.binding_name);
-      free(arm.variant_name);
-      break;
+    if (is_expression) {
+      arm.body = parser_parse_expression(parser);
+      if (!arm.body) {
+        if (!parser->has_error)
+          parser_set_error(parser,
+                           "Expected value expression in match arm");
+        free(arm.binding_name);
+        free(arm.variant_name);
+        break;
+      }
+    } else {
+      arm.body = parser_parse_block(parser);
+      if (!arm.body) {
+        if (!parser->has_error)
+          parser_set_error(parser, "Expected '{' block body in match arm");
+        free(arm.binding_name);
+        free(arm.variant_name);
+        break;
+      }
     }
 
     MatchArm *new_arms = realloc(arms, (arm_count + 1) * sizeof(MatchArm));
@@ -4092,6 +4109,10 @@ ASTNode *parser_parse_match_statement(Parser *parser) {
     }
     arms = new_arms;
     arms[arm_count++] = arm;
+
+    // Expression-form arms may be separated by a comma.
+    if (is_expression && parser->current_token.type == TOKEN_COMMA)
+      parser_advance(parser);
 
     while (parser->current_token.type == TOKEN_NEWLINE ||
            parser->current_token.type == TOKEN_SEMICOLON)
@@ -4120,7 +4141,10 @@ ASTNode *parser_parse_match_statement(Parser *parser) {
     return NULL;
   }
 
-  ASTNode *node = ast_create_match_statement(expr, arms, arm_count, location);
+  ASTNode *node =
+      is_expression
+          ? ast_create_match_expression(expr, arms, arm_count, location)
+          : ast_create_match_statement(expr, arms, arm_count, location);
   for (size_t i = 0; i < arm_count; i++) {
     free(arms[i].variant_name);
     free(arms[i].binding_name);
@@ -4128,6 +4152,14 @@ ASTNode *parser_parse_match_statement(Parser *parser) {
   }
   free(arms);
   return node;
+}
+
+ASTNode *parser_parse_match_statement(Parser *parser) {
+  return parser_parse_match_core(parser, 0);
+}
+
+ASTNode *parser_parse_match_expression(Parser *parser) {
+  return parser_parse_match_core(parser, 1);
 }
 
 ASTNode *parser_parse_block(Parser *parser) {

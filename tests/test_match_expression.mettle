@@ -1,0 +1,31 @@
+enum Option {
+    Some(int32),
+    None
+}
+
+function unwrap_or(o: Option, fallback: int32) -> int32 {
+    return match (o) {
+        case Some(value): value
+        case None: fallback
+    };
+}
+
+function main() -> int32 {
+    // match expression with payload binding
+    var a: int32 = match (Some(40)) {
+        case Some(value): value + 2
+        case None: -1
+    };
+
+    // match expression via default arm, used through a function
+    var b: int32 = unwrap_or(None(), 0);
+
+    // match expression nested in a larger expression
+    var c: int32 = match (Some(10)) {
+        case Some(v): v
+        default: 0
+    } * 10;
+
+    // a == 42, b == 0, c == 100  -> 142
+    return a + b + c;
+}

@@ -365,6 +365,8 @@ static const char *ir_opcode_name(IROpcode op) {
     return "store";
   case IR_OP_BINARY:
     return "binary";
+  case IR_OP_ROTATE_ADD:
+    return "rotate_add";
   case IR_OP_UNARY:
     return "unary";
   case IR_OP_CALL:
@@ -499,6 +501,10 @@ int ir_program_dump(IRProgram *program, FILE *output) {
         fprintf(output, "%s %s = %s %s%s %s\n", ir_opcode_name(instruction->op),
                 dest, lhs, instruction->text ? instruction->text : "?",
                 instruction->is_float ? " (float)" : "", rhs);
+        break;
+      case IR_OP_ROTATE_ADD:
+        fprintf(output, "%s %s = rotate_add(%s, %s)\n",
+                ir_opcode_name(instruction->op), dest, lhs, rhs);
         break;
       case IR_OP_UNARY:
         fprintf(output, "%s %s = %s%s%s\n", ir_opcode_name(instruction->op),

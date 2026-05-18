@@ -1981,6 +1981,19 @@ static int code_generator_binary_symbol_assigned_register(
   return 1;
 }
 
+static int code_generator_binary_function_has_calls(const IRFunction *function) {
+  if (!function) {
+    return 0;
+  }
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IROpcode op = function->instructions[i].op;
+    if (op == IR_OP_CALL || op == IR_OP_CALL_INDIRECT) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int code_generator_binary_promote_hot_symbols(
     CodeGenerator *generator, BinaryFunctionContext *context,
     FunctionDeclaration *function_data, IRFunction *ir_function) {
@@ -1992,8 +2005,56 @@ static int code_generator_binary_promote_hot_symbols(
     return 0;
   }
 
-  for (size_t reg_index = 0;
-       reg_index < sizeof(promotion_registers) / sizeof(promotion_registers[0]);
+  const size_t max_promoted =
+      sizeof(promotion_registers) / sizeof(promotion_registers[0]);
+  size_t promoted_count = 0;
+  int function_has_no_calls =
+      !code_generator_binary_function_has_calls(ir_function);
+
+  if (function_has_no_calls) {
+    for (size_t insn_i = 0;
+         insn_i < ir_function->instruction_count && promoted_count < max_promoted;
+         insn_i++) {
+      const IRInstruction *insn = &ir_function->instructions[insn_i];
+      const IROperand *operands[3];
+      size_t op_i = 0;
+
+      if (insn->op != IR_OP_ROTATE_ADD) {
+        continue;
+      }
+
+      operands[0] = &insn->dest;
+      operands[1] = &insn->lhs;
+      operands[2] = &insn->rhs;
+      for (op_i = 0; op_i < 3 && promoted_count < max_promoted; op_i++) {
+        const char *name = operands[op_i]->name;
+        Type *type = NULL;
+        if (operands[op_i]->kind != IR_OPERAND_SYMBOL || !name ||
+            code_generator_binary_symbol_already_promoted(context, name) ||
+            binary_named_slot_table_get_offset(&context->address_taken_symbols,
+                                               name) >= 0) {
+          continue;
+        }
+
+        type = code_generator_binary_get_resolved_type(generator, "int64", 0);
+        if (!code_generator_binary_type_is_gp_promotable(type)) {
+          continue;
+        }
+
+        if (!binary_named_slot_table_add(
+                &context->register_symbols, name,
+                (int)promotion_registers[promoted_count]) ||
+            !code_generator_binary_context_add_saved_register(
+                context, promotion_registers[promoted_count])) {
+          return 0;
+        }
+        promoted_count++;
+      }
+    }
+  }
+
+  for (size_t reg_index = promoted_count;
+       reg_index < max_promoted;
        reg_index++) {
     const char *best_name = NULL;
     size_t best_score = 0;
@@ -4729,6 +4790,99 @@ static int code_generator_binary_emit_call_indirect(
   return 1;
 }
 
+static int code_generator_binary_emit_rotate_add(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  BinaryGpRegister reg_next = BINARY_GP_RAX;
+  BinaryGpRegister reg_a = BINARY_GP_R10;
+  BinaryGpRegister reg_b = BINARY_GP_R11;
+  int has_next = 0;
+  int has_a = 0;
+  int has_b = 0;
+
+  if (!generator || !context || !instruction ||
+      instruction->dest.kind != IR_OPERAND_SYMBOL || !instruction->dest.name ||
+      instruction->lhs.kind != IR_OPERAND_SYMBOL || !instruction->lhs.name ||
+      instruction->rhs.kind != IR_OPERAND_SYMBOL || !instruction->rhs.name) {
+    code_generator_set_error(generator, "Malformed IR rotate_add in '%s'",
+                             context->function_name);
+    return 0;
+  }
+
+  has_next = code_generator_binary_symbol_assigned_register(
+      generator, context, instruction->dest.name, &reg_next);
+  has_a = code_generator_binary_symbol_assigned_register(
+      generator, context, instruction->lhs.name, &reg_a);
+  has_b = code_generator_binary_symbol_assigned_register(
+      generator, context, instruction->rhs.name, &reg_b);
+
+  if (has_next && has_a && has_b) {
+  if (!binary_emit_mov_reg_reg(&context->code, reg_next, reg_a) ||
+      !binary_emit_alu_reg_reg(&context->code, 0x01, reg_next, reg_b) ||
+      !binary_emit_mov_reg_reg(&context->code, reg_a, reg_b) ||
+      !binary_emit_mov_reg_reg(&context->code, reg_b, reg_next)) {
+    return 0;
+  }
+    return 1;
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->lhs,
+                                               BINARY_GP_RAX)) {
+    return 0;
+  }
+  if (has_b) {
+    if (!binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX, reg_b)) {
+      return 0;
+    }
+  } else if (!code_generator_binary_emit_operand_load(generator, context,
+                                                      &instruction->rhs,
+                                                      BINARY_GP_R10) ||
+             !binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+                                      BINARY_GP_R10)) {
+    return 0;
+  }
+
+  if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_R11, BINARY_GP_RAX)) {
+    return 0;
+  }
+  if (!code_generator_binary_emit_destination_store(generator, context,
+                                                    &instruction->dest,
+                                                    BINARY_GP_R11)) {
+    return 0;
+  }
+
+  if (has_a && has_b) {
+    if (!binary_emit_mov_reg_reg(&context->code, reg_a, reg_b)) {
+      return 0;
+    }
+  } else if (has_a) {
+    if (!code_generator_binary_emit_operand_load(generator, context,
+                                                 &instruction->rhs,
+                                                 BINARY_GP_R10) ||
+        !binary_emit_mov_reg_reg(&context->code, reg_a, BINARY_GP_R10)) {
+      return 0;
+    }
+  } else if (!code_generator_binary_emit_operand_load(generator, context,
+                                                      &instruction->rhs,
+                                                      BINARY_GP_R10) ||
+             !code_generator_binary_emit_destination_store(
+                 generator, context, &instruction->lhs, BINARY_GP_R10)) {
+    return 0;
+  }
+
+  if (has_b) {
+    if (!binary_emit_mov_reg_reg(&context->code, reg_b, BINARY_GP_R11)) {
+      return 0;
+    }
+  } else if (!code_generator_binary_emit_destination_store(
+                 generator, context, &instruction->rhs, BINARY_GP_R11)) {
+    return 0;
+  }
+
+  return 1;
+}
+
 static int code_generator_binary_emit_binary(CodeGenerator *generator,
                                              BinaryFunctionContext *context,
                                              const IRInstruction *instruction) {
@@ -5600,6 +5754,10 @@ static int code_generator_binary_emit_instruction(
 
   case IR_OP_BINARY:
     return code_generator_binary_emit_binary(generator, context, instruction);
+
+  case IR_OP_ROTATE_ADD:
+    return code_generator_binary_emit_rotate_add(generator, context,
+                                                 instruction);
 
   case IR_OP_UNARY:
     return code_generator_binary_emit_unary(generator, context, instruction);

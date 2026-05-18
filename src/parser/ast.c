@@ -1268,9 +1268,9 @@ ASTNode *ast_create_enum_declaration(const char *name, EnumVariant *variants,
   return node;
 }
 
-ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
-                                    size_t arm_count,
-                                    SourceLocation location) {
+static ASTNode *ast_create_match_node(ASTNode *expression, MatchArm *arms,
+                                      size_t arm_count, int is_expression,
+                                      SourceLocation location) {
   ASTNode *node = ast_create_node(AST_MATCH_STATEMENT, location);
   if (!node)
     return NULL;
@@ -1281,6 +1281,7 @@ ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
     return NULL;
   }
 
+  match->is_expression = is_expression;
   match->expression = expression;
   if (expression)
     ast_add_child(node, expression);
@@ -1307,6 +1308,18 @@ ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
 
   node->data = match;
   return node;
+}
+
+ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
+                                    size_t arm_count,
+                                    SourceLocation location) {
+  return ast_create_match_node(expression, arms, arm_count, 0, location);
+}
+
+ASTNode *ast_create_match_expression(ASTNode *expression, MatchArm *arms,
+                                     size_t arm_count,
+                                     SourceLocation location) {
+  return ast_create_match_node(expression, arms, arm_count, 1, location);
 }
 
 ASTNode *ast_create_trait_declaration(const char *name,

@@ -117,6 +117,10 @@ static int ir_lower_switch_statement(IRLoweringContext *context,
 static int ir_lower_match_statement(IRLoweringContext *context,
                                     IRFunction *function, ASTNode *statement,
                                     IRDeferScope *defers);
+static int ir_lower_match_expression(IRLoweringContext *context,
+                                     IRFunction *function,
+                                     ASTNode *expression,
+                                     IROperand *out_value);
 static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
                                                  IRFunction *function,
                                                  ASTNode *expression,
@@ -864,6 +868,324 @@ cleanup:
     free(arm_labels);
   }
   free(end_label);
+  free(owned_subject_name);
+  ir_operand_destroy(&tag_value);
+  ir_operand_destroy(&subject_address);
+  ir_operand_destroy(&subject_value);
+  return ok;
+}
+
+// Lower a match used in expression position. Mirrors ir_lower_match_statement
+// but allocates a result local; each arm lowers its body *expression* and
+// stores the value into that local, which becomes the value of the match.
+static int ir_lower_match_expression(IRLoweringContext *context,
+                                     IRFunction *function,
+                                     ASTNode *expression,
+                                     IROperand *out_value) {
+  MatchStatement *match = NULL;
+  Type *subject_type = NULL;
+  Type *result_type = NULL;
+  IROperand subject_value = ir_operand_none();
+  IROperand subject_address = ir_operand_none();
+  IROperand tag_value = ir_operand_none();
+  char *owned_subject_name = NULL;
+  const char *subject_name = NULL;
+  char *result_name = NULL;
+  char *end_label = NULL;
+  char **arm_labels = NULL;
+  char *default_label = NULL;
+  int ok = 0;
+
+  if (!context || !function || !expression || !out_value ||
+      expression->type != AST_MATCH_STATEMENT) {
+    return 0;
+  }
+
+  match = (MatchStatement *)expression->data;
+  if (!match || !match->expression || !match->is_expression) {
+    ir_set_error(context, "Malformed match expression");
+    return 0;
+  }
+
+  subject_type = ir_infer_expression_type(context, match->expression);
+  if (!subject_type || subject_type->kind != TYPE_TAGGED_ENUM ||
+      !subject_type->name) {
+    ir_set_error(context, "IR match lowering requires a tagged-enum subject");
+    return 0;
+  }
+
+  result_type = ir_infer_expression_type(context, expression);
+  if (!result_type || !result_type->name) {
+    ir_set_error(context, "Could not determine match expression result type");
+    return 0;
+  }
+
+  if (!ir_lower_expression(context, function, match->expression,
+                           &subject_value)) {
+    return 0;
+  }
+
+  result_name = ir_new_label_name(context, "match_result");
+  if (!result_name ||
+      !ir_emit_local_declaration(context, function, result_name,
+                                 result_type->name, expression->location)) {
+    ir_set_error(context, "Out of memory while allocating match result");
+    goto cleanup;
+  }
+
+  if (subject_value.kind == IR_OPERAND_SYMBOL && subject_value.name) {
+    subject_name = subject_value.name;
+  } else {
+    owned_subject_name = ir_new_label_name(context, "match_subject");
+    if (!owned_subject_name) {
+      ir_set_error(context,
+                   "Out of memory while allocating match subject storage");
+      goto cleanup;
+    }
+    if (!ir_emit_local_declaration(context, function, owned_subject_name,
+                                   subject_type->name,
+                                   expression->location) ||
+        !ir_emit_symbol_assignment(context, function, owned_subject_name,
+                                   &subject_value, expression->location)) {
+      goto cleanup;
+    }
+    subject_name = owned_subject_name;
+  }
+
+  if (!ir_emit_address_of_symbol(context, function, subject_name,
+                                 match->expression->location,
+                                 &subject_address)) {
+    goto cleanup;
+  }
+
+  if (!ir_make_temp_operand(context, &tag_value)) {
+    goto cleanup;
+  }
+
+  {
+    IRInstruction load_tag = {0};
+    load_tag.op = IR_OP_LOAD;
+    load_tag.location = match->expression->location;
+    load_tag.dest = tag_value;
+    load_tag.lhs = subject_address;
+    load_tag.rhs = ir_operand_int(4);
+    if (!ir_emit(context, function, &load_tag)) {
+      goto cleanup;
+    }
+  }
+
+  end_label = ir_new_label_name(context, "match_end");
+  if (!end_label) {
+    ir_set_error(context, "Out of memory while allocating match labels");
+    goto cleanup;
+  }
+
+  if (match->arm_count > 0) {
+    arm_labels = calloc(match->arm_count, sizeof(char *));
+    if (!arm_labels) {
+      ir_set_error(context, "Out of memory while allocating match labels");
+      goto cleanup;
+    }
+    for (size_t i = 0; i < match->arm_count; i++) {
+      arm_labels[i] = ir_new_label_name(context, "match_arm");
+      if (!arm_labels[i]) {
+        ir_set_error(context, "Out of memory while allocating match labels");
+        goto cleanup;
+      }
+      if (match->arms[i].is_default) {
+        default_label = arm_labels[i];
+      }
+    }
+  }
+  if (!default_label) {
+    default_label = end_label;
+  }
+
+  for (size_t i = 0; i < match->arm_count; i++) {
+    MatchArm *arm = &match->arms[i];
+    int variant_idx = -1;
+
+    if (!arm || arm->is_default) {
+      continue;
+    }
+
+    for (size_t v = 0; v < subject_type->tagged_variant_count; v++) {
+      if (subject_type->tagged_variant_names[v] &&
+          strcmp(subject_type->tagged_variant_names[v], arm->variant_name) ==
+              0) {
+        variant_idx = (int)v;
+        break;
+      }
+    }
+
+    if (variant_idx < 0) {
+      ir_set_error(context, "Unknown tagged-enum variant '%s' in match",
+                   arm->variant_name ? arm->variant_name : "<unnamed>");
+      goto cleanup;
+    }
+
+    IRInstruction cmp = {0};
+    cmp.op = IR_OP_BRANCH_EQ;
+    cmp.location = expression->location;
+    cmp.lhs = tag_value;
+    cmp.rhs = ir_operand_int(
+        (long long)subject_type->tagged_variant_tags[variant_idx]);
+    cmp.text = arm_labels[i];
+    if (!ir_emit(context, function, &cmp)) {
+      goto cleanup;
+    }
+  }
+
+  if (!ir_emit_jump_instruction(context, function, default_label,
+                                expression->location)) {
+    goto cleanup;
+  }
+
+  for (size_t i = 0; i < match->arm_count; i++) {
+    MatchArm *arm = &match->arms[i];
+    int variant_idx = -1;
+    IROperand arm_value = ir_operand_none();
+
+    if (!arm) {
+      continue;
+    }
+
+    if (!ir_emit_label_instruction(context, function, arm_labels[i],
+                                   arm->body ? arm->body->location
+                                             : expression->location)) {
+      goto cleanup;
+    }
+
+    if (!arm->is_default) {
+      for (size_t v = 0; v < subject_type->tagged_variant_count; v++) {
+        if (subject_type->tagged_variant_names[v] &&
+            strcmp(subject_type->tagged_variant_names[v], arm->variant_name) ==
+                0) {
+          variant_idx = (int)v;
+          break;
+        }
+      }
+    }
+
+    if (arm->binding_name && variant_idx >= 0) {
+      Type *payload_type = subject_type->tagged_variant_payloads[variant_idx];
+      int payload_size = 0;
+      IROperand payload_address = ir_operand_none();
+
+      if (!payload_type || !payload_type->name) {
+        ir_set_error(context, "Match binding '%s' has no payload to bind",
+                     arm->binding_name);
+        goto cleanup;
+      }
+
+      payload_size = (payload_type->size > 0)
+                         ? (int)payload_type->size
+                         : ir_type_storage_size(payload_type);
+      if (!ir_emit_local_declaration(context, function, arm->binding_name,
+                                     payload_type->name,
+                                     expression->location) ||
+          !ir_emit_address_with_offset(context, function, &subject_address,
+                                       subject_type->tagged_data_offset,
+                                       expression->location,
+                                       &payload_address)) {
+        ir_operand_destroy(&payload_address);
+        goto cleanup;
+      }
+
+      if (payload_size > 8) {
+        IROperand binding_address = ir_operand_none();
+        IRInstruction copy = {0};
+
+        if (!ir_emit_address_of_symbol(context, function, arm->binding_name,
+                                       expression->location,
+                                       &binding_address)) {
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        copy.op = IR_OP_STORE;
+        copy.location = expression->location;
+        copy.dest = binding_address;
+        copy.lhs = payload_address;
+        copy.rhs = ir_operand_int(payload_size);
+        if (!ir_emit(context, function, &copy)) {
+          ir_operand_destroy(&binding_address);
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        ir_operand_destroy(&binding_address);
+      } else {
+        IROperand payload_value = ir_operand_none();
+        IRInstruction load = {0};
+
+        if (!ir_make_temp_operand(context, &payload_value)) {
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        load.op = IR_OP_LOAD;
+        load.location = expression->location;
+        load.dest = payload_value;
+        load.lhs = payload_address;
+        load.rhs = ir_operand_int(payload_size);
+        if (!ir_emit(context, function, &load) ||
+            !ir_emit_symbol_assignment(context, function, arm->binding_name,
+                                       &payload_value,
+                                       expression->location)) {
+          ir_operand_destroy(&payload_value);
+          ir_operand_destroy(&payload_address);
+          goto cleanup;
+        }
+
+        ir_operand_destroy(&payload_value);
+      }
+
+      ir_operand_destroy(&payload_address);
+    }
+
+    if (!arm->body) {
+      ir_set_error(context, "match arm has no value expression");
+      goto cleanup;
+    }
+
+    if (!ir_lower_expression(context, function, arm->body, &arm_value)) {
+      goto cleanup;
+    }
+    if (!ir_emit_symbol_assignment(context, function, result_name, &arm_value,
+                                   arm->body->location)) {
+      ir_operand_destroy(&arm_value);
+      goto cleanup;
+    }
+    ir_operand_destroy(&arm_value);
+
+    if (!ir_emit_jump_instruction(context, function, end_label,
+                                  expression->location)) {
+      goto cleanup;
+    }
+  }
+
+  if (!ir_emit_label_instruction(context, function, end_label,
+                                 expression->location)) {
+    goto cleanup;
+  }
+
+  *out_value = ir_operand_symbol(result_name);
+  if (!out_value->name) {
+    ir_set_error(context, "Out of memory while finalizing match expression");
+    goto cleanup;
+  }
+  ok = 1;
+
+cleanup:
+  if (arm_labels) {
+    for (size_t i = 0; i < match->arm_count; i++) {
+      free(arm_labels[i]);
+    }
+    free(arm_labels);
+  }
+  free(end_label);
+  free(result_name);
   free(owned_subject_name);
   ir_operand_destroy(&tag_value);
   ir_operand_destroy(&subject_address);
@@ -3534,6 +3856,10 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     return 1;
   }
 
+  case AST_MATCH_STATEMENT:
+    return ir_lower_match_expression(context, function, expression,
+                                     out_value);
+
   default:
     ir_set_error(context, "Unsupported expression type in pure IR lowering");
     return 0;
@@ -4011,8 +4337,18 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
   case AST_SWITCH_STATEMENT:
     return ir_lower_switch_statement(context, function, statement);
 
-  case AST_MATCH_STATEMENT:
+  case AST_MATCH_STATEMENT: {
+    MatchStatement *m = (MatchStatement *)statement->data;
+    if (m && m->is_expression) {
+      // match used as an expression-statement: lower it and discard the value.
+      IROperand discarded = ir_operand_none();
+      int r = ir_lower_match_expression(context, function, statement,
+                                        &discarded);
+      ir_operand_destroy(&discarded);
+      return r;
+    }
     return ir_lower_match_statement(context, function, statement, defers);
+  }
 
   case AST_BREAK_STATEMENT: {
     LoopControlStatement *ctrl = (LoopControlStatement *)statement->data;

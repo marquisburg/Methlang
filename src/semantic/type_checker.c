@@ -31,6 +31,8 @@ static int type_checker_process_tagged_enum(TypeChecker *checker,
                                             ASTNode *enum_decl_node);
 static int type_checker_check_match_statement(TypeChecker *checker,
                                                ASTNode *statement);
+static Type *type_checker_check_match_expression(TypeChecker *checker,
+                                                 ASTNode *expression);
 
 static Type *type_checker_parse_array_type(TypeChecker *checker,
                                            const char *name) {
@@ -2433,6 +2435,18 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     return t;
   }
 
+  case AST_MATCH_STATEMENT: {
+    MatchStatement *m = (MatchStatement *)expression->data;
+    if (!m || !m->is_expression) {
+      type_checker_set_error_at_location(
+          checker, expression->location,
+          "statement-form 'match' does not yield a value; use "
+          "'match (x) { case A: v, default: w }' expression form");
+      return NULL;
+    }
+    return type_checker_check_match_expression(checker, expression);
+  }
+
   default:
     return NULL;
   }
@@ -3737,6 +3751,159 @@ static int type_checker_check_match_statement(TypeChecker *checker,
 
   free(covered);
   return 1;
+}
+
+// Type-check a match used in expression position. Every arm body is a
+// value-yielding expression; all arm types must unify, and the match must be
+// exhaustive (no implicit fallthrough is allowed when a value is required).
+// Returns the unified result Type*, or NULL on error.
+static Type *type_checker_check_match_expression(TypeChecker *checker,
+                                                 ASTNode *expression) {
+  MatchStatement *match = (MatchStatement *)expression->data;
+  if (!match || !match->expression) {
+    type_checker_set_error_at_location(checker, expression->location,
+                                       "Invalid match expression");
+    return NULL;
+  }
+
+  Type *subject_type = type_checker_infer_type(checker, match->expression);
+  if (!subject_type)
+    return NULL;
+
+  if (subject_type->kind != TYPE_TAGGED_ENUM) {
+    type_checker_set_error_at_location(
+        checker, match->expression->location,
+        "match expression must be a tagged enum type, got '%s'",
+        subject_type->name);
+    return NULL;
+  }
+
+  int seen_default = 0;
+  Type *result_type = NULL;
+  int *covered = calloc(subject_type->tagged_variant_count, sizeof(int));
+  if (!covered) {
+    type_checker_set_error_at_location(checker, expression->location,
+                                       "Out of memory in match");
+    return NULL;
+  }
+
+  for (size_t i = 0; i < match->arm_count; i++) {
+    MatchArm *arm = &match->arms[i];
+    int variant_idx = -1;
+    Type *payload = NULL;
+
+    if (arm->is_default) {
+      seen_default = 1;
+    } else {
+      for (size_t v = 0; v < subject_type->tagged_variant_count; v++) {
+        if (subject_type->tagged_variant_names[v] &&
+            strcmp(subject_type->tagged_variant_names[v],
+                   arm->variant_name) == 0) {
+          variant_idx = (int)v;
+          break;
+        }
+      }
+      if (variant_idx < 0) {
+        type_checker_set_error_at_location(
+            checker, expression->location,
+            "Unknown variant '%s' for type '%s' in match",
+            arm->variant_name, subject_type->name);
+        free(covered);
+        return NULL;
+      }
+      if (covered[variant_idx]) {
+        type_checker_set_error_at_location(
+            checker, expression->location,
+            "Duplicate match arm for variant '%s'", arm->variant_name);
+        free(covered);
+        return NULL;
+      }
+      covered[variant_idx] = 1;
+
+      if (arm->binding_name) {
+        payload = subject_type->tagged_variant_payloads[variant_idx];
+        if (!payload) {
+          type_checker_set_error_at_location(
+              checker, expression->location,
+              "Variant '%s' carries no payload but binding '%s' was given",
+              arm->variant_name, arm->binding_name);
+          free(covered);
+          return NULL;
+        }
+      }
+    }
+
+    if (!arm->body) {
+      type_checker_set_error_at_location(
+          checker, expression->location,
+          "match arm must yield a value in expression position");
+      free(covered);
+      return NULL;
+    }
+
+    int has_binding_scope = (payload && arm->binding_name);
+    if (has_binding_scope) {
+      symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK);
+      Symbol *binding =
+          symbol_create(arm->binding_name, SYMBOL_VARIABLE, payload);
+      if (binding) {
+        binding->is_initialized = 1;
+        symbol_table_declare(checker->symbol_table, binding);
+      }
+    }
+
+    Type *arm_type = type_checker_infer_type(checker, arm->body);
+
+    if (has_binding_scope)
+      symbol_table_exit_scope(checker->symbol_table);
+
+    if (!arm_type) {
+      free(covered);
+      return NULL;
+    }
+
+    if (!result_type) {
+      result_type = arm_type;
+    } else if (!type_checker_are_compatible(result_type, arm_type)) {
+      type_checker_set_error_at_location(
+          checker, arm->body->location,
+          "match arms have incompatible types: '%s' vs '%s'",
+          result_type->name ? result_type->name : "?",
+          arm_type->name ? arm_type->name : "?");
+      free(covered);
+      return NULL;
+    }
+  }
+
+  if (!seen_default) {
+    for (size_t v = 0; v < subject_type->tagged_variant_count; v++) {
+      if (!covered[v]) {
+        type_checker_set_error_at_location(
+            checker, expression->location,
+            "Non-exhaustive match expression on '%s': variant '%s' not "
+            "covered; add a 'case %s:' arm or a 'default:' arm",
+            subject_type->name,
+            subject_type->tagged_variant_names[v]
+                ? subject_type->tagged_variant_names[v]
+                : "?",
+            subject_type->tagged_variant_names[v]
+                ? subject_type->tagged_variant_names[v]
+                : "?");
+        free(covered);
+        return NULL;
+      }
+    }
+  }
+
+  free(covered);
+
+  if (!result_type) {
+    type_checker_set_error_at_location(
+        checker, expression->location,
+        "match expression has no arms to determine a result type");
+    return NULL;
+  }
+  return result_type;
 }
 
 int type_checker_process_enum_declaration(TypeChecker *checker,
@@ -5396,8 +5563,12 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     return 1;
   }
 
-  case AST_MATCH_STATEMENT:
+  case AST_MATCH_STATEMENT: {
+    MatchStatement *m = (MatchStatement *)statement->data;
+    if (m && m->is_expression)
+      return type_checker_check_match_expression(checker, statement) != NULL;
     return type_checker_check_match_statement(checker, statement);
+  }
 
   case AST_BREAK_STATEMENT:
     if (checker->loop_depth <= 0 && checker->switch_depth <= 0) {

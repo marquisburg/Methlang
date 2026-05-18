@@ -135,6 +135,8 @@ typedef struct {
   ASTNode *expression;  // Value being matched
   MatchArm *arms;
   size_t arm_count;
+  int is_expression;    // 1 if used in expression position (arm bodies are
+                        // value-yielding expressions, exhaustiveness required)
 } MatchStatement;
 
 typedef struct {
@@ -372,6 +374,8 @@ ASTNode *ast_create_errdefer_statement(ASTNode *statement,
                                        SourceLocation location);
 ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
                                     size_t arm_count, SourceLocation location);
+ASTNode *ast_create_match_expression(ASTNode *expression, MatchArm *arms,
+                                     size_t arm_count, SourceLocation location);
 ASTNode *ast_create_spawn_expression(ASTNode *call, SourceLocation location);
 
 #endif // AST_H
