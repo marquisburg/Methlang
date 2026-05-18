@@ -53,7 +53,7 @@ static void register_fake_image(void) {
   functions[0].start_address = (const void *)(uintptr_t)&victim_function;
   functions[0].end_address = (const void *)(uintptr_t)&victim_function_end;
   functions[0].function_name = "victim_function";
-  functions[0].filename = "crash_demo.meth";
+  functions[0].filename = "crash_demo.mettle";
   functions[0].line = 7;
   functions[0].column = 3;
   meth_runtime_debug_register_image(functions, 1, NULL, 0);

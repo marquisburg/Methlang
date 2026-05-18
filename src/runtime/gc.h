@@ -1,5 +1,5 @@
-#ifndef METHASM_GC_H
-#define METHASM_GC_H
+#ifndef METTLE_GC_H
+#define METTLE_GC_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -25,7 +25,7 @@ typedef struct {
  * @brief Initialize the garbage collector.
  *
  * Captures the base of the stack to anchor the root scanning phase.
- * Handled automatically in the entry point built by Methlang.
+ * Handled automatically in the entry point built by Mettle.
  *
  * @param stack_base Pointer to the bottom (highest address) of the stack.
  */
@@ -271,4 +271,4 @@ size_t gc_get_tlab_chunk_count(void);
  */
 void gc_shutdown(void);
 
-#endif /* METHASM_GC_H */
+#endif /* METTLE_GC_H */

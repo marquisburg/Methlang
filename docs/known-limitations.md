@@ -1,6 +1,6 @@
 # Known Limitations
 
-This document lists current limitations of the Methlang language and compiler.
+This document lists current limitations of the Mettle language and compiler.
 
 No top-level constant expressions. Use functions that return constant values instead.
 
@@ -42,7 +42,7 @@ Coroutine frame GC visibility currently comes from lifted frame locals stored as
 
 Unreachable code analysis is currently block-local and conservative; some dead paths in complex control-flow may not be diagnosed yet.
 
-String concatenation via `+` is now supported, but it allocates via the GC runtime (`gc_alloc`). Use `methlang --build` or otherwise link the bundled GC runtime before using `string + string`.
+String concatenation via `+` is now supported, but it allocates via the GC runtime (`gc_alloc`). Use `mettle --build` or otherwise link the bundled GC runtime before using `string + string`.
 
 Managed pointers that cross into C remain a hazard. The compiler now warns when a managed struct pointer is passed to an `extern function` or stored in an `extern` variable, but C code that retains such pointers must still register the storage slot with `gc_register_root`.
 

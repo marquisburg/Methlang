@@ -1,5 +1,5 @@
 /*
- * C Collatz benchmark - counterpart to collatz.meth
+ * C Collatz benchmark - counterpart to collatz.mettle
  *
  * Collatz sequence: n -> n/2 (if even) or 3n+1 (if odd), until n==1.
  * Counts steps for n=1..100000, sums them. Benchmarks 10 full passes.

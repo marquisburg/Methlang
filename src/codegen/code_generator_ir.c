@@ -151,6 +151,9 @@ typedef struct {
 static const x86Register IR_PROMOTION_REGISTERS[] = {
     REG_R12, REG_R13, REG_R14, REG_R15, REG_RBX};
 
+static int ir_binary_operator_is_comparison(const char *op);
+static int ir_binary_operator_is_commutative(const char *op);
+
 static char *ir_codegen_strdup(const char *text) {
   if (!text) {
     return NULL;
@@ -658,6 +661,16 @@ static int ir_binary_operator_is_comparison(const char *op) {
   return strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
          strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
          strcmp(op, ">") == 0 || strcmp(op, ">=") == 0;
+}
+
+static int ir_binary_operator_is_commutative(const char *op) {
+  if (!op) {
+    return 0;
+  }
+  return strcmp(op, "+") == 0 || strcmp(op, "*") == 0 ||
+         strcmp(op, "&") == 0 || strcmp(op, "|") == 0 ||
+         strcmp(op, "^") == 0 || strcmp(op, "==") == 0 ||
+         strcmp(op, "!=") == 0;
 }
 
 static const char *ir_false_jump_for_comparison(const char *op) {
@@ -1443,6 +1456,60 @@ code_generator_emit_ir_binary_fallback(CodeGenerator *generator,
     }
   }
 
+  if (!instruction->is_float && instruction->rhs.kind == IR_OPERAND_INT &&
+      ir_immediate_fits_signed_32(instruction->rhs.int_value)) {
+    const char *arith = code_generator_get_arithmetic_instruction(op, 0);
+    long long immediate = instruction->rhs.int_value;
+
+    if (arith && strcmp(op, "/") != 0 && strcmp(op, "%") != 0 &&
+        ((strcmp(op, "<<") != 0 && strcmp(op, ">>") != 0) ||
+         (immediate >= 0 && immediate < 64))) {
+      if (!code_generator_load_ir_operand(generator, &instruction->lhs,
+                                          temp_table)) {
+        return 0;
+      }
+
+      if (strcmp(op, "*") == 0) {
+        code_generator_emit(generator, "    imul rax, rax, %lld\n",
+                            immediate);
+      } else if (strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) {
+        code_generator_emit(generator, "    %s rax, %lld\n", arith,
+                            immediate);
+      } else {
+        code_generator_emit(generator, "    %s rax, %lld\n", arith,
+                            immediate);
+      }
+
+      return code_generator_store_ir_destination(generator, &instruction->dest,
+                                                 temp_table);
+    }
+
+    if (ir_binary_operator_is_comparison(op)) {
+      if (!code_generator_load_ir_operand(generator, &instruction->lhs,
+                                          temp_table)) {
+        return 0;
+      }
+
+      code_generator_emit(generator, "    cmp rax, %lld\n", immediate);
+      if (strcmp(op, "==") == 0) {
+        code_generator_emit(generator, "    sete al\n");
+      } else if (strcmp(op, "!=") == 0) {
+        code_generator_emit(generator, "    setne al\n");
+      } else if (strcmp(op, "<") == 0) {
+        code_generator_emit(generator, "    setl al\n");
+      } else if (strcmp(op, "<=") == 0) {
+        code_generator_emit(generator, "    setle al\n");
+      } else if (strcmp(op, ">") == 0) {
+        code_generator_emit(generator, "    setg al\n");
+      } else if (strcmp(op, ">=") == 0) {
+        code_generator_emit(generator, "    setge al\n");
+      }
+      code_generator_emit(generator, "    movzx rax, al\n");
+      return code_generator_store_ir_destination(generator, &instruction->dest,
+                                                 temp_table);
+    }
+  }
+
   if (!code_generator_load_ir_operand_into_register(
           generator, &instruction->rhs, temp_table, REG_R10)) {
     return 0;
@@ -1576,6 +1643,547 @@ code_generator_emit_ir_binary_fallback(CodeGenerator *generator,
   code_generator_emit(generator, "    movzx rax, al\n");
   return code_generator_store_ir_destination(generator, &instruction->dest,
                                              temp_table);
+}
+
+static int code_generator_emit_ir_integer_binary_with_rhs_register(
+    CodeGenerator *generator, const char *op, const char *rhs_register) {
+  if (!generator || !op || !rhs_register) {
+    return 0;
+  }
+
+  const char *arith = code_generator_get_arithmetic_instruction(op, 0);
+  if (arith) {
+    if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0) {
+      if (strcmp(rhs_register, "r10") != 0) {
+        code_generator_emit(generator, "    mov r10, %s\n", rhs_register);
+      }
+      code_generator_emit(generator, "    cqo\n");
+      code_generator_emit(generator, "    idiv r10\n");
+      if (strcmp(op, "%") == 0) {
+        code_generator_emit(generator, "    mov rax, rdx\n");
+      }
+    } else if (strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) {
+      if (strcmp(rhs_register, "rcx") != 0) {
+        code_generator_emit(generator, "    mov rcx, %s\n", rhs_register);
+      }
+      code_generator_emit(generator, "    %s rax, cl\n", arith);
+    } else {
+      code_generator_emit(generator, "    %s rax, %s\n", arith, rhs_register);
+    }
+    return 1;
+  }
+
+  code_generator_emit(generator, "    cmp rax, %s\n", rhs_register);
+  if (strcmp(op, "==") == 0) {
+    code_generator_emit(generator, "    sete al\n");
+  } else if (strcmp(op, "!=") == 0) {
+    code_generator_emit(generator, "    setne al\n");
+  } else if (strcmp(op, "<") == 0) {
+    code_generator_emit(generator, "    setl al\n");
+  } else if (strcmp(op, "<=") == 0) {
+    code_generator_emit(generator, "    setle al\n");
+  } else if (strcmp(op, ">") == 0) {
+    code_generator_emit(generator, "    setg al\n");
+  } else if (strcmp(op, ">=") == 0) {
+    code_generator_emit(generator, "    setge al\n");
+  } else if (strcmp(op, "&&") == 0) {
+    code_generator_emit(generator, "    and rax, %s\n", rhs_register);
+    code_generator_emit(generator, "    setne al\n");
+  } else if (strcmp(op, "||") == 0) {
+    code_generator_emit(generator, "    or rax, %s\n", rhs_register);
+    code_generator_emit(generator, "    setne al\n");
+  } else {
+    code_generator_set_error(generator,
+                             "Unsupported integer binary operator '%s'", op);
+    return 0;
+  }
+  code_generator_emit(generator, "    movzx rax, al\n");
+  return 1;
+}
+
+static int code_generator_emit_ir_integer_binary_with_rhs_immediate(
+    CodeGenerator *generator, const char *op, long long immediate) {
+  if (!generator || !op || !ir_immediate_fits_signed_32(immediate)) {
+    return 0;
+  }
+
+  const char *arith = code_generator_get_arithmetic_instruction(op, 0);
+  if (arith && strcmp(op, "/") != 0 && strcmp(op, "%") != 0 &&
+      ((strcmp(op, "<<") != 0 && strcmp(op, ">>") != 0) ||
+       (immediate >= 0 && immediate < 64))) {
+    if (strcmp(op, "*") == 0) {
+      code_generator_emit(generator, "    imul rax, rax, %lld\n", immediate);
+    } else {
+      code_generator_emit(generator, "    %s rax, %lld\n", arith, immediate);
+    }
+    return 1;
+  }
+
+  if (!ir_binary_operator_is_comparison(op)) {
+    return 0;
+  }
+
+  code_generator_emit(generator, "    cmp rax, %lld\n", immediate);
+  if (strcmp(op, "==") == 0) {
+    code_generator_emit(generator, "    sete al\n");
+  } else if (strcmp(op, "!=") == 0) {
+    code_generator_emit(generator, "    setne al\n");
+  } else if (strcmp(op, "<") == 0) {
+    code_generator_emit(generator, "    setl al\n");
+  } else if (strcmp(op, "<=") == 0) {
+    code_generator_emit(generator, "    setle al\n");
+  } else if (strcmp(op, ">") == 0) {
+    code_generator_emit(generator, "    setg al\n");
+  } else if (strcmp(op, ">=") == 0) {
+    code_generator_emit(generator, "    setge al\n");
+  }
+  code_generator_emit(generator, "    movzx rax, al\n");
+  return 1;
+}
+
+static int code_generator_compute_ir_binary_to_r11(
+    CodeGenerator *generator, const IRInstruction *instruction,
+    IRTempTable *temp_table) {
+  if (!generator || !instruction || instruction->op != IR_OP_BINARY ||
+      instruction->is_float || !instruction->text) {
+    return 0;
+  }
+
+  if (instruction->rhs.kind == IR_OPERAND_INT &&
+      ir_immediate_fits_signed_32(instruction->rhs.int_value)) {
+    if (!code_generator_load_ir_operand(generator, &instruction->lhs,
+                                        temp_table)) {
+      return 0;
+    }
+    if (code_generator_emit_ir_integer_binary_with_rhs_immediate(
+            generator, instruction->text, instruction->rhs.int_value)) {
+      code_generator_emit(generator, "    mov r11, rax\n");
+      return 1;
+    }
+  }
+
+  if (instruction->lhs.kind == IR_OPERAND_INT &&
+      ir_immediate_fits_signed_32(instruction->lhs.int_value) &&
+      ir_binary_operator_is_commutative(instruction->text)) {
+    if (!code_generator_load_ir_operand(generator, &instruction->rhs,
+                                        temp_table)) {
+      return 0;
+    }
+    if (code_generator_emit_ir_integer_binary_with_rhs_immediate(
+            generator, instruction->text, instruction->lhs.int_value)) {
+      code_generator_emit(generator, "    mov r11, rax\n");
+      return 1;
+    }
+  }
+
+  if (!code_generator_load_ir_operand_into_register(
+          generator, &instruction->rhs, temp_table, REG_R10)) {
+    return 0;
+  }
+  if (!code_generator_load_ir_operand(generator, &instruction->lhs,
+                                      temp_table)) {
+    return 0;
+  }
+  if (!code_generator_emit_ir_integer_binary_with_rhs_register(
+          generator, instruction->text, "r10")) {
+    return 0;
+  }
+  code_generator_emit(generator, "    mov r11, rax\n");
+  return 1;
+}
+
+static int code_generator_try_emit_ir_binary_temp_pair(
+    CodeGenerator *generator, const IRInstruction *producer,
+    const IRInstruction *consumer, const IRTempUseMap *temp_use_map,
+    IRTempTable *temp_table, int *emitted) {
+  if (emitted) {
+    *emitted = 0;
+  }
+  if (!generator || !producer || !consumer || !temp_use_map || !temp_table) {
+    return 0;
+  }
+
+  if (producer->op != IR_OP_BINARY || consumer->op != IR_OP_BINARY ||
+      producer->is_float || consumer->is_float || producer->ast_ref ||
+      consumer->ast_ref || producer->dest.kind != IR_OPERAND_TEMP ||
+      !producer->dest.name || !producer->text || !consumer->text ||
+      ir_temp_use_map_get(temp_use_map, producer->dest.name) != 1) {
+    return 1;
+  }
+
+  int temp_is_lhs =
+      consumer->lhs.kind == IR_OPERAND_TEMP && consumer->lhs.name &&
+      strcmp(consumer->lhs.name, producer->dest.name) == 0;
+  int temp_is_rhs =
+      consumer->rhs.kind == IR_OPERAND_TEMP && consumer->rhs.name &&
+      strcmp(consumer->rhs.name, producer->dest.name) == 0;
+  if (!temp_is_lhs && !temp_is_rhs) {
+    return 1;
+  }
+
+  if (!code_generator_compute_ir_binary_to_r11(generator, producer,
+                                               temp_table)) {
+    return 0;
+  }
+
+  if (temp_is_rhs) {
+    if (consumer->lhs.kind == IR_OPERAND_INT &&
+        ir_immediate_fits_signed_32(consumer->lhs.int_value) &&
+        ir_binary_operator_is_commutative(consumer->text)) {
+      code_generator_emit(generator, "    mov rax, r11\n");
+      if (code_generator_emit_ir_integer_binary_with_rhs_immediate(
+              generator, consumer->text, consumer->lhs.int_value)) {
+        if (!code_generator_store_ir_destination(generator, &consumer->dest,
+                                                 temp_table)) {
+          return 0;
+        }
+        if (emitted) {
+          *emitted = 1;
+        }
+        return 1;
+      }
+    }
+
+    if (!code_generator_load_ir_operand(generator, &consumer->lhs,
+                                        temp_table)) {
+      return 0;
+    }
+    if (!code_generator_emit_ir_integer_binary_with_rhs_register(
+            generator, consumer->text, "r11")) {
+      return 0;
+    }
+  } else {
+    if (consumer->rhs.kind == IR_OPERAND_INT &&
+        ir_immediate_fits_signed_32(consumer->rhs.int_value)) {
+      code_generator_emit(generator, "    mov rax, r11\n");
+      if (code_generator_emit_ir_integer_binary_with_rhs_immediate(
+              generator, consumer->text, consumer->rhs.int_value)) {
+        if (!code_generator_store_ir_destination(generator, &consumer->dest,
+                                                 temp_table)) {
+          return 0;
+        }
+        if (emitted) {
+          *emitted = 1;
+        }
+        return 1;
+      }
+    }
+
+    if (!code_generator_load_ir_operand_into_register(
+            generator, &consumer->rhs, temp_table, REG_R10)) {
+      return 0;
+    }
+    code_generator_emit(generator, "    mov rax, r11\n");
+    if (!code_generator_emit_ir_integer_binary_with_rhs_register(
+            generator, consumer->text, "r10")) {
+      return 0;
+    }
+  }
+
+  if (!code_generator_store_ir_destination(generator, &consumer->dest,
+                                           temp_table)) {
+    return 0;
+  }
+
+  if (emitted) {
+    *emitted = 1;
+  }
+  return 1;
+}
+
+static int code_generator_emit_ir_compare_r11_branch(
+    CodeGenerator *generator, const IRInstruction *compare_instruction,
+    int temp_is_lhs, const char *jump, const char *target_label,
+    IRTempTable *temp_table) {
+  if (!generator || !compare_instruction || !jump || !target_label ||
+      !temp_table) {
+    return 0;
+  }
+
+  if (temp_is_lhs) {
+    if (compare_instruction->rhs.kind == IR_OPERAND_INT &&
+        ir_immediate_fits_signed_32(compare_instruction->rhs.int_value)) {
+      code_generator_emit(generator, "    cmp r11, %lld\n",
+                          compare_instruction->rhs.int_value);
+    } else {
+      if (!code_generator_load_ir_operand_into_register(
+              generator, &compare_instruction->rhs, temp_table, REG_R10)) {
+        return 0;
+      }
+      code_generator_emit(generator, "    cmp r11, r10\n");
+    }
+  } else {
+    if (!code_generator_load_ir_operand(generator, &compare_instruction->lhs,
+                                        temp_table)) {
+      return 0;
+    }
+    code_generator_emit(generator, "    cmp rax, r11\n");
+  }
+
+  code_generator_emit(generator, "    %s %s\n", jump, target_label);
+  return 1;
+}
+
+static int code_generator_try_emit_ir_binary_compare_branch_chain(
+    CodeGenerator *generator, const IRInstruction *producer,
+    const IRInstruction *compare_instruction,
+    const IRInstruction *branch_instruction, const IRTempUseMap *temp_use_map,
+    IRTempTable *temp_table, int *emitted) {
+  if (emitted) {
+    *emitted = 0;
+  }
+  if (!generator || !producer || !compare_instruction || !branch_instruction ||
+      !temp_use_map || !temp_table) {
+    return 0;
+  }
+
+  if (producer->op != IR_OP_BINARY || producer->is_float ||
+      producer->ast_ref || producer->dest.kind != IR_OPERAND_TEMP ||
+      !producer->dest.name ||
+      ir_temp_use_map_get(temp_use_map, producer->dest.name) != 1 ||
+      compare_instruction->op != IR_OP_BINARY ||
+      compare_instruction->is_float || compare_instruction->ast_ref ||
+      !ir_binary_operator_is_comparison(compare_instruction->text) ||
+      compare_instruction->dest.kind != IR_OPERAND_TEMP ||
+      !compare_instruction->dest.name ||
+      ir_temp_use_map_get(temp_use_map, compare_instruction->dest.name) != 1 ||
+      branch_instruction->op != IR_OP_BRANCH_ZERO ||
+      branch_instruction->lhs.kind != IR_OPERAND_TEMP ||
+      !branch_instruction->lhs.name || !branch_instruction->text ||
+      strcmp(branch_instruction->lhs.name, compare_instruction->dest.name) !=
+          0) {
+    return 1;
+  }
+
+  int temp_is_lhs = compare_instruction->lhs.kind == IR_OPERAND_TEMP &&
+                    compare_instruction->lhs.name &&
+                    strcmp(compare_instruction->lhs.name,
+                           producer->dest.name) == 0;
+  int temp_is_rhs = compare_instruction->rhs.kind == IR_OPERAND_TEMP &&
+                    compare_instruction->rhs.name &&
+                    strcmp(compare_instruction->rhs.name,
+                           producer->dest.name) == 0;
+  if (!temp_is_lhs && !temp_is_rhs) {
+    return 1;
+  }
+
+  const char *false_jump =
+      ir_false_jump_for_comparison(compare_instruction->text);
+  if (!false_jump) {
+    return 1;
+  }
+
+  if (!code_generator_compute_ir_binary_to_r11(generator, producer,
+                                               temp_table)) {
+    return 0;
+  }
+  if (!code_generator_emit_ir_compare_r11_branch(
+          generator, compare_instruction, temp_is_lhs, false_jump,
+          branch_instruction->text, temp_table)) {
+    return 0;
+  }
+
+  if (emitted) {
+    *emitted = 1;
+  }
+  return 1;
+}
+
+static int code_generator_ir_binary_temp_use_side(
+    const IRInstruction *instruction, const char *temp_name, int *is_lhs_out,
+    int *is_rhs_out) {
+  if (!instruction || !temp_name || !is_lhs_out || !is_rhs_out ||
+      instruction->op != IR_OP_BINARY || instruction->is_float ||
+      instruction->ast_ref || !instruction->text) {
+    return 0;
+  }
+
+  int is_lhs = instruction->lhs.kind == IR_OPERAND_TEMP &&
+               instruction->lhs.name &&
+               strcmp(instruction->lhs.name, temp_name) == 0;
+  int is_rhs = instruction->rhs.kind == IR_OPERAND_TEMP &&
+               instruction->rhs.name &&
+               strcmp(instruction->rhs.name, temp_name) == 0;
+  *is_lhs_out = is_lhs;
+  *is_rhs_out = is_rhs;
+  return is_lhs || is_rhs;
+}
+
+static int code_generator_ir_binary_chain_candidate(
+    const IRInstruction *instruction) {
+  return instruction && instruction->op == IR_OP_BINARY &&
+         !instruction->is_float && !instruction->ast_ref && instruction->text;
+}
+
+static int code_generator_emit_ir_binary_extend_r11(
+    CodeGenerator *generator, const IRInstruction *instruction,
+    const char *previous_temp, IRTempTable *temp_table) {
+  if (!generator || !instruction || !previous_temp || !temp_table ||
+      !code_generator_ir_binary_chain_candidate(instruction)) {
+    return 0;
+  }
+
+  int temp_is_lhs = 0;
+  int temp_is_rhs = 0;
+  if (!code_generator_ir_binary_temp_use_side(instruction, previous_temp,
+                                              &temp_is_lhs, &temp_is_rhs)) {
+    return 0;
+  }
+
+  if (temp_is_lhs) {
+    if (instruction->rhs.kind == IR_OPERAND_INT &&
+        ir_immediate_fits_signed_32(instruction->rhs.int_value)) {
+      code_generator_emit(generator, "    mov rax, r11\n");
+      if (code_generator_emit_ir_integer_binary_with_rhs_immediate(
+              generator, instruction->text, instruction->rhs.int_value)) {
+        code_generator_emit(generator, "    mov r11, rax\n");
+        return 1;
+      }
+    }
+
+    if (!code_generator_load_ir_operand_into_register(
+            generator, &instruction->rhs, temp_table, REG_R10)) {
+      return 0;
+    }
+    code_generator_emit(generator, "    mov rax, r11\n");
+    if (!code_generator_emit_ir_integer_binary_with_rhs_register(
+            generator, instruction->text, "r10")) {
+      return 0;
+    }
+    code_generator_emit(generator, "    mov r11, rax\n");
+    return 1;
+  }
+
+  if (instruction->lhs.kind == IR_OPERAND_INT &&
+      ir_immediate_fits_signed_32(instruction->lhs.int_value) &&
+      ir_binary_operator_is_commutative(instruction->text)) {
+    code_generator_emit(generator, "    mov rax, r11\n");
+    if (code_generator_emit_ir_integer_binary_with_rhs_immediate(
+            generator, instruction->text, instruction->lhs.int_value)) {
+      code_generator_emit(generator, "    mov r11, rax\n");
+      return 1;
+    }
+  }
+
+  if (!code_generator_load_ir_operand(generator, &instruction->lhs,
+                                      temp_table)) {
+    return 0;
+  }
+  if (!code_generator_emit_ir_integer_binary_with_rhs_register(
+          generator, instruction->text, "r11")) {
+    return 0;
+  }
+  code_generator_emit(generator, "    mov r11, rax\n");
+  return 1;
+}
+
+static int code_generator_try_emit_ir_binary_expression_chain(
+    CodeGenerator *generator, const IRFunction *function, size_t start_index,
+    const IRTempUseMap *temp_use_map, IRTempTable *temp_table,
+    size_t *last_index_out, int *consumed_branch_out, int *emitted) {
+  if (emitted) {
+    *emitted = 0;
+  }
+  if (last_index_out) {
+    *last_index_out = start_index;
+  }
+  if (consumed_branch_out) {
+    *consumed_branch_out = 0;
+  }
+  if (!generator || !function || !temp_use_map || !temp_table ||
+      start_index >= function->instruction_count) {
+    return 0;
+  }
+
+  const IRInstruction *first = &function->instructions[start_index];
+  if (!code_generator_ir_binary_chain_candidate(first) ||
+      first->dest.kind != IR_OPERAND_TEMP || !first->dest.name ||
+      ir_temp_use_map_get(temp_use_map, first->dest.name) != 1) {
+    return 1;
+  }
+
+  size_t last = start_index;
+  const char *previous_temp = first->dest.name;
+  while (last + 1 < function->instruction_count) {
+    const IRInstruction *next = &function->instructions[last + 1];
+    int temp_is_lhs = 0;
+    int temp_is_rhs = 0;
+    if (!code_generator_ir_binary_temp_use_side(next, previous_temp,
+                                                &temp_is_lhs, &temp_is_rhs)) {
+      break;
+    }
+
+    last++;
+    if (next->dest.kind != IR_OPERAND_TEMP || !next->dest.name ||
+        ir_temp_use_map_get(temp_use_map, next->dest.name) != 1) {
+      break;
+    }
+    previous_temp = next->dest.name;
+  }
+
+  if (last < start_index + 2) {
+    return 1;
+  }
+
+  int consumes_branch = 0;
+  const IRInstruction *last_instruction = &function->instructions[last];
+  if (last + 1 < function->instruction_count &&
+      last_instruction->dest.kind == IR_OPERAND_TEMP &&
+      last_instruction->dest.name &&
+      ir_temp_use_map_get(temp_use_map, last_instruction->dest.name) == 1 &&
+      ir_binary_operator_is_comparison(last_instruction->text)) {
+    const IRInstruction *branch = &function->instructions[last + 1];
+    if (branch->op == IR_OP_BRANCH_ZERO && branch->lhs.kind == IR_OPERAND_TEMP &&
+        branch->lhs.name &&
+        strcmp(branch->lhs.name, last_instruction->dest.name) == 0 &&
+        branch->text) {
+      consumes_branch = 1;
+    }
+  }
+
+  if (!code_generator_compute_ir_binary_to_r11(generator, first, temp_table)) {
+    return 0;
+  }
+
+  previous_temp = first->dest.name;
+  for (size_t i = start_index + 1; i <= last; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (!code_generator_emit_ir_binary_extend_r11(generator, instruction,
+                                                  previous_temp, temp_table)) {
+      return 0;
+    }
+    if (i < last) {
+      if (instruction->dest.kind != IR_OPERAND_TEMP ||
+          !instruction->dest.name) {
+        return 0;
+      }
+      previous_temp = instruction->dest.name;
+    }
+  }
+
+  if (consumes_branch) {
+    const IRInstruction *branch = &function->instructions[last + 1];
+    code_generator_emit(generator, "    test r11, r11\n");
+    code_generator_emit(generator, "    jz %s\n", branch->text);
+  } else {
+    code_generator_emit(generator, "    mov rax, r11\n");
+    if (!code_generator_store_ir_destination(generator,
+                                             &last_instruction->dest,
+                                             temp_table)) {
+      return 0;
+    }
+  }
+
+  if (last_index_out) {
+    *last_index_out = last;
+  }
+  if (consumed_branch_out) {
+    *consumed_branch_out = consumes_branch;
+  }
+  if (emitted) {
+    *emitted = 1;
+  }
+  return 1;
 }
 
 static int
@@ -2195,6 +2803,19 @@ static int code_generator_emit_ir_compare_branch_with_jump(
     if (emitted_fastpath) {
       return 1;
     }
+  }
+
+  if (!compare_instruction->is_float &&
+      compare_instruction->rhs.kind == IR_OPERAND_INT &&
+      ir_immediate_fits_signed_32(compare_instruction->rhs.int_value)) {
+    if (!code_generator_load_ir_operand(generator, &compare_instruction->lhs,
+                                        temp_table)) {
+      return 0;
+    }
+    code_generator_emit(generator, "    cmp rax, %lld\n",
+                        compare_instruction->rhs.int_value);
+    code_generator_emit(generator, "    %s %s\n", jump, target_label);
+    return 1;
   }
 
   if (!code_generator_load_ir_operand_into_register(
@@ -3051,7 +3672,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    push r15\n");
       code_generator_emit(generator,
                           "    ; Spill XMM registers for conservative root scan\n");
-#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
+#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    sub rsp, 512\n");
 #else
       code_generator_emit(generator, "    sub rsp, 256\n");
@@ -3072,7 +3693,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    movdqu [rsp + 208], xmm13\n");
       code_generator_emit(generator, "    movdqu [rsp + 224], xmm14\n");
       code_generator_emit(generator, "    movdqu [rsp + 240], xmm15\n");
-#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
+#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    movdqu [rsp + 256], xmm16\n");
       code_generator_emit(generator, "    movdqu [rsp + 272], xmm17\n");
       code_generator_emit(generator, "    movdqu [rsp + 288], xmm18\n");
@@ -3111,7 +3732,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    movdqu xmm13, [rsp + 208]\n");
       code_generator_emit(generator, "    movdqu xmm14, [rsp + 224]\n");
       code_generator_emit(generator, "    movdqu xmm15, [rsp + 240]\n");
-#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
+#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    movdqu xmm16, [rsp + 256]\n");
       code_generator_emit(generator, "    movdqu xmm17, [rsp + 272]\n");
       code_generator_emit(generator, "    movdqu xmm18, [rsp + 288]\n");
@@ -3165,7 +3786,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    push r15\n");
       code_generator_emit(generator,
                           "    ; Spill XMM registers for conservative root scan\n");
-#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
+#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    sub rsp, 512\n");
 #else
       code_generator_emit(generator, "    sub rsp, 256\n");
@@ -3186,7 +3807,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    movdqu [rsp + 208], xmm13\n");
       code_generator_emit(generator, "    movdqu [rsp + 224], xmm14\n");
       code_generator_emit(generator, "    movdqu [rsp + 240], xmm15\n");
-#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
+#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    movdqu [rsp + 256], xmm16\n");
       code_generator_emit(generator, "    movdqu [rsp + 272], xmm17\n");
       code_generator_emit(generator, "    movdqu [rsp + 288], xmm18\n");
@@ -3223,7 +3844,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       code_generator_emit(generator, "    movdqu xmm13, [rsp + 208]\n");
       code_generator_emit(generator, "    movdqu xmm14, [rsp + 224]\n");
       code_generator_emit(generator, "    movdqu xmm15, [rsp + 240]\n");
-#if defined(Methlang_SAFEPOINT_SPILL_XMM31)
+#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
       code_generator_emit(generator, "    movdqu xmm16, [rsp + 256]\n");
       code_generator_emit(generator, "    movdqu xmm17, [rsp + 272]\n");
       code_generator_emit(generator, "    movdqu xmm18, [rsp + 288]\n");
@@ -3362,6 +3983,55 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       }
       if (i + 1 < ir_function->instruction_count) {
         const IRInstruction *next = &ir_function->instructions[i + 1];
+        if (instruction->op == IR_OP_BINARY &&
+            instruction->dest.kind == IR_OPERAND_TEMP &&
+            instruction->dest.name) {
+          size_t chain_last = i;
+          int chain_consumed_branch = 0;
+          int emitted_chain = 0;
+          if (!code_generator_try_emit_ir_binary_expression_chain(
+                  generator, ir_function, i, &temp_use_map, &temp_table,
+                  &chain_last, &chain_consumed_branch, &emitted_chain)) {
+            break;
+          }
+          if (emitted_chain) {
+            i = chain_last + (chain_consumed_branch ? 1 : 0);
+            continue;
+          }
+        }
+
+        if (i + 2 < ir_function->instruction_count &&
+            instruction->op == IR_OP_BINARY &&
+            instruction->dest.kind == IR_OPERAND_TEMP &&
+            instruction->dest.name && next->op == IR_OP_BINARY &&
+            ir_function->instructions[i + 2].op == IR_OP_BRANCH_ZERO) {
+          int emitted_chain = 0;
+          if (!code_generator_try_emit_ir_binary_compare_branch_chain(
+                  generator, instruction, next, &ir_function->instructions[i + 2],
+                  &temp_use_map, &temp_table, &emitted_chain)) {
+            break;
+          }
+          if (emitted_chain) {
+            i += 2;
+            continue;
+          }
+        }
+
+        if (instruction->op == IR_OP_BINARY &&
+            instruction->dest.kind == IR_OPERAND_TEMP &&
+            instruction->dest.name && next->op == IR_OP_BINARY) {
+          int emitted_pair = 0;
+          if (!code_generator_try_emit_ir_binary_temp_pair(
+                  generator, instruction, next, &temp_use_map, &temp_table,
+                  &emitted_pair)) {
+            break;
+          }
+          if (emitted_pair) {
+            i++;
+            continue;
+          }
+        }
+
         if (instruction->op == IR_OP_BINARY && !instruction->is_float &&
             instruction->dest.kind == IR_OPERAND_TEMP &&
             instruction->dest.name && ir_binary_operator_is_comparison(instruction->text) &&

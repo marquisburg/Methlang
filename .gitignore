@@ -8,5 +8,4 @@ obj/
 *.s
 *.s.ir
 docs/linker-implementation-todo.md
-
-# Implementation notes (local only)
+.claude/

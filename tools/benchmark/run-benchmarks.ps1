@@ -1,4 +1,4 @@
-﻿# Dedicated MethASM benchmark harness against C.
+# Dedicated Mettle benchmark harness against C.
 #
 # - Reads benchmark matrix from docs/benchmarks/harness.json
 # - Builds each suite via its build script
@@ -87,7 +87,7 @@ if ($BuildCompiler) {
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
-if (-not (Test-Path ".\bin\methlang.exe")) {
+if (-not (Test-Path ".\bin\mettle.exe")) {
     Write-Error "Compiler not found. Run with -BuildCompiler or build manually."
     exit 1
 }

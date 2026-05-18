@@ -359,7 +359,7 @@ static int print_help_topic(const char *program_name, const char *argv0,
 
   if (strcmp(topic, "build") == 0 || strcmp(topic, "compile") == 0) {
     printf("Build help\n");
-    printf("  methlang --build app.meth -o app.exe\n");
+    printf("  mettle --build app.mettle -o app.exe\n");
     printf("  Builds an executable directly on Windows.\n");
     printf("  Uses NASM, then tries the selected linker backend.\n");
     printf("  Default is --linker auto (internal, then gcc, then link.exe).\n");
@@ -367,7 +367,7 @@ static int print_help_topic(const char *program_name, const char *argv0,
     printf("  The internal linker probes common Win32 DLLs directly.\n");
     printf("  Add repeatable linker flags with --link-arg <arg> for extra "
            "DLLs or import libraries.\n");
-    printf("  Example: methlang --build --emit-obj web\\\\server.meth -o "
+    printf("  Example: mettle --build --emit-obj web\\\\server.mettle -o "
            "web\\\\server.exe --linker internal\n");
     print_doc_reference(argv0, "compilation.md");
     return 0;
@@ -377,7 +377,7 @@ static int print_help_topic(const char *program_name, const char *argv0,
     printf("GC help\n");
     printf("  The .s file contains calls to gc_alloc/gc_init, not the GC "
            "implementation itself.\n");
-    printf("  methlang --build links the bundled runtime automatically.\n");
+    printf("  mettle --build links the bundled runtime automatically.\n");
     printf("  Manual assembly/linking still requires the bundled runtime "
            "objects.\n");
     printf("  If you use new or GC-backed string concatenation, use "
@@ -391,7 +391,7 @@ static int print_help_topic(const char *program_name, const char *argv0,
     printf("  Declare external C functions with extern function.\n");
     printf("  Prefer std/win32 for common Windows OS APIs.\n");
     printf("  Use --link-arg for extra linker libraries in --build mode.\n");
-    printf("  Example: methlang --build --emit-obj main.meth -o main.exe "
+    printf("  Example: mettle --build --emit-obj main.mettle -o main.exe "
            "--linker internal\n");
     print_doc_reference(argv0, "c-interop.md");
     return 0;
@@ -408,7 +408,7 @@ static int print_help_topic(const char *program_name, const char *argv0,
   if (strcmp(topic, "web") == 0) {
     printf("Web example help\n");
     printf("  Build the demo server with .\\\\web\\\\build.bat\n");
-    printf("  That now delegates to methlang --build with --link-arg "
+    printf("  That now delegates to mettle --build with --link-arg "
            "-lws2_32.\n");
     print_doc_reference(argv0, "compilation.md");
     return 0;
@@ -930,8 +930,8 @@ static int object_needs_thread_runtime(const char *object_path) {
          object_has_undefined_symbol_prefix(object_path, "__meth_chan_");
 }
 
-static int object_needs_methlang_entry(const char *object_path) {
-  return object_has_undefined_symbol_prefix(object_path, "methlang_entry_");
+static int object_needs_mettle_entry(const char *object_path) {
+  return object_has_undefined_symbol_prefix(object_path, "mettle_entry_");
 }
 
 static int append_argument_text(char *buffer, size_t buffer_size, size_t *offset,
@@ -1078,7 +1078,7 @@ static int run_nasm_assemble(const char *asm_filename,
   return 0;
 }
 
-static int methlang_build_with_gcc(const char *object_filename,
+static int mettle_build_with_gcc(const char *object_filename,
                                    const char *executable_filename,
                                    const char *gc_object,
                                    const char *async_object,
@@ -1171,7 +1171,7 @@ static int methlang_build_with_gcc(const char *object_filename,
   return 0;
 }
 
-static int methlang_build_with_link(const char *object_filename,
+static int mettle_build_with_link(const char *object_filename,
                                     const char *executable_filename,
                                     const char *gc_object,
                                     const char *async_object,
@@ -1306,7 +1306,7 @@ cleanup:
 /* Build → link routing is documented in docs/linker-build-pipelines.md (asm+GCC
  * vs emit-obj+internal vs emit-obj+external GCC). */
 
-static int methlang_link_internal(const char **object_paths,
+static int mettle_link_internal(const char **object_paths,
                                   size_t object_count,
                                   const char *executable_filename,
                                   int include_shell32,
@@ -1365,15 +1365,15 @@ cleanup:
   return result;
 }
 
-static int methlang_link_object_with_gcc(const char *object_filename,
+static int mettle_link_object_with_gcc(const char *object_filename,
                                          const char *executable_filename,
                                          const char *gc_object,
                                          const char *async_object,
                                          const char *thread_object,
                                          const char *entry_object,
                                          const CompilerOptions *options) {
-  /* Keep flags aligned with methlang_build_with_gcc (asm path): -nostartfiles,
-   * optional methlang_entry.o, -lkernel32 and -lshell32 when entry is linked.
+  /* Keep flags aligned with mettle_build_with_gcc (asm path): -nostartfiles,
+   * optional mettle_entry.o, -lkernel32 and -lshell32 when entry is linked.
    * See docs/linker-build-pipelines.md. */
   size_t gcc_len = strlen(object_filename) + strlen(executable_filename) + 192;
   if (gc_object && gc_object[0] != '\0') {
@@ -1461,7 +1461,7 @@ static int methlang_link_object_with_gcc(const char *object_filename,
   return 0;
 }
 
-static int methlang_link_object_with_link(const char *object_filename,
+static int mettle_link_object_with_link(const char *object_filename,
                                           const char *executable_filename,
                                           const char *gc_object,
                                           const char *async_object,
@@ -1524,7 +1524,7 @@ static int methlang_link_object_with_link(const char *object_filename,
   return 0;
 }
 
-static int methlang_build_executable(const char *asm_filename,
+static int mettle_build_executable(const char *asm_filename,
                                      const char *executable_filename,
                                      const char *runtime_directory,
                                      const CompilerOptions *options) {
@@ -1564,11 +1564,11 @@ static int methlang_build_executable(const char *asm_filename,
   char *gc_gcc_object = join_paths(runtime_directory, "gc.o");
   char *async_gcc_object = join_paths(runtime_directory, "async_runtime.o");
   char *thread_gcc_object = join_paths(runtime_directory, "meth_thread.o");
-  char *entry_gcc_object = join_paths(runtime_directory, "methlang_entry.o");
+  char *entry_gcc_object = join_paths(runtime_directory, "mettle_entry.o");
   char *gc_msvc_object = join_paths(runtime_directory, "gc.obj");
   char *async_msvc_object = join_paths(runtime_directory, "async_runtime.obj");
   char *thread_msvc_object = join_paths(runtime_directory, "meth_thread.obj");
-  char *entry_msvc_object = join_paths(runtime_directory, "methlang_entry.obj");
+  char *entry_msvc_object = join_paths(runtime_directory, "mettle_entry.obj");
   if (!gcc_object_filename || !msvc_object_filename || !gc_gcc_object ||
       !async_gcc_object || !thread_gcc_object || !entry_gcc_object ||
       !gc_msvc_object || !async_msvc_object || !thread_msvc_object ||
@@ -1622,7 +1622,7 @@ static int methlang_build_executable(const char *asm_filename,
     }
     needs_gc = object_needs_gc_runtime(msvc_object_filename);
     needs_thread = object_needs_thread_runtime(msvc_object_filename);
-    needs_entry = object_needs_methlang_entry(msvc_object_filename);
+    needs_entry = object_needs_mettle_entry(msvc_object_filename);
     if (needs_gc) {
       gc_object = (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
       async_object = (_access(async_msvc_object, 0) == 0)
@@ -1659,7 +1659,7 @@ static int methlang_build_executable(const char *asm_filename,
       object_paths[object_count++] = entry_object;
     }
 
-    if (methlang_link_internal(object_paths, object_count, executable_filename,
+    if (mettle_link_internal(object_paths, object_count, executable_filename,
                                entry_object != NULL, options) == 0) {
       build_result = 0;
       goto cleanup;
@@ -1686,7 +1686,7 @@ static int methlang_build_executable(const char *asm_filename,
           (_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL;
       const char *tobj =
           (_access(thread_gcc_object, 0) == 0) ? thread_gcc_object : NULL;
-      if (methlang_build_with_gcc(gcc_object_filename, executable_filename,
+      if (mettle_build_with_gcc(gcc_object_filename, executable_filename,
                                   gc_gcc_object, async_gcc_object,
                                   tobj, entry_object, options) == 0) {
         build_result = 0;
@@ -1711,7 +1711,7 @@ static int methlang_build_executable(const char *asm_filename,
           (_access(entry_msvc_object, 0) == 0)
               ? entry_msvc_object
               : ((_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL);
-      if (methlang_build_with_link(msvc_object_filename, executable_filename,
+      if (mettle_build_with_link(msvc_object_filename, executable_filename,
                                    gc_object, async_object, tobj, entry_object,
                                    options) == 0) {
         build_result = 0;
@@ -1737,7 +1737,7 @@ cleanup:
   return build_result;
 }
 
-static int methlang_link_object_file(const char *object_filename,
+static int mettle_link_object_file(const char *object_filename,
                                      const char *executable_filename,
                                      const char *runtime_directory,
                                      const CompilerOptions *options) {
@@ -1771,7 +1771,7 @@ static int methlang_link_object_file(const char *object_filename,
   char *async_gcc_object = join_paths(runtime_directory, "async_runtime.o");
   char *thread_gcc_object = join_paths(runtime_directory, "meth_thread.o");
   char *entry_gcc_object =
-      join_paths(runtime_directory, "methlang_entry.o");
+      join_paths(runtime_directory, "mettle_entry.o");
   char *gc_msvc_object = join_paths(runtime_directory, "gc.obj");
   char *async_msvc_object = join_paths(runtime_directory, "async_runtime.obj");
   char *thread_msvc_object = join_paths(runtime_directory, "meth_thread.obj");
@@ -1869,7 +1869,7 @@ static int methlang_link_object_file(const char *object_filename,
         object_paths[object_count++] = thread_object;
       }
 
-      if (methlang_link_internal(object_paths, object_count, executable_filename, 0,
+      if (mettle_link_internal(object_paths, object_count, executable_filename, 0,
                                  options) == 0) {
         build_result = 0;
       } else if (linker_mode == LINKER_MODE_INTERNAL) {
@@ -1903,7 +1903,7 @@ static int methlang_link_object_file(const char *object_filename,
         (_access(thread_gcc_object, 0) == 0) ? thread_gcc_object : NULL;
     const char *entry_object =
         (_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL;
-    if (methlang_link_object_with_gcc(object_filename, executable_filename,
+    if (mettle_link_object_with_gcc(object_filename, executable_filename,
                                       gc_gcc_object, async_gcc_object,
                                       tobj, entry_object, options) == 0) {
       build_result = 0;
@@ -1922,7 +1922,7 @@ static int methlang_link_object_file(const char *object_filename,
         (_access(thread_msvc_object, 0) == 0)
             ? thread_msvc_object
             : ((_access(thread_gcc_object, 0) == 0) ? thread_gcc_object : NULL);
-    if (methlang_link_object_with_link(object_filename, executable_filename,
+    if (mettle_link_object_with_link(object_filename, executable_filename,
                                        gc_object, async_object, tobj, options) == 0) {
       build_result = 0;
       goto cleanup;
@@ -2001,7 +2001,7 @@ int main(int argc, char *argv[]) {
       if (argc >= 3) {
         return print_help_topic(argv[0], argv[0], argv[2]);
       }
-      printf("Methlang documentation topics: build, gc, interop, stdlib, web\n");
+      printf("Mettle documentation topics: build, gc, interop, stdlib, web\n");
       print_doc_reference(argv[0], "LANGUAGE.md");
       print_doc_reference(argv[0], "compilation.md");
       print_doc_reference(argv[0], "garbage-collector.md");
@@ -2195,11 +2195,11 @@ int main(int argc, char *argv[]) {
     double build_profile_start =
         options.profile ? compiler_profile_now_ms() : 0.0;
     if (options.emit_object) {
-      result = methlang_link_object_file(options.output_filename,
+      result = mettle_link_object_file(options.output_filename,
                                          build_output_filename,
                                          auto_runtime_directory, &options);
     } else {
-      result = methlang_build_executable(options.output_filename,
+      result = mettle_build_executable(options.output_filename,
                                          build_output_filename,
                                          auto_runtime_directory, &options);
     }
@@ -2699,7 +2699,7 @@ cleanup:
 }
 
 void print_usage(const char *program_name) {
-  printf("Usage: %s [options] <input.meth>\n", program_name);
+  printf("Usage: %s [options] <input.mettle>\n", program_name);
   printf("       %s help [topic]\n", program_name);
   printf("       %s docs [topic]\n", program_name);
   printf("Options:\n");

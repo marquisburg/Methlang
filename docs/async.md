@@ -1,11 +1,11 @@
 # Async and Sync Execution
 
-Methlang supports both ordinary synchronous functions and asynchronous functions. **Async lowering is selectable** at compile time:
+Mettle supports both ordinary synchronous functions and asynchronous functions. **Async lowering is selectable** at compile time:
 
 - **`pool` (default)** — `async` creates a `Future<T>` handle, work runs on a **bounded worker-pool executor**, and `await` **blocks an OS thread** until the future completes. This is the **stable** model described throughout most of this document.
 - **`coroutine` (experimental)** — the compiler rewrites `async`/`await` toward **stackless task frames** and the **`meth_coro_*` runtime** (see [Coroutine reactor preview](#coroutine-reactor-preview-c-runtime-api)). The reactor is now **portable**: Windows uses IOCP and POSIX (Linux/macOS) uses a `poll(2)` + self-pipe backend exposing the **same API and `EVENT_WAKE`/`EVENT_IO`/`EVENT_IO_ERROR` semantics**, so the stackless lowering behaves identically on both. Scope, language-level ergonomics, optimization, and diagnostics are still evolving; use **`--async-model coroutine`** only when you intentionally need this path.
 
-Pass **`--async-model pool`** or **`--async-model coroutine`** to the compiler (`methlang`). Omitting the flag is equivalent to **`pool`**.
+Pass **`--async-model pool`** or **`--async-model coroutine`** to the compiler (`mettle`). Omitting the flag is equivalent to **`pool`**.
 
 The **`pool`** model is **not** a coroutine/event-loop model: it is explicit futures, blocking waits, cooperative cancellation, and a bounded pool of long-lived worker threads.
 
@@ -21,9 +21,9 @@ The **`pool`** model is **not** a coroutine/event-loop model: it is explicit fut
 
 ## Declaring Functions
 
-Methlang accepts both `function` and `fn` spelling for ordinary functions:
+Mettle accepts both `function` and `fn` spelling for ordinary functions:
 
-```meth
+```mettle
 function add(a: int32, b: int32) -> int32 {
   return a + b;
 }
@@ -35,7 +35,7 @@ fn mul(a: int32, b: int32) -> int32 {
 
 Async functions add the `async` keyword in front of the declaration:
 
-```meth
+```mettle
 async function load_count() -> int32 {
   return 42;
 }
@@ -61,7 +61,7 @@ Synchronous calls are ordinary direct calls:
 - Parameters are passed according to the normal ABI rules.
 - There is no implicit task allocation, scheduling, or cancellation.
 
-```meth
+```mettle
 function inc(x: int32) -> int32 {
   return x + 1;
 }
@@ -83,7 +83,7 @@ An async call still evaluates its arguments at the call site, but instead of ret
 4. Enqueues work on the async executor.
 5. Returns a `Future<T>` handle immediately.
 
-```meth
+```mettle
 async fn add_one(x: int32) -> int32 {
   return x + 1;
 }
@@ -111,7 +111,7 @@ Use it when you want to:
 - request cancellation with `cancel(future)`,
 - wait explicitly with `await future`.
 
-```meth
+```mettle
 async fn fetch() -> int32 {
   return 5;
 }
@@ -136,7 +136,7 @@ The implementation currently allows low-level casts between futures, pointers, a
 
 `await` is a unary expression operator.
 
-```meth
+```mettle
 async fn add_one(x: int32) -> int32 {
   return x + 1;
 }
@@ -174,7 +174,7 @@ With **`--async-model coroutine`**, lowering targets the stackless task runtime 
 | async | async | child future returned immediately; child task is queued |
 | async | async + `await` | parent worker thread blocks while waiting for the child |
 
-This makes Methlang async predictable, but it also means `await` can still block worker threads.
+This makes Mettle async predictable, but it also means `await` can still block worker threads.
 
 ## Executor Configuration
 
@@ -240,7 +240,7 @@ When `cancelled()` is called outside an active async task, it returns `0`.
 
 Example:
 
-```meth
+```mettle
 async fn worker() -> int32 {
   while (cancelled() == 0) {
     // do a chunk of work
@@ -272,7 +272,7 @@ When one async task waits on another, the runtime propagates cancellation from t
 
 That means this pattern works as expected:
 
-```meth
+```mettle
 async fn child() -> int32 {
   while (cancelled() == 0) {
   }
@@ -338,7 +338,7 @@ Async execution is tied to the runtime:
 
 This means:
 
-- `methlang --build` is the easiest way to build async code on Windows,
+- `mettle --build` is the easiest way to build async code on Windows,
 - manual link flows must include the bundled runtime objects,
 - user-created threads still need explicit `gc_thread_attach()` / `gc_thread_detach()`.
 
@@ -396,13 +396,13 @@ Current scheduling semantics:
 Use:
 
 ```powershell
-.\bin\methlang.exe --build --emit-obj --linker internal app.meth -o app.exe
+.\bin\mettle.exe --build --emit-obj --linker internal app.mettle -o app.exe
 ```
 
 or the simpler auto path:
 
 ```powershell
-.\bin\methlang.exe --build app.meth -o app.exe
+.\bin\mettle.exe --build app.mettle -o app.exe
 ```
 
 When the program uses async features, the build links the bundled async runtime automatically.
@@ -412,12 +412,12 @@ When the program uses async features, the build links the bundled async runtime 
 If you assemble and link manually, async programs need both the GC runtime and the async runtime:
 
 ```bash
-methlang app.meth -o app.s
+mettle app.mettle -o app.s
 nasm -f win64 app.s -o app.o
 gcc -nostartfiles app.o path/to/runtime/gc.o path/to/runtime/async_runtime.o -o app -lkernel32
 ```
 
-If your entry point is `main(argc, argv)`, also link `methlang_entry.o` as documented in [Compilation](compilation.md).
+If your entry point is `main(argc, argv)`, also link `mettle_entry.o` as documented in [Compilation](compilation.md).
 
 On POSIX toolchains, the bundled async runtime uses a pthread-backed implementation for **both** the `pool` executor and the `coroutine` reactor/scheduler. Link pthread support (`-lpthread`, or as required by your system toolchain). The coroutine reactor additionally relies only on standard POSIX `poll(2)`, `pipe(2)`, and `fcntl(2)` — no `epoll`/`kqueue` dependency, so it builds unmodified on Linux and macOS.
 
@@ -425,7 +425,7 @@ On POSIX toolchains, the bundled async runtime uses a pthread-backed implementat
 
 ### Start Now, Await Later
 
-```meth
+```mettle
 async fn load_a() -> int32 { return 10; }
 async fn load_b() -> int32 { return 32; }
 
@@ -438,7 +438,7 @@ function main() -> int32 {
 
 ### Sync Wrapper Over Async Work
 
-```meth
+```mettle
 async fn compute() -> int32 {
   return 42;
 }
@@ -452,7 +452,7 @@ This is valid, but remember that the wrapper is still blocking.
 
 ### Cooperative Shutdown Loop
 
-```meth
+```mettle
 async fn service() -> int32 {
   while (cancelled() == 0) {
     // poll, process, or sleep

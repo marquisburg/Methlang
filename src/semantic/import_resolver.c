@@ -142,12 +142,12 @@ static char *resolve_candidate_path(const char *candidate_base) {
 
   if (!path_has_extension(candidate_base)) {
     size_t len = strlen(candidate_base);
-    char *with_ext = malloc(len + 6);
+    char *with_ext = malloc(len + 8);
     if (!with_ext) {
       return NULL;
     }
     memcpy(with_ext, candidate_base, len);
-    memcpy(with_ext + len, ".meth", 6);
+    memcpy(with_ext + len, ".mettle", 8);
 
     if (file_exists_readable(with_ext)) {
       char *resolved = canonicalize_path(with_ext);
@@ -234,18 +234,18 @@ static char *trim_whitespace_in_place(char *text) {
   return text;
 }
 
-/* meth.deps ancestor-walk memoization.
+/* mettle.deps ancestor-walk memoization.
  *
  * resolve_dependency_import() walks from the importer's directory up to the
- * filesystem root, fopen-probing for a "meth.deps" file at every level. That
- * walk's result (the ordered list of existing meth.deps files, each paired
+ * filesystem root, fopen-probing for a "mettle.deps" file at every level. That
+ * walk's result (the ordered list of existing mettle.deps files, each paired
  * with the directory it sits in) depends ONLY on the start directory, not on
  * the import string. In a real project every module lives in a handful of
  * directories, so the same multi-syscall walk is repeated for nearly every
  * import edge. Memoize it per canonical start directory. Most projects have
- * no meth.deps at all, in which case this collapses ~all walks to one. */
+ * no mettle.deps at all, in which case this collapses ~all walks to one. */
 typedef struct {
-  char *deps_path; /* absolute path to an existing meth.deps file */
+  char *deps_path; /* absolute path to an existing mettle.deps file */
   char *deps_dir;  /* directory containing it (used as join base) */
 } DepsFileLocation;
 
@@ -274,7 +274,7 @@ static void deps_walk_cache_reset(void) {
   g_deps_walk_cache_capacity = 0;
 }
 
-/* Returns the cached list of existing meth.deps locations for `start_dir`,
+/* Returns the cached list of existing mettle.deps locations for `start_dir`,
  * performing (and caching) the filesystem walk on first use. The returned
  * array is owned by the cache; the caller must not free it. *out_count is
  * set to the number of locations (may be 0). Returns NULL only on hard
@@ -300,7 +300,7 @@ deps_walk_lookup(const char *start_dir, size_t *out_count) {
 
   char *walk_dir = strdup(start_dir);
   while (walk_dir && walk_dir[0] != '\0') {
-    char *deps_path = join_paths(walk_dir, "meth.deps");
+    char *deps_path = join_paths(walk_dir, "mettle.deps");
     if (deps_path && file_exists_readable(deps_path)) {
       if (location_count >= location_capacity) {
         size_t nc = location_capacity == 0 ? 4 : location_capacity * 2;
@@ -388,7 +388,7 @@ static char *resolve_dependency_import(const char *current_file_path,
     return NULL;
   }
 
-  /* Resolve the meth.deps locations once per start directory (memoized). */
+  /* Resolve the mettle.deps locations once per start directory (memoized). */
   size_t deps_loc_count = 0;
   const DepsFileLocation *deps_locs =
       deps_walk_lookup(search_dir, &deps_loc_count);
@@ -2339,8 +2339,8 @@ static void pop_import_chain(ImportContext *ctx) {
   }
 }
 
-// Build a human-readable import chain string like "main.meth -> utils.meth ->
-// math.meth"
+// Build a human-readable import chain string like "main.mettle -> utils.mettle ->
+// math.mettle"
 static char *format_import_chain(ImportContext *ctx) {
   if (!ctx || ctx->chain_depth == 0)
     return strdup("");
