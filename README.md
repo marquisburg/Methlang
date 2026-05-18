@@ -37,11 +37,16 @@ This is the main source code repository for Mettle. It contains the compiler, st
 
 ## Why Mettle?
 
+**No LLVM. No C backend.**
+Mettle is its own compiler end to end: source in, its own IR and x86-64
+backend out. Nothing about how your code becomes instructions is hidden behind
+someone else's optimizer.
+
 **Performance.**
-Mettle compiles straight to x86-64 with no runtime between your code and the
-machine. Generics monomorphize at compile time, casts and pointer access are
-explicit, and `--release` strips bounds and null checks. You can predict the
-instructions your code becomes.
+Compiles straight to x86-64 with no runtime, emitting NASM assembly or, on
+Windows, a COFF object directly. Generics monomorphize at compile time, casts
+and pointer access are explicit, and `--release` strips bounds and null checks.
+You can predict the instructions your code becomes.
 
 **Control.**
 A low-level language without the busywork: static types, generics, structured
@@ -156,26 +161,35 @@ Stack trace:
   #1 main at app.mettle:8:3 (0x00007FF7DFD71080)
 ```
 
-## Compiler Snapshot
+## How it compiles
 
-Pipeline:
+"Straight to x86-64" means there is no third-party code generator in the path.
+Mettle does not lower to LLVM IR, and it does not emit C and shell out to a C
+compiler. The compiler owns every phase from source text to machine code:
 
-1. Lexing
-2. Parsing
-3. Import resolution
-4. Monomorphization
-5. Type checking
-6. IR lowering
-7. Optimization (optional)
-8. Code generation
+1. **Lexing** - tokenize source
+2. **Parsing** - build the AST
+3. **Import resolution** - resolve and inline `import` directives
+4. **Monomorphization** - expand generics into concrete instantiations
+5. **Async rewrite** - lower `async` per `--async-model` (`pool` or experimental `coroutine`)
+6. **Type checking** - semantic analysis and symbol resolution
+7. **IR lowering** - convert the AST to Mettle's own intermediate representation
+8. **Optimization** (optional, `-O`) - propagation, folding, branch and codegen peepholes
+9. **Code generation** - emit x86-64
 
-Current internal token model includes:
+The final phase has two outputs. By default it writes **NASM assembly**, which
+NASM then assembles. On Windows, `--emit-obj` skips the assembler entirely and
+writes a **Win64 COFF object** directly from the same codegen; `--build
+--linker internal` then links it with the built-in PE linker, so a complete
+executable needs no NASM, gcc, or `link.exe` on the machine.
 
-- Token `value` (null-terminated C string for parser/semantic compatibility)
-- Token `lexeme` string view (`data + length`) for precise extents
-- Global interning for identifier-like names used across lexer/AST/symbol/type metadata
+Because Mettle controls IR lowering and codegen, the things that affect
+performance are visible decisions rather than a black box: monomorphization
+removes generic dispatch before codegen, the optimizer's peepholes map known IR
+shapes to specific instruction sequences, and `--release` lowers without the
+generated null/bounds trap checks that normal builds emit.
 
-See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](docs/lexical-structure.md) for details.
+See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](docs/lexical-structure.md) for the full pipeline, token model, and diagnostics.
 
 ## Repository Layout
 
