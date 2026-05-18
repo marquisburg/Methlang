@@ -1,15 +1,41 @@
-<p align="left">
-  <img src="mettle.svg#gh-light-mode-only" alt="Mettle" width="96" height="96">
-  <img src="mettle-syntax/icons/mettle-dark.svg#gh-dark-mode-only" alt="Mettle" width="96" height="96">
+<p align="center">
+  <img src="mettle.svg#gh-light-mode-only" alt="Mettle" width="120" height="120">
+  <img src="mettle-syntax/icons/mettle-dark.svg#gh-dark-mode-only" alt="Mettle" width="120" height="120">
 </p>
 
-# Mettle
+<h1 align="center">The Mettle Programming Language</h1>
 
-Mettle is a typed, low-level language that compiles `.mettle` source files to x86-64 NASM assembly and, on Windows, native COFF objects for direct PE linking.
+<p align="center">
+  <a href="#why-mettle">Why Mettle</a> |
+  <a href="#quick-start-windows">Getting started</a> |
+  <a href="docs/LANGUAGE.md">Language reference</a> |
+  <a href="docs/quick-reference.md">Examples</a> |
+  <a href="#documentation">Documentation</a>
+</p>
 
-It is designed for systems-style control with stronger semantics than raw assembly: structured control flow, static type checking, modules, generics, and C interop.
+This is the main source code repository for Mettle. It contains the compiler, standard library, runtime, and documentation.
 
-## Highlights
+## Why Mettle?
+
+Hand-written x86-64 is fast and predictable, but it gives you no type checking, no modules, no generics, and no way to call into C without ceremony. High-level languages give you those things but hide the machine behind a runtime you don't control.
+
+Mettle sits in between: a statically typed, low-level language that compiles straight to x86-64 — with structured control flow, generics, async/await, and first-class C interop. On Windows it emits native COFF objects and links them with a built-in PE linker, so you can build a real executable with **no NASM, no gcc, no `link.exe`** on the machine.
+
+```mettle
+import "std/io";
+
+function main() -> int32 {
+  println("Hello, Mettle!");
+  return 0;
+}
+```
+
+- **Closer to the metal, easier to write.** You reason about x86-64 output, but with static types, generics, and structured control flow instead of raw mnemonics.
+- **Self-contained on Windows.** `mettle --build --emit-obj --linker internal` produces a `.exe` with no external assembler or linker in the loop.
+- **Talks to C directly.** `extern` + `cstring` call into existing C libraries without a binding layer.
+- **Diagnostics that help.** Stable error codes, source snippets with carets, scope-aware "did you mean?" suggestions, and symbolized crash tracebacks with Mettle source frames.
+
+## What's in the box
 
 - Compiles to x86-64 NASM assembly and Windows COFF objects
 - Strong typing with pointers, arrays, structs, enums, and function pointers
@@ -21,17 +47,6 @@ It is designed for systems-style control with stronger semantics than raw assemb
 - Standard library modules for I/O, conversion, networking, process, threading, and more
 - Developer-friendly diagnostics: stable error codes, source snippets with carets, and scope-aware "did you mean?" suggestions for typos
 - Cross-platform symbolized crash tracebacks (Windows SEH and POSIX signal handlers)
-
-## Hello World
-
-```mettle
-import "std/io";
-
-function main() -> int32 {
-  println("Hello, Mettle!");
-  return 0;
-}
-```
 
 ## Quick Start (Windows)
 
