@@ -6,36 +6,53 @@
 <h1 align="center">The Mettle Programming Language</h1>
 
 <p align="center">
-  <b><a href="docs/LANGUAGE.md">Docs</a></b> &nbsp;·&nbsp;
-  <b><a href="#built-in-help">Help</a></b> &nbsp;·&nbsp;
-  <a href="#quick-start-windows">Getting started</a> &nbsp;·&nbsp;
-  <a href="docs/quick-reference.md">Examples</a> &nbsp;·&nbsp;
+  <i>A statically typed, low-level language that compiles straight to x86-64.</i>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0">
+  <img src="https://img.shields.io/badge/target-x86--64-orange.svg" alt="Target: x86-64">
+  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-success.svg" alt="Platforms: Windows | Linux">
+  <img src="https://img.shields.io/badge/runtime-none-lightgrey.svg" alt="Runtime: none">
+</p>
+
+<p align="center">
+  <b><a href="docs/LANGUAGE.md">Docs</a></b>
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <b><a href="#built-in-help">Help</a></b>
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <a href="#quick-start-windows">Getting started</a>
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <a href="docs/quick-reference.md">Examples</a>
+  &nbsp;&nbsp;•&nbsp;&nbsp;
   <a href="#why-mettle">Why Mettle</a>
 </p>
 
+<hr>
+
 This is the main source code repository for Mettle. It contains the compiler, standard library, runtime, and documentation.
 
+> [!TIP]
 > **New to Mettle?** Start with the **[Language Reference](docs/LANGUAGE.md)** for a guided tour, or run `mettle help` for built-in CLI docs (`build`, `gc`, `interop`, `stdlib`, `web`).
 
 ## Why Mettle?
 
-Hand-written x86-64 is fast and predictable, but it gives you no type checking, no modules, no generics, and no way to call into C without ceremony. High-level languages give you those things but hide the machine behind a runtime you don't control.
+**Performance.**
+Mettle compiles straight to x86-64 with no runtime between your code and the
+machine. Generics monomorphize at compile time, casts and pointer access are
+explicit, and `--release` strips bounds and null checks. You can predict the
+instructions your code becomes.
 
-Mettle sits in between: a statically typed, low-level language that compiles straight to x86-64, with structured control flow, generics, async/await, and first-class C interop. On Windows it emits native COFF objects and links them with a built-in PE linker, so you can build a real executable with **no NASM, no gcc, no `link.exe`** on the machine.
+**Control.**
+A low-level language without the busywork: static types, generics, structured
+control flow, and `defer` / `errdefer` for scope-bound cleanup, so resource
+handling stays correct without `goto cleanup` ladders. `extern` calls into
+existing C libraries with no binding layer.
 
-```mettle
-import "std/io";
-
-function main() -> int32 {
-  println("Hello, Mettle!");
-  return 0;
-}
-```
-
-- **Closer to the metal, easier to write.** You reason about x86-64 output, but with static types, generics, and structured control flow instead of raw mnemonics.
-- **Self-contained on Windows.** `mettle --build --emit-obj --linker internal` produces a `.exe` with no external assembler or linker in the loop.
-- **Talks to C directly.** `extern` + `cstring` call into existing C libraries without a binding layer.
-- **Diagnostics that help.** Stable error codes, source snippets with carets, scope-aware "did you mean?" suggestions, and symbolized crash tracebacks with Mettle source frames.
+**Self-contained.**
+On Windows, `mettle --build` emits native COFF objects and links them with a
+built-in PE linker. No NASM, no gcc, no `link.exe` on the machine: one binary
+in, one executable out.
 
 ## What's in the box
 
