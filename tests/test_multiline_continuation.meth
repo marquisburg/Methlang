@@ -1,0 +1,38 @@
+function sum3(a: int32, b: int32, c: int32) -> int32 {
+  return a + b + c;
+}
+
+function main() -> int32 {
+  var a: int32 = 1;
+  var b: int32 = 2;
+  var c: int32 = 3;
+  var values: int32[3];
+  values[0] = 10;
+  values[1] = 20;
+  values[2] = 30;
+
+  if (a == 1 &&
+      b == 2 &&
+      c == 3) {
+    a = a + 1;
+  }
+  else {
+    return 1;
+  }
+
+  var total: int32 = sum3(a,
+                          b,
+                          c);
+  if (values[
+        1
+      ] != 20) {
+    return 2;
+  }
+
+  if (total == 7) {
+    return 0;
+  }
+  else {
+    return 3;
+  }
+}

@@ -332,6 +332,7 @@ $cases = @(
   },
   @{ Name = "char_literals"; Path = "tests/test_char_literals.meth"; ShouldSucceed = $true },
   @{ Name = "logical_ops"; Path = "tests/test_logical_ops.meth"; ShouldSucceed = $true },
+  @{ Name = "multiline_continuation"; Path = "tests/test_multiline_continuation.meth"; ShouldSucceed = $true },
   @{ Name = "strncmp_slice"; Path = "tests/test_strncmp_slice.meth"; ShouldSucceed = $true },
   @{ Name = "narrowing_conversions"; Path = "tests/test_narrowing_conversions.meth"; ShouldSucceed = $true },
   @{ Name = "signed_negation"; Path = "tests/test_signed_negation.meth"; ShouldSucceed = $true },
