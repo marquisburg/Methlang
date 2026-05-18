@@ -885,7 +885,7 @@ static char *substitute_type_string(const char *type_str, char **param_names,
         }
       }
       if (!found) {
-        SourceLocation internal_location = {0, 0};
+        SourceLocation internal_location = {0, 0, NULL};
         mono_add_instantiation(ctx, gen_base, subst_args, gen_arg_count,
                                internal_location);
       }
@@ -2095,7 +2095,7 @@ static int mono_emit_impl_method_functions(MonoContext *ctx, ASTNode *program) {
       ASTNode *fn = mono_create_impl_method_function(ctx, impl, impl->methods[j]);
       ASTNode **grown = NULL;
       if (!fn) {
-        mono_report_error(ctx, (SourceLocation){0, 0},
+        mono_report_error(ctx, (SourceLocation){0, 0, NULL},
                           "Failed to create trait impl method function");
         return 0;
       }

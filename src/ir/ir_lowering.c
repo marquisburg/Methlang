@@ -2099,6 +2099,33 @@ static int ir_lower_call_expression(IRLoweringContext *context,
     ir_set_error(context, "Malformed call expression");
     return 0;
   }
+
+  if (strcmp(call->function_name, "sizeof") == 0) {
+    if (call->argument_count != 1 || !call->arguments ||
+        !call->arguments[0] || call->arguments[0]->type != AST_IDENTIFIER) {
+      ir_set_error(context, "Malformed sizeof expression");
+      return 0;
+    }
+
+    Identifier *type_id = (Identifier *)call->arguments[0]->data;
+    Type *type = (context->type_checker && type_id && type_id->name)
+                     ? type_checker_get_type_by_name(context->type_checker,
+                                                     type_id->name)
+                     : NULL;
+    if (!type || type->size > (size_t)LLONG_MAX) {
+      ir_set_error(context, "Unable to lower sizeof expression");
+      return 0;
+    }
+
+    *out_value = ir_operand_int((long long)type->size);
+    return 1;
+  }
+
+  if (strcmp(call->function_name, "static_assert") == 0) {
+    *out_value = ir_operand_none();
+    return 1;
+  }
+
   if (call->object) {
     // Threading method calls — handled natively here, not name-mangled
     Type *obj_type = ir_infer_expression_type(context, call->object);

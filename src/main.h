@@ -38,6 +38,7 @@ typedef struct {
   size_t link_argument_count;
   const char *stdlib_directory;
   int prelude;
+  int profile;
   LinkerMode linker_mode;
   AsyncRewriteModel async_model;
 } CompilerOptions;

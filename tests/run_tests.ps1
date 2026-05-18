@@ -333,6 +333,7 @@ $cases = @(
   @{ Name = "char_literals"; Path = "tests/test_char_literals.meth"; ShouldSucceed = $true },
   @{ Name = "logical_ops"; Path = "tests/test_logical_ops.meth"; ShouldSucceed = $true },
   @{ Name = "multiline_continuation"; Path = "tests/test_multiline_continuation.meth"; ShouldSucceed = $true },
+  @{ Name = "sizeof_static_assert"; Path = "tests/test_sizeof_static_assert.meth"; ShouldSucceed = $true },
   @{ Name = "strncmp_slice"; Path = "tests/test_strncmp_slice.meth"; ShouldSucceed = $true },
   @{ Name = "narrowing_conversions"; Path = "tests/test_narrowing_conversions.meth"; ShouldSucceed = $true },
   @{ Name = "signed_negation"; Path = "tests/test_signed_negation.meth"; ShouldSucceed = $true },
@@ -774,6 +775,7 @@ $cases = @(
   @{ Name = "err_member_on_non_struct"; Path = "tests/err_member_on_non_struct.meth"; ShouldSucceed = $false; Pattern = "Cannot access field on non-struct type" },
   @{ Name = "err_switch_multiple_default"; Path = "tests/err_switch_multiple_default.meth"; ShouldSucceed = $false; Pattern = "Only one default case is allowed|only contain one default clause" },
   @{ Name = "err_return_type_mismatch"; Path = "tests/err_return_type_mismatch.meth"; ShouldSucceed = $false; Pattern = "Type mismatch" },
+  @{ Name = "err_static_assert_sizeof"; Path = "tests/err_static_assert_sizeof.meth"; ShouldSucceed = $false; Pattern = "static_assert failed" },
   @{ Name = "err_defer_top_level"; Path = "tests/err_defer_top_level.meth"; ShouldSucceed = $false; Pattern = "Defer statement outside of a function" },
   @{ Name = "err_await_non_future"; Path = "tests/err_await_non_future.meth"; ShouldSucceed = $false; Pattern = "Await operator requires a Future<T> operand" },
   @{
@@ -782,6 +784,22 @@ $cases = @(
     ShouldSucceed = $false
     Pattern       = "Undefined variable|not visible|private_func"
     Args          = @("-I", "tests/lib")
+  },
+  @{
+    Name               = "err_import_bad_syntax_location"
+    Path               = "tests/test_import_bad_syntax_location.meth"
+    ShouldSucceed      = $false
+    Pattern            = "bad_syntax_module\.meth"
+    OutputMustNotMatch = @("Parse error in imported file", "test_import_bad_syntax_location\.meth:[0-9]+:[0-9]+")
+    Args               = @("-I", "tests/lib")
+  },
+  @{
+    Name            = "err_import_bad_semantic_location"
+    Path            = "tests/test_import_bad_semantic_location.meth"
+    ShouldSucceed   = $false
+    Pattern         = "bad_semantic_module\.meth"
+    OutputMustMatch = @("Undefined variable")
+    Args            = @("-I", "tests/lib")
   },
   @{
     Name          = "err_import_chain"
@@ -945,6 +963,30 @@ foreach ($case in $cases) {
         if ($output -notmatch $case.Pattern) {
           $passed = $false
           $reason = "Failure message did not match expected pattern '$($case.Pattern)'"
+        }
+      }
+      if ($passed -and $case.ContainsKey("OutputMustMatch") -and $case.OutputMustMatch) {
+        foreach ($pattern in @($case.OutputMustMatch)) {
+          if ([string]::IsNullOrWhiteSpace($pattern)) {
+            continue
+          }
+          if ($output -notmatch $pattern) {
+            $passed = $false
+            $reason = "Failure output missing required pattern '$pattern'"
+            break
+          }
+        }
+      }
+      if ($passed -and $case.ContainsKey("OutputMustNotMatch") -and $case.OutputMustNotMatch) {
+        foreach ($pattern in @($case.OutputMustNotMatch)) {
+          if ([string]::IsNullOrWhiteSpace($pattern)) {
+            continue
+          }
+          if ($output -match $pattern) {
+            $passed = $false
+            $reason = "Failure output matched forbidden pattern '$pattern'"
+            break
+          }
         }
       }
     }

@@ -1020,7 +1020,7 @@ void ast_add_child(ASTNode *parent, ASTNode *child) {
 
 // Specific node creation functions
 ASTNode *ast_create_program() {
-  SourceLocation location = {0, 0};
+  SourceLocation location = {0, 0, NULL};
   ASTNode *node = ast_create_node(AST_PROGRAM, location);
   if (!node)
     return NULL;

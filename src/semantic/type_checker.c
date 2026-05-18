@@ -287,8 +287,9 @@ static int type_checker_is_lvalue_expression(ASTNode *expression) {
   }
 }
 
-static int type_checker_eval_integer_constant(ASTNode *expression,
-                                              long long *out_value) {
+static int type_checker_eval_integer_constant_with_checker(TypeChecker *checker,
+                                                           ASTNode *expression,
+                                                           long long *out_value) {
   if (!expression || !out_value) {
     return 0;
   }
@@ -303,11 +304,50 @@ static int type_checker_eval_integer_constant(ASTNode *expression,
     return 1;
   }
 
+  case AST_IDENTIFIER: {
+    Identifier *identifier = (Identifier *)expression->data;
+    if (!identifier || !identifier->name) {
+      return 0;
+    }
+
+    Symbol *symbol = checker ? symbol_table_lookup(checker->symbol_table,
+                                                   identifier->name)
+                             : NULL;
+    if (!symbol || symbol->kind != SYMBOL_CONSTANT) {
+      return 0;
+    }
+
+    *out_value = symbol->data.constant.value;
+    return 1;
+  }
+
+  case AST_FUNCTION_CALL: {
+    CallExpression *call = (CallExpression *)expression->data;
+    if (!call || !call->function_name ||
+        strcmp(call->function_name, "sizeof") != 0 ||
+        call->argument_count != 1 || !call->arguments[0] ||
+        call->arguments[0]->type != AST_IDENTIFIER) {
+      return 0;
+    }
+
+    Identifier *type_id = (Identifier *)call->arguments[0]->data;
+    Type *type = (checker && type_id)
+                     ? type_checker_get_type_by_name(checker, type_id->name)
+                     : NULL;
+    if (!type || type->size > (size_t)LLONG_MAX) {
+      return 0;
+    }
+
+    *out_value = (long long)type->size;
+    return 1;
+  }
+
   case AST_UNARY_EXPRESSION: {
     UnaryExpression *unary_expr = (UnaryExpression *)expression->data;
     long long operand = 0;
     if (!unary_expr || !unary_expr->operator || !unary_expr->operand ||
-        !type_checker_eval_integer_constant(unary_expr->operand, &operand)) {
+        !type_checker_eval_integer_constant_with_checker(
+            checker, unary_expr->operand, &operand)) {
       return 0;
     }
 
@@ -328,8 +368,10 @@ static int type_checker_eval_integer_constant(ASTNode *expression,
     long long right = 0;
     if (!binary_expr || !binary_expr->operator || !binary_expr->left ||
         !binary_expr->right ||
-        !type_checker_eval_integer_constant(binary_expr->left, &left) ||
-        !type_checker_eval_integer_constant(binary_expr->right, &right)) {
+        !type_checker_eval_integer_constant_with_checker(
+            checker, binary_expr->left, &left) ||
+        !type_checker_eval_integer_constant_with_checker(
+            checker, binary_expr->right, &right)) {
       return 0;
     }
 
@@ -359,12 +401,114 @@ static int type_checker_eval_integer_constant(ASTNode *expression,
       *out_value = left % right;
       return 1;
     }
+    if (strcmp(binary_expr->operator, "==") == 0) {
+      *out_value = left == right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, "!=") == 0) {
+      *out_value = left != right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, "<") == 0) {
+      *out_value = left < right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, "<=") == 0) {
+      *out_value = left <= right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, ">") == 0) {
+      *out_value = left > right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, ">=") == 0) {
+      *out_value = left >= right;
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, "&&") == 0) {
+      *out_value = (left != 0) && (right != 0);
+      return 1;
+    }
+    if (strcmp(binary_expr->operator, "||") == 0) {
+      *out_value = (left != 0) || (right != 0);
+      return 1;
+    }
     return 0;
   }
 
   default:
     return 0;
   }
+}
+
+static int type_checker_eval_integer_constant(ASTNode *expression,
+                                              long long *out_value) {
+  return type_checker_eval_integer_constant_with_checker(NULL, expression,
+                                                        out_value);
+}
+
+static Type *type_checker_resolve_sizeof_argument(TypeChecker *checker,
+                                                  CallExpression *call,
+                                                  SourceLocation location) {
+  if (!checker || !call) {
+    return NULL;
+  }
+
+  if (call->argument_count != 1) {
+    type_checker_set_error_at_location(
+        checker, location, "sizeof expects exactly one type argument");
+    return NULL;
+  }
+
+  ASTNode *arg = call->arguments ? call->arguments[0] : NULL;
+  if (!arg || arg->type != AST_IDENTIFIER) {
+    type_checker_set_error_at_location(
+        checker, location, "sizeof expects a type name");
+    return NULL;
+  }
+
+  Identifier *type_id = (Identifier *)arg->data;
+  Type *type = type_id ? type_checker_get_type_by_name(checker, type_id->name)
+                       : NULL;
+  if (!type) {
+    type_checker_set_error_at_location(
+        checker, arg->location, "Unknown type '%s' in sizeof",
+        type_id && type_id->name ? type_id->name : "<invalid>");
+    return NULL;
+  }
+
+  return type;
+}
+
+static int type_checker_validate_static_assert(TypeChecker *checker,
+                                               CallExpression *call,
+                                               SourceLocation location) {
+  if (!checker || !call) {
+    return 0;
+  }
+
+  if (call->argument_count != 1) {
+    type_checker_set_error_at_location(
+        checker, location, "static_assert expects exactly one condition");
+    return 0;
+  }
+
+  long long value = 0;
+  if (!type_checker_eval_integer_constant_with_checker(
+          checker, call->arguments[0], &value)) {
+    type_checker_set_error_at_location(
+        checker, call->arguments[0] ? call->arguments[0]->location : location,
+        "static_assert condition must be a compile-time integer expression");
+    return 0;
+  }
+
+  if (value == 0) {
+    type_checker_set_error_at_location(checker, location,
+                                       "static_assert failed");
+    return 0;
+  }
+
+  return 1;
 }
 
 static void type_checker_buffer_extent_clear(TypeChecker *checker) {
@@ -1586,6 +1730,20 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
   case AST_FUNCTION_CALL: {
     CallExpression *call = (CallExpression *)expression->data;
     if (call && call->function_name) {
+      if (strcmp(call->function_name, "sizeof") == 0) {
+        Type *sized_type =
+            type_checker_resolve_sizeof_argument(checker, call,
+                                                 expression->location);
+        return sized_type ? checker->builtin_int64 : NULL;
+      }
+
+      if (strcmp(call->function_name, "static_assert") == 0) {
+        return type_checker_validate_static_assert(checker, call,
+                                                   expression->location)
+                   ? checker->builtin_void
+                   : NULL;
+      }
+
       if (strcmp(call->function_name, "cancelled") == 0 ||
           strcmp(call->function_name, "__meth_async_current_cancelled") == 0) {
         if (call->argument_count != 0) {
@@ -3711,6 +3869,20 @@ int type_checker_process_declaration(TypeChecker *checker,
         checker, declaration->location,
         "Errdefer statement outside of a function");
     return 0;
+
+  case AST_FUNCTION_CALL: {
+    CallExpression *call = (CallExpression *)declaration->data;
+    if (call && call->function_name &&
+        strcmp(call->function_name, "static_assert") == 0) {
+      return type_checker_validate_static_assert(checker, call,
+                                                 declaration->location);
+    }
+    type_checker_set_error_at_location(
+        checker, declaration->location,
+        "Unsupported top-level construct in declaration context");
+    return 0;
+  }
+
   case AST_VAR_DECLARATION: {
     VarDeclaration *var_decl = (VarDeclaration *)declaration->data;
     if (!var_decl || !var_decl->name) {

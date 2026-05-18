@@ -71,6 +71,12 @@ typedef struct Scope {
   struct Symbol **symbols;
   size_t symbol_count;
   size_t symbol_capacity;
+  /* Open-addressing hash index over `symbols`, keyed by name. Stores
+   * (symbol_index + 1); 0 marks an empty bucket. Lets symbol_table_lookup and
+   * the declare-time duplicate check avoid a linear strcmp scan per query.
+   * Built lazily once a scope grows past a small threshold. */
+  size_t *name_index;
+  size_t name_index_bucket_count;
 } Scope;
 
 typedef enum {

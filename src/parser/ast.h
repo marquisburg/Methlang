@@ -45,6 +45,7 @@ typedef enum {
 typedef struct {
   size_t line;
   size_t column;
+  const char *filename;
 } SourceLocation;
 
 typedef struct ASTNode {

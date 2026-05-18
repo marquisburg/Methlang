@@ -38,6 +38,7 @@ typedef struct {
   size_t line;
   size_t column;
   size_t length;
+  const char *filename;
 } SourceSpan;
 
 typedef struct {
@@ -45,10 +46,17 @@ typedef struct {
   ErrorSeverity severity;
   SourceLocation location;
   SourceSpan span;
+  char *filename;
+  const char *source_code;
   char *message;
   char *suggestion;
   char *code_snippet;
 } ErrorReport;
+
+typedef struct {
+  char *filename;
+  char *source_code;
+} ErrorReporterSource;
 
 typedef struct {
   ErrorReport *errors;
@@ -57,12 +65,25 @@ typedef struct {
   size_t max_errors;
   const char *source_code;
   const char *filename;
+  ErrorReporterSource *sources;
+  size_t source_count;
+  size_t source_capacity;
+  const char *current_filename;
+  const char *current_source_code;
 } ErrorReporter;
 
 // Function declarations
 ErrorReporter *error_reporter_create(const char *filename,
                                      const char *source_code);
 void error_reporter_destroy(ErrorReporter *reporter);
+int error_reporter_register_source(ErrorReporter *reporter,
+                                   const char *filename,
+                                   const char *source_code);
+int error_reporter_set_source_context(ErrorReporter *reporter,
+                                      const char *filename,
+                                      const char *source_code);
+const char *error_reporter_current_filename(ErrorReporter *reporter);
+const char *error_reporter_current_source_code(ErrorReporter *reporter);
 
 // Error reporting functions
 void error_reporter_add_error(ErrorReporter *reporter, ErrorType type,

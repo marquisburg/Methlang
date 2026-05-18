@@ -234,6 +234,126 @@ static char *trim_whitespace_in_place(char *text) {
   return text;
 }
 
+/* meth.deps ancestor-walk memoization.
+ *
+ * resolve_dependency_import() walks from the importer's directory up to the
+ * filesystem root, fopen-probing for a "meth.deps" file at every level. That
+ * walk's result (the ordered list of existing meth.deps files, each paired
+ * with the directory it sits in) depends ONLY on the start directory, not on
+ * the import string. In a real project every module lives in a handful of
+ * directories, so the same multi-syscall walk is repeated for nearly every
+ * import edge. Memoize it per canonical start directory. Most projects have
+ * no meth.deps at all, in which case this collapses ~all walks to one. */
+typedef struct {
+  char *deps_path; /* absolute path to an existing meth.deps file */
+  char *deps_dir;  /* directory containing it (used as join base) */
+} DepsFileLocation;
+
+typedef struct {
+  char *start_dir; /* canonical directory the walk started from */
+  DepsFileLocation *locations;
+  size_t location_count;
+} DepsWalkCacheEntry;
+
+static DepsWalkCacheEntry *g_deps_walk_cache = NULL;
+static size_t g_deps_walk_cache_count = 0;
+static size_t g_deps_walk_cache_capacity = 0;
+
+static void deps_walk_cache_reset(void) {
+  for (size_t i = 0; i < g_deps_walk_cache_count; i++) {
+    free(g_deps_walk_cache[i].start_dir);
+    for (size_t j = 0; j < g_deps_walk_cache[i].location_count; j++) {
+      free(g_deps_walk_cache[i].locations[j].deps_path);
+      free(g_deps_walk_cache[i].locations[j].deps_dir);
+    }
+    free(g_deps_walk_cache[i].locations);
+  }
+  free(g_deps_walk_cache);
+  g_deps_walk_cache = NULL;
+  g_deps_walk_cache_count = 0;
+  g_deps_walk_cache_capacity = 0;
+}
+
+/* Returns the cached list of existing meth.deps locations for `start_dir`,
+ * performing (and caching) the filesystem walk on first use. The returned
+ * array is owned by the cache; the caller must not free it. *out_count is
+ * set to the number of locations (may be 0). Returns NULL only on hard
+ * allocation failure (caller falls back to NULL = "no dependency import"). */
+static const DepsFileLocation *
+deps_walk_lookup(const char *start_dir, size_t *out_count) {
+  *out_count = 0;
+  if (!start_dir || start_dir[0] == '\0') {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < g_deps_walk_cache_count; i++) {
+    if (strcmp(g_deps_walk_cache[i].start_dir, start_dir) == 0) {
+      *out_count = g_deps_walk_cache[i].location_count;
+      return g_deps_walk_cache[i].locations;
+    }
+  }
+
+  /* Perform the walk once. */
+  DepsFileLocation *locations = NULL;
+  size_t location_count = 0;
+  size_t location_capacity = 0;
+
+  char *walk_dir = strdup(start_dir);
+  while (walk_dir && walk_dir[0] != '\0') {
+    char *deps_path = join_paths(walk_dir, "meth.deps");
+    if (deps_path && file_exists_readable(deps_path)) {
+      if (location_count >= location_capacity) {
+        size_t nc = location_capacity == 0 ? 4 : location_capacity * 2;
+        DepsFileLocation *grown =
+            realloc(locations, nc * sizeof(DepsFileLocation));
+        if (grown) {
+          locations = grown;
+          location_capacity = nc;
+        }
+      }
+      if (location_count < location_capacity) {
+        locations[location_count].deps_path = deps_path;
+        locations[location_count].deps_dir = strdup(walk_dir);
+        location_count++;
+        deps_path = NULL; /* ownership moved into the cache entry */
+      }
+    }
+    free(deps_path);
+    if (!path_remove_last_component(walk_dir)) {
+      break;
+    }
+  }
+  free(walk_dir);
+
+  if (g_deps_walk_cache_count >= g_deps_walk_cache_capacity) {
+    size_t nc =
+        g_deps_walk_cache_capacity == 0 ? 16 : g_deps_walk_cache_capacity * 2;
+    DepsWalkCacheEntry *grown =
+        realloc(g_deps_walk_cache, nc * sizeof(DepsWalkCacheEntry));
+    if (grown) {
+      g_deps_walk_cache = grown;
+      g_deps_walk_cache_capacity = nc;
+    }
+  }
+  if (g_deps_walk_cache_count < g_deps_walk_cache_capacity) {
+    g_deps_walk_cache[g_deps_walk_cache_count].start_dir = strdup(start_dir);
+    g_deps_walk_cache[g_deps_walk_cache_count].locations = locations;
+    g_deps_walk_cache[g_deps_walk_cache_count].location_count = location_count;
+    g_deps_walk_cache_count++;
+    *out_count = location_count;
+    return g_deps_walk_cache[g_deps_walk_cache_count - 1].locations;
+  }
+
+  /* Cache full and realloc failed: return a transient result. Leak-free path
+   * would require ownership juggling; this branch only triggers under OOM. */
+  for (size_t j = 0; j < location_count; j++) {
+    free(locations[j].deps_path);
+    free(locations[j].deps_dir);
+  }
+  free(locations);
+  return NULL;
+}
+
 static char *resolve_dependency_import(const char *current_file_path,
                                       const char *import_path) {
   char *search_dir = NULL;
@@ -268,9 +388,15 @@ static char *resolve_dependency_import(const char *current_file_path,
     return NULL;
   }
 
-  while (search_dir && search_dir[0] != '\0') {
-    char *deps_path = join_paths(search_dir, "meth.deps");
-    if (deps_path && file_exists_readable(deps_path)) {
+  /* Resolve the meth.deps locations once per start directory (memoized). */
+  size_t deps_loc_count = 0;
+  const DepsFileLocation *deps_locs =
+      deps_walk_lookup(search_dir, &deps_loc_count);
+
+  for (size_t li = 0; li < deps_loc_count; li++) {
+    const char *deps_path = deps_locs[li].deps_path;
+    const char *deps_dir = deps_locs[li].deps_dir;
+    {
       FILE *deps_file = fopen(deps_path, "r");
       if (deps_file) {
         char line[2048];
@@ -304,7 +430,7 @@ static char *resolve_dependency_import(const char *current_file_path,
           }
 
           dep_root = is_absolute_path(value) ? strdup(value)
-                                             : join_paths(search_dir, value);
+                                             : join_paths(deps_dir, value);
           if (!dep_root) {
             continue;
           }
@@ -320,7 +446,6 @@ static char *resolve_dependency_import(const char *current_file_path,
           free(candidate_base);
           if (result) {
             fclose(deps_file);
-            free(deps_path);
             free(search_dir);
             return result;
           }
@@ -328,13 +453,7 @@ static char *resolve_dependency_import(const char *current_file_path,
         fclose(deps_file);
       }
     }
-    free(deps_path);
-
-    if (!path_remove_last_component(search_dir)) {
-      break;
-    }
   }
-
   free(search_dir);
   return NULL;
 }
@@ -1609,9 +1728,129 @@ static int collect_namespaced_rewrites(NameRewrite **rewrites,
   return 1;
 }
 
+/* Path-resolution memoization.
+ *
+ * resolve_import_path() walks the filesystem (_fullpath / fopen probes / .deps
+ * reads) for every import edge. In a real project the same module is imported
+ * from dozens of places, so the same (current_file, import_path) pair resolves
+ * to the same file many times over. The result depends only on those two
+ * strings plus the resolver options (fixed for one compilation), so it is safe
+ * to memoize. The cache is process-static and reset at the start of every
+ * top-level resolve so independent compilations never share state. */
+typedef struct {
+  char *key;    /* "<current_file_path>\n<import_path>" */
+  char *value;  /* resolved absolute path, or NULL if unresolvable */
+  int resolved; /* 1 if this entry represents a completed resolution */
+} ImportPathCacheEntry;
+
+static ImportPathCacheEntry *g_import_path_cache = NULL;
+static size_t g_import_path_cache_count = 0;
+static size_t g_import_path_cache_capacity = 0;
+
+static void import_path_cache_reset(void) {
+  for (size_t i = 0; i < g_import_path_cache_count; i++) {
+    free(g_import_path_cache[i].key);
+    free(g_import_path_cache[i].value);
+  }
+  free(g_import_path_cache);
+  g_import_path_cache = NULL;
+  g_import_path_cache_count = 0;
+  g_import_path_cache_capacity = 0;
+}
+
+/* Builds the lookup key. current_file_path may be NULL (root program). */
+static char *import_path_cache_make_key(const char *current_file_path,
+                                        const char *import_path) {
+  const char *cur = current_file_path ? current_file_path : "";
+  size_t cur_len = strlen(cur);
+  size_t imp_len = strlen(import_path);
+  char *key = malloc(cur_len + 1 + imp_len + 1);
+  if (!key) {
+    return NULL;
+  }
+  memcpy(key, cur, cur_len);
+  key[cur_len] = '\n';
+  memcpy(key + cur_len + 1, import_path, imp_len);
+  key[cur_len + 1 + imp_len] = '\0';
+  return key;
+}
+
+static char *resolve_import_path_uncached(ImportContext *ctx,
+                                          const char *current_file_path,
+                                          const char *import_path);
+
 static char *resolve_import_path(ImportContext *ctx,
                                  const char *current_file_path,
                                  const char *import_path) {
+  if (!import_path || import_path[0] == '\0') {
+    return NULL;
+  }
+
+  char *key = import_path_cache_make_key(current_file_path, import_path);
+  if (key) {
+    for (size_t i = 0; i < g_import_path_cache_count; i++) {
+      if (strcmp(g_import_path_cache[i].key, key) == 0) {
+        free(key);
+        const char *cached = g_import_path_cache[i].value;
+        /* Callers free the returned string, so hand back a fresh copy. */
+        if (!cached) {
+          return NULL;
+        }
+        size_t n = strlen(cached) + 1;
+        char *copy = malloc(n);
+        if (copy) {
+          memcpy(copy, cached, n);
+        }
+        return copy;
+      }
+    }
+  }
+
+  char *resolved =
+      resolve_import_path_uncached(ctx, current_file_path, import_path);
+
+  if (key) {
+    if (g_import_path_cache_count >= g_import_path_cache_capacity) {
+      size_t new_cap =
+          g_import_path_cache_capacity == 0 ? 32
+                                            : g_import_path_cache_capacity * 2;
+      ImportPathCacheEntry *grown = realloc(
+          g_import_path_cache, new_cap * sizeof(ImportPathCacheEntry));
+      if (grown) {
+        g_import_path_cache = grown;
+        g_import_path_cache_capacity = new_cap;
+      }
+    }
+    if (g_import_path_cache_count < g_import_path_cache_capacity) {
+      char *value_copy = NULL;
+      if (resolved) {
+        size_t n = strlen(resolved) + 1;
+        value_copy = malloc(n);
+        if (value_copy) {
+          memcpy(value_copy, resolved, n);
+        }
+      }
+      /* Only cache when we could store the value faithfully (a NULL value is
+       * itself a valid "unresolvable" result). */
+      if (resolved == NULL || value_copy != NULL) {
+        g_import_path_cache[g_import_path_cache_count].key = key;
+        g_import_path_cache[g_import_path_cache_count].value = value_copy;
+        g_import_path_cache[g_import_path_cache_count].resolved = 1;
+        g_import_path_cache_count++;
+        key = NULL; /* ownership transferred to the cache */
+      } else {
+        free(value_copy);
+      }
+    }
+    free(key); /* no-op if ownership was transferred */
+  }
+
+  return resolved;
+}
+
+static char *resolve_import_path_uncached(ImportContext *ctx,
+                                          const char *current_file_path,
+                                          const char *import_path) {
   if (!import_path || import_path[0] == '\0') {
     return NULL;
   }
@@ -1706,6 +1945,20 @@ static char *read_file_content(const char *filename) {
   return buffer;
 }
 
+static void stamp_source_locations(ASTNode *node, const char *filename) {
+  if (!node || !filename) {
+    return;
+  }
+
+  if (!node->location.filename) {
+    node->location.filename = filename;
+  }
+
+  for (size_t i = 0; i < node->child_count; i++) {
+    stamp_source_locations(node->children[i], filename);
+  }
+}
+
 // Check if a declaration is exported (for filtering during import)
 static int is_declaration_exported(ASTNode *decl) {
   if (!decl || !decl->data)
@@ -1759,6 +2012,84 @@ static const char *get_declaration_name(ASTNode *decl) {
 //  -1: internal failure (e.g. allocation failure)
 static int path_set_add(char ***paths, size_t *count, size_t *capacity,
                         const char *path);
+
+/* Open-addressing name -> declaration-index map, used by the export
+ * dependency closure to resolve a called name to its declaration in O(1)
+ * instead of a linear scan. Keys are borrowed pointers into the imported
+ * module's AST (valid for the lifetime of the map). Stores (decl_index + 1)
+ * so 0 marks an empty bucket. */
+typedef struct {
+  const char **keys;
+  size_t *vals; /* decl_index + 1; 0 = empty */
+  size_t bucket_count;
+} DeclNameMap;
+
+static size_t decl_name_hash(const char *s) {
+  size_t h = (size_t)1469598103934665603ULL;
+  for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+    h ^= (size_t)*p;
+    h *= (size_t)1099511628211ULL;
+  }
+  return h;
+}
+
+static void decl_name_map_init(DeclNameMap *m, size_t expected_entries) {
+  size_t cap = 16;
+  while (cap < (expected_entries + 1) * 2) {
+    cap *= 2;
+  }
+  m->keys = calloc(cap, sizeof(const char *));
+  m->vals = calloc(cap, sizeof(size_t));
+  m->bucket_count = (m->keys && m->vals) ? cap : 0;
+  if (!m->keys || !m->vals) {
+    free(m->keys);
+    free(m->vals);
+    m->keys = NULL;
+    m->vals = NULL;
+  }
+}
+
+static void decl_name_map_put(DeclNameMap *m, const char *key,
+                              size_t decl_index) {
+  if (m->bucket_count == 0 || !key) {
+    return;
+  }
+  size_t mask = m->bucket_count - 1;
+  size_t pos = decl_name_hash(key) & mask;
+  while (m->vals[pos] != 0) {
+    if (strcmp(m->keys[pos], key) == 0) {
+      return; /* first declaration of a name wins, matching prior behavior */
+    }
+    pos = (pos + 1) & mask;
+  }
+  m->keys[pos] = key;
+  m->vals[pos] = decl_index + 1;
+}
+
+static int decl_name_map_get(const DeclNameMap *m, const char *key,
+                             size_t *out_index) {
+  if (m->bucket_count == 0 || !key) {
+    return 0;
+  }
+  size_t mask = m->bucket_count - 1;
+  size_t pos = decl_name_hash(key) & mask;
+  while (m->vals[pos] != 0) {
+    if (strcmp(m->keys[pos], key) == 0) {
+      *out_index = m->vals[pos] - 1;
+      return 1;
+    }
+    pos = (pos + 1) & mask;
+  }
+  return 0;
+}
+
+static void decl_name_map_destroy(DeclNameMap *m) {
+  free(m->keys);
+  free(m->vals);
+  m->keys = NULL;
+  m->vals = NULL;
+  m->bucket_count = 0;
+}
 
 static void collect_called_function_names(ASTNode *node, char ***names,
                                           size_t *count, size_t *capacity) {
@@ -2332,20 +2663,45 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
         continue;
       }
 
+      const char *previous_reporter_filename =
+          error_reporter_current_filename(ctx->reporter);
+      const char *previous_reporter_source =
+          error_reporter_current_source_code(ctx->reporter);
+      if (ctx->reporter &&
+          !error_reporter_set_source_context(ctx->reporter, full_path,
+                                             source)) {
+        error_reporter_add_error(ctx->reporter, ERROR_INTERNAL, decl->location,
+                                 "Failed to register imported source file");
+        path_set_remove(ctx->active_files, &ctx->active_count, full_path);
+        pop_import_chain(ctx);
+        free(full_path);
+        free(source);
+        ast_destroy_node(decl);
+        *had_error = 1;
+        continue;
+      }
+
+      size_t parse_error_count_before =
+          ctx->reporter ? (size_t)error_reporter_get_error_count(ctx->reporter)
+                        : 0;
       Lexer *lexer = lexer_create(source);
       Parser *parser = parser_create_with_error_reporter(lexer, ctx->reporter);
       ASTNode *imported_program = parser_parse_program(parser);
 
       int import_succeeded = 0;
       if (parser->had_error || !imported_program) {
-        if (ctx->reporter) {
+        if (ctx->reporter &&
+            (size_t)error_reporter_get_error_count(ctx->reporter) ==
+                parse_error_count_before) {
           char *chain = format_import_chain(ctx);
           char error_msg[1024];
           snprintf(error_msg, sizeof(error_msg),
                    "Parse error in imported file '%s' (import chain: %s)",
                    import_decl->module_name, chain);
-          error_reporter_add_error(ctx->reporter, ERROR_SYNTAX, decl->location,
-                                   error_msg);
+          SourceLocation fallback_location = source_location_create(1, 1);
+          fallback_location.filename = parser ? parser->source_filename : full_path;
+          error_reporter_add_error(ctx->reporter, ERROR_SYNTAX,
+                                   fallback_location, error_msg);
           free(chain);
         }
         *had_error = 1;
@@ -2356,6 +2712,7 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
         ImportContext child_ctx;
         ImportContext *import_ctx = ctx;
         int using_child_ctx = 0;
+        stamp_source_locations(imported_program, parser->source_filename);
 
         if (import_decl->namespace_alias) {
           if (!import_context_init_child(&child_ctx, ctx)) {
@@ -2471,38 +2828,78 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
                       "Failed to process exports (out of memory)");
                 }
               } else {
-                for (size_t j = 0; j < imported_prog_data->declaration_count;
-                     j++) {
-                  ASTNode *imp_decl = imported_prog_data->declarations[j];
-                  if (!is_declaration_exported(imp_decl)) {
-                    continue;
+                /* Export dependency closure.
+                 *
+                 * Previous implementation: a `while(changed)` fixpoint that
+                 * rescanned every declaration each pass and tested membership
+                 * with a linear strcmp over the (large) required-names set —
+                 * O(D^2 * names) per module, the dominant import-phase cost on
+                 * real projects.
+                 *
+                 * New implementation: build a name -> declaration-index map
+                 * once (O(D)), then drive a worklist. Each declaration is
+                 * processed at most once; every name produced by
+                 * collect_called_function_names is looked up O(1) in the map
+                 * to discover the next declaration to pull in. Net cost is
+                 * O(D + total_called_names). The result (which declarations
+                 * end up included) is identical to the fixpoint. */
+                size_t decl_count = imported_prog_data->declaration_count;
+                DeclNameMap name_map;
+                decl_name_map_init(&name_map, decl_count);
+                for (size_t j = 0; j < decl_count; j++) {
+                  const char *dn =
+                      get_declaration_name(imported_prog_data->declarations[j]);
+                  if (dn) {
+                    decl_name_map_put(&name_map, dn, j);
                   }
-                  include_flags[j] = 1;
-                  collect_called_function_names(imp_decl, &required_names,
-                                                &required_count,
-                                                &required_capacity);
                 }
 
-                int changed = 1;
-                while (changed) {
-                  changed = 0;
-                  for (size_t j = 0; j < imported_prog_data->declaration_count;
-                       j++) {
-                    if (include_flags[j]) {
-                      continue;
-                    }
-                    ASTNode *imp_decl = imported_prog_data->declarations[j];
-                    const char *name = get_declaration_name(imp_decl);
-                    if (!name || !path_set_contains(required_names, required_count,
-                                                    name)) {
-                      continue;
-                    }
-                    include_flags[j] = 1;
-                    changed = 1;
-                    collect_called_function_names(imp_decl, &required_names,
-                                                  &required_count,
-                                                  &required_capacity);
+                /* Worklist of declaration indices whose called-name set still
+                 * needs to be expanded. Seed with all exported declarations. */
+                size_t *worklist = malloc(decl_count ? decl_count *
+                                                           sizeof(size_t)
+                                                     : sizeof(size_t));
+                size_t worklist_len = 0;
+                if (!worklist) {
+                  /* Fall back to include-all on allocation failure rather than
+                   * silently dropping declarations. */
+                  include_all = 1;
+                  *had_error = 1;
+                  if (ctx->reporter) {
+                    error_reporter_add_error(
+                        ctx->reporter, ERROR_INTERNAL, decl->location,
+                        "Failed to process exports (out of memory)");
                   }
+                  decl_name_map_destroy(&name_map);
+                } else {
+                  for (size_t j = 0; j < decl_count; j++) {
+                    if (is_declaration_exported(
+                            imported_prog_data->declarations[j])) {
+                      include_flags[j] = 1;
+                      worklist[worklist_len++] = j;
+                    }
+                  }
+
+                  while (worklist_len > 0) {
+                    size_t j = worklist[--worklist_len];
+                    size_t names_before = required_count;
+                    collect_called_function_names(
+                        imported_prog_data->declarations[j], &required_names,
+                        &required_count, &required_capacity);
+                    /* Only the freshly added names can unlock new
+                     * declarations; older names were already resolved. */
+                    for (size_t n = names_before; n < required_count; n++) {
+                      size_t target;
+                      if (decl_name_map_get(&name_map, required_names[n],
+                                            &target) &&
+                          !include_flags[target]) {
+                        include_flags[target] = 1;
+                        worklist[worklist_len++] = target;
+                      }
+                    }
+                  }
+                  free(worklist);
+                  decl_name_map_destroy(&name_map);
                 }
               }
             } else {
@@ -2599,6 +2996,11 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
 
       parser_destroy(parser);
       lexer_destroy(lexer);
+      if (ctx->reporter) {
+        error_reporter_set_source_context(ctx->reporter,
+                                          previous_reporter_filename,
+                                          previous_reporter_source);
+      }
       free(source);
       path_set_remove(ctx->active_files, &ctx->active_count, full_path);
       if (import_succeeded && !import_decl->namespace_alias &&
@@ -2668,6 +3070,10 @@ int resolve_imports_with_options(ASTNode *program, const char *base_path,
   if (!program || program->type != AST_PROGRAM)
     return 0;
 
+  /* Fresh path-resolution caches per top-level compilation. */
+  import_path_cache_reset();
+  deps_walk_cache_reset();
+
   ImportContext ctx;
   ctx.resolved_files = NULL;
   ctx.resolved_count = 0;
@@ -2705,6 +3111,8 @@ int resolve_imports_with_options(ASTNode *program, const char *base_path,
     }
     free(ctx.active_files);
     free(ctx.import_chain);
+    import_path_cache_reset();
+    deps_walk_cache_reset();
     return 0;
   }
 
@@ -2723,6 +3131,10 @@ int resolve_imports_with_options(ASTNode *program, const char *base_path,
   }
   free(ctx.active_files);
   free(ctx.import_chain);
+
+  /* Release cache memory; it is rebuilt fresh on the next top-level resolve. */
+  import_path_cache_reset();
+  deps_walk_cache_reset();
 
   return !had_error;
 }
