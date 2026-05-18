@@ -350,6 +350,10 @@ static void print_doc_reference(const char *argv0, const char *relative_path) {
   free(docs_dir);
 }
 
+/* Single source of truth for the help-topic list. Referenced by print_usage,
+ * the topic dispatcher, and the unknown-topic error so they cannot drift. */
+#define METTLE_HELP_TOPICS "build, gc, interop, stdlib, web"
+
 static int print_help_topic(const char *program_name, const char *argv0,
                             const char *topic) {
   if (!topic || topic[0] == '\0') {
@@ -357,71 +361,96 @@ static int print_help_topic(const char *program_name, const char *argv0,
     return 0;
   }
 
+  if (strcmp(topic, "all") == 0) {
+    printf("Mettle help topics\n\n");
+    print_help_topic(program_name, argv0, "build");
+    printf("\n");
+    print_help_topic(program_name, argv0, "gc");
+    printf("\n");
+    print_help_topic(program_name, argv0, "interop");
+    printf("\n");
+    print_help_topic(program_name, argv0, "stdlib");
+    printf("\n");
+    print_help_topic(program_name, argv0, "web");
+    return 0;
+  }
+
   if (strcmp(topic, "build") == 0 || strcmp(topic, "compile") == 0) {
-    printf("Build help\n");
-    printf("  mettle --build app.mettle -o app.exe\n");
-    printf("  Builds an executable directly on Windows.\n");
-    printf("  Uses NASM, then tries the selected linker backend.\n");
-    printf("  Default is --linker auto (internal, then gcc, then link.exe).\n");
-    printf("  Use --linker internal to force the native PE linker.\n");
-    printf("  The internal linker probes common Win32 DLLs directly.\n");
-    printf("  Add repeatable linker flags with --link-arg <arg> for extra "
-           "DLLs or import libraries.\n");
-    printf("  Example: mettle --build --emit-obj web\\\\server.mettle -o "
-           "web\\\\server.exe --linker internal\n");
+    printf("build - compile, assemble, and link an executable\n\n");
+    printf("  Common:\n");
+    printf("    mettle --build app.mettle -o app.exe\n");
+    printf("    mettle --build --emit-obj --linker internal app.mettle -o "
+           "app.exe   (no NASM/gcc/link.exe needed)\n");
+    printf("    mettle --build --release app.mettle -o app.exe              "
+           "   (optimized, stripped)\n\n");
+    printf("  Notes:\n");
+    printf("    --build assembles with NASM, then links with the selected "
+           "backend.\n");
+    printf("    --linker auto tries internal, then gcc, then link.exe "
+           "(default).\n");
+    printf("    --linker internal forces the native PE linker and probes "
+           "common Win32 DLLs directly.\n");
+    printf("    --link-arg <arg> passes an extra linker argument (repeatable) "
+           "for extra DLLs or import libraries.\n");
     print_doc_reference(argv0, "compilation.md");
     return 0;
   }
 
   if (strcmp(topic, "gc") == 0 || strcmp(topic, "runtime") == 0) {
-    printf("GC help\n");
-    printf("  The .s file contains calls to gc_alloc/gc_init, not the GC "
-           "implementation itself.\n");
+    printf("gc - garbage collector and runtime linking\n\n");
+    printf("  Emitted assembly calls gc_alloc/gc_init; it does not contain "
+           "the GC implementation itself.\n");
     printf("  mettle --build links the bundled runtime automatically.\n");
     printf("  Manual assembly/linking still requires the bundled runtime "
-           "objects.\n");
-    printf("  If you use new or GC-backed string concatenation, use "
-           "--build or link gc.o manually.\n");
+           "objects (link gc.o yourself).\n");
+    printf("  Anything using new or GC-backed string concatenation needs the "
+           "runtime: use --build or link gc.o manually.\n");
     print_doc_reference(argv0, "garbage-collector.md");
     return 0;
   }
 
   if (strcmp(topic, "interop") == 0 || strcmp(topic, "c") == 0) {
-    printf("C interop help\n");
+    printf("interop - calling C and OS APIs\n\n");
     printf("  Declare external C functions with extern function.\n");
     printf("  Prefer std/win32 for common Windows OS APIs.\n");
     printf("  Use --link-arg for extra linker libraries in --build mode.\n");
-    printf("  Example: mettle --build --emit-obj main.mettle -o main.exe "
-           "--linker internal\n");
+    printf("  Example:\n");
+    printf("    mettle --build --emit-obj --linker internal main.mettle -o "
+           "main.exe\n");
     print_doc_reference(argv0, "c-interop.md");
     return 0;
   }
 
   if (strcmp(topic, "stdlib") == 0) {
-    printf("Stdlib help\n");
-    printf("  std/... imports resolve against the bundled stdlib by default.\n");
-    printf("  Override with --stdlib <dir> only when you need a custom root.\n");
+    printf("stdlib - standard library resolution\n\n");
+    printf("  std/... imports resolve against the bundled stdlib by "
+           "default.\n");
+    printf("  No project-local stdlib/ folder is required.\n");
+    printf("  Override with --stdlib <dir> only when you need a custom "
+           "root.\n");
     print_doc_reference(argv0, "standard-library.md");
     return 0;
   }
 
   if (strcmp(topic, "web") == 0) {
-    printf("Web example help\n");
-    printf("  Build the demo server with .\\\\web\\\\build.bat\n");
-    printf("  That now delegates to mettle --build with --link-arg "
-           "-lws2_32.\n");
+    printf("web - the demo web server example\n\n");
+    printf("  Build it with .\\web\\build.bat\n");
+    printf("  That delegates to mettle --build with --link-arg -lws2_32.\n");
     print_doc_reference(argv0, "compilation.md");
     return 0;
   }
 
   if (strcmp(topic, "docs") == 0 || strcmp(topic, "topics") == 0) {
-    printf("Help topics: build, gc, interop, stdlib, web\n");
+    printf("Help topics: " METTLE_HELP_TOPICS "\n");
+    printf("Use 'mettle help <topic>' for one, or 'mettle help all' for "
+           "everything.\n");
     print_doc_reference(argv0, "LANGUAGE.md");
     return 0;
   }
 
-  fprintf(stderr, "Error: Unknown help topic '%s'\n", topic);
-  fprintf(stderr, "Available topics: build, gc, interop, stdlib, web\n");
+  fprintf(stderr, "Error: unknown help topic '%s'\n", topic);
+  fprintf(stderr, "Available topics: " METTLE_HELP_TOPICS "\n");
+  fprintf(stderr, "Try 'mettle help' for general usage.\n");
   return 1;
 }
 
@@ -2735,7 +2764,22 @@ void print_usage(const char *program_name) {
          "std/net, etc.)\n");
   printf("  --profile           Print per-phase compilation timings\n");
   printf("  -h, --help          Show this help message\n");
-  printf("Topics: build, gc, interop, stdlib, web\n");
+  printf("\nExamples:\n");
+  printf("  %s app.mettle -o app.s\n", program_name);
+  printf("      Compile to x86-64 assembly only.\n");
+  printf("  %s --build app.mettle -o app.exe\n", program_name);
+  printf("      Compile, assemble, and link an executable.\n");
+  printf("  %s --build --emit-obj --linker internal app.mettle -o app.exe\n",
+         program_name);
+  printf("      Self-contained build: no NASM, gcc, or link.exe needed.\n");
+  printf("  %s --build --release app.mettle -o app.exe\n", program_name);
+  printf("      Optimized, comment-stripped release build.\n");
+  printf("\nHelp:\n");
+  printf("  %s help <topic>     Detail on a topic (" METTLE_HELP_TOPICS ")\n",
+         program_name);
+  printf("  %s help all         Print every topic\n", program_name);
+  printf("  %s docs [topic]     Show the matching documentation file path\n",
+         program_name);
 }
 
 char *read_file(const char *filename) {

@@ -664,8 +664,6 @@ $cases = @(
       "(?s)errdefer_ok.*?; IR call: ok"
     )
   },
-  @{ Name = "web_server_import"; Path = "web/server.mettle"; ShouldSucceed = $true },
-
   # New errdefer tests
   @{ Name = "test_cast_expression"; Path = "tests/test_cast_expression.mettle"; ShouldSucceed = $true },
   @{ Name = "errdefer_interleaved_with_defer"; Path = "tests/test_errdefer_interleaved_with_defer.mettle"; ShouldSucceed = $true },

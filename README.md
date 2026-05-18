@@ -1,37 +1,76 @@
-<p align="left">
-  <img src="mettle.svg#gh-light-mode-only" alt="Mettle" width="96" height="96">
-  <img src="mettle-syntax/icons/mettle-dark.svg#gh-dark-mode-only" alt="Mettle" width="96" height="96">
+<p align="center">
+  <img src="mettle.svg#gh-light-mode-only" alt="Mettle" width="120" height="120">
+  <img src="mettle-syntax/icons/mettle-dark.svg#gh-dark-mode-only" alt="Mettle" width="120" height="120">
 </p>
 
-# Mettle
+<h1 align="center">The Mettle Programming Language</h1>
 
-Mettle is a typed, low-level language that compiles `.mettle` source files to x86-64 NASM assembly and, on Windows, native COFF objects for direct PE linking.
+<p align="center">
+  <i>A statically typed, low-level language that compiles straight to x86-64.</i>
+</p>
 
-It is designed for systems-style control with stronger semantics than raw assembly: structured control flow, static type checking, modules, generics, and C interop.
+<p align="center">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0">
+  <img src="https://img.shields.io/badge/target-x86--64-orange.svg" alt="Target: x86-64">
+  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-success.svg" alt="Platforms: Windows | Linux">
+  <img src="https://img.shields.io/badge/runtime-none-lightgrey.svg" alt="Runtime: none">
+</p>
 
-## Highlights
+<p align="center">
+  <b><a href="docs/LANGUAGE.md">Docs</a></b>
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <b><a href="#built-in-help">Help</a></b>
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <a href="#quick-start-windows">Getting started</a>
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <a href="docs/quick-reference.md">Examples</a>
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <a href="#why-mettle">Why Mettle</a>
+</p>
+
+<hr>
+
+This is the main source code repository for Mettle. It contains the compiler, standard library, runtime, and documentation.
+
+> [!TIP]
+> **New to Mettle?** Start with the **[Language Reference](docs/LANGUAGE.md)** for a guided tour, or run `mettle help` for built-in CLI docs (`build`, `gc`, `interop`, `stdlib`, `web`).
+
+## Why Mettle?
+
+**No LLVM. No C backend.**
+Mettle is its own compiler end to end: source in, its own IR and x86-64
+backend out. Nothing about how your code becomes instructions is hidden behind
+someone else's optimizer.
+
+**Performance.**
+Compiles straight to x86-64 with no runtime, emitting NASM assembly or, on
+Windows, a COFF object directly. Generics monomorphize at compile time, casts
+and pointer access are explicit, and `--release` strips bounds and null checks.
+You can predict the instructions your code becomes.
+
+**Control.**
+A low-level language without the busywork: static types, generics, structured
+control flow, and `defer` / `errdefer` for scope-bound cleanup, so resource
+handling stays correct without `goto cleanup` ladders. `extern` calls into
+existing C libraries with no binding layer.
+
+**Self-contained.**
+On Windows, `mettle --build` emits native COFF objects and links them with a
+built-in PE linker. No NASM, no gcc, no `link.exe` on the machine: one binary
+in, one executable out.
+
+## What's in the box
 
 - Compiles to x86-64 NASM assembly and Windows COFF objects
 - Strong typing with pointers, arrays, structs, enums, and function pointers
 - Control flow: `if`, `while`, `for`, `switch`, `match`, `defer`, `errdefer`, and labeled `break`/`continue`
 - Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`); line (`//`) and nesting block (`/* */`) comments
-- Async execution with `async`, `await`, `Future<T>`, and cooperative cancellation (default **pool** executor; optional experimental **`--async-model coroutine`** with a portable reactor — IOCP on Windows, `poll(2)` on POSIX — see `docs/async.md`)
+- Async execution with `async`, `await`, `Future<T>`, and cooperative cancellation (default **pool** executor; optional experimental **`--async-model coroutine`** with a portable reactor: IOCP on Windows, `poll(2)` on POSIX; see `docs/async.md`)
 - C interop via `extern` and `cstring`
 - Optional conservative GC runtime for `new` and GC-backed string concatenation
 - Standard library modules for I/O, conversion, networking, process, threading, and more
 - Developer-friendly diagnostics: stable error codes, source snippets with carets, and scope-aware "did you mean?" suggestions for typos
 - Cross-platform symbolized crash tracebacks (Windows SEH and POSIX signal handlers)
-
-## Hello World
-
-```mettle
-import "std/io";
-
-function main() -> int32 {
-  println("Hello, Mettle!");
-  return 0;
-}
-```
 
 ## Quick Start (Windows)
 
@@ -122,26 +161,35 @@ Stack trace:
   #1 main at app.mettle:8:3 (0x00007FF7DFD71080)
 ```
 
-## Compiler Snapshot
+## How it compiles
 
-Pipeline:
+"Straight to x86-64" means there is no third-party code generator in the path.
+Mettle does not lower to LLVM IR, and it does not emit C and shell out to a C
+compiler. The compiler owns every phase from source text to machine code:
 
-1. Lexing
-2. Parsing
-3. Import resolution
-4. Monomorphization
-5. Type checking
-6. IR lowering
-7. Optimization (optional)
-8. Code generation
+1. **Lexing** - tokenize source
+2. **Parsing** - build the AST
+3. **Import resolution** - resolve and inline `import` directives
+4. **Monomorphization** - expand generics into concrete instantiations
+5. **Async rewrite** - lower `async` per `--async-model` (`pool` or experimental `coroutine`)
+6. **Type checking** - semantic analysis and symbol resolution
+7. **IR lowering** - convert the AST to Mettle's own intermediate representation
+8. **Optimization** (optional, `-O`) - propagation, folding, branch and codegen peepholes
+9. **Code generation** - emit x86-64
 
-Current internal token model includes:
+The final phase has two outputs. By default it writes **NASM assembly**, which
+NASM then assembles. On Windows, `--emit-obj` skips the assembler entirely and
+writes a **Win64 COFF object** directly from the same codegen; `--build
+--linker internal` then links it with the built-in PE linker, so a complete
+executable needs no NASM, gcc, or `link.exe` on the machine.
 
-- Token `value` (null-terminated C string for parser/semantic compatibility)
-- Token `lexeme` string view (`data + length`) for precise extents
-- Global interning for identifier-like names used across lexer/AST/symbol/type metadata
+Because Mettle controls IR lowering and codegen, the things that affect
+performance are visible decisions rather than a black box: monomorphization
+removes generic dispatch before codegen, the optimizer's peepholes map known IR
+shapes to specific instruction sequences, and `--release` lowers without the
+generated null/bounds trap checks that normal builds emit.
 
-See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](docs/lexical-structure.md) for details.
+See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](docs/lexical-structure.md) for the full pipeline, token model, and diagnostics.
 
 ## Repository Layout
 
