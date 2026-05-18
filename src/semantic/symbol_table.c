@@ -17,6 +17,131 @@ static int symbol_table_names_equal(const char *lhs, const char *rhs) {
   return strcmp(lhs, rhs) == 0;
 }
 
+/* Scopes below this size keep the plain linear scan: building and probing a
+ * hash index costs more than a handful of strcmp calls. Function and block
+ * scopes almost always stay under this; the global scope (thousands of
+ * symbols across all modules) is what the index exists for. */
+#define SYMBOL_NAME_INDEX_MIN_SYMBOLS 24
+
+static size_t symbol_name_hash(const char *name) {
+  /* FNV-1a over size_t, matching the string interner's hash width. */
+  size_t hash = (size_t)1469598103934665603ULL;
+  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+    hash ^= (size_t)*p;
+    hash *= (size_t)1099511628211ULL;
+  }
+  return hash;
+}
+
+/* Rebuilds a scope's hash index from its current symbol array. */
+static int scope_name_index_rebuild(Scope *scope, size_t bucket_count) {
+  size_t *buckets = calloc(bucket_count, sizeof(size_t));
+  if (!buckets) {
+    return 0;
+  }
+  size_t mask = bucket_count - 1;
+  for (size_t i = 0; i < scope->symbol_count; i++) {
+    if (!scope->symbols[i] || !scope->symbols[i]->name) {
+      continue;
+    }
+    size_t pos = symbol_name_hash(scope->symbols[i]->name) & mask;
+    while (buckets[pos] != 0) {
+      pos = (pos + 1) & mask;
+    }
+    buckets[pos] = i + 1;
+  }
+  free(scope->name_index);
+  scope->name_index = buckets;
+  scope->name_index_bucket_count = bucket_count;
+  return 1;
+}
+
+/* Ensures the index exists and has room for one more symbol. Returns 0 only on
+ * allocation failure; on failure the caller must fall back to a linear scan. */
+static int scope_name_index_ensure(Scope *scope) {
+  if (scope->symbol_count < SYMBOL_NAME_INDEX_MIN_SYMBOLS) {
+    return 0; /* deliberately unindexed: linear scan is cheaper here */
+  }
+  if (scope->name_index_bucket_count == 0 ||
+      ((scope->symbol_count + 1) * 10) >=
+          (scope->name_index_bucket_count * 7)) {
+    size_t next = scope->name_index_bucket_count == 0
+                      ? 64
+                      : scope->name_index_bucket_count * 2;
+    if (!scope_name_index_rebuild(scope, next)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/* Records that scope->symbols[symbol_index] now exists in the index. The
+ * symbol must already be appended to the array. */
+static void scope_name_index_insert(Scope *scope, size_t symbol_index) {
+  if (!scope->name_index || scope->name_index_bucket_count == 0) {
+    return;
+  }
+  size_t mask = scope->name_index_bucket_count - 1;
+  const char *name = scope->symbols[symbol_index]->name;
+  size_t pos = symbol_name_hash(name) & mask;
+  while (scope->name_index[pos] != 0) {
+    pos = (pos + 1) & mask;
+  }
+  scope->name_index[pos] = symbol_index + 1;
+}
+
+/* Called immediately after a symbol is appended at `new_index`. Keeps the
+ * scope's name index consistent: ensure() rebuilds and reindexes every
+ * symbol (including this one) when the scope first crosses the size threshold
+ * or exceeds its load factor, otherwise we insert just the new entry. On
+ * allocation failure the index is left empty and lookups fall back to a
+ * linear scan, so correctness is preserved either way. */
+static void scope_register_appended_symbol(Scope *scope, size_t new_index) {
+  if (!scope_name_index_ensure(scope)) {
+    return;
+  }
+  if (scope->name_index_bucket_count == 0) {
+    return;
+  }
+  /* If a rebuild ran inside ensure() it already placed this symbol; detect
+   * that so we don't insert a duplicate bucket entry. */
+  size_t mask = scope->name_index_bucket_count - 1;
+  size_t pos = symbol_name_hash(scope->symbols[new_index]->name) & mask;
+  while (scope->name_index[pos] != 0) {
+    if (scope->name_index[pos] == new_index + 1) {
+      return; /* already indexed by the rebuild */
+    }
+    pos = (pos + 1) & mask;
+  }
+  scope->name_index[pos] = new_index + 1;
+}
+
+/* O(1) name lookup within a single scope. Returns the symbol or NULL. Falls
+ * back to a linear scan when the scope is small or unindexed. */
+static Symbol *scope_lookup_symbol(Scope *scope, const char *name) {
+  if (scope->name_index && scope->name_index_bucket_count > 0) {
+    size_t mask = scope->name_index_bucket_count - 1;
+    size_t pos = symbol_name_hash(name) & mask;
+    while (scope->name_index[pos] != 0) {
+      size_t idx = scope->name_index[pos] - 1;
+      if (scope->symbols[idx] &&
+          symbol_table_names_equal(scope->symbols[idx]->name, name)) {
+        return scope->symbols[idx];
+      }
+      pos = (pos + 1) & mask;
+    }
+    return NULL;
+  }
+
+  for (size_t i = 0; i < scope->symbol_count; i++) {
+    if (scope->symbols[i] &&
+        symbol_table_names_equal(scope->symbols[i]->name, name)) {
+      return scope->symbols[i];
+    }
+  }
+  return NULL;
+}
+
 static void symbol_table_free_string(char *value) {
   if (!value) {
     return;
@@ -149,6 +274,8 @@ SymbolTable *symbol_table_create(void) {
   table->global_scope->symbols = NULL;
   table->global_scope->symbol_count = 0;
   table->global_scope->symbol_capacity = 0;
+  table->global_scope->name_index = NULL;
+  table->global_scope->name_index_bucket_count = 0;
 
   table->current_scope = table->global_scope;
 
@@ -186,6 +313,7 @@ static void scope_destroy(Scope *scope) {
     }
   }
   free(scope->symbols);
+  free(scope->name_index);
   free(scope);
 }
 
@@ -219,6 +347,8 @@ void symbol_table_enter_scope(SymbolTable *table, ScopeType type) {
   new_scope->symbols = NULL;
   new_scope->symbol_count = 0;
   new_scope->symbol_capacity = 0;
+  new_scope->name_index = NULL;
+  new_scope->name_index_bucket_count = 0;
 
   table->current_scope = new_scope;
 }
@@ -247,25 +377,20 @@ int symbol_table_declare(SymbolTable *table, Symbol *symbol) {
   }
 
   // Check for duplicate declaration in current scope only
-  for (size_t i = 0; i < table->current_scope->symbol_count; i++) {
-    if (table->current_scope->symbols[i] &&
-        symbol_table_names_equal(table->current_scope->symbols[i]->name,
-                                 symbol->name)) {
-      Symbol *existing = table->current_scope->symbols[i];
-      // Allow forward declaration resolution for functions
-      if (symbol->kind == SYMBOL_FUNCTION &&
-          existing->kind == SYMBOL_FUNCTION &&
-          existing->is_forward_declaration) {
-        if (!symbol_table_function_signatures_match(existing, symbol)) {
-          return 0; // Mismatched function signature vs forward declaration
-        }
-        // Resolve the forward declaration
-        existing->is_forward_declaration = 0;
-        existing->is_initialized = 1;
-        return 1; // Successfully resolved forward declaration
+  Symbol *existing = scope_lookup_symbol(table->current_scope, symbol->name);
+  if (existing) {
+    // Allow forward declaration resolution for functions
+    if (symbol->kind == SYMBOL_FUNCTION && existing->kind == SYMBOL_FUNCTION &&
+        existing->is_forward_declaration) {
+      if (!symbol_table_function_signatures_match(existing, symbol)) {
+        return 0; // Mismatched function signature vs forward declaration
       }
-      return 0; // Duplicate declaration
+      // Resolve the forward declaration
+      existing->is_forward_declaration = 0;
+      existing->is_initialized = 1;
+      return 1; // Successfully resolved forward declaration
     }
+    return 0; // Duplicate declaration
   }
 
   // Resize symbols array if needed
@@ -287,8 +412,10 @@ int symbol_table_declare(SymbolTable *table, Symbol *symbol) {
   symbol->scope = table->current_scope;
 
   // Add symbol to current scope
-  table->current_scope->symbols[table->current_scope->symbol_count] = symbol;
+  size_t new_index = table->current_scope->symbol_count;
+  table->current_scope->symbols[new_index] = symbol;
   table->current_scope->symbol_count++;
+  scope_register_appended_symbol(table->current_scope, new_index);
 
   return 1; // Success
 }
@@ -301,12 +428,9 @@ Symbol *symbol_table_lookup(SymbolTable *table, const char *name) {
   // Search from current scope up to global scope
   Scope *current_scope = table->current_scope;
   while (current_scope) {
-    // Search in current scope
-    for (size_t i = 0; i < current_scope->symbol_count; i++) {
-      if (current_scope->symbols[i] &&
-          symbol_table_names_equal(current_scope->symbols[i]->name, name)) {
-        return current_scope->symbols[i];
-      }
+    Symbol *found = scope_lookup_symbol(current_scope, name);
+    if (found) {
+      return found;
     }
     // Move to parent scope
     current_scope = current_scope->parent;
@@ -590,14 +714,7 @@ Symbol *symbol_table_lookup_current_scope(SymbolTable *table,
   }
 
   // Search only in current scope
-  for (size_t i = 0; i < table->current_scope->symbol_count; i++) {
-    if (table->current_scope->symbols[i] &&
-        symbol_table_names_equal(table->current_scope->symbols[i]->name, name)) {
-      return table->current_scope->symbols[i];
-    }
-  }
-
-  return NULL; // Symbol not found in current scope
+  return scope_lookup_symbol(table->current_scope, name);
 }
 
 void symbol_table_insert(SymbolTable *table, Symbol *symbol) {
@@ -624,8 +741,10 @@ void symbol_table_insert(SymbolTable *table, Symbol *symbol) {
   symbol->scope = table->current_scope;
 
   // Add symbol to current scope
-  table->current_scope->symbols[table->current_scope->symbol_count] = symbol;
+  size_t new_index = table->current_scope->symbol_count;
+  table->current_scope->symbols[new_index] = symbol;
   table->current_scope->symbol_count++;
+  scope_register_appended_symbol(table->current_scope, new_index);
 }
 
 int symbol_table_declare_forward(SymbolTable *table, Symbol *symbol) {

@@ -141,6 +141,12 @@ ErrorReporter *error_reporter_create(const char *filename,
   reporter->max_errors = MAX_ERRORS_DEFAULT;
   reporter->source_code = source_code;
   reporter->filename = filename ? er_strdup(filename) : NULL;
+  reporter->sources = NULL;
+  reporter->source_count = 0;
+  reporter->source_capacity = 0;
+  reporter->current_filename = reporter->filename;
+  reporter->current_source_code = reporter->source_code;
+  error_reporter_register_source(reporter, filename, source_code);
 
   return reporter;
 }
@@ -150,11 +156,14 @@ SourceSpan source_span_create(size_t line, size_t column, size_t length) {
   span.line = line;
   span.column = column;
   span.length = length;
+  span.filename = NULL;
   return span;
 }
 
 SourceSpan source_span_from_location(SourceLocation location, size_t length) {
-  return source_span_create(location.line, location.column, length);
+  SourceSpan span = source_span_create(location.line, location.column, length);
+  span.filename = location.filename;
+  return span;
 }
 
 void error_reporter_destroy(ErrorReporter *reporter) {
@@ -162,14 +171,112 @@ void error_reporter_destroy(ErrorReporter *reporter) {
     return;
 
   for (size_t i = 0; i < reporter->count; i++) {
+    free(reporter->errors[i].filename);
     free(reporter->errors[i].message);
     free(reporter->errors[i].suggestion);
     free(reporter->errors[i].code_snippet);
   }
 
+  for (size_t i = 0; i < reporter->source_count; i++) {
+    free(reporter->sources[i].filename);
+    free(reporter->sources[i].source_code);
+  }
+  free(reporter->sources);
   free(reporter->errors);
   free((char *)reporter->filename);
   free(reporter);
+}
+
+static const ErrorReporterSource *
+error_reporter_find_source(ErrorReporter *reporter, const char *filename) {
+  if (!reporter || !filename) {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < reporter->source_count; i++) {
+    if (reporter->sources[i].filename &&
+        strcmp(reporter->sources[i].filename, filename) == 0) {
+      return &reporter->sources[i];
+    }
+  }
+
+  return NULL;
+}
+
+int error_reporter_register_source(ErrorReporter *reporter,
+                                   const char *filename,
+                                   const char *source_code) {
+  if (!reporter || !filename || !source_code) {
+    return 0;
+  }
+
+  ErrorReporterSource *existing =
+      (ErrorReporterSource *)error_reporter_find_source(reporter, filename);
+  if (existing) {
+    char *source_copy = er_strdup(source_code);
+    if (!source_copy) {
+      return 0;
+    }
+    free(existing->source_code);
+    existing->source_code = source_copy;
+    return 1;
+  }
+
+  if (reporter->source_count >= reporter->source_capacity) {
+    size_t new_capacity =
+        reporter->source_capacity == 0 ? 8 : reporter->source_capacity * 2;
+    ErrorReporterSource *grown =
+        realloc(reporter->sources, new_capacity * sizeof(ErrorReporterSource));
+    if (!grown) {
+      return 0;
+    }
+    reporter->sources = grown;
+    reporter->source_capacity = new_capacity;
+  }
+
+  ErrorReporterSource *entry = &reporter->sources[reporter->source_count];
+  entry->filename = er_strdup(filename);
+  entry->source_code = er_strdup(source_code);
+  if (!entry->filename || !entry->source_code) {
+    free(entry->filename);
+    free(entry->source_code);
+    entry->filename = NULL;
+    entry->source_code = NULL;
+    return 0;
+  }
+
+  reporter->source_count++;
+  return 1;
+}
+
+int error_reporter_set_source_context(ErrorReporter *reporter,
+                                      const char *filename,
+                                      const char *source_code) {
+  if (!reporter) {
+    return 0;
+  }
+
+  if (filename && source_code &&
+      !error_reporter_register_source(reporter, filename, source_code)) {
+    return 0;
+  }
+
+  const ErrorReporterSource *entry =
+      filename ? error_reporter_find_source(reporter, filename) : NULL;
+  reporter->current_filename =
+      entry ? entry->filename : (filename ? filename : reporter->filename);
+  reporter->current_source_code =
+      entry ? entry->source_code
+            : (source_code ? source_code : reporter->source_code);
+  return 1;
+}
+
+const char *error_reporter_current_filename(ErrorReporter *reporter) {
+  return reporter ? reporter->current_filename : NULL;
+}
+
+const char *error_reporter_current_source_code(ErrorReporter *reporter) {
+  return reporter ? reporter->current_source_code : NULL;
 }
 
 static int error_reporter_expand_capacity(ErrorReporter *reporter) {
@@ -220,15 +327,26 @@ void error_reporter_add_error_with_span_and_suggestion(
   if (span.length == 0)
     span.length = 1;
 
+  const char *filename =
+      span.filename ? span.filename : reporter->current_filename;
+  const ErrorReporterSource *source_entry =
+      filename ? error_reporter_find_source(reporter, filename) : NULL;
+  const char *source_code =
+      source_entry ? source_entry->source_code : reporter->current_source_code;
+
   ErrorReport *error = &reporter->errors[reporter->count];
   error->type = type;
   error->severity = DIAG_SEVERITY_ERROR;
   error->location = source_location_create(span.line, span.column);
+  error->location.filename = filename;
   error->span = span;
+  error->span.filename = filename;
+  error->filename = filename ? er_strdup(filename) : NULL;
+  error->source_code = source_code;
   error->message = er_strdup(message);
   error->suggestion = suggestion ? er_strdup(suggestion) : NULL;
   error->code_snippet =
-      error_reporter_get_line_from_source(reporter->source_code, span.line);
+      error_reporter_get_line_from_source(source_code, span.line);
 
   reporter->count++;
 }
@@ -250,15 +368,26 @@ void error_reporter_add_warning_with_span(ErrorReporter *reporter, ErrorType typ
   if (span.length == 0)
     span.length = 1;
 
+  const char *filename =
+      span.filename ? span.filename : reporter->current_filename;
+  const ErrorReporterSource *source_entry =
+      filename ? error_reporter_find_source(reporter, filename) : NULL;
+  const char *source_code =
+      source_entry ? source_entry->source_code : reporter->current_source_code;
+
   ErrorReport *error = &reporter->errors[reporter->count];
   error->type = type;
   error->severity = DIAG_SEVERITY_WARNING;
   error->location = source_location_create(span.line, span.column);
+  error->location.filename = filename;
   error->span = span;
+  error->span.filename = filename;
+  error->filename = filename ? er_strdup(filename) : NULL;
+  error->source_code = source_code;
   error->message = er_strdup(message);
   error->suggestion = NULL;
   error->code_snippet =
-      error_reporter_get_line_from_source(reporter->source_code, span.line);
+      error_reporter_get_line_from_source(source_code, span.line);
 
   reporter->count++;
 }
@@ -278,6 +407,8 @@ void error_reporter_add_note(ErrorReporter *reporter, const char *message) {
   note->severity = DIAG_SEVERITY_NOTE_OF;
   note->location = parent->location;
   note->span = parent->span;
+  note->filename = parent->filename ? er_strdup(parent->filename) : NULL;
+  note->source_code = parent->source_code;
   note->message = er_strdup(message);
   note->suggestion = NULL;
   note->code_snippet = NULL; /* notes don't re-print the snippet */
@@ -376,14 +507,16 @@ void error_reporter_print_error(ErrorReporter *reporter,
   if (error->severity == DIAG_SEVERITY_NOTE_OF ||
       error->severity == DIAG_SEVERITY_NOTE) {
     /* Notes: indent slightly to show they belong to the parent */
-    if (reporter->filename) {
+    const char *filename = error->filename ? error->filename : reporter->filename;
+    if (filename) {
       fprintf(DIAG_STREAM, "   = %snote%s at %s:%zu:%zu\n",
               help_color, reset,
-              reporter->filename, error->location.line, error->location.column);
+              filename, error->location.line, error->location.column);
     }
   } else {
-    if (reporter->filename) {
-      fprintf(DIAG_STREAM, "  --> %s:%zu:%zu\n", reporter->filename,
+    const char *filename = error->filename ? error->filename : reporter->filename;
+    if (filename) {
+      fprintf(DIAG_STREAM, "  --> %s:%zu:%zu\n", filename,
               error->location.line, error->location.column);
     } else {
       fprintf(DIAG_STREAM, "  --> line %zu, column %zu\n",
@@ -395,14 +528,16 @@ void error_reporter_print_error(ErrorReporter *reporter,
   if (error->code_snippet &&
       error->severity != DIAG_SEVERITY_NOTE_OF &&
       error->severity != DIAG_SEVERITY_NOTE) {
+    const char *source_code =
+        error->source_code ? error->source_code : reporter->source_code;
     const size_t line = error->location.line;
     const size_t prev_line = (line > 1) ? (line - 1) : 0;
     const size_t next_line = line + 1;
 
     char *prev_raw = prev_line ? error_reporter_get_line_from_source(
-                                     reporter->source_code, prev_line)
+                                     source_code, prev_line)
                                : NULL;
-    char *next_raw = error_reporter_get_line_from_source(reporter->source_code,
+    char *next_raw = error_reporter_get_line_from_source(source_code,
                                                          next_line);
 
     char *prev = snippet_truncate(prev_raw);
@@ -483,6 +618,7 @@ SourceLocation source_location_create(size_t line, size_t column) {
   SourceLocation location;
   location.line = line;
   location.column = column;
+  location.filename = NULL;
   return location;
 }
 
@@ -528,7 +664,7 @@ char *error_reporter_create_caret_line(size_t column, size_t length) {
   if (column == 0)
     return NULL;
 
-  size_t caret_length = column + length;
+  size_t caret_length = (column - 1) + (length > 0 ? length : 1);
   char *caret_line = malloc(caret_length + 1);
   if (!caret_line)
     return NULL;

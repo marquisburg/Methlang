@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
@@ -25,6 +26,97 @@
 #include <mach-o/dyld.h>
 #endif
 #endif
+
+typedef enum {
+  PROFILE_PHASE_READ_INPUT = 0,
+  PROFILE_PHASE_LEXICAL_VALIDATION,
+  PROFILE_PHASE_INIT,
+  PROFILE_PHASE_PARSE,
+  PROFILE_PHASE_PRELUDE,
+  PROFILE_PHASE_IMPORTS,
+  PROFILE_PHASE_MONOMORPHIZE,
+  PROFILE_PHASE_ASYNC_REWRITE,
+  PROFILE_PHASE_TYPE_CHECK,
+  PROFILE_PHASE_IR_LOWERING,
+  PROFILE_PHASE_IR_OPTIMIZATION,
+  PROFILE_PHASE_IR_DUMP,
+  PROFILE_PHASE_CODEGEN,
+  PROFILE_PHASE_WRITE_OUTPUT,
+  PROFILE_PHASE_DEBUG_INFO,
+  PROFILE_PHASE_CLEANUP,
+  PROFILE_PHASE_COUNT
+} CompilerProfilePhase;
+
+typedef struct {
+  int enabled;
+  double phases_ms[PROFILE_PHASE_COUNT];
+} CompilerProfile;
+
+static double compiler_profile_now_ms(void) {
+  struct timeval tv;
+
+  gettimeofday(&tv, NULL);
+  return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
+}
+
+static void compiler_profile_init(CompilerProfile *profile, int enabled) {
+  if (!profile) {
+    return;
+  }
+  memset(profile, 0, sizeof(*profile));
+  profile->enabled = enabled;
+}
+
+static double compiler_profile_begin(const CompilerProfile *profile) {
+  return (profile && profile->enabled) ? compiler_profile_now_ms() : 0.0;
+}
+
+static void compiler_profile_add(CompilerProfile *profile,
+                                 CompilerProfilePhase phase,
+                                 double started_ms) {
+  if (!profile || !profile->enabled || phase < 0 ||
+      phase >= PROFILE_PHASE_COUNT) {
+    return;
+  }
+  profile->phases_ms[phase] += compiler_profile_now_ms() - started_ms;
+}
+
+static void compiler_profile_print_compile(const CompilerProfile *profile,
+                                           const char *input_filename,
+                                           int result) {
+  static const char *phase_names[PROFILE_PHASE_COUNT] = {
+      "read input",       "lexical validation", "init",
+      "parse",            "prelude injection",  "imports",
+      "monomorphize",     "async rewrite",      "type check",
+      "IR lowering",      "IR optimization",    "IR dump",
+      "codegen",          "write output",       "debug info",
+      "cleanup",
+  };
+  double total_ms = 0.0;
+
+  if (!profile || !profile->enabled) {
+    return;
+  }
+
+  for (int i = 0; i < PROFILE_PHASE_COUNT; i++) {
+    total_ms += profile->phases_ms[i];
+  }
+
+  fprintf(stderr, "Compilation profile for '%s'%s:\n",
+          input_filename ? input_filename : "(unknown)",
+          result == 0 ? "" : " (failed)");
+  for (int i = 0; i < PROFILE_PHASE_COUNT; i++) {
+    double ms = profile->phases_ms[i];
+    double percent = total_ms > 0.0 ? (ms * 100.0) / total_ms : 0.0;
+
+    if (ms <= 0.0) {
+      continue;
+    }
+    fprintf(stderr, "  %-20s %9.3f ms  %6.2f%%\n", phase_names[i], ms,
+            percent);
+  }
+  fprintf(stderr, "  %-20s %9.3f ms  %6.2f%%\n", "total", total_ms, 100.0);
+}
 
 static int directory_exists(const char *path) {
   if (!path || path[0] == '\0') {
@@ -1997,6 +2089,8 @@ int main(int argc, char *argv[]) {
       options.strip_asm_comments = 1;
     } else if (strcmp(argv[i], "--prelude") == 0) {
       options.prelude = 1;
+    } else if (strcmp(argv[i], "--profile") == 0) {
+      options.profile = 1;
     } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
       print_usage(argv[0]);
       return 0;
@@ -2092,10 +2186,14 @@ int main(int argc, char *argv[]) {
 #endif
   }
 
+  double command_profile_start =
+      options.profile ? compiler_profile_now_ms() : 0.0;
   int result =
       compile_file(options.input_filename, options.output_filename, &options);
   if (result == 0 && build_executable) {
 #ifdef _WIN32
+    double build_profile_start =
+        options.profile ? compiler_profile_now_ms() : 0.0;
     if (options.emit_object) {
       result = methlang_link_object_file(options.output_filename,
                                          build_output_filename,
@@ -2108,12 +2206,23 @@ int main(int argc, char *argv[]) {
     if (result == 0) {
       printf("Built executable '%s'\n", build_output_filename);
     }
+    if (options.profile) {
+      fprintf(stderr, "Executable build profile%s:\n",
+              result == 0 ? "" : " (failed)");
+      fprintf(stderr, "  %-20s %9.3f ms\n", "assemble/link",
+              compiler_profile_now_ms() - build_profile_start);
+    }
 #endif
   } else if (result == 0 && auto_runtime_directory && !options.debug_mode) {
     fprintf(stderr,
             "Note: bundled runtime detected at '%s'. Use --build to assemble "
             "and link the packaged GC/runtime automatically.\n",
             auto_runtime_directory);
+  }
+  if (options.profile) {
+    fprintf(stderr, "Command profile%s:\n", result == 0 ? "" : " (failed)");
+    fprintf(stderr, "  %-20s %9.3f ms\n", "total",
+            compiler_profile_now_ms() - command_profile_start);
   }
   free((void *)options.import_directories);
   free((void *)options.link_arguments);
@@ -2128,28 +2237,46 @@ int main(int argc, char *argv[]) {
 
 int compile_file(const char *input_filename, const char *output_filename,
                  CompilerOptions *options) {
+  CompilerProfile profile;
+  double phase_start = 0.0;
+
+  compiler_profile_init(&profile, options && options->profile);
+
   // Read input file
+  phase_start = compiler_profile_begin(&profile);
   char *source = read_file(input_filename);
+  compiler_profile_add(&profile, PROFILE_PHASE_READ_INPUT, phase_start);
   if (!source) {
     fprintf(stderr, "Error: Could not read file '%s'\n", input_filename);
+    compiler_profile_print_compile(&profile, input_filename, 1);
     return 1;
   }
 
+  phase_start = compiler_profile_begin(&profile);
   ErrorReporter *error_reporter = error_reporter_create(input_filename, source);
+  compiler_profile_add(&profile, PROFILE_PHASE_INIT, phase_start);
   if (!error_reporter) {
     fprintf(stderr, "Error: Could not initialize error reporter\n");
     free(source);
+    compiler_profile_print_compile(&profile, input_filename, 1);
     return 1;
   }
 
+  phase_start = compiler_profile_begin(&profile);
   if (!validate_lexical_phase(source, error_reporter)) {
+    compiler_profile_add(&profile, PROFILE_PHASE_LEXICAL_VALIDATION,
+                         phase_start);
     error_reporter_print_errors(error_reporter);
     error_reporter_destroy(error_reporter);
     free(source);
+    compiler_profile_print_compile(&profile, input_filename, 1);
     return 1;
   }
+  compiler_profile_add(&profile, PROFILE_PHASE_LEXICAL_VALIDATION,
+                       phase_start);
 
   // Initialize compiler components
+  phase_start = compiler_profile_begin(&profile);
   Lexer *lexer = lexer_create(source);
   Parser *parser = NULL;
   SymbolTable *symbol_table = symbol_table_create();
@@ -2164,6 +2291,7 @@ int compile_file(const char *input_filename, const char *output_filename,
   char *ir_error_message = NULL;
 
   if (!lexer || !symbol_table || !register_allocator) {
+    compiler_profile_add(&profile, PROFILE_PHASE_INIT, phase_start);
     error_reporter_add_error(error_reporter, ERROR_INTERNAL,
                              source_location_create(0, 0),
                              "Failed to initialize compiler components");
@@ -2176,6 +2304,7 @@ int compile_file(const char *input_filename, const char *output_filename,
       register_allocator_destroy(register_allocator);
     error_reporter_destroy(error_reporter);
     free(source);
+    compiler_profile_print_compile(&profile, input_filename, 1);
     return 1;
   }
 
@@ -2183,6 +2312,7 @@ int compile_file(const char *input_filename, const char *output_filename,
   type_checker =
       type_checker_create_with_error_reporter(symbol_table, error_reporter);
   if (!parser || !type_checker) {
+    compiler_profile_add(&profile, PROFILE_PHASE_INIT, phase_start);
     error_reporter_add_error(error_reporter, ERROR_INTERNAL,
                              source_location_create(0, 0),
                              "Failed to initialize parser or type checker");
@@ -2196,6 +2326,7 @@ int compile_file(const char *input_filename, const char *output_filename,
     lexer_destroy(lexer);
     error_reporter_destroy(error_reporter);
     free(source);
+    compiler_profile_print_compile(&profile, input_filename, 1);
     return 1;
   }
 
@@ -2203,6 +2334,7 @@ int compile_file(const char *input_filename, const char *output_filename,
       options->generate_line_mapping || options->generate_stack_trace_support) {
     debug_info = debug_info_create(input_filename, output_filename);
     if (!debug_info) {
+      compiler_profile_add(&profile, PROFILE_PHASE_INIT, phase_start);
       error_reporter_add_error(error_reporter, ERROR_INTERNAL,
                                source_location_create(0, 0),
                                "Failed to initialize debug information");
@@ -2214,6 +2346,7 @@ int compile_file(const char *input_filename, const char *output_filename,
       lexer_destroy(lexer);
       error_reporter_destroy(error_reporter);
       free(source);
+      compiler_profile_print_compile(&profile, input_filename, 1);
       return 1;
     }
     code_generator = code_generator_create_with_debug(
@@ -2224,6 +2357,7 @@ int compile_file(const char *input_filename, const char *output_filename,
   }
 
   if (!code_generator) {
+    compiler_profile_add(&profile, PROFILE_PHASE_INIT, phase_start);
     error_reporter_add_error(error_reporter, ERROR_INTERNAL,
                              source_location_create(0, 0),
                              "Failed to initialize code generator");
@@ -2237,6 +2371,7 @@ int compile_file(const char *input_filename, const char *output_filename,
       debug_info_destroy(debug_info);
     error_reporter_destroy(error_reporter);
     free(source);
+    compiler_profile_print_compile(&profile, input_filename, 1);
     return 1;
   }
 
@@ -2244,6 +2379,7 @@ int compile_file(const char *input_filename, const char *output_filename,
                                        options->strip_asm_comments ? 0 : 1);
   code_generator_set_eliminate_unreachable_functions(
       code_generator, options->release ? 1 : 0);
+  compiler_profile_add(&profile, PROFILE_PHASE_INIT, phase_start);
 
   int result = 0;
 
@@ -2262,7 +2398,9 @@ int compile_file(const char *input_filename, const char *output_filename,
   }
 
   // Parse the source code
+  phase_start = compiler_profile_begin(&profile);
   program = parser_parse_program(parser);
+  compiler_profile_add(&profile, PROFILE_PHASE_PARSE, phase_start);
   if (!program || parser->had_error ||
       error_reporter_has_errors(error_reporter)) {
     if (error_reporter_has_errors(error_reporter)) {
@@ -2289,9 +2427,10 @@ int compile_file(const char *input_filename, const char *output_filename,
   }
 
   // Auto-inject the standard prelude only when --prelude was specified.
+  phase_start = compiler_profile_begin(&profile);
   if (options->prelude) {
     Program *prog_data = (Program *)program->data;
-    SourceLocation prelude_loc = {0, 0};
+    SourceLocation prelude_loc = {0, 0, NULL};
     ASTNode *prelude_import =
         ast_create_import_declaration("std/prelude", NULL, NULL, 0, prelude_loc);
     if (prelude_import) {
@@ -2311,9 +2450,12 @@ int compile_file(const char *input_filename, const char *output_filename,
       }
     }
   }
+  compiler_profile_add(&profile, PROFILE_PHASE_PRELUDE, phase_start);
 
+  phase_start = compiler_profile_begin(&profile);
   if (!resolve_imports_with_options(program, input_filename, error_reporter,
                                     &import_options)) {
+    compiler_profile_add(&profile, PROFILE_PHASE_IMPORTS, phase_start);
     if (error_reporter_has_errors(error_reporter)) {
       error_reporter_print_errors(error_reporter);
     } else {
@@ -2322,9 +2464,12 @@ int compile_file(const char *input_filename, const char *output_filename,
     result = 1;
     goto cleanup;
   }
+  compiler_profile_add(&profile, PROFILE_PHASE_IMPORTS, phase_start);
 
   // Monomorphize generics (before type checking)
+  phase_start = compiler_profile_begin(&profile);
   if (!monomorphize_program(program, error_reporter)) {
+    compiler_profile_add(&profile, PROFILE_PHASE_MONOMORPHIZE, phase_start);
     if (error_reporter_has_errors(error_reporter)) {
       error_reporter_print_errors(error_reporter);
     } else {
@@ -2333,10 +2478,13 @@ int compile_file(const char *input_filename, const char *output_filename,
     result = 1;
     goto cleanup;
   }
+  compiler_profile_add(&profile, PROFILE_PHASE_MONOMORPHIZE, phase_start);
 
+  phase_start = compiler_profile_begin(&profile);
   if (!async_rewrite_program(
           program, error_reporter,
           options ? options->async_model : ASYNC_REWRITE_MODEL_POOL)) {
+    compiler_profile_add(&profile, PROFILE_PHASE_ASYNC_REWRITE, phase_start);
     if (error_reporter_has_errors(error_reporter)) {
       error_reporter_print_errors(error_reporter);
     } else {
@@ -2345,9 +2493,12 @@ int compile_file(const char *input_filename, const char *output_filename,
     result = 1;
     goto cleanup;
   }
+  compiler_profile_add(&profile, PROFILE_PHASE_ASYNC_REWRITE, phase_start);
 
   // Type checking
+  phase_start = compiler_profile_begin(&profile);
   if (!type_checker_check_program(type_checker, program)) {
+    compiler_profile_add(&profile, PROFILE_PHASE_TYPE_CHECK, phase_start);
     if (error_reporter_has_errors(error_reporter)) {
       error_reporter_print_errors(error_reporter);
     } else {
@@ -2358,12 +2509,15 @@ int compile_file(const char *input_filename, const char *output_filename,
     result = 1;
     goto cleanup;
   }
+  compiler_profile_add(&profile, PROFILE_PHASE_TYPE_CHECK, phase_start);
 
   // Lower to the compiler IR before backend code generation.
   int emit_runtime_checks = options->release ? 0 : 1;
+  phase_start = compiler_profile_begin(&profile);
   ir_program =
       ir_lower_program(program, type_checker, symbol_table, &ir_error_message,
                        emit_runtime_checks);
+  compiler_profile_add(&profile, PROFILE_PHASE_IR_LOWERING, phase_start);
   if (!ir_program) {
     fprintf(stderr, "IR lowering error: %s\n",
             ir_error_message ? ir_error_message : "Unknown error");
@@ -2372,16 +2526,22 @@ int compile_file(const char *input_filename, const char *output_filename,
   }
 
   if (options->optimize) {
+    phase_start = compiler_profile_begin(&profile);
     if (!ir_optimize_program(ir_program)) {
+      compiler_profile_add(&profile, PROFILE_PHASE_IR_OPTIMIZATION,
+                           phase_start);
       fprintf(stderr, "IR optimization error\n");
       result = 1;
       goto cleanup;
     }
+    compiler_profile_add(&profile, PROFILE_PHASE_IR_OPTIMIZATION,
+                         phase_start);
   }
 
   code_generator_set_ir_program(code_generator, ir_program);
 
   if (options->debug_mode || (options->optimize && !options->release)) {
+    phase_start = compiler_profile_begin(&profile);
     char *ir_output = build_sidecar_filename(output_filename, ".ir");
     if (!ir_output) {
       fprintf(stderr,
@@ -2404,10 +2564,13 @@ int compile_file(const char *input_filename, const char *output_filename,
       }
       free(ir_output);
     }
+    compiler_profile_add(&profile, PROFILE_PHASE_IR_DUMP, phase_start);
   }
 
   // Generate code
+  phase_start = compiler_profile_begin(&profile);
   if (!code_generator_generate_program(code_generator, program)) {
+    compiler_profile_add(&profile, PROFILE_PHASE_CODEGEN, phase_start);
     fprintf(stderr, "Code generation error: %s\n",
             (code_generator && code_generator->error_message)
                 ? code_generator->error_message
@@ -2415,11 +2578,14 @@ int compile_file(const char *input_filename, const char *output_filename,
     result = 1;
     goto cleanup;
   }
+  compiler_profile_add(&profile, PROFILE_PHASE_CODEGEN, phase_start);
 
+  phase_start = compiler_profile_begin(&profile);
   if (options->emit_object) {
     BinaryEmitter *binary_emitter =
         code_generator_get_binary_emitter(code_generator);
     if (!binary_emitter_write_object_file(binary_emitter, output_filename)) {
+      compiler_profile_add(&profile, PROFILE_PHASE_WRITE_OUTPUT, phase_start);
       fprintf(stderr, "Error: Could not create object file '%s': %s\n",
               output_filename,
               binary_emitter_get_error(binary_emitter)
@@ -2432,6 +2598,7 @@ int compile_file(const char *input_filename, const char *output_filename,
     // Write output file
     FILE *output_file = fopen(output_filename, "w");
     if (!output_file) {
+      compiler_profile_add(&profile, PROFILE_PHASE_WRITE_OUTPUT, phase_start);
       fprintf(stderr, "Error: Could not create output file '%s': %s\n",
               output_filename, strerror(errno));
       result = 1;
@@ -2442,8 +2609,10 @@ int compile_file(const char *input_filename, const char *output_filename,
     fprintf(output_file, "%s", generated_code);
     fclose(output_file);
   }
+  compiler_profile_add(&profile, PROFILE_PHASE_WRITE_OUTPUT, phase_start);
 
   // Generate debug information files if requested
+  phase_start = compiler_profile_begin(&profile);
   if (debug_info) {
     if (options->debug_mode || options->generate_debug_symbols ||
         options->generate_line_mapping) {
@@ -2465,6 +2634,7 @@ int compile_file(const char *input_filename, const char *output_filename,
 
       char *debug_output = build_sidecar_filename(output_filename, suffix);
       if (!debug_output) {
+        compiler_profile_add(&profile, PROFILE_PHASE_DEBUG_INFO, phase_start);
         fprintf(stderr,
                 "Error: Failed to allocate debug output filename for '%s'\n",
                 output_filename);
@@ -2490,6 +2660,7 @@ int compile_file(const char *input_filename, const char *output_filename,
       printf("Embedded runtime stack trace support enabled\n");
     }
   }
+  compiler_profile_add(&profile, PROFILE_PHASE_DEBUG_INFO, phase_start);
 
   if (options->debug_mode) {
     if (error_reporter->count > 0) {
@@ -2505,6 +2676,7 @@ int compile_file(const char *input_filename, const char *output_filename,
 
 cleanup:
   // Clean up resources
+  phase_start = compiler_profile_begin(&profile);
   if (program)
     ast_destroy_node(program);
   if (ir_program)
@@ -2520,6 +2692,8 @@ cleanup:
     debug_info_destroy(debug_info);
   error_reporter_destroy(error_reporter);
   free(source);
+  compiler_profile_add(&profile, PROFILE_PHASE_CLEANUP, phase_start);
+  compiler_profile_print_compile(&profile, input_filename, result);
 
   return result;
 }
@@ -2559,6 +2733,7 @@ void print_usage(const char *program_name) {
   printf("  --strip-comments    Omit emitted assembly comments\n");
   printf("  --prelude           Auto-import the standard prelude (std/io, "
          "std/net, etc.)\n");
+  printf("  --profile           Print per-phase compilation timings\n");
   printf("  -h, --help          Show this help message\n");
   printf("Topics: build, gc, interop, stdlib, web\n");
 }

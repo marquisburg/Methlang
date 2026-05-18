@@ -63,6 +63,11 @@ typedef struct {
   BinarySymbol *symbols;
   size_t symbol_count;
   size_t symbol_capacity;
+  /* Open-addressing hash index over `symbols`, keyed by name. Stores
+   * (symbol_index + 1); 0 marks an empty bucket. Kept in sync by
+   * binary_emitter_define_symbol so name lookups stay O(1). */
+  size_t *symbol_index_buckets;
+  size_t symbol_index_bucket_count;
   BinaryRelocation *relocations;
   size_t relocation_count;
   size_t relocation_capacity;

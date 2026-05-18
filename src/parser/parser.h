@@ -16,6 +16,7 @@ typedef struct {
   char *error_message;
   ErrorReporter *error_reporter;
   int error_recovery_mode;
+  const char *source_filename;
 } Parser;
 
 // Function declarations

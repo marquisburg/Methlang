@@ -30,9 +30,18 @@ static void parser_report_lexer_token_error(Parser *parser,
   if (parser->error_reporter) {
     SourceLocation location =
         source_location_create(token->line, token->column);
+    location.filename = parser->source_filename;
     error_reporter_add_error(parser->error_reporter, ERROR_LEXICAL, location,
                              error_msg);
   }
+}
+
+static SourceLocation parser_current_location(Parser *parser) {
+  SourceLocation location = source_location_create(
+      parser ? parser->current_token.line : 0,
+      parser ? parser->current_token.column : 0);
+  location.filename = parser ? parser->source_filename : NULL;
+  return location;
 }
 
 Parser *parser_create(Lexer *lexer) {
@@ -58,6 +67,7 @@ Parser *parser_create_with_error_reporter(Lexer *lexer,
   parser->error_message = NULL;
   parser->error_reporter = error_reporter;
   parser->error_recovery_mode = 0;
+  parser->source_filename = error_reporter_current_filename(error_reporter);
 
   if (parser->current_token.type == TOKEN_ERROR) {
     parser_report_lexer_token_error(parser, &parser->current_token);
@@ -298,6 +308,7 @@ void parser_set_error_with_suggestion(Parser *parser, const char *message,
   if (parser->error_reporter) {
     SourceLocation location = source_location_create(
         parser->current_token.line, parser->current_token.column);
+    location.filename = parser->source_filename;
 
     size_t span_len = 1;
     if (parser->current_token.lexeme.length > 0) {
@@ -852,8 +863,7 @@ ASTNode *parser_parse_defer_statement(Parser *parser) {
     return NULL;
   }
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (!parser_expect(parser, TOKEN_DEFER)) {
     return NULL;
@@ -882,8 +892,7 @@ ASTNode *parser_parse_errdefer_statement(Parser *parser) {
     return NULL;
   }
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (!parser_expect(parser, TOKEN_ERRDEFER)) {
     return NULL;
@@ -1525,12 +1534,20 @@ static ASTNode *parser_parse_for_initializer(Parser *parser) {
   return expr;
 }
 
+static int parser_identifier_name_is(ASTNode *expr, const char *name) {
+  if (!expr || expr->type != AST_IDENTIFIER || !name) {
+    return 0;
+  }
+
+  Identifier *id = (Identifier *)expr->data;
+  return id && id->name && strcmp(id->name, name) == 0;
+}
+
 ASTNode *parser_parse_primary_expression(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (parser_is_identifier_like(parser->current_token.type)) {
     char *name = strdup(parser->current_token.value);
@@ -1643,8 +1660,7 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
   parser->error_reporter =
       NULL; // Disable error reporting during speculative parsing
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   parser_advance(parser); // consume '('
 
@@ -1735,8 +1751,7 @@ ASTNode *parser_parse_unary_expression(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (parser->current_token.type == TOKEN_AWAIT) {
     parser_advance(parser);
@@ -1885,8 +1900,7 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
     return NULL;
 
   while (1) {
-    SourceLocation location = {parser->current_token.line,
-                               parser->current_token.column};
+    SourceLocation location = parser_current_location(parser);
 
     if (expr->type == AST_IDENTIFIER &&
         parser->current_token.type == TOKEN_LESS_THAN) {
@@ -1956,7 +1970,48 @@ ASTNode *parser_parse_postfix_expression(Parser *parser) {
       ASTNode **arguments = NULL;
       size_t arg_count = 0;
 
-      if (parser->current_token.type != TOKEN_RPAREN) {
+      if (parser_identifier_name_is(expr, "sizeof")) {
+        SourceLocation type_location = parser_current_location(parser);
+        if (parser->current_token.type == TOKEN_RPAREN) {
+          parser_set_error(parser, "Expected type name in sizeof");
+          ast_destroy_node(expr);
+          return NULL;
+        }
+
+        char *type_name = parser_parse_type_annotation(parser);
+        if (!type_name) {
+          if (!parser->has_error) {
+            parser_set_error(parser, "Expected type name in sizeof");
+          }
+          ast_destroy_node(expr);
+          return NULL;
+        }
+
+        ASTNode *type_arg = ast_create_identifier(type_name, type_location);
+        free(type_name);
+        if (!type_arg) {
+          ast_destroy_node(expr);
+          return NULL;
+        }
+
+        arguments = malloc(sizeof(ASTNode *));
+        if (!arguments) {
+          ast_destroy_node(type_arg);
+          ast_destroy_node(expr);
+          parser_set_error(parser, "Out of memory parsing sizeof");
+          return NULL;
+        }
+        arguments[0] = type_arg;
+        arg_count = 1;
+
+        if (parser->current_token.type == TOKEN_COMMA) {
+          parser_set_error(parser, "sizeof expects exactly one type argument");
+          ast_destroy_node(type_arg);
+          free(arguments);
+          ast_destroy_node(expr);
+          return NULL;
+        }
+      } else if (parser->current_token.type != TOKEN_RPAREN) {
         do {
           ASTNode *arg = parser_parse_expression(parser);
           if (!arg)
@@ -2095,8 +2150,7 @@ ASTNode *parser_parse_binary_expression(Parser *parser, int min_precedence) {
     return NULL;
 
   while (parser_is_binary_operator(parser->current_token.type)) {
-    SourceLocation location = {parser->current_token.line,
-                               parser->current_token.column};
+    SourceLocation location = parser_current_location(parser);
     int precedence = parser_get_operator_precedence(parser->current_token.type);
     if (precedence < min_precedence)
       break;
@@ -2125,8 +2179,7 @@ ASTNode *parser_parse_import_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   parser_advance(parser); // consume 'import'
 
   // Selective import: import { a, b } from "mod"
@@ -2255,8 +2308,7 @@ static ASTNode *parser_parse_extern_var_declaration(Parser *parser) {
     return NULL;
   }
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_VAR)) {
     return NULL;
   }
@@ -2346,8 +2398,7 @@ ASTNode *parser_parse_var_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   // Expect 'var' keyword
   if (!parser_expect(parser, TOKEN_VAR)) {
     return NULL;
@@ -2417,8 +2468,7 @@ static ASTNode *parser_parse_function_declaration_with_async(Parser *parser,
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (parser->current_token.type != TOKEN_FUNCTION &&
       parser->current_token.type != TOKEN_FN) {
     parser_set_error(parser, "Expected 'function' or 'fn'");
@@ -2731,8 +2781,7 @@ ASTNode *parser_parse_trait_declaration(Parser *parser) {
     return NULL;
   }
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_TRAIT)) {
     return NULL;
   }
@@ -2827,8 +2876,7 @@ ASTNode *parser_parse_impl_declaration(Parser *parser) {
     return NULL;
   }
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   char *trait_name = NULL;
   char *for_type_name = NULL;
   ASTNode *impl_decl = NULL;
@@ -2934,8 +2982,7 @@ ASTNode *parser_parse_enum_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_ENUM))
     return NULL;
 
@@ -3116,8 +3163,7 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   // Expect 'struct' keyword
   if (!parser_expect(parser, TOKEN_STRUCT)) {
     return NULL;
@@ -3337,8 +3383,7 @@ ASTNode *parser_parse_inline_asm(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   // Expect 'asm' keyword
   if (!parser_expect(parser, TOKEN_ASM)) {
     return NULL;
@@ -3419,8 +3464,7 @@ ASTNode *parser_parse_assignment(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (parser->current_token.type != TOKEN_IDENTIFIER) {
     parser_set_error(parser, "Expected identifier in assignment");
     return NULL;
@@ -3449,8 +3493,7 @@ ASTNode *parser_parse_return_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   parser_advance(parser); // consume 'return'
 
   ASTNode *value = NULL;
@@ -3474,8 +3517,7 @@ ASTNode *parser_parse_if_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (!parser_expect(parser, TOKEN_IF)) {
     return NULL;
@@ -3605,8 +3647,7 @@ ASTNode *parser_parse_while_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
 
   if (!parser_expect(parser, TOKEN_WHILE)) {
     return NULL;
@@ -3666,8 +3707,7 @@ ASTNode *parser_parse_break_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_BREAK)) {
     return NULL;
   }
@@ -3688,8 +3728,7 @@ ASTNode *parser_parse_continue_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_CONTINUE)) {
     return NULL;
   }
@@ -3710,8 +3749,7 @@ ASTNode *parser_parse_for_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_FOR)) {
     return NULL;
   }
@@ -3811,8 +3849,7 @@ ASTNode *parser_parse_switch_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_SWITCH)) {
     return NULL;
   }
@@ -3854,8 +3891,7 @@ ASTNode *parser_parse_switch_statement(Parser *parser) {
 
     int is_default = 0;
     ASTNode *case_value = NULL;
-    SourceLocation case_loc = {parser->current_token.line,
-                               parser->current_token.column};
+    SourceLocation case_loc = parser_current_location(parser);
 
     if (parser->current_token.type == TOKEN_CASE) {
       parser_advance(parser);
@@ -3958,8 +3994,7 @@ ASTNode *parser_parse_match_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   if (!parser_expect(parser, TOKEN_MATCH))
     return NULL;
 
@@ -4162,8 +4197,7 @@ ASTNode *parser_parse_method_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
-  SourceLocation location = {parser->current_token.line,
-                             parser->current_token.column};
+  SourceLocation location = parser_current_location(parser);
   // Expect 'method' keyword
   if (!parser_expect(parser, TOKEN_METHOD)) {
     return NULL;

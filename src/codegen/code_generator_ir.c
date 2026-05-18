@@ -1,5 +1,6 @@
 #include "code_generator_internal.h"
 #include <limits.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -10,11 +11,99 @@ typedef struct {
   int offset;
 } IRTempSlot;
 
+// Open-addressing hash index over IRTempTable::items. Stores (slot_index + 1)
+// so that 0 means "empty bucket". The table is append-only while building a
+// function frame and read-only during emission, so we never need tombstones.
+typedef struct {
+  size_t *buckets;
+  size_t bucket_count;
+} IRNameIndex;
+
 typedef struct {
   IRTempSlot *items;
   size_t count;
   size_t capacity;
+  IRNameIndex index;
 } IRTempTable;
+
+static uint64_t ir_name_hash(const char *name) {
+  // FNV-1a 64-bit. unsigned long is 32-bit on Windows, so use a fixed-width
+  // type to keep the full mixing behavior.
+  uint64_t hash = 1469598103934665603ULL;
+  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+    hash ^= (uint64_t)*p;
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+static int ir_name_index_rehash(IRNameIndex *index, IRTempSlot *items,
+                                size_t count, size_t new_bucket_count) {
+  size_t *buckets = calloc(new_bucket_count, sizeof(size_t));
+  if (!buckets) {
+    return 0;
+  }
+  for (size_t i = 0; i < count; i++) {
+    if (!items[i].name) {
+      continue;
+    }
+    size_t mask = new_bucket_count - 1;
+    size_t pos = (size_t)(ir_name_hash(items[i].name) & (uint64_t)mask);
+    while (buckets[pos] != 0) {
+      pos = (pos + 1) & mask;
+    }
+    buckets[pos] = i + 1;
+  }
+  free(index->buckets);
+  index->buckets = buckets;
+  index->bucket_count = new_bucket_count;
+  return 1;
+}
+
+// Returns the slot index for `name`, or -1 if absent. O(1) amortized.
+static int ir_name_index_lookup(const IRNameIndex *index,
+                                const IRTempSlot *items, const char *name) {
+  if (!index->buckets || index->bucket_count == 0) {
+    return -1;
+  }
+  size_t mask = index->bucket_count - 1;
+  size_t pos = (size_t)(ir_name_hash(name) & (uint64_t)mask);
+  while (index->buckets[pos] != 0) {
+    size_t slot = index->buckets[pos] - 1;
+    if (items[slot].name && strcmp(items[slot].name, name) == 0) {
+      return (int)slot;
+    }
+    pos = (pos + 1) & mask;
+  }
+  return -1;
+}
+
+// Records that items[slot_index] now exists. Grows/rehashes when the index
+// would exceed a 0.7 load factor.
+static int ir_name_index_insert(IRNameIndex *index, IRTempSlot *items,
+                                size_t count, size_t slot_index) {
+  if (index->bucket_count == 0 ||
+      (count * 10) >= (index->bucket_count * 7)) {
+    size_t next = index->bucket_count == 0 ? 64 : index->bucket_count * 2;
+    if (!ir_name_index_rehash(index, items, count, next)) {
+      return 0;
+    }
+  }
+  size_t mask = index->bucket_count - 1;
+  size_t pos =
+      (size_t)(ir_name_hash(items[slot_index].name) & (uint64_t)mask);
+  while (index->buckets[pos] != 0) {
+    pos = (pos + 1) & mask;
+  }
+  index->buckets[pos] = slot_index + 1;
+  return 1;
+}
+
+static void ir_name_index_destroy(IRNameIndex *index) {
+  free(index->buckets);
+  index->buckets = NULL;
+  index->bucket_count = 0;
+}
 
 typedef struct {
   char *name;
@@ -771,12 +860,11 @@ static int ir_temp_table_get_offset(IRTempTable *table, const char *name) {
   if (!table || !name) {
     return -1;
   }
-  for (size_t i = 0; i < table->count; i++) {
-    if (table->items[i].name && strcmp(table->items[i].name, name) == 0) {
-      return table->items[i].offset;
-    }
+  int slot = ir_name_index_lookup(&table->index, table->items, name);
+  if (slot < 0) {
+    return -1;
   }
-  return -1;
+  return table->items[slot].offset;
 }
 
 static int ir_temp_table_add(IRTempTable *table, const char *name) {
@@ -784,7 +872,7 @@ static int ir_temp_table_add(IRTempTable *table, const char *name) {
     return 0;
   }
 
-  if (ir_temp_table_get_offset(table, name) >= 0) {
+  if (ir_name_index_lookup(&table->index, table->items, name) >= 0) {
     return 1;
   }
 
@@ -808,6 +896,12 @@ static int ir_temp_table_add(IRTempTable *table, const char *name) {
 
   table->items[table->count].name = name_copy;
   table->items[table->count].offset = -1;
+  if (!ir_name_index_insert(&table->index, table->items, table->count,
+                            table->count)) {
+    free(name_copy);
+    table->items[table->count].name = NULL;
+    return 0;
+  }
   table->count++;
   return 1;
 }
@@ -816,6 +910,7 @@ static void ir_temp_table_destroy(IRTempTable *table) {
   if (!table) {
     return;
   }
+  ir_name_index_destroy(&table->index);
   for (size_t i = 0; i < table->count; i++) {
     free(table->items[i].name);
   }
