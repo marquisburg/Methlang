@@ -1,5 +1,5 @@
 ﻿{
-    "generated":  "2026-05-18T18:49:38Z",
+    "generated":  "2026-05-18T23:40:34Z",
     "harness":  {
                     "config":  "docs/benchmarks/harness.json",
                     "mode":  "meth-vs-c"
@@ -8,37 +8,37 @@
                        {
                            "name":  "fib",
                            "description":  "Fibonacci fib(35) x 10M",
-                           "meth_ms":  281,
+                           "meth_ms":  63,
                            "c_ms":  47,
-                           "relative":  5.98
+                           "relative":  1.34
                        },
                        {
                            "name":  "word_count",
                            "description":  "Word count 256 KB buffer x 500",
                            "meth_ms":  141,
-                           "c_ms":  63,
-                           "relative":  2.24
+                           "c_ms":  47,
+                           "relative":  3
                        },
                        {
                            "name":  "grep",
                            "description":  "Grep ERROR 256 KB x 200",
-                           "meth_ms":  62,
+                           "meth_ms":  47,
                            "c_ms":  0,
                            "relative":  null
                        },
                        {
                            "name":  "sum_squares",
                            "description":  "Sum of squares 1..100000 x 500",
-                           "meth_ms":  16,
+                           "meth_ms":  31,
                            "c_ms":  0,
                            "relative":  null
                        },
                        {
                            "name":  "collatz",
                            "description":  "Collatz steps 1..100000 x 10",
-                           "meth_ms":  188,
-                           "c_ms":  125,
-                           "relative":  1.5
+                           "meth_ms":  187,
+                           "c_ms":  110,
+                           "relative":  1.7
                        }
                    ],
     "failed":  [

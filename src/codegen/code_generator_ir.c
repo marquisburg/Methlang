@@ -167,6 +167,80 @@ static char *ir_codegen_strdup(const char *text) {
   return copy;
 }
 
+/* Per-instruction loop nesting depth, derived from backward branches.
+ *
+ * A label that is targeted by a later JUMP/BRANCH forms a loop whose body is
+ * [label_index, branch_index]. Counting how many such bodies enclose each
+ * instruction yields its nesting depth. Used to weight register-promotion so
+ * variables live inside hot loops outrank one-shot setup code. Returns a
+ * malloc'd array of length instruction_count (caller frees), or NULL on OOM
+ * or when there are no instructions. */
+static unsigned char *ir_compute_loop_depths(const IRFunction *function) {
+  if (!function || function->instruction_count == 0) {
+    return NULL;
+  }
+  size_t n = function->instruction_count;
+
+  /* delta[i] = (loops opening at i) - (loops closing just after i). A prefix
+   * sum then gives the depth at each instruction. int is sufficient: depth is
+   * bounded by the number of branches, far below INT_MAX in practice. */
+  int *delta = calloc(n + 1, sizeof(int));
+  unsigned char *depth = calloc(n, sizeof(unsigned char));
+  if (!delta || !depth) {
+    free(delta);
+    free(depth);
+    return NULL;
+  }
+
+  for (size_t i = 0; i < n; i++) {
+    const IRInstruction *insn = &function->instructions[i];
+    if (insn->op != IR_OP_JUMP && insn->op != IR_OP_BRANCH_ZERO &&
+        insn->op != IR_OP_BRANCH_EQ) {
+      continue;
+    }
+    const char *target = insn->text;
+    if (!target) {
+      continue;
+    }
+    /* Find the label this branch targets; only backward edges form loops. */
+    for (size_t j = 0; j <= i; j++) {
+      const IRInstruction *cand = &function->instructions[j];
+      if (cand->op == IR_OP_LABEL && cand->text &&
+          strcmp(cand->text, target) == 0) {
+        delta[j] += 1;
+        delta[i + 1] -= 1;
+        break;
+      }
+    }
+  }
+
+  int level = 0;
+  for (size_t i = 0; i < n; i++) {
+    level += delta[i];
+    if (level < 0) {
+      level = 0; /* defensive: overlapping/irreducible edges */
+    }
+    depth[i] = (level > 255) ? 255 : (unsigned char)level;
+  }
+
+  free(delta);
+  return depth;
+}
+
+/* Register-promotion weight for an instruction at the given loop depth. Each
+ * nesting level multiplies pressure by 16, capped so the saturating add in
+ * ir_symbol_stats_map_add_use_weighted stays well-behaved. Depth 0 -> 1,
+ * 1 -> 16, 2 -> 256, deep loops clamp at 4096. */
+static size_t ir_loop_depth_weight(unsigned char depth) {
+  if (depth == 0) {
+    return 1;
+  }
+  if (depth >= 3) {
+    return 4096;
+  }
+  return (size_t)1 << (4 * depth);
+}
+
 static int ir_symbol_stats_map_find(const IRSymbolStatsMap *map,
                                     const char *name) {
   if (!map || !name) {
@@ -214,14 +288,26 @@ static IRSymbolStatsEntry *ir_symbol_stats_map_get_or_add(IRSymbolStatsMap *map,
   return entry;
 }
 
-static int ir_symbol_stats_map_add_use(IRSymbolStatsMap *map,
-                                       const char *name) {
+static int ir_symbol_stats_map_add_use_weighted(IRSymbolStatsMap *map,
+                                                const char *name,
+                                                size_t weight) {
   IRSymbolStatsEntry *entry = ir_symbol_stats_map_get_or_add(map, name);
   if (!entry) {
     return 0;
   }
-  entry->use_count++;
+  /* Saturating add: a runaway weight must never wrap use_count back to a
+   * small value and demote a genuinely hot symbol. */
+  if (entry->use_count > (size_t)-1 - weight) {
+    entry->use_count = (size_t)-1;
+  } else {
+    entry->use_count += weight;
+  }
   return 1;
+}
+
+static int ir_symbol_stats_map_add_use(IRSymbolStatsMap *map,
+                                       const char *name) {
+  return ir_symbol_stats_map_add_use_weighted(map, name, 1);
 }
 
 static int ir_symbol_stats_map_mark_address_taken(IRSymbolStatsMap *map,
@@ -266,28 +352,31 @@ static void ir_symbol_stats_map_destroy(IRSymbolStatsMap *map) {
 }
 
 static int ir_symbol_stats_map_record_operand(IRSymbolStatsMap *map,
-                                              const IROperand *operand) {
+                                              const IROperand *operand,
+                                              size_t weight) {
   if (!map || !operand || operand->kind != IR_OPERAND_SYMBOL ||
       !operand->name) {
     return 1;
   }
-  return ir_symbol_stats_map_add_use(map, operand->name);
+  return ir_symbol_stats_map_add_use_weighted(map, operand->name, weight);
 }
 
 static int ir_symbol_stats_map_record_instruction(IRSymbolStatsMap *map,
-                                                  const IRInstruction *instr) {
+                                                  const IRInstruction *instr,
+                                                  size_t weight) {
   if (!map || !instr) {
     return 0;
   }
 
-  if (!ir_symbol_stats_map_record_operand(map, &instr->dest) ||
-      !ir_symbol_stats_map_record_operand(map, &instr->lhs) ||
-      !ir_symbol_stats_map_record_operand(map, &instr->rhs)) {
+  if (!ir_symbol_stats_map_record_operand(map, &instr->dest, weight) ||
+      !ir_symbol_stats_map_record_operand(map, &instr->lhs, weight) ||
+      !ir_symbol_stats_map_record_operand(map, &instr->rhs, weight)) {
     return 0;
   }
 
   for (size_t i = 0; i < instr->argument_count; i++) {
-    if (!ir_symbol_stats_map_record_operand(map, &instr->arguments[i])) {
+    if (!ir_symbol_stats_map_record_operand(map, &instr->arguments[i],
+                                            weight)) {
       return 0;
     }
   }
@@ -1007,6 +1096,26 @@ static int code_generator_load_ir_operand(CodeGenerator *generator,
                                operand->name);
       return 0;
     }
+    /* Deferred-spill peephole. If this temp's spill is still pending (nothing
+     * emitted since it was produced), rax still holds the value. */
+    if (offset == generator->pending_spill_offset &&
+        generator->emit_seq == generator->rax_cached_emit_seq) {
+      if (generator->pending_spill_single_use) {
+        /* This load is the temp's only use: the spill is dead. Drop it. */
+        generator->pending_spill_offset = 0;
+        generator->pending_spill_single_use = 0;
+      } else {
+        /* More uses follow: the slot must hold the value. Emit the store now
+         * (flush), but the value is still in rax afterwards so no reload. */
+        code_generator_flush_pending_spill(generator);
+      }
+      return 1; /* value already in rax */
+    }
+    /* Reload-elision: value spilled to this slot and nothing emitted since. */
+    if (offset == generator->rax_cached_temp_offset &&
+        generator->emit_seq == generator->rax_cached_emit_seq) {
+      return 1;
+    }
     code_generator_emit(generator, "    mov rax, [rbp - %d]\n", offset);
     return 1;
   }
@@ -1079,7 +1188,32 @@ static int code_generator_store_ir_destination(CodeGenerator *generator,
                                destination->name);
       return 0;
     }
-    code_generator_emit(generator, "    mov [rbp - %d], rax\n", offset);
+    /* Defer the spill. rax already holds the value; emit nothing yet. If the
+     * next IR operand load wants this same temp we may be able to drop the
+     * store entirely (dead, when single-use) or at least skip the reload. Any
+     * other emission flushes this first (code_generator_emit), so the slot is
+     * always written before any reader or rax clobber.
+     *
+     * A still-pending earlier spill (different temp) must be flushed now: we
+     * are about to overwrite rax, so its value can no longer be recovered. */
+    if (generator->pending_spill_offset != 0 &&
+        generator->pending_spill_offset != offset) {
+      code_generator_flush_pending_spill(generator);
+    }
+    {
+      const IRTempUseMap *use_map =
+          (const IRTempUseMap *)generator->current_temp_use_map;
+      generator->pending_spill_single_use =
+          (use_map &&
+           ir_temp_use_map_get(use_map, destination->name) == 1)
+              ? 1
+              : 0;
+    }
+    generator->pending_spill_offset = offset;
+    /* rax still holds the value. Mark the reload cache too, so even the
+     * multi-use path (store flushed, then read) skips the reload. */
+    generator->rax_cached_temp_offset = offset;
+    generator->rax_cached_emit_seq = generator->emit_seq;
     return 1;
   }
 
@@ -3261,7 +3395,34 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
                         instruction->text ? instruction->text : "ir_missing");
     return 1;
 
-  case IR_OP_BRANCH_EQ:
+  case IR_OP_BRANCH_EQ: {
+    const char *eq_target =
+        instruction->text ? instruction->text : "ir_missing";
+    /* Fast path: comparing against a 32-bit immediate (e.g. the whitespace
+     * `c == 32 || c == 9 ...` chain). Emit `cmp <lhs>, imm; je` directly
+     * instead of materializing the constant into r10 first. Works whichever
+     * side holds the immediate since equality is symmetric. */
+    const IROperand *cmp_value = NULL;
+    const IROperand *cmp_imm = NULL;
+    if (instruction->rhs.kind == IR_OPERAND_INT &&
+        ir_immediate_fits_signed_32(instruction->rhs.int_value)) {
+      cmp_value = &instruction->lhs;
+      cmp_imm = &instruction->rhs;
+    } else if (instruction->lhs.kind == IR_OPERAND_INT &&
+               ir_immediate_fits_signed_32(instruction->lhs.int_value)) {
+      cmp_value = &instruction->rhs;
+      cmp_imm = &instruction->lhs;
+    }
+    if (cmp_value && cmp_value->kind != IR_OPERAND_INT) {
+      if (!code_generator_load_ir_operand(generator, cmp_value, temp_table)) {
+        return 0;
+      }
+      code_generator_emit(generator, "    cmp rax, %lld\n",
+                          cmp_imm->int_value);
+      code_generator_emit(generator, "    je %s\n", eq_target);
+      return 1;
+    }
+
     if (!code_generator_load_ir_operand_into_register(
             generator, &instruction->rhs, temp_table, REG_R10)) {
       return 0;
@@ -3271,9 +3432,9 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
       return 0;
     }
     code_generator_emit(generator, "    cmp rax, r10\n");
-    code_generator_emit(generator, "    je %s\n",
-                        instruction->text ? instruction->text : "ir_missing");
+    code_generator_emit(generator, "    je %s\n", eq_target);
     return 1;
+  }
 
   case IR_OP_ASSIGN:
     {
@@ -3617,15 +3778,25 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   int promoted_save_bytes = 0;
   int stack_offset_base = parameter_home_size;
 
+  /* Loop-depth weighting: a symbol used inside a nested loop deserves a
+   * promotion register far more than one touched only in straight-line setup
+   * code, even if the latter has more static occurrences. NULL is fine for a
+   * loop-free function (every weight falls back to 1). */
+  unsigned char *loop_depths = ir_compute_loop_depths(ir_function);
+
   for (size_t i = 0; i < ir_function->instruction_count; i++) {
     IRInstruction *instruction = &ir_function->instructions[i];
     if (!instruction) {
       continue;
     }
 
-    if (!ir_symbol_stats_map_record_instruction(&symbol_stats, instruction)) {
+    size_t use_weight =
+        loop_depths ? ir_loop_depth_weight(loop_depths[i]) : 1;
+    if (!ir_symbol_stats_map_record_instruction(&symbol_stats, instruction,
+                                                use_weight)) {
       code_generator_set_error(generator,
                                "Out of memory while tracking IR symbol usage");
+      free(loop_depths);
       ir_temp_table_destroy(&temp_table);
       ir_local_table_destroy(&local_table);
       ir_symbol_stats_map_destroy(&symbol_stats);
@@ -3716,6 +3887,8 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       }
     }
   }
+  free(loop_depths);
+  loop_depths = NULL;
   if (temp_table.count > (size_t)(INT_MAX / (8 + 15))) {
     code_generator_set_error(
         generator, "Stack frame too large in function '%s' (too many temps)",
@@ -4229,6 +4402,13 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       break;
     }
   }
+  /* Expose the use map to the deferred-spill peephole, and start this
+   * function with no inherited pending/cached state. */
+  generator->current_temp_use_map = &temp_use_map;
+  generator->pending_spill_offset = 0;
+  generator->pending_spill_single_use = 0;
+  generator->rax_cached_temp_offset = 0;
+
   if (!generator->has_error) {
     for (size_t i = 0; i < ir_function->instruction_count; i++) {
       const IRInstruction *instruction = &ir_function->instructions[i];
@@ -4376,6 +4556,14 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   if (runtime_end_label) {
     code_generator_emit(generator, "%s:\n", runtime_end_label);
   }
+
+  /* No spill may outlive the function. The epilogue's own emits will have
+   * flushed any pending store; clear the borrowed map pointer before it dies
+   * and drop any stale cache so the next function starts clean. */
+  generator->current_temp_use_map = NULL;
+  generator->pending_spill_offset = 0;
+  generator->pending_spill_single_use = 0;
+  generator->rax_cached_temp_offset = 0;
 
   ir_temp_use_map_destroy(&temp_use_map);
   ir_temp_table_destroy(&temp_table);

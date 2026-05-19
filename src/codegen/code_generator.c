@@ -44,6 +44,13 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->last_runtime_location_line = 0;
   generator->last_runtime_location_column = 0;
   generator->backend_mode = CODEGEN_BACKEND_TEXT_ASSEMBLY;
+  generator->emit_seq = 0;
+  generator->rax_cached_temp_offset = 0;
+  generator->rax_cached_emit_seq = 0;
+  generator->pending_spill_offset = 0;
+  generator->pending_spill_single_use = 0;
+  generator->flushing_pending = 0;
+  generator->current_temp_use_map = NULL;
   generator->binary_emitter =
       binary_emitter_create(BINARY_TARGET_FORMAT_COFF_WIN64);
 
@@ -278,9 +285,33 @@ static int code_generator_append_text(CodeGenerator *generator, const char *text
   return 1;
 }
 
+/* Emit any deferred temp spill before the next instruction is produced. This
+ * preserves correctness of the deferred-spill peephole: a pending store is
+ * always materialized before anything that could read the slot or clobber rax.
+ * Idempotent; the flushing_pending guard stops the store's own emit call from
+ * re-entering this. */
+void code_generator_flush_pending_spill(CodeGenerator *generator) {
+  if (!generator || generator->flushing_pending ||
+      generator->pending_spill_offset == 0) {
+    return;
+  }
+  int offset = generator->pending_spill_offset;
+  generator->pending_spill_offset = 0;
+  generator->pending_spill_single_use = 0;
+  generator->flushing_pending = 1;
+  code_generator_emit(generator, "    mov [rbp - %d], rax\n", offset);
+  generator->flushing_pending = 0;
+}
+
 void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
   if (!generator || !format || generator->has_error) {
     return;
+  }
+
+  /* Materialize a deferred spill before emitting anything else, unless this
+   * very call IS the deferred spill being flushed. */
+  if (generator->pending_spill_offset != 0 && !generator->flushing_pending) {
+    code_generator_flush_pending_spill(generator);
   }
 
   va_list args;
@@ -321,6 +352,11 @@ void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
     }
     to_append = cleaned;
   }
+
+  /* Every emitted chunk advances the sequence counter. The redundant-spill
+   * peephole relies on this to detect whether anything was emitted between a
+   * store_ir_destination spill and a subsequent load_ir_operand. */
+  generator->emit_seq++;
 
   code_generator_append_text(generator, to_append, strlen(to_append), 0);
 
