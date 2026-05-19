@@ -2996,6 +2996,46 @@ catch {
   Write-CaseResult -Name "crash_handler" -Passed $false -Reason $_.Exception.Message
 }
 
+# General reduction-unrolling vectorizer: correctness on non-benchmark
+# reductions (distinct EXPR(i), inclusive/exclusive bounds, a trip count that
+# is not a multiple of the unroll factor so the scalar remainder runs). Built
+# via the direct-object backend (the path the benchmarks use). Exact closed
+# forms are asserted so a miscompiled unroll is caught, not just a crash.
+$total++
+try {
+  $reduExe = "bin\test_opt_reduction_unroll.exe"
+  $reduBuild = & $CompilerPath --build --emit-obj --linker internal --release `
+    tests\test_opt_reduction_unroll.mettle -o $reduExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "reduction-unroll build failed: $reduBuild"
+  }
+  $reduOut = & $reduExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "reduction-unroll exe exited with $LASTEXITCODE"
+  }
+  if ($reduOut -notmatch "lin=500500") {
+    throw "sum_linear(1000) wrong (expected 500500): $reduOut"
+  }
+  if ($reduOut -notmatch "aff=1517539") {
+    throw "sum_affine(1003) wrong (expected 1517539): $reduOut"
+  }
+  if ($reduOut -notmatch "cnt=777") {
+    throw "count_to(777) wrong (expected 777): $reduOut"
+  }
+  # The unroll must actually have fired (synthetic accumulators in the IR).
+  $reduIr = & $CompilerPath --release tests\test_opt_reduction_unroll.mettle `
+    -o "$env:TEMP\redu_check.s" 2>&1 | Out-Null
+  $reduAsm = Get-Content "$env:TEMP\redu_check.s" -Raw
+  if ($reduAsm -notmatch "vu\d+_main") {
+    throw "reduction-unroll pass did not fire (no vuN_main in asm)"
+  }
+  Write-CaseResult -Name "opt_reduction_unroll" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "opt_reduction_unroll" -Passed $false -Reason $_.Exception.Message
+}
+
 Write-Host ""
 Write-Host "Test summary: $($total - $failed)/$total passed"
 

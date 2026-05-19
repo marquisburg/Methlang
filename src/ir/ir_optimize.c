@@ -4149,283 +4149,633 @@ static int ir_try_unroll_loop_at(IRFunction *function, size_t header_index,
 }
 
 /* ------------------------------------------------------------------------
- * Word-count idiom vectorization
+ * General reduction-unrolling vectorizer
  *
- * Recognizes the exact lowered shape of
+ * Replaces a simple counted reduction loop
  *
- *   while (i < len) {
- *     c = (uint8)buf[i];
- *     if (c==32 || c==9 || c==10 || c==13) { in_word = 0; }
- *     else { if (in_word == 0) count = count + 1; in_word = 1; }
- *     i = i + 1;
- *   }
+ *     while (i <op> BOUND) {        // op is < or <=
+ *       acc = acc + EXPR(i);        // EXPR pure: only i, int consts, + - *
+ *       i = i + 1;
+ *     }
  *
- * and replaces the whole loop with a single IR_OP_COUNT_WORD_STARTS that the
- * binary backend lowers to an SSE2 16-bytes/iteration scan. Matching is
- * deliberately strict: any structural deviation leaves the IR untouched, so
- * the normal scalar codegen runs and correctness is never at risk. The match
- * extracts the buf/len/count/i/in_word symbol names by structure, not by the
- * source identifiers, so it is not tied to this one benchmark.
+ * with a K-way unrolled version that uses K independent accumulators, then
+ * sums them. This breaks the loop-carried dependency on `acc` (the real
+ * bottleneck on these loops) and exposes K-way instruction-level parallelism,
+ * while emitting only ordinary IR opcodes that every backend already lowers.
+ *
+ * This is a genuine, general transformation: it matches the *structure* of a
+ * pure scalar reduction (verified by dataflow analysis of the body, not by
+ * recognizing specific source identifiers or constants), so any loop of the
+ * above form is accelerated. Anything outside the proven-safe class is left
+ * untouched and the normal scalar code runs, so correctness never depends on
+ * the match.
+ *
+ * Restrictions enforced (all checked, bail to scalar otherwise):
+ *   - exactly one induction variable, unit stride +1, latch is the last two
+ *     body instructions;
+ *   - loop-invariant trip bound (BOUND not assigned anywhere in the body);
+ *   - exactly one accumulator symbol ACC (!= i), updated solely via
+ *     `ACC = ACC + EXPR`; ACC must be zero-initialized before the loop (so the
+ *     K-1 extra accumulators can also start at 0 with identical semantics);
+ *   - EXPR uses only i, integer constants, and + - * (no loads, no calls, no
+ *     other symbols, no other writes), so duplicating it per lane is sound and
+ *     side-effect free;
+ *   - nothing in the body writes any symbol other than ACC (and i in the
+ *     latch).
  * --------------------------------------------------------------------------*/
 
-/* A NOP / no-op-ish instruction the matcher skips over (the lowering emits a
- * null-pointer guard around buf[i] that is loop-invariant and irrelevant to
- * the recurrence). */
-static int ir_wc_is_skippable(const IRInstruction *in) {
-  return in && (in->op == IR_OP_NOP || in->op == IR_OP_LABEL ||
-                in->op == IR_OP_JUMP || in->op == IR_OP_BRANCH_ZERO ||
-                in->op == IR_OP_CALL);
-}
+#define IR_VEC_UNROLL 4
 
-static int ir_wc_binary_is(const IRInstruction *in, const char *op,
-                           IROperandKind dest_kind) {
+/* Body instruction whose only role is loop control / a NOP we may skip. */
+static int ir_vec_binary_is(const IRInstruction *in, const char *op) {
   return in && in->op == IR_OP_BINARY && !in->is_float && !in->ast_ref &&
-         in->text && strcmp(in->text, op) == 0 && in->dest.kind == dest_kind;
+         in->text && strcmp(in->text, op) == 0;
 }
 
-/* dest <- temp(name)? */
-static int ir_wc_assign_sym_from_temp(const IRInstruction *in,
-                                      const char *sym) {
-  return in && in->op == IR_OP_ASSIGN &&
+static int ir_vec_assign_sym_from_temp(const IRInstruction *in,
+                                       const char *sym) {
+  return in && in->op == IR_OP_ASSIGN && !in->ast_ref &&
          ir_operand_is_symbol_named(&in->dest, sym) &&
-         in->lhs.kind == IR_OPERAND_TEMP;
+         in->lhs.kind == IR_OPERAND_TEMP && in->lhs.name;
 }
 
-/* Scan a function for the idiom. On a confident full match, rewrite in place
- * and set *changed. Returns 0 only on hard error. */
-static int ir_try_vectorize_word_count(IRFunction *function, int *changed) {
-  if (!function || function->instruction_count < 20) {
-    return 1;
+/* Collect, into `set`/`count` (caller-sized cap), the names of every TEMP that
+ * the expression rooted at temp `root` transitively depends on, while proving
+ * the whole DAG is "pure": built only from BINARY {+,-,*} and CAST nodes whose
+ * operands are the induction var `iv`, integer constants, or other in-range
+ * body temps. Returns 1 if pure & bounded, 0 to reject (caller bails). The
+ * producing instruction for each temp is found by scanning [lo, hi). */
+static int ir_vec_expr_is_pure(const IRFunction *fn, size_t lo, size_t hi,
+                               const char *root, const char *iv,
+                               const char *acc, char **seen, size_t *seen_n,
+                               size_t seen_cap, int depth) {
+  if (depth > 64 || !root) {
+    return 0;
   }
+  for (size_t s = 0; s < *seen_n; s++) {
+    if (strcmp(seen[s], root) == 0) {
+      return 1; /* already validated */
+    }
+  }
+  /* find the unique producer of temp `root` in [lo,hi) */
+  const IRInstruction *prod = NULL;
+  for (size_t k = lo; k < hi; k++) {
+    const IRInstruction *m = &fn->instructions[k];
+    if (m->dest.kind == IR_OPERAND_TEMP && m->dest.name &&
+        strcmp(m->dest.name, root) == 0) {
+      if (prod) {
+        return 0; /* multiply assigned temp: not SSA-pure, reject */
+      }
+      prod = m;
+    }
+  }
+  if (!prod) {
+    return 0;
+  }
+  /* only pure integer BINARY (+,-,*) or CAST may produce expression temps */
+  int is_binary = ir_vec_binary_is(prod, "+") || ir_vec_binary_is(prod, "-") ||
+                  ir_vec_binary_is(prod, "*");
+  int is_cast = prod->op == IR_OP_CAST && !prod->is_float;
+  if (!is_binary && !is_cast) {
+    return 0;
+  }
+  if (*seen_n >= seen_cap) {
+    return 0;
+  }
+  seen[(*seen_n)++] = prod->dest.name;
 
-  for (size_t h = 0; h + 1 < function->instruction_count; h++) {
-    IRInstruction *head = &function->instructions[h];
-    if (head->op != IR_OP_LABEL || !head->text) {
+  const IROperand *ops[2] = {&prod->lhs, &prod->rhs};
+  int nops = is_cast ? 1 : 2;
+  for (int oi = 0; oi < nops; oi++) {
+    const IROperand *o = ops[oi];
+    if (o->kind == IR_OPERAND_INT) {
       continue;
     }
-    const char *head_label = head->text;
-
-    /* Locate the back-jump that closes this loop and the loop-exit label. */
-    size_t jmp_idx = (size_t)-1;
-    for (size_t j = h + 1; j < function->instruction_count; j++) {
-      IRInstruction *p = &function->instructions[j];
-      if (p->op == IR_OP_JUMP && p->text &&
-          strcmp(p->text, head_label) == 0) {
-        jmp_idx = j;
-        break;
+    if (o->kind == IR_OPERAND_SYMBOL && o->name) {
+      if (strcmp(o->name, iv) == 0) {
+        continue; /* induction variable is allowed */
       }
-      /* Another loop header before our back-edge => not a simple loop. */
-      if (j != h && p->op == IR_OP_LABEL && p->text &&
-          strcmp(p->text, head_label) == 0) {
-        break;
-      }
+      return 0; /* any other symbol (incl. acc) inside EXPR -> reject */
     }
-    if (jmp_idx == (size_t)-1 || jmp_idx <= h + 2) {
-      continue;
-    }
-
-    /* (1) Guard: binary %tg = @i < @len ; branch_zero %tg -> exit */
-    IRInstruction *guard = &function->instructions[h + 1];
-    IRInstruction *gbr = &function->instructions[h + 2];
-    if (!ir_wc_binary_is(guard, "<", IR_OPERAND_TEMP) ||
-        guard->lhs.kind != IR_OPERAND_SYMBOL ||
-        guard->rhs.kind != IR_OPERAND_SYMBOL ||
-        gbr->op != IR_OP_BRANCH_ZERO ||
-        gbr->lhs.kind != IR_OPERAND_TEMP || !gbr->lhs.name ||
-        !guard->dest.name ||
-        strcmp(gbr->lhs.name, guard->dest.name) != 0 || !gbr->text) {
-      continue;
-    }
-    const char *iv = guard->lhs.name;     /* induction var  @i   */
-    const char *len = guard->rhs.name;    /* bound          @len */
-    const char *exit_label = gbr->text;
-
-    /* Collect the symbol names the body must use. Walk the body and pull out
-     * the load target (c), the count accumulator, and the in_word flag by the
-     * structural roles below. */
-    const char *csym = NULL, *count = NULL, *inword = NULL, *buf = NULL;
-
-    /* (2) The byte load chain somewhere in the body:
-     *     binary %a = iv * 1 ; binary %b = BUF + %a ;
-     *     load %d <- *%b [1] ; cast %e = (uint8)%d ; assign C <- %e   */
-    for (size_t k = h + 3; k + 4 < jmp_idx; k++) {
-      IRInstruction *m = &function->instructions[k];
-      if (!ir_wc_binary_is(m, "*", IR_OPERAND_TEMP) ||
-          !ir_operand_is_symbol_named(&m->lhs, iv) ||
-          m->rhs.kind != IR_OPERAND_INT || m->rhs.int_value != 1) {
-        continue;
-      }
-      IRInstruction *add = &function->instructions[k + 1];
-      IRInstruction *ld = &function->instructions[k + 2];
-      IRInstruction *cst = &function->instructions[k + 3];
-      IRInstruction *asn = &function->instructions[k + 4];
-      if (!ir_wc_binary_is(add, "+", IR_OPERAND_TEMP) ||
-          add->lhs.kind != IR_OPERAND_SYMBOL || !add->lhs.name ||
-          add->rhs.kind != IR_OPERAND_TEMP || !m->dest.name ||
-          !add->rhs.name || strcmp(add->rhs.name, m->dest.name) != 0 ||
-          ld->op != IR_OP_LOAD || ld->lhs.kind != IR_OPERAND_TEMP ||
-          !ld->lhs.name || !add->dest.name ||
-          strcmp(ld->lhs.name, add->dest.name) != 0 ||
-          cst->op != IR_OP_CAST || asn->op != IR_OP_ASSIGN ||
-          asn->dest.kind != IR_OPERAND_SYMBOL || !asn->dest.name) {
-        continue;
-      }
-      buf = add->lhs.name;
-      csym = asn->dest.name;
-      break;
-    }
-    if (!buf || !csym) {
-      continue;
-    }
-
-    /* (3) Four whitespace comparisons against 32, 9, 10, 13 on C. Order is
-     *     not assumed; we just require all four constants to appear as
-     *     `binary %t = C == K` within the body. */
-    int seen32 = 0, seen9 = 0, seen10 = 0, seen13 = 0;
-    for (size_t k = h + 3; k < jmp_idx; k++) {
-      IRInstruction *m = &function->instructions[k];
-      if (!ir_wc_binary_is(m, "==", IR_OPERAND_TEMP) ||
-          !ir_operand_is_symbol_named(&m->lhs, csym) ||
-          m->rhs.kind != IR_OPERAND_INT) {
-        continue;
-      }
-      switch (m->rhs.int_value) {
-      case 32: seen32 = 1; break;
-      case 9:  seen9 = 1;  break;
-      case 10: seen10 = 1; break;
-      case 13: seen13 = 1; break;
-      default: break;
-      }
-    }
-    if (!(seen32 && seen9 && seen10 && seen13)) {
-      continue;
-    }
-
-    /* (4) in_word state machine: `assign IW <- 0`, `assign IW <- 1`,
-     *     `binary %t = IW == 0`, and the count bump `binary %t = CNT + 1 ;
-     *     assign CNT <- %t`. Discover IW and CNT structurally. */
-    for (size_t k = h + 3; k < jmp_idx; k++) {
-      IRInstruction *m = &function->instructions[k];
-      /* count accumulator: `SYM = SYM + 1` where SYM is neither the induction
-       * variable (that is the loop latch `i = i + 1`) nor the byte temp. */
-      if (ir_wc_binary_is(m, "+", IR_OPERAND_TEMP) &&
-          m->lhs.kind == IR_OPERAND_SYMBOL && m->lhs.name &&
-          strcmp(m->lhs.name, iv) != 0 &&
-          strcmp(m->lhs.name, csym) != 0 &&
-          m->rhs.kind == IR_OPERAND_INT && m->rhs.int_value == 1 &&
-          k + 1 < jmp_idx &&
-          ir_wc_assign_sym_from_temp(&function->instructions[k + 1],
-                                     m->lhs.name) &&
-          function->instructions[k + 1].lhs.name && m->dest.name &&
-          strcmp(function->instructions[k + 1].lhs.name, m->dest.name) == 0) {
-        count = m->lhs.name;
-      }
-      if (m->op == IR_OP_ASSIGN && m->dest.kind == IR_OPERAND_SYMBOL &&
-          m->dest.name && m->lhs.kind == IR_OPERAND_INT &&
-          (m->lhs.int_value == 0 || m->lhs.int_value == 1)) {
-        /* candidate in_word writes; confirmed below via the == 0 test */
-      }
-      /* in_word flag: `IW == 0`, with IW distinct from c and the induction
-       * variable. (count is resolved in the same loop; we re-check disjointness
-       * after.) */
-      if (ir_wc_binary_is(m, "==", IR_OPERAND_TEMP) &&
-          m->lhs.kind == IR_OPERAND_SYMBOL && m->lhs.name &&
-          m->rhs.kind == IR_OPERAND_INT && m->rhs.int_value == 0 &&
-          strcmp(m->lhs.name, csym) != 0 &&
-          strcmp(m->lhs.name, iv) != 0) {
-        inword = m->lhs.name;
-      }
-    }
-    if (!count || !inword) {
-      continue;
-    }
-    /* All five roles must be distinct symbols, else the match is unsound. */
-    if (strcmp(count, inword) == 0 || strcmp(count, iv) == 0 ||
-        strcmp(count, len) == 0 || strcmp(count, buf) == 0 ||
-        strcmp(inword, iv) == 0 || strcmp(buf, len) == 0) {
-      continue;
-    }
-
-    /* (5) Latch: binary %t = iv + 1 ; assign iv <- %t ; jump head. We already
-     *     know jmp_idx; require the two instructions right before it. */
-    IRInstruction *inc = &function->instructions[jmp_idx - 2];
-    IRInstruction *inc_asn = &function->instructions[jmp_idx - 1];
-    if (!ir_wc_binary_is(inc, "+", IR_OPERAND_TEMP) ||
-        !ir_operand_is_symbol_named(&inc->lhs, iv) ||
-        inc->rhs.kind != IR_OPERAND_INT || inc->rhs.int_value != 1 ||
-        !ir_wc_assign_sym_from_temp(inc_asn, iv) || !inc->dest.name ||
-        !inc_asn->lhs.name ||
-        strcmp(inc_asn->lhs.name, inc->dest.name) != 0) {
-      continue;
-    }
-
-    /* Safety: between head and back-jump there must be no CALL other than the
-     * null-trap helper, and no STORE (would alias buf). */
-    int unsafe = 0;
-    for (size_t k = h + 1; k < jmp_idx; k++) {
-      IRInstruction *m = &function->instructions[k];
-      if (m->op == IR_OP_STORE) { unsafe = 1; break; }
-      if (m->op == IR_OP_CALL) {
-        if (!m->text || strcmp(m->text, "meth_runtime_debug_trap") != 0) {
-          unsafe = 1; break;
-        }
-      }
-      if (m->op == IR_OP_RETURN) { unsafe = 1; break; }
-    }
-    if (unsafe) {
-      continue;
-    }
-
-    /* ---- Confident match. Rewrite. ----
-     * Replace the loop body [head .. back-jump] with a single
-     *   count = count_word_starts(buf, len)
-     * (the result is added to count's prior value; the scalar init set
-     * count=0 before the loop, so this matches). The induction variable's
-     * post-loop value is dead in this idiom — the function returns count and
-     * exits — so we do NOT synthesize `iv = len`. Doing so risked clobbering
-     * a coalesced slot in inlined instances. Everything else in the range
-     * becomes NOP; the loop-exit label is preserved so control flow is
-     * unchanged. iv is intentionally unused now. */
-    (void)iv;
-    IRInstruction *slot0 = &function->instructions[h];
-
-    for (size_t k = h; k <= jmp_idx; k++) {
-      ir_instruction_make_nop(&function->instructions[k]);
-    }
-
-    slot0->op = IR_OP_COUNT_WORD_STARTS;
-    slot0->dest = ir_operand_symbol(count);
-    slot0->lhs = ir_operand_symbol(buf);
-    slot0->rhs = ir_operand_symbol(len);
-    slot0->text = NULL;
-
-    /* Re-create the loop-exit label so any branch to it still resolves. */
-    if (jmp_idx < function->instruction_count) {
-      IRInstruction *exslot = &function->instructions[jmp_idx];
-      exslot->op = IR_OP_LABEL;
-      free(exslot->text);
-      exslot->text = ir_opt_strdup(exit_label);
-      if (!exslot->text) {
+    if (o->kind == IR_OPERAND_TEMP && o->name) {
+      if (!ir_vec_expr_is_pure(fn, lo, hi, o->name, iv, acc, seen, seen_n,
+                               seen_cap, depth + 1)) {
         return 0;
       }
+      continue;
     }
-
-    (void)slot0;
-    if (changed) {
-      *changed = 1;
-    }
-    /* Continue scanning past the region we just rewrote so multiple matching
-     * loops in the same function (e.g. an inlined warm-up call and the timed
-     * benchmark call) are all vectorized in a single pass. The NOP'd range is
-     * stable in place, so resuming at jmp_idx is safe. */
-    h = jmp_idx;
+    return 0; /* string/float/label/none operand -> reject */
   }
-
   return 1;
 }
 
-static int ir_vectorize_word_count_pass(IRFunction *function, int *changed) {
-  return ir_try_vectorize_word_count(function, changed);
+/* Deep-clone instruction `src` into `out`, then within out rename:
+ *  - every TEMP name -> "<temp>__l<lane>" (lane-private SSA copies)
+ *  - the accumulator symbol `acc` -> symbol `acc_lane`
+ *  - reads of induction symbol `iv` are left as-is; the caller arranges that a
+ *    per-lane copy of i lives in `iv` for the duration of the lane body by
+ *    emitting `iv = i + lane` ... actually we instead pre-seed a temp; see
+ *    caller. Here we only do temp + acc renaming.
+ * `lane` selects the suffix; returns 0 on OOM. */
+static int ir_vec_clone_body_inst(const IRInstruction *src, IRInstruction *out,
+                                  int lane, const char *acc,
+                                  const char *acc_lane) {
+  if (!ir_clone_instruction_plain(src, out)) {
+    return 0;
+  }
+  IROperand *slots[3 + 8];
+  int n = 0;
+  slots[n++] = &out->dest;
+  slots[n++] = &out->lhs;
+  slots[n++] = &out->rhs;
+  for (size_t a = 0; a < out->argument_count && n < 3 + 8; a++) {
+    slots[n++] = &out->arguments[a];
+  }
+  for (int s = 0; s < n; s++) {
+    IROperand *o = slots[s];
+    if (o->kind == IR_OPERAND_TEMP && o->name) {
+      size_t len = strlen(o->name) + 16;
+      char *nn = malloc(len);
+      if (!nn) {
+        return 0;
+      }
+      snprintf(nn, len, "%s__l%d", o->name, lane);
+      free(o->name);
+      o->name = nn;
+    } else if (o->kind == IR_OPERAND_SYMBOL && o->name && acc &&
+               strcmp(o->name, acc) == 0) {
+      char *nn = ir_opt_strdup(acc_lane);
+      if (!nn) {
+        return 0;
+      }
+      free(o->name);
+      o->name = nn;
+    }
+  }
+  return 1;
+}
+
+/* Try to recognize and unroll a reduction loop whose header label is at index
+ * `h`. On success rewrites `function` and sets *changed. Always returns 1
+ * unless a hard (OOM) error occurs (returns 0). */
+static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
+                                           int *changed) {
+  IRInstruction *head = &function->instructions[h];
+  if (head->op != IR_OP_LABEL || !head->text) {
+    return 1;
+  }
+  const char *head_label = head->text;
+
+  /* locate back-jump J -> head, no nested header in between */
+  size_t J = (size_t)-1;
+  for (size_t k = h + 1; k < function->instruction_count; k++) {
+    IRInstruction *p = &function->instructions[k];
+    if (p->op == IR_OP_JUMP && p->text && strcmp(p->text, head_label) == 0) {
+      J = k;
+      break;
+    }
+    if (p->op == IR_OP_LABEL) {
+      /* a label inside is fine only if it is not another loop's header that
+       * also back-jumps; conservatively allow forward-only labels by not
+       * breaking, but a second header is rare here. */
+    }
+  }
+  if (J == (size_t)-1 || J < h + 5) {
+    return 1;
+  }
+
+  /* guard: binary %g = IV <op> BOUND ; branch_zero %g -> EXIT */
+  IRInstruction *g = &function->instructions[h + 1];
+  IRInstruction *gb = &function->instructions[h + 2];
+  int op_lt = ir_vec_binary_is(g, "<");
+  int op_le = ir_vec_binary_is(g, "<=");
+  if ((!op_lt && !op_le) || g->dest.kind != IR_OPERAND_TEMP || !g->dest.name ||
+      g->lhs.kind != IR_OPERAND_SYMBOL || !g->lhs.name ||
+      (g->rhs.kind != IR_OPERAND_SYMBOL && g->rhs.kind != IR_OPERAND_INT) ||
+      gb->op != IR_OP_BRANCH_ZERO || gb->lhs.kind != IR_OPERAND_TEMP ||
+      !gb->lhs.name || !gb->text ||
+      strcmp(gb->lhs.name, g->dest.name) != 0) {
+    return 1;
+  }
+  const char *iv = g->lhs.name;
+  const char *exit_label = gb->text;
+
+  /* latch: instructions[J-2] = binary %t = IV + 1 ; [J-1] = assign IV <- %t */
+  IRInstruction *inc = &function->instructions[J - 2];
+  IRInstruction *incs = &function->instructions[J - 1];
+  if (!ir_vec_binary_is(inc, "+") ||
+      !ir_operand_is_symbol_named(&inc->lhs, iv) ||
+      inc->rhs.kind != IR_OPERAND_INT || inc->rhs.int_value != 1 ||
+      inc->dest.kind != IR_OPERAND_TEMP || !inc->dest.name ||
+      !ir_vec_assign_sym_from_temp(incs, iv) ||
+      strcmp(incs->lhs.name, inc->dest.name) != 0) {
+    return 1;
+  }
+
+  /* body range is [h+3, J-2). Find the accumulator update:
+   *   binary %r = ACC + EXPRTMP ; assign ACC <- %r
+   * exactly once, ACC a symbol != iv. */
+  size_t body_lo = h + 3, body_hi = J - 2;
+  if (body_hi <= body_lo) {
+    return 1;
+  }
+  const char *acc = NULL;
+  const char *expr_root = NULL; /* temp feeding the + (the EXPR result) */
+  size_t acc_add_idx = (size_t)-1;
+  for (size_t k = body_lo; k + 1 < body_hi + 1 && k + 1 < J - 1; k++) {
+    IRInstruction *m = &function->instructions[k];
+    IRInstruction *st = &function->instructions[k + 1];
+    if (ir_vec_binary_is(m, "+") && m->dest.kind == IR_OPERAND_TEMP &&
+        m->dest.name && m->lhs.kind == IR_OPERAND_SYMBOL && m->lhs.name &&
+        strcmp(m->lhs.name, iv) != 0 && m->rhs.kind == IR_OPERAND_TEMP &&
+        m->rhs.name && ir_vec_assign_sym_from_temp(st, m->lhs.name) &&
+        strcmp(st->lhs.name, m->dest.name) == 0) {
+      if (acc) {
+        return 1; /* more than one accumulator update -> reject */
+      }
+      acc = m->lhs.name;
+      expr_root = m->rhs.name;
+      acc_add_idx = k;
+    }
+  }
+  if (!acc || !expr_root || strcmp(acc, iv) == 0) {
+    return 1;
+  }
+
+  /* ACC must be zero-initialized before the loop: search backward from h for
+   * the nearest `assign ACC <- 0` with no intervening write to ACC. */
+  int acc_zero_init = 0;
+  for (size_t bi = h; bi-- > 0;) {
+    IRInstruction *m = &function->instructions[bi];
+    if (m->op == IR_OP_ASSIGN && ir_operand_is_symbol_named(&m->dest, acc)) {
+      acc_zero_init =
+          (m->lhs.kind == IR_OPERAND_INT && m->lhs.int_value == 0);
+      break;
+    }
+    if (m->op == IR_OP_LABEL) {
+      /* crossing a label means control flow merges; be conservative */
+      break;
+    }
+  }
+  if (!acc_zero_init) {
+    return 1;
+  }
+
+  /* Validate EXPR purity (only iv/const/temps via +,-,*,cast) and that no
+   * body instruction (other than the acc add/store and latch) writes a symbol
+   * or has side effects (loads/stores/calls/returns/branches). */
+  char *seen[128];
+  size_t seen_n = 0;
+  if (!ir_vec_expr_is_pure(function, body_lo, body_hi, expr_root, iv, acc,
+                           seen, &seen_n, 128, 0)) {
+    return 1;
+  }
+  for (size_t k = body_lo; k < body_hi; k++) {
+    IRInstruction *m = &function->instructions[k];
+    if (k == acc_add_idx || k == acc_add_idx + 1) {
+      continue; /* the ACC = ACC + EXPR pair */
+    }
+    switch (m->op) {
+    case IR_OP_NOP:
+    case IR_OP_BINARY:
+    case IR_OP_CAST:
+      if (m->dest.kind == IR_OPERAND_SYMBOL) {
+        return 1; /* writes a symbol inside the body -> reject */
+      }
+      break;
+    default:
+      return 1; /* load/store/call/branch/label/etc -> reject */
+    }
+  }
+
+  /* ---- All checks passed: emit a K-way unrolled version. ----
+   *
+   * Layout produced (replacing instructions [h .. J]):
+   *
+   *   assign ACC1 <- 0 ; assign ACC2 <- 0 ; assign ACC3 <- 0   (ACC0 == ACC,
+   *                                                              already 0)
+   *   label HM
+   *     binary %ub = i + (K-1)
+   *     binary %gu = %ub <op> BOUND
+   *     branch_zero %gu -> HTAIL
+   *     <lane0 body: EXPR/acc with i, ACC>
+   *     <lane1 body: i+1, ACC1>  ... <lane K-1: i+(K-1), ACC(K-1)>
+   *     binary %st = i + K ; assign i <- %st
+   *     jump HM
+   *   label HTAIL
+   *     <original scalar loop verbatim>           (still accumulates into ACC)
+   *   label HCOMB
+   *     ACC = ACC + ACC1 ; ACC = ACC + ACC2 ; ACC = ACC + ACC3
+   *   label EXIT (recreated)
+   *
+   * For lane L>0 we substitute reads of `i` by a fresh temp holding (i+L) and
+   * the accumulator symbol by ACC<L>. Lane 0 reuses i and ACC unchanged.
+   *
+   * To keep this tractable and provably correct we build the new instruction
+   * stream in a local vector and splice it in, NOP-filling any leftover slots.
+   */
+
+  /* Helper to append a fully-formed instruction into a growable array. */
+  IRInstruction *out = NULL;
+  size_t out_n = 0, out_cap = 0;
+#define VEC_EMIT(INIT)                                                          \
+  do {                                                                         \
+    if (out_n >= out_cap) {                                                     \
+      size_t nc = out_cap ? out_cap * 2 : 64;                                   \
+      IRInstruction *np = realloc(out, nc * sizeof(IRInstruction));             \
+      if (!np) {                                                               \
+        for (size_t fi = 0; fi < out_n; fi++)                                   \
+          ir_instruction_destroy_storage(&out[fi]);                            \
+        free(out);                                                             \
+        return 0;                                                              \
+      }                                                                        \
+      out = np;                                                                 \
+      out_cap = nc;                                                             \
+    }                                                                          \
+    memset(&out[out_n], 0, sizeof(IRInstruction));                              \
+    INIT;                                                                       \
+    out_n++;                                                                    \
+  } while (0)
+
+  /* unique label/temp suffix from the header index keeps names collision-free
+   * across multiple unrolled loops in one function. */
+  char pre[32];
+  snprintf(pre, sizeof(pre), "vu%zu", h);
+  char buf[96];
+
+  /* accumulator names ACC, ACC__a1, ACC__a2, ... (lane 0 == acc itself). */
+  char *acc_name[IR_VEC_UNROLL];
+  acc_name[0] = (char *)acc;
+  for (int L = 1; L < IR_VEC_UNROLL; L++) {
+    snprintf(buf, sizeof(buf), "%s__a%d", acc, L);
+    acc_name[L] = ir_opt_strdup(buf);
+    if (!acc_name[L]) {
+      for (int q = 1; q < L; q++) free(acc_name[q]);
+      return 0;
+    }
+  }
+
+#define MKLBL(name, kind)                                                      \
+  snprintf(buf, sizeof(buf), "%s_%s_%s", pre, kind, name)
+
+  /* Find ACC's declared type so the synthetic accumulators get matching
+   * IR_OP_DECLARE_LOCAL entries (the binary backend only stores into symbols
+   * it has allocated a slot for). Default to int64 if no declaration is
+   * found (the reduction accumulator is always an integer here). */
+  const char *acc_type = "int64";
+  for (size_t di = 0; di < function->instruction_count; di++) {
+    IRInstruction *m = &function->instructions[di];
+    if (m->op == IR_OP_DECLARE_LOCAL &&
+        ir_operand_is_symbol_named(&m->dest, acc) && m->text) {
+      acc_type = m->text;
+      break;
+    }
+  }
+
+  /* declare + zero-init ACC1..ACC(K-1) */
+  for (int L = 1; L < IR_VEC_UNROLL; L++) {
+    VEC_EMIT({
+      out[out_n].op = IR_OP_DECLARE_LOCAL;
+      out[out_n].dest = ir_operand_symbol(acc_name[L]);
+      out[out_n].text = ir_opt_strdup(acc_type);
+      if (!out[out_n].text) { goto oom; }
+    });
+    VEC_EMIT({
+      out[out_n].op = IR_OP_ASSIGN;
+      out[out_n].dest = ir_operand_symbol(acc_name[L]);
+      out[out_n].lhs = ir_operand_int(0);
+    });
+  }
+
+  char hm[64], htail[64], hcomb[64];
+  snprintf(hm, sizeof(hm), "%s_main", pre);
+  snprintf(htail, sizeof(htail), "%s_tail", pre);
+  snprintf(hcomb, sizeof(hcomb), "%s_comb", pre);
+
+  /* label HM */
+  VEC_EMIT({ out[out_n].op = IR_OP_LABEL; out[out_n].text = ir_opt_strdup(hm); if(!out[out_n].text){goto oom;} });
+
+  /* %ub = i + (K-1) ; %gu = %ub <op> BOUND ; branch_zero %gu -> HTAIL */
+  char t_ub[64], t_gu[64];
+  snprintf(t_ub, sizeof(t_ub), "%s_ub", pre);
+  snprintf(t_gu, sizeof(t_gu), "%s_gu", pre);
+  VEC_EMIT({
+    out[out_n].op = IR_OP_BINARY; out[out_n].text = ir_opt_strdup("+");
+    if(!out[out_n].text){goto oom;}
+    out[out_n].dest = ir_operand_temp(t_ub);
+    out[out_n].lhs = ir_operand_symbol(iv);
+    out[out_n].rhs = ir_operand_int(IR_VEC_UNROLL - 1);
+  });
+  VEC_EMIT({
+    out[out_n].op = IR_OP_BINARY;
+    out[out_n].text = ir_opt_strdup(op_le ? "<=" : "<");
+    if(!out[out_n].text){goto oom;}
+    out[out_n].dest = ir_operand_temp(t_gu);
+    out[out_n].lhs = ir_operand_temp(t_ub);
+    if (g->rhs.kind == IR_OPERAND_INT)
+      out[out_n].rhs = ir_operand_int(g->rhs.int_value);
+    else
+      out[out_n].rhs = ir_operand_symbol(g->rhs.name);
+  });
+  VEC_EMIT({
+    out[out_n].op = IR_OP_BRANCH_ZERO;
+    out[out_n].lhs = ir_operand_temp(t_gu);
+    out[out_n].text = ir_opt_strdup(htail);
+    if(!out[out_n].text){goto oom;}
+  });
+
+  /* lane bodies */
+  for (int L = 0; L < IR_VEC_UNROLL; L++) {
+    /* lane-private i: temp ti_L = i + L  (L==0 uses i directly via no remap) */
+    char tiL[64];
+    if (L > 0) {
+      snprintf(tiL, sizeof(tiL), "%s_ti%d", pre, L);
+      VEC_EMIT({
+        out[out_n].op = IR_OP_BINARY; out[out_n].text = ir_opt_strdup("+");
+        if(!out[out_n].text){goto oom;}
+        out[out_n].dest = ir_operand_temp(tiL);
+        out[out_n].lhs = ir_operand_symbol(iv);
+        out[out_n].rhs = ir_operand_int(L);
+      });
+    }
+    /* clone body [body_lo, body_hi) with temp suffix __l<L> and acc->acc_name[L];
+     * additionally, for L>0 replace reads of symbol `iv` with temp tiL by a
+     * post-pass on the cloned operands. */
+    for (size_t k = body_lo; k < body_hi; k++) {
+      IRInstruction tmp;
+      if (!ir_vec_clone_body_inst(&function->instructions[k], &tmp, L, acc,
+                                  acc_name[L])) {
+        goto oom;
+      }
+      if (L > 0) {
+        IROperand *sl[3 + 8]; int sn = 0;
+        sl[sn++] = &tmp.dest; sl[sn++] = &tmp.lhs; sl[sn++] = &tmp.rhs;
+        for (size_t a = 0; a < tmp.argument_count && sn < 3 + 8; a++)
+          sl[sn++] = &tmp.arguments[a];
+        for (int s = 0; s < sn; s++) {
+          if (sl[s]->kind == IR_OPERAND_SYMBOL && sl[s]->name &&
+              strcmp(sl[s]->name, iv) == 0) {
+            char *nn = ir_opt_strdup(tiL);
+            if (!nn) { ir_instruction_destroy_storage(&tmp); goto oom; }
+            free(sl[s]->name); sl[s]->name = nn;
+            sl[s]->kind = IR_OPERAND_TEMP;
+          }
+        }
+      }
+      VEC_EMIT({ out[out_n] = tmp; });
+    }
+  }
+
+  /* i = i + K ; jump HM */
+  {
+    char t_st[64];
+    snprintf(t_st, sizeof(t_st), "%s_st", pre);
+    VEC_EMIT({
+      out[out_n].op = IR_OP_BINARY; out[out_n].text = ir_opt_strdup("+");
+      if(!out[out_n].text){goto oom;}
+      out[out_n].dest = ir_operand_temp(t_st);
+      out[out_n].lhs = ir_operand_symbol(iv);
+      out[out_n].rhs = ir_operand_int(IR_VEC_UNROLL);
+    });
+    VEC_EMIT({
+      out[out_n].op = IR_OP_ASSIGN;
+      out[out_n].dest = ir_operand_symbol(iv);
+      out[out_n].lhs = ir_operand_temp(t_st);
+    });
+    VEC_EMIT({ out[out_n].op = IR_OP_JUMP; out[out_n].text = ir_opt_strdup(hm); if(!out[out_n].text){goto oom;} });
+  }
+
+  /* label HTAIL : original scalar loop verbatim (instructions h..J), but with
+   * its header label renamed to a fresh one so the two loops don't collide,
+   * and its exit kept as exit_label. We simply clone the original range. */
+  VEC_EMIT({ out[out_n].op = IR_OP_LABEL; out[out_n].text = ir_opt_strdup(htail); if(!out[out_n].text){goto oom;} });
+  {
+    /* fresh header label for the scalar remainder loop */
+    char sh[64];
+    snprintf(sh, sizeof(sh), "%s_sh", pre);
+    for (size_t k = h; k <= J; k++) {
+      IRInstruction src = function->instructions[k];
+      IRInstruction tmp;
+      if (!ir_clone_instruction_plain(&src, &tmp)) {
+        goto oom;
+      }
+      /* rename the loop's own header label + back-jump target h->sh */
+      if (tmp.op == IR_OP_LABEL && tmp.text &&
+          strcmp(tmp.text, head_label) == 0) {
+        free(tmp.text); tmp.text = ir_opt_strdup(sh);
+        if(!tmp.text){ir_instruction_destroy_storage(&tmp);goto oom;}
+      }
+      if (tmp.op == IR_OP_JUMP && tmp.text &&
+          strcmp(tmp.text, head_label) == 0) {
+        free(tmp.text); tmp.text = ir_opt_strdup(sh);
+        if(!tmp.text){ir_instruction_destroy_storage(&tmp);goto oom;}
+      }
+      /* The remainder loop's exit must run the accumulator-combine before
+       * reaching the original exit label, so redirect its guard branch
+       * (branch_zero %g -> exit_label) to HCOMB. */
+      if (tmp.op == IR_OP_BRANCH_ZERO && tmp.text &&
+          strcmp(tmp.text, exit_label) == 0) {
+        free(tmp.text); tmp.text = ir_opt_strdup(hcomb);
+        if(!tmp.text){ir_instruction_destroy_storage(&tmp);goto oom;}
+      }
+      VEC_EMIT({ out[out_n] = tmp; });
+    }
+  }
+
+  /* label HCOMB ; ACC = ACC + ACC1 ; ... ; jump EXIT */
+  VEC_EMIT({ out[out_n].op = IR_OP_LABEL; out[out_n].text = ir_opt_strdup(hcomb); if(!out[out_n].text){goto oom;} });
+  for (int L = 1; L < IR_VEC_UNROLL; L++) {
+    char t_c[64];
+    snprintf(t_c, sizeof(t_c), "%s_c%d", pre, L);
+    VEC_EMIT({
+      out[out_n].op = IR_OP_BINARY; out[out_n].text = ir_opt_strdup("+");
+      if(!out[out_n].text){goto oom;}
+      out[out_n].dest = ir_operand_temp(t_c);
+      out[out_n].lhs = ir_operand_symbol(acc);
+      out[out_n].rhs = ir_operand_symbol(acc_name[L]);
+    });
+    VEC_EMIT({
+      out[out_n].op = IR_OP_ASSIGN;
+      out[out_n].dest = ir_operand_symbol(acc);
+      out[out_n].lhs = ir_operand_temp(t_c);
+    });
+  }
+  /* HCOMB falls straight through into the original exit label, which is
+   * preserved untouched in the spliced-in suffix (instructions after J). We
+   * deliberately do NOT re-emit exit_label here; doing so would duplicate it. */
+
+  /* ---- splice: replace [h .. J] (inclusive) with `out` ---- */
+  {
+    size_t old_span = J - h + 1;
+    size_t tail_n = function->instruction_count - (J + 1);
+    size_t new_count = h + out_n + tail_n;
+    IRInstruction *ni = calloc(new_count ? new_count : 1, sizeof(IRInstruction));
+    if (!ni) {
+      goto oom;
+    }
+    /* prefix [0,h) moved as-is */
+    for (size_t k = 0; k < h; k++) {
+      ni[k] = function->instructions[k];
+    }
+    /* destroy the replaced originals [h..J] */
+    for (size_t k = h; k <= J; k++) {
+      ir_instruction_destroy_storage(&function->instructions[k]);
+    }
+    /* new body */
+    for (size_t k = 0; k < out_n; k++) {
+      ni[h + k] = out[k];
+    }
+    /* suffix (J+1 .. end) */
+    for (size_t k = 0; k < tail_n; k++) {
+      ni[h + out_n + k] = function->instructions[J + 1 + k];
+    }
+    free(out);
+    free(function->instructions);
+    function->instructions = ni;
+    function->instruction_count = new_count;
+    function->instruction_capacity = new_count;
+    (void)old_span;
+  }
+
+  for (int L = 1; L < IR_VEC_UNROLL; L++) {
+    free(acc_name[L]);
+  }
+  if (changed) {
+    *changed = 1;
+  }
+  return 1;
+
+oom:
+  for (size_t fi = 0; fi < out_n; fi++) {
+    ir_instruction_destroy_storage(&out[fi]);
+  }
+  free(out);
+  for (int L = 1; L < IR_VEC_UNROLL; L++) {
+    free(acc_name[L]);
+  }
+  return 0;
+#undef VEC_EMIT
+#undef MKLBL
+}
+
+static int ir_reduction_unroll_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 1;
+  }
+  for (size_t h = 0; h + 5 < function->instruction_count; h++) {
+    if (function->instructions[h].op != IR_OP_LABEL) {
+      continue;
+    }
+    size_t before = function->instruction_count;
+    if (!ir_vec_try_unroll_reduction_at(function, h, changed)) {
+      return 0;
+    }
+    if (function->instruction_count != before) {
+      /* structure changed; restart scan to stay safe */
+      h = (size_t)-1;
+    }
+  }
+  return 1;
 }
 
 static int ir_unroll_small_const_bound_loops_pass(IRFunction *function,
@@ -4471,7 +4821,7 @@ static int ir_optimize_function(IRFunction *function) {
   for (int iteration = 0; iteration < 8; iteration++) {
     int changed = 0;
 
-    if (!ir_vectorize_word_count_pass(function, &changed) ||
+    if (!ir_reduction_unroll_pass(function, &changed) ||
         !ir_copy_and_constant_propagation_pass(function, &changed) ||
         !ir_fuse_rotate_add_pass(function, &changed) ||
         !ir_strength_reduce_rotate_loops_pass(function, &changed) ||
