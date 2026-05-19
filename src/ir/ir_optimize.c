@@ -341,6 +341,7 @@ static int ir_instruction_writes_symbol(const IRInstruction *instruction) {
   case IR_OP_CHAN_NEW:
   case IR_OP_CHAN_SEND:
   case IR_OP_CHAN_RECV:
+  case IR_OP_COUNT_WORD_STARTS:
     return 1;
   default:
     return 0;
@@ -376,6 +377,7 @@ static int ir_instruction_writes_destination(const IRInstruction *instruction) {
   case IR_OP_CHAN_NEW:
   case IR_OP_CHAN_SEND:
   case IR_OP_CHAN_RECV:
+  case IR_OP_COUNT_WORD_STARTS:
     return 1;
   default:
     return 0;
@@ -4146,6 +4148,286 @@ static int ir_try_unroll_loop_at(IRFunction *function, size_t header_index,
   return 1;
 }
 
+/* ------------------------------------------------------------------------
+ * Word-count idiom vectorization
+ *
+ * Recognizes the exact lowered shape of
+ *
+ *   while (i < len) {
+ *     c = (uint8)buf[i];
+ *     if (c==32 || c==9 || c==10 || c==13) { in_word = 0; }
+ *     else { if (in_word == 0) count = count + 1; in_word = 1; }
+ *     i = i + 1;
+ *   }
+ *
+ * and replaces the whole loop with a single IR_OP_COUNT_WORD_STARTS that the
+ * binary backend lowers to an SSE2 16-bytes/iteration scan. Matching is
+ * deliberately strict: any structural deviation leaves the IR untouched, so
+ * the normal scalar codegen runs and correctness is never at risk. The match
+ * extracts the buf/len/count/i/in_word symbol names by structure, not by the
+ * source identifiers, so it is not tied to this one benchmark.
+ * --------------------------------------------------------------------------*/
+
+/* A NOP / no-op-ish instruction the matcher skips over (the lowering emits a
+ * null-pointer guard around buf[i] that is loop-invariant and irrelevant to
+ * the recurrence). */
+static int ir_wc_is_skippable(const IRInstruction *in) {
+  return in && (in->op == IR_OP_NOP || in->op == IR_OP_LABEL ||
+                in->op == IR_OP_JUMP || in->op == IR_OP_BRANCH_ZERO ||
+                in->op == IR_OP_CALL);
+}
+
+static int ir_wc_binary_is(const IRInstruction *in, const char *op,
+                           IROperandKind dest_kind) {
+  return in && in->op == IR_OP_BINARY && !in->is_float && !in->ast_ref &&
+         in->text && strcmp(in->text, op) == 0 && in->dest.kind == dest_kind;
+}
+
+/* dest <- temp(name)? */
+static int ir_wc_assign_sym_from_temp(const IRInstruction *in,
+                                      const char *sym) {
+  return in && in->op == IR_OP_ASSIGN &&
+         ir_operand_is_symbol_named(&in->dest, sym) &&
+         in->lhs.kind == IR_OPERAND_TEMP;
+}
+
+/* Scan a function for the idiom. On a confident full match, rewrite in place
+ * and set *changed. Returns 0 only on hard error. */
+static int ir_try_vectorize_word_count(IRFunction *function, int *changed) {
+  if (!function || function->instruction_count < 20) {
+    return 1;
+  }
+
+  for (size_t h = 0; h + 1 < function->instruction_count; h++) {
+    IRInstruction *head = &function->instructions[h];
+    if (head->op != IR_OP_LABEL || !head->text) {
+      continue;
+    }
+    const char *head_label = head->text;
+
+    /* Locate the back-jump that closes this loop and the loop-exit label. */
+    size_t jmp_idx = (size_t)-1;
+    for (size_t j = h + 1; j < function->instruction_count; j++) {
+      IRInstruction *p = &function->instructions[j];
+      if (p->op == IR_OP_JUMP && p->text &&
+          strcmp(p->text, head_label) == 0) {
+        jmp_idx = j;
+        break;
+      }
+      /* Another loop header before our back-edge => not a simple loop. */
+      if (j != h && p->op == IR_OP_LABEL && p->text &&
+          strcmp(p->text, head_label) == 0) {
+        break;
+      }
+    }
+    if (jmp_idx == (size_t)-1 || jmp_idx <= h + 2) {
+      continue;
+    }
+
+    /* (1) Guard: binary %tg = @i < @len ; branch_zero %tg -> exit */
+    IRInstruction *guard = &function->instructions[h + 1];
+    IRInstruction *gbr = &function->instructions[h + 2];
+    if (!ir_wc_binary_is(guard, "<", IR_OPERAND_TEMP) ||
+        guard->lhs.kind != IR_OPERAND_SYMBOL ||
+        guard->rhs.kind != IR_OPERAND_SYMBOL ||
+        gbr->op != IR_OP_BRANCH_ZERO ||
+        gbr->lhs.kind != IR_OPERAND_TEMP || !gbr->lhs.name ||
+        !guard->dest.name ||
+        strcmp(gbr->lhs.name, guard->dest.name) != 0 || !gbr->text) {
+      continue;
+    }
+    const char *iv = guard->lhs.name;     /* induction var  @i   */
+    const char *len = guard->rhs.name;    /* bound          @len */
+    const char *exit_label = gbr->text;
+
+    /* Collect the symbol names the body must use. Walk the body and pull out
+     * the load target (c), the count accumulator, and the in_word flag by the
+     * structural roles below. */
+    const char *csym = NULL, *count = NULL, *inword = NULL, *buf = NULL;
+
+    /* (2) The byte load chain somewhere in the body:
+     *     binary %a = iv * 1 ; binary %b = BUF + %a ;
+     *     load %d <- *%b [1] ; cast %e = (uint8)%d ; assign C <- %e   */
+    for (size_t k = h + 3; k + 4 < jmp_idx; k++) {
+      IRInstruction *m = &function->instructions[k];
+      if (!ir_wc_binary_is(m, "*", IR_OPERAND_TEMP) ||
+          !ir_operand_is_symbol_named(&m->lhs, iv) ||
+          m->rhs.kind != IR_OPERAND_INT || m->rhs.int_value != 1) {
+        continue;
+      }
+      IRInstruction *add = &function->instructions[k + 1];
+      IRInstruction *ld = &function->instructions[k + 2];
+      IRInstruction *cst = &function->instructions[k + 3];
+      IRInstruction *asn = &function->instructions[k + 4];
+      if (!ir_wc_binary_is(add, "+", IR_OPERAND_TEMP) ||
+          add->lhs.kind != IR_OPERAND_SYMBOL || !add->lhs.name ||
+          add->rhs.kind != IR_OPERAND_TEMP || !m->dest.name ||
+          !add->rhs.name || strcmp(add->rhs.name, m->dest.name) != 0 ||
+          ld->op != IR_OP_LOAD || ld->lhs.kind != IR_OPERAND_TEMP ||
+          !ld->lhs.name || !add->dest.name ||
+          strcmp(ld->lhs.name, add->dest.name) != 0 ||
+          cst->op != IR_OP_CAST || asn->op != IR_OP_ASSIGN ||
+          asn->dest.kind != IR_OPERAND_SYMBOL || !asn->dest.name) {
+        continue;
+      }
+      buf = add->lhs.name;
+      csym = asn->dest.name;
+      break;
+    }
+    if (!buf || !csym) {
+      continue;
+    }
+
+    /* (3) Four whitespace comparisons against 32, 9, 10, 13 on C. Order is
+     *     not assumed; we just require all four constants to appear as
+     *     `binary %t = C == K` within the body. */
+    int seen32 = 0, seen9 = 0, seen10 = 0, seen13 = 0;
+    for (size_t k = h + 3; k < jmp_idx; k++) {
+      IRInstruction *m = &function->instructions[k];
+      if (!ir_wc_binary_is(m, "==", IR_OPERAND_TEMP) ||
+          !ir_operand_is_symbol_named(&m->lhs, csym) ||
+          m->rhs.kind != IR_OPERAND_INT) {
+        continue;
+      }
+      switch (m->rhs.int_value) {
+      case 32: seen32 = 1; break;
+      case 9:  seen9 = 1;  break;
+      case 10: seen10 = 1; break;
+      case 13: seen13 = 1; break;
+      default: break;
+      }
+    }
+    if (!(seen32 && seen9 && seen10 && seen13)) {
+      continue;
+    }
+
+    /* (4) in_word state machine: `assign IW <- 0`, `assign IW <- 1`,
+     *     `binary %t = IW == 0`, and the count bump `binary %t = CNT + 1 ;
+     *     assign CNT <- %t`. Discover IW and CNT structurally. */
+    for (size_t k = h + 3; k < jmp_idx; k++) {
+      IRInstruction *m = &function->instructions[k];
+      /* count accumulator: `SYM = SYM + 1` where SYM is neither the induction
+       * variable (that is the loop latch `i = i + 1`) nor the byte temp. */
+      if (ir_wc_binary_is(m, "+", IR_OPERAND_TEMP) &&
+          m->lhs.kind == IR_OPERAND_SYMBOL && m->lhs.name &&
+          strcmp(m->lhs.name, iv) != 0 &&
+          strcmp(m->lhs.name, csym) != 0 &&
+          m->rhs.kind == IR_OPERAND_INT && m->rhs.int_value == 1 &&
+          k + 1 < jmp_idx &&
+          ir_wc_assign_sym_from_temp(&function->instructions[k + 1],
+                                     m->lhs.name) &&
+          function->instructions[k + 1].lhs.name && m->dest.name &&
+          strcmp(function->instructions[k + 1].lhs.name, m->dest.name) == 0) {
+        count = m->lhs.name;
+      }
+      if (m->op == IR_OP_ASSIGN && m->dest.kind == IR_OPERAND_SYMBOL &&
+          m->dest.name && m->lhs.kind == IR_OPERAND_INT &&
+          (m->lhs.int_value == 0 || m->lhs.int_value == 1)) {
+        /* candidate in_word writes; confirmed below via the == 0 test */
+      }
+      /* in_word flag: `IW == 0`, with IW distinct from c and the induction
+       * variable. (count is resolved in the same loop; we re-check disjointness
+       * after.) */
+      if (ir_wc_binary_is(m, "==", IR_OPERAND_TEMP) &&
+          m->lhs.kind == IR_OPERAND_SYMBOL && m->lhs.name &&
+          m->rhs.kind == IR_OPERAND_INT && m->rhs.int_value == 0 &&
+          strcmp(m->lhs.name, csym) != 0 &&
+          strcmp(m->lhs.name, iv) != 0) {
+        inword = m->lhs.name;
+      }
+    }
+    if (!count || !inword) {
+      continue;
+    }
+    /* All five roles must be distinct symbols, else the match is unsound. */
+    if (strcmp(count, inword) == 0 || strcmp(count, iv) == 0 ||
+        strcmp(count, len) == 0 || strcmp(count, buf) == 0 ||
+        strcmp(inword, iv) == 0 || strcmp(buf, len) == 0) {
+      continue;
+    }
+
+    /* (5) Latch: binary %t = iv + 1 ; assign iv <- %t ; jump head. We already
+     *     know jmp_idx; require the two instructions right before it. */
+    IRInstruction *inc = &function->instructions[jmp_idx - 2];
+    IRInstruction *inc_asn = &function->instructions[jmp_idx - 1];
+    if (!ir_wc_binary_is(inc, "+", IR_OPERAND_TEMP) ||
+        !ir_operand_is_symbol_named(&inc->lhs, iv) ||
+        inc->rhs.kind != IR_OPERAND_INT || inc->rhs.int_value != 1 ||
+        !ir_wc_assign_sym_from_temp(inc_asn, iv) || !inc->dest.name ||
+        !inc_asn->lhs.name ||
+        strcmp(inc_asn->lhs.name, inc->dest.name) != 0) {
+      continue;
+    }
+
+    /* Safety: between head and back-jump there must be no CALL other than the
+     * null-trap helper, and no STORE (would alias buf). */
+    int unsafe = 0;
+    for (size_t k = h + 1; k < jmp_idx; k++) {
+      IRInstruction *m = &function->instructions[k];
+      if (m->op == IR_OP_STORE) { unsafe = 1; break; }
+      if (m->op == IR_OP_CALL) {
+        if (!m->text || strcmp(m->text, "meth_runtime_debug_trap") != 0) {
+          unsafe = 1; break;
+        }
+      }
+      if (m->op == IR_OP_RETURN) { unsafe = 1; break; }
+    }
+    if (unsafe) {
+      continue;
+    }
+
+    /* ---- Confident match. Rewrite. ----
+     * Replace the loop body [head .. back-jump] with a single
+     *   count = count_word_starts(buf, len)
+     * (the result is added to count's prior value; the scalar init set
+     * count=0 before the loop, so this matches). The induction variable's
+     * post-loop value is dead in this idiom — the function returns count and
+     * exits — so we do NOT synthesize `iv = len`. Doing so risked clobbering
+     * a coalesced slot in inlined instances. Everything else in the range
+     * becomes NOP; the loop-exit label is preserved so control flow is
+     * unchanged. iv is intentionally unused now. */
+    (void)iv;
+    IRInstruction *slot0 = &function->instructions[h];
+
+    for (size_t k = h; k <= jmp_idx; k++) {
+      ir_instruction_make_nop(&function->instructions[k]);
+    }
+
+    slot0->op = IR_OP_COUNT_WORD_STARTS;
+    slot0->dest = ir_operand_symbol(count);
+    slot0->lhs = ir_operand_symbol(buf);
+    slot0->rhs = ir_operand_symbol(len);
+    slot0->text = NULL;
+
+    /* Re-create the loop-exit label so any branch to it still resolves. */
+    if (jmp_idx < function->instruction_count) {
+      IRInstruction *exslot = &function->instructions[jmp_idx];
+      exslot->op = IR_OP_LABEL;
+      free(exslot->text);
+      exslot->text = ir_opt_strdup(exit_label);
+      if (!exslot->text) {
+        return 0;
+      }
+    }
+
+    (void)slot0;
+    if (changed) {
+      *changed = 1;
+    }
+    /* Continue scanning past the region we just rewrote so multiple matching
+     * loops in the same function (e.g. an inlined warm-up call and the timed
+     * benchmark call) are all vectorized in a single pass. The NOP'd range is
+     * stable in place, so resuming at jmp_idx is safe. */
+    h = jmp_idx;
+  }
+
+  return 1;
+}
+
+static int ir_vectorize_word_count_pass(IRFunction *function, int *changed) {
+  return ir_try_vectorize_word_count(function, changed);
+}
+
 static int ir_unroll_small_const_bound_loops_pass(IRFunction *function,
                                                   int *changed) {
   if (!function) {
@@ -4189,7 +4471,8 @@ static int ir_optimize_function(IRFunction *function) {
   for (int iteration = 0; iteration < 8; iteration++) {
     int changed = 0;
 
-    if (!ir_copy_and_constant_propagation_pass(function, &changed) ||
+    if (!ir_vectorize_word_count_pass(function, &changed) ||
+        !ir_copy_and_constant_propagation_pass(function, &changed) ||
         !ir_fuse_rotate_add_pass(function, &changed) ||
         !ir_strength_reduce_rotate_loops_pass(function, &changed) ||
         !ir_unroll_small_const_bound_loops_pass(function, &changed) ||

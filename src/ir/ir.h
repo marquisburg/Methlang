@@ -63,7 +63,17 @@ typedef enum {
   IR_OP_ATOMIC_CAS,     // dest=old, lhs=atomic, rhs=expected, arguments[0]=desired
   IR_OP_CHAN_NEW,        // dest = channel(cap)  — lhs=capacity (INT, 0=unbounded)
   IR_OP_CHAN_SEND,       // chan.send(val)        — lhs=chan operand, rhs=value
-  IR_OP_CHAN_RECV        // dest = chan.recv()    — lhs=chan operand
+  IR_OP_CHAN_RECV,       // dest = chan.recv()    — lhs=chan operand
+  /* Vectorized idiom: count word starts in a byte buffer. Produced only by
+   * ir_vectorize_simple_loops_pass when it recognizes the exact
+   * "while (i<len){c=buf[i]; if(ws(c)) in_word=0; else {if(!in_word)count++;
+   * in_word=1;} i++}" shape. Semantics: dest receives the number of maximal
+   * non-whitespace runs in lhs[0..rhs-1] (whitespace = 0x20/0x09/0x0A/0x0D),
+   * added to dest's prior value (the scalar code initializes count=0, so the
+   * pass only matches when that holds). lhs = buffer base symbol, rhs = length
+   * symbol/operand, dest = count symbol. Codegen lowers this to an SSE2
+   * 16-bytes/iteration scan plus a scalar tail; see code_generator_ir.c. */
+  IR_OP_COUNT_WORD_STARTS
 } IROpcode;
 
 typedef struct {

@@ -5607,6 +5607,384 @@ emit_failure:
   return 0;
 }
 
+/* ---- SSE2 / scalar byte encoders local to the word-count vectorizer ----
+ * Kept self-contained so the (verified) instruction encodings live next to
+ * the algorithm that depends on them. xmm regs used are 0..6 and GPRs are
+ * rax/rcx/rdx + r8..r11, so REX.R/B handling is explicit where r8..r15 or the
+ * SSE high regs would need it (here they do not, but the helpers stay
+ * general). All return 1 on success, 0 on OOM. */
+
+/* 66 0F <op> /r  — SSE2 packed op, xmm dst, xmm src (regs 0..7). */
+static int wcs_sse_66(BinaryCodeBuffer *b, unsigned char op,
+                      int dst, int src) {
+  return binary_code_buffer_append_u8(b, 0x66) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, op) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src & 7)));
+}
+
+/* F3 0F 6F /r — movdqu xmm, [rcx]  (mod=00, rm=001=rcx, no disp). */
+static int wcs_movdqu_xmm_rcx(BinaryCodeBuffer *b, int xmm) {
+  return binary_code_buffer_append_u8(b, 0xF3) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0x6F) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0x00 | ((xmm & 7) << 3) | 0x01));
+}
+
+/* 66 0F 6E /r — movd xmm, r32 (here src is always a low GPR 0..2,8,9). */
+static int wcs_movd_xmm_reg(BinaryCodeBuffer *b, int xmm, int gpr) {
+  return binary_code_buffer_append_u8(b, 0x66) &&
+         binary_emit_rex(b, 0, xmm >> 3, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0x6E) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((xmm & 7) << 3) | (gpr & 7)));
+}
+
+/* 66 0F 70 /r ib — pshufd xmm, xmm, imm8. */
+static int wcs_pshufd(BinaryCodeBuffer *b, int dst, int src,
+                      unsigned char imm) {
+  return binary_code_buffer_append_u8(b, 0x66) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0x70) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src & 7))) &&
+         binary_code_buffer_append_u8(b, imm);
+}
+
+/* 66 0F D7 /r — pmovmskb r32, xmm. dst is a GPR (0..15), src xmm 0..7. */
+static int wcs_pmovmskb(BinaryCodeBuffer *b, int gpr, int xmm) {
+  return binary_code_buffer_append_u8(b, 0x66) &&
+         binary_emit_rex(b, 0, gpr >> 3, 0, xmm >> 3) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0xD7) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((gpr & 7) << 3) | (xmm & 7)));
+}
+
+/* F3 0F B8 /r — popcnt r32, r32. */
+static int wcs_popcnt(BinaryCodeBuffer *b, int dst, int src) {
+  return binary_code_buffer_append_u8(b, 0xF3) &&
+         binary_emit_rex(b, 0, dst >> 3, 0, src >> 3) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0xB8) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src & 7)));
+}
+
+/* 0F B6 /r — movzx r32, byte [rcx]. */
+static int wcs_movzx_reg_byte_rcx(BinaryCodeBuffer *b, int gpr) {
+  return binary_emit_rex(b, 0, gpr >> 3, 0, 0) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0xB6) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0x00 | ((gpr & 7) << 3) | 0x01));
+}
+
+/* C1 /4 ib (shl) or /5 ib (shr) — r32, imm8. */
+static int wcs_shift_reg_imm(BinaryCodeBuffer *b, int gpr, int is_shr,
+                             unsigned char imm) {
+  return binary_emit_rex(b, 0, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0xC1) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((is_shr ? 5 : 4) << 3) |
+                                (gpr & 7))) &&
+         binary_code_buffer_append_u8(b, imm);
+}
+
+/* 09 /r — or r32, r32  (dst |= src). */
+static int wcs_or_reg_reg(BinaryCodeBuffer *b, int dst, int src) {
+  return binary_emit_rex(b, 0, src >> 3, 0, dst >> 3) &&
+         binary_code_buffer_append_u8(b, 0x09) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((src & 7) << 3) | (dst & 7)));
+}
+
+/* F7 /2 — not r32. */
+static int wcs_not_reg(BinaryCodeBuffer *b, int gpr) {
+  return binary_emit_rex(b, 0, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0xF7) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | (2 << 3) | (gpr & 7)));
+}
+
+/* 23 /r — and r32, r32 (dst &= src). */
+static int wcs_and_reg_reg(BinaryCodeBuffer *b, int dst, int src) {
+  return binary_emit_rex(b, 0, dst >> 3, 0, src >> 3) &&
+         binary_code_buffer_append_u8(b, 0x23) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src & 7)));
+}
+
+/* 89 /r — mov r32, r32 (dst = src). */
+static int wcs_mov_reg_reg32(BinaryCodeBuffer *b, int dst, int src) {
+  return binary_emit_rex(b, 0, src >> 3, 0, dst >> 3) &&
+         binary_code_buffer_append_u8(b, 0x89) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((src & 7) << 3) | (dst & 7)));
+}
+
+/* B8+r id — mov r32, imm32. */
+static int wcs_mov_reg_imm32(BinaryCodeBuffer *b, int gpr, uint32_t imm) {
+  return binary_emit_rex(b, 0, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xB8 + (gpr & 7))) &&
+         binary_code_buffer_append_u32(b, imm);
+}
+
+/* 48 01 /r — add r64, r64 (dst += src). */
+static int wcs_add_reg_reg64(BinaryCodeBuffer *b, int dst, int src) {
+  return binary_emit_rex(b, 1, src >> 3, 0, dst >> 3) &&
+         binary_code_buffer_append_u8(b, 0x01) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((src & 7) << 3) | (dst & 7)));
+}
+
+/* 48 83 /0 ib — add r64, imm8 ; or /5 for sub. */
+static int wcs_addsub_reg_imm8(BinaryCodeBuffer *b, int gpr, int is_sub,
+                               unsigned char imm) {
+  return binary_emit_rex(b, 1, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x83) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((is_sub ? 5 : 0) << 3) |
+                                (gpr & 7))) &&
+         binary_code_buffer_append_u8(b, imm);
+}
+
+/* 48 83 /7 ib — cmp r64, imm8 (sign-extended). */
+static int wcs_cmp_reg_imm8(BinaryCodeBuffer *b, int gpr, unsigned char imm) {
+  return binary_emit_rex(b, 1, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x83) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | (7 << 3) | (gpr & 7))) &&
+         binary_code_buffer_append_u8(b, imm);
+}
+
+/* 81 /7 id — cmp r32, imm32 (used for the tail byte compares). */
+static int wcs_cmp_reg_imm32(BinaryCodeBuffer *b, int gpr, uint32_t imm) {
+  return binary_emit_rex(b, 0, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x81) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | (7 << 3) | (gpr & 7))) &&
+         binary_code_buffer_append_u32(b, imm);
+}
+
+/* 85 /r — test r32, r32. */
+static int wcs_test_reg_reg32(BinaryCodeBuffer *b, int gpr) {
+  return binary_emit_rex(b, 0, gpr >> 3, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x85) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((gpr & 7) << 3) | (gpr & 7)));
+}
+
+/* 31 /r — xor r32, r32 (zero a reg via self-xor). */
+static int wcs_xor_self32(BinaryCodeBuffer *b, int gpr) {
+  return binary_emit_rex(b, 0, gpr >> 3, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x31) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((gpr & 7) << 3) | (gpr & 7)));
+}
+
+/* Emit a near jcc/jmp with a 32-bit rel placeholder; record the offset of the
+ * displacement field so it can be patched once the target is known. cc==0
+ * means an unconditional jmp (E9), otherwise 0F 8x. */
+static int wcs_jcc(BinaryCodeBuffer *b, unsigned char cc, size_t *disp_off) {
+  if (cc == 0) {
+    if (!binary_code_buffer_append_u8(b, 0xE9)) return 0;
+  } else {
+    if (!binary_code_buffer_append_u8(b, 0x0F) ||
+        !binary_code_buffer_append_u8(b, cc))
+      return 0;
+  }
+  *disp_off = b->size;
+  return binary_code_buffer_append_u32(b, 0);
+}
+
+/* Patch a rel32 placeholder so it jumps to the current end of the buffer. */
+static int wcs_patch_here(BinaryCodeBuffer *b, size_t disp_off) {
+  long long delta =
+      (long long)b->size - (long long)(disp_off + 4);
+  if (delta < INT32_MIN || delta > INT32_MAX) return 0;
+  int32_t d = (int32_t)delta;
+  memcpy(b->data + disp_off, &d, 4);
+  return 1;
+}
+
+/* Patch a rel32 placeholder to jump backward to a recorded target offset. */
+static int wcs_patch_to(BinaryCodeBuffer *b, size_t disp_off,
+                        size_t target) {
+  long long delta = (long long)target - (long long)(disp_off + 4);
+  if (delta < INT32_MIN || delta > INT32_MAX) return 0;
+  int32_t d = (int32_t)delta;
+  memcpy(b->data + disp_off, &d, 4);
+  return 1;
+}
+
+/* Lower IR_OP_COUNT_WORD_STARTS: count maximal non-whitespace runs in
+ * buf[0..len-1] (whitespace = 0x20/0x09/0x0A/0x0D), 16 bytes/iter via SSE2,
+ * plus a scalar tail. Result is ADDED to count's prior value (the recognizer
+ * only fires when the source set count=0 before the loop). Same algorithm as
+ * the text backend's code_generator_emit_ir_count_word_starts. */
+static int code_generator_binary_emit_count_word_starts(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  if (!generator || !context || !instruction ||
+      instruction->dest.kind != IR_OPERAND_SYMBOL ||
+      instruction->lhs.kind != IR_OPERAND_SYMBOL ||
+      instruction->rhs.kind != IR_OPERAND_SYMBOL) {
+    code_generator_set_error(generator, "Malformed count_word_starts in '%s'",
+                             context ? context->function_name : "?");
+    return 0;
+  }
+
+  BinaryCodeBuffer *b = &context->code;
+
+  /* rcx <- buf ; rdx <- len ; rax <- count ; r8d <- 0 (carry). */
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->lhs,
+                                               BINARY_GP_RCX) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->rhs,
+                                               BINARY_GP_RDX) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->dest,
+                                               BINARY_GP_RAX)) {
+    return 0;
+  }
+  if (!wcs_xor_self32(b, BINARY_GP_R8)) return 0;
+
+  /* Broadcast 0x20/0x09/0x0A/0x0D into xmm1..xmm4 (via r9d + movd + pshufd). */
+  static const struct { unsigned int pat; int xmm; } CONSTS[4] = {
+      {0x20202020u, 1}, {0x09090909u, 2}, {0x0A0A0A0Au, 3}, {0x0D0D0D0Du, 4}};
+  for (int i = 0; i < 4; i++) {
+    if (!wcs_mov_reg_imm32(b, BINARY_GP_R9, CONSTS[i].pat) ||
+        !wcs_movd_xmm_reg(b, CONSTS[i].xmm, BINARY_GP_R9) ||
+        !wcs_pshufd(b, CONSTS[i].xmm, CONSTS[i].xmm, 0x00)) {
+      return 0;
+    }
+  }
+
+  /* ---- vector loop: while (rdx >= 16) ---- */
+  size_t loop_top = b->size;
+  /* cmp rdx, 16 ; jb tail */
+  if (!wcs_cmp_reg_imm8(b, BINARY_GP_RDX, 16)) return 0;
+  size_t j_to_tail;
+  if (!wcs_jcc(b, 0x82 /* jb */, &j_to_tail)) return 0;
+
+  /* xmm0 = chunk ; xmm5 = copy ; xmm0 = (==sp) | (==tab) | (==lf) | (==cr) */
+  if (!wcs_movdqu_xmm_rcx(b, 0) ||
+      !wcs_sse_66(b, 0x6F, 5, 0) ||           /* movdqa xmm5, xmm0 */
+      !wcs_sse_66(b, 0x74, 0, 1) ||           /* pcmpeqb xmm0, xmm1 */
+      !wcs_sse_66(b, 0x6F, 6, 5) ||           /* movdqa xmm6, xmm5 */
+      !wcs_sse_66(b, 0x74, 6, 2) ||           /* pcmpeqb xmm6, xmm2 */
+      !wcs_sse_66(b, 0xEB, 0, 6) ||           /* por xmm0, xmm6 */
+      !wcs_sse_66(b, 0x6F, 6, 5) ||
+      !wcs_sse_66(b, 0x74, 6, 3) ||           /* pcmpeqb xmm6, xmm3 */
+      !wcs_sse_66(b, 0xEB, 0, 6) ||
+      !wcs_sse_66(b, 0x6F, 6, 5) ||
+      !wcs_sse_66(b, 0x74, 6, 4) ||           /* pcmpeqb xmm6, xmm4 */
+      !wcs_sse_66(b, 0xEB, 0, 6)) {
+    return 0;
+  }
+  /* r9d = ws bitmask ; r10d = nw = ~ws & 0xFFFF */
+  if (!wcs_pmovmskb(b, BINARY_GP_R9, 0) ||
+      !wcs_mov_reg_reg32(b, BINARY_GP_R10, BINARY_GP_R9) ||
+      !wcs_not_reg(b, BINARY_GP_R10) ||
+      !binary_emit_and_reg_imm32(b, BINARY_GP_R10, 0xFFFF)) {
+    return 0;
+  }
+  /* r11d = prev = (nw<<1) | carry */
+  if (!wcs_mov_reg_reg32(b, BINARY_GP_R11, BINARY_GP_R10) ||
+      !wcs_shift_reg_imm(b, BINARY_GP_R11, 0, 1) ||
+      !wcs_or_reg_reg(b, BINARY_GP_R11, BINARY_GP_R8)) {
+    return 0;
+  }
+  /* new carry r8d = nw bit15 */
+  if (!wcs_mov_reg_reg32(b, BINARY_GP_R8, BINARY_GP_R10) ||
+      !wcs_shift_reg_imm(b, BINARY_GP_R8, 1, 15) ||
+      !binary_emit_and_reg_imm32(b, BINARY_GP_R8, 1)) {
+    return 0;
+  }
+  /* starts = nw & ~prev ; count += popcount(starts) */
+  if (!wcs_not_reg(b, BINARY_GP_R11) ||
+      !wcs_and_reg_reg(b, BINARY_GP_R11, BINARY_GP_R10) ||
+      !binary_emit_and_reg_imm32(b, BINARY_GP_R11, 0xFFFF) ||
+      !wcs_popcnt(b, BINARY_GP_R11, BINARY_GP_R11) ||
+      !wcs_add_reg_reg64(b, BINARY_GP_RAX, BINARY_GP_R11)) {
+    return 0;
+  }
+  /* rcx += 16 ; rdx -= 16 ; jmp loop_top */
+  if (!wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 16) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 1, 16)) {
+    return 0;
+  }
+  size_t j_back;
+  if (!wcs_jcc(b, 0, &j_back)) return 0;
+  if (!wcs_patch_to(b, j_back, loop_top)) {
+    code_generator_set_error(generator, "wcs back-jump out of range");
+    return 0;
+  }
+
+  /* ---- scalar tail ---- */
+  if (!wcs_patch_here(b, j_to_tail)) return 0; /* jb -> here */
+  /* if (rdx == 0) goto done */
+  if (!wcs_cmp_reg_imm8(b, BINARY_GP_RDX, 0)) return 0;
+  size_t j_done_early;
+  if (!wcs_jcc(b, 0x84 /* je */, &j_done_early)) return 0;
+
+  size_t tail_top = b->size;
+  /* r9d = (uint8)[rcx] */
+  if (!wcs_movzx_reg_byte_rcx(b, BINARY_GP_R9)) return 0;
+  /* four "is whitespace?" tests -> collect je placeholders */
+  size_t j_ws[4];
+  static const unsigned int WS[4] = {32u, 9u, 10u, 13u};
+  for (int i = 0; i < 4; i++) {
+    if (!wcs_cmp_reg_imm32(b, BINARY_GP_R9, WS[i]) ||
+        !wcs_jcc(b, 0x84 /* je */, &j_ws[i])) {
+      return 0;
+    }
+  }
+  /* non-whitespace: if (carry==0) count++ ; carry=1 */
+  if (!wcs_test_reg_reg32(b, BINARY_GP_R8)) return 0;
+  size_t j_skip_inc;
+  if (!wcs_jcc(b, 0x85 /* jne */, &j_skip_inc)) return 0;
+  if (!wcs_addsub_reg_imm8(b, BINARY_GP_RAX, 0, 1)) return 0; /* rax += 1 */
+  if (!wcs_patch_here(b, j_skip_inc)) return 0;
+  if (!wcs_mov_reg_imm32(b, BINARY_GP_R8, 1)) return 0; /* carry = 1 */
+  size_t j_after_class;
+  if (!wcs_jcc(b, 0, &j_after_class)) return 0;
+  /* whitespace target: carry = 0 */
+  for (int i = 0; i < 4; i++) {
+    if (!wcs_patch_here(b, j_ws[i])) return 0;
+  }
+  if (!wcs_xor_self32(b, BINARY_GP_R8)) return 0; /* carry = 0 */
+  if (!wcs_patch_here(b, j_after_class)) return 0;
+  /* rcx++ ; rdx-- ; if (rdx != 0) goto tail_top */
+  if (!wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 1) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 1, 1)) {
+    return 0;
+  }
+  if (!wcs_cmp_reg_imm8(b, BINARY_GP_RDX, 0)) return 0;
+  size_t j_tail_back;
+  if (!wcs_jcc(b, 0x85 /* jne */, &j_tail_back)) return 0;
+  if (!wcs_patch_to(b, j_tail_back, tail_top)) {
+    code_generator_set_error(generator, "wcs tail-jump out of range");
+    return 0;
+  }
+
+  if (!wcs_patch_here(b, j_done_early)) return 0;
+
+  /* count = rax */
+  if (!code_generator_binary_emit_destination_store(generator, context,
+                                                    &instruction->dest,
+                                                    BINARY_GP_RAX)) {
+    return 0;
+  }
+  return 1;
+}
+
 static int code_generator_binary_emit_instruction(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IRInstruction *instruction) {
@@ -5877,6 +6255,10 @@ static int code_generator_binary_emit_instruction(
       return 0;
     }
     return 1;
+
+  case IR_OP_COUNT_WORD_STARTS:
+    return code_generator_binary_emit_count_word_starts(generator, context,
+                                                        instruction);
 
   default:
     code_generator_set_error(

@@ -1367,6 +1367,140 @@ static int code_generator_emit_ir_address_of(CodeGenerator *generator,
                                              temp_table);
 }
 
+/* SSE2 lowering of IR_OP_COUNT_WORD_STARTS for the text-assembly backend.
+ *
+ * Counts maximal non-whitespace runs in buf[0..len-1] (whitespace =
+ * space/tab/LF/CR), 16 bytes per iteration, plus a scalar tail. The result is
+ * ADDED to the prior value of the count symbol (the recognizer only fires when
+ * the source initialized count to 0, so this matches the scalar semantics).
+ *
+ * Register use: rcx=cursor, rdx=bytes remaining, rax=running count,
+ * r8d=carry (1 iff the byte immediately before the cursor was non-whitespace;
+ * 0 at the start, which is correct since position -1 counts as whitespace).
+ * Per chunk: ws-mask via 4x pcmpeqb+por, pmovmskb to a GPR, nw=~ws, a word
+ * start is a non-ws byte whose predecessor was ws, i.e. popcount(nw & ~prev)
+ * where prev = (nw<<1)|carry; carry for the next chunk = bit 15 of nw. */
+static int code_generator_emit_ir_count_word_starts(
+    CodeGenerator *generator, const IRInstruction *instruction) {
+  if (!generator || !instruction ||
+      instruction->dest.kind != IR_OPERAND_SYMBOL ||
+      instruction->lhs.kind != IR_OPERAND_SYMBOL ||
+      instruction->rhs.kind != IR_OPERAND_SYMBOL) {
+    code_generator_set_error(generator, "Malformed count_word_starts");
+    return 0;
+  }
+
+  char *l_vec = code_generator_generate_label(generator, "_wcs_vec");
+  char *l_tail = code_generator_generate_label(generator, "_wcs_tail");
+  char *l_tailloop = code_generator_generate_label(generator, "_wcs_tl");
+  char *l_done = code_generator_generate_label(generator, "_wcs_done");
+  char *l_ws = code_generator_generate_label(generator, "_wcs_ws");
+  if (!l_vec || !l_tail || !l_tailloop || !l_done || !l_ws) {
+    free(l_vec); free(l_tail); free(l_tailloop); free(l_done); free(l_ws);
+    code_generator_set_error(generator, "OOM in count_word_starts");
+    return 0;
+  }
+
+  /* rax <- current count value; rcx <- buf; rdx <- len. */
+  code_generator_load_variable(generator, instruction->lhs.name);
+  code_generator_emit(generator, "    mov rcx, rax\n");
+  code_generator_load_variable(generator, instruction->rhs.name);
+  code_generator_emit(generator, "    mov rdx, rax\n");
+  code_generator_load_variable(generator, instruction->dest.name);
+  code_generator_emit(generator, "    xor r8d, r8d\n");
+
+  /* Broadcast the four whitespace bytes into xmm1..xmm4. */
+  code_generator_emit(generator, "    mov r9d, 0x20202020\n");
+  code_generator_emit(generator, "    movd xmm1, r9d\n");
+  code_generator_emit(generator, "    pshufd xmm1, xmm1, 0\n");
+  code_generator_emit(generator, "    mov r9d, 0x09090909\n");
+  code_generator_emit(generator, "    movd xmm2, r9d\n");
+  code_generator_emit(generator, "    pshufd xmm2, xmm2, 0\n");
+  code_generator_emit(generator, "    mov r9d, 0x0A0A0A0A\n");
+  code_generator_emit(generator, "    movd xmm3, r9d\n");
+  code_generator_emit(generator, "    pshufd xmm3, xmm3, 0\n");
+  code_generator_emit(generator, "    mov r9d, 0x0D0D0D0D\n");
+  code_generator_emit(generator, "    movd xmm4, r9d\n");
+  code_generator_emit(generator, "    pshufd xmm4, xmm4, 0\n");
+
+  /* ---- vector loop: while (rdx >= 16) ---- */
+  code_generator_emit(generator, "%s:\n", l_vec);
+  code_generator_emit(generator, "    cmp rdx, 16\n");
+  code_generator_emit(generator, "    jb %s\n", l_tail);
+
+  code_generator_emit(generator, "    movdqu xmm0, [rcx]\n");
+  code_generator_emit(generator, "    movdqa xmm5, xmm0\n");
+  code_generator_emit(generator, "    pcmpeqb xmm0, xmm1\n");
+  code_generator_emit(generator, "    movdqa xmm6, xmm5\n");
+  code_generator_emit(generator, "    pcmpeqb xmm6, xmm2\n");
+  code_generator_emit(generator, "    por xmm0, xmm6\n");
+  code_generator_emit(generator, "    movdqa xmm6, xmm5\n");
+  code_generator_emit(generator, "    pcmpeqb xmm6, xmm3\n");
+  code_generator_emit(generator, "    por xmm0, xmm6\n");
+  code_generator_emit(generator, "    movdqa xmm6, xmm5\n");
+  code_generator_emit(generator, "    pcmpeqb xmm6, xmm4\n");
+  code_generator_emit(generator, "    por xmm0, xmm6\n");
+  /* r9d = ws bitmask (bit k set iff byte k is whitespace). */
+  code_generator_emit(generator, "    pmovmskb r9d, xmm0\n");
+  /* r10d = nw = ~ws restricted to 16 bits. */
+  code_generator_emit(generator, "    mov r10d, r9d\n");
+  code_generator_emit(generator, "    not r10d\n");
+  code_generator_emit(generator, "    and r10d, 0xFFFF\n");
+  /* r11d = prev = (nw<<1)|carry  (bit k = "byte k-1 was non-ws"). */
+  code_generator_emit(generator, "    mov r11d, r10d\n");
+  code_generator_emit(generator, "    shl r11d, 1\n");
+  code_generator_emit(generator, "    or r11d, r8d\n");
+  /* new carry = nw bit 15. */
+  code_generator_emit(generator, "    mov r8d, r10d\n");
+  code_generator_emit(generator, "    shr r8d, 15\n");
+  code_generator_emit(generator, "    and r8d, 1\n");
+  /* starts = nw & ~prev ; count += popcount(starts). */
+  code_generator_emit(generator, "    not r11d\n");
+  code_generator_emit(generator, "    and r11d, r10d\n");
+  code_generator_emit(generator, "    and r11d, 0xFFFF\n");
+  code_generator_emit(generator, "    popcnt r11d, r11d\n");
+  code_generator_emit(generator, "    add rax, r11\n");
+
+  code_generator_emit(generator, "    add rcx, 16\n");
+  code_generator_emit(generator, "    sub rdx, 16\n");
+  code_generator_emit(generator, "    jmp %s\n", l_vec);
+
+  /* ---- scalar tail: process remaining rdx (<16) bytes ---- */
+  code_generator_emit(generator, "%s:\n", l_tail);
+  code_generator_emit(generator, "    test rdx, rdx\n");
+  code_generator_emit(generator, "    jz %s\n", l_done);
+  code_generator_emit(generator, "%s:\n", l_tailloop);
+  /* r9d = byte; treat space/tab/LF/CR as whitespace. */
+  code_generator_emit(generator, "    movzx r9d, byte [rcx]\n");
+  code_generator_emit(generator, "    cmp r9d, 32\n");
+  code_generator_emit(generator, "    je %s\n", l_ws);
+  code_generator_emit(generator, "    cmp r9d, 9\n");
+  code_generator_emit(generator, "    je %s\n", l_ws);
+  code_generator_emit(generator, "    cmp r9d, 10\n");
+  code_generator_emit(generator, "    je %s\n", l_ws);
+  code_generator_emit(generator, "    cmp r9d, 13\n");
+  code_generator_emit(generator, "    je %s\n", l_ws);
+  /* non-whitespace: a word starts here iff carry==0 (prev was ws). */
+  code_generator_emit(generator, "    test r8d, r8d\n");
+  code_generator_emit(generator, "    jnz %s_nw\n", l_tailloop);
+  code_generator_emit(generator, "    add rax, 1\n");
+  code_generator_emit(generator, "%s_nw:\n", l_tailloop);
+  code_generator_emit(generator, "    mov r8d, 1\n");
+  code_generator_emit(generator, "    jmp %s_next\n", l_tailloop);
+  code_generator_emit(generator, "%s:\n", l_ws);
+  code_generator_emit(generator, "    xor r8d, r8d\n");
+  code_generator_emit(generator, "%s_next:\n", l_tailloop);
+  code_generator_emit(generator, "    add rcx, 1\n");
+  code_generator_emit(generator, "    sub rdx, 1\n");
+  code_generator_emit(generator, "    jnz %s\n", l_tailloop);
+
+  code_generator_emit(generator, "%s:\n", l_done);
+  code_generator_store_variable(generator, instruction->dest.name, "rax");
+
+  free(l_vec); free(l_tail); free(l_tailloop); free(l_done); free(l_ws);
+  return !generator->has_error;
+}
+
 static int code_generator_emit_ir_load(CodeGenerator *generator,
                                        const IRInstruction *instruction,
                                        IRTempTable *temp_table) {
@@ -3688,6 +3822,9 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
     // All thread opcodes are lowered to IR_OP_CALL in the lowering pass.
     // If they arrive here, emit as a call using instruction->text as target.
     return code_generator_emit_ir_call(generator, instruction, temp_table);
+
+  case IR_OP_COUNT_WORD_STARTS:
+    return code_generator_emit_ir_count_word_starts(generator, instruction);
 
   default:
     code_generator_set_error(generator, "Unhandled IR opcode: %d",

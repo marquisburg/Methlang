@@ -392,6 +392,7 @@ static const char *ir_opcode_name(IROpcode op) {
   case IR_OP_CHAN_NEW:          return "chan_new";
   case IR_OP_CHAN_SEND:         return "chan_send";
   case IR_OP_CHAN_RECV:         return "chan_recv";
+  case IR_OP_COUNT_WORD_STARTS: return "count_word_starts";
   default:
     return "unknown";
   }
@@ -583,6 +584,10 @@ int ir_program_dump(IRProgram *program, FILE *output) {
         break;
       case IR_OP_CHAN_RECV:
         fprintf(output, "%s %s = chan_recv(%s)\n", ir_opcode_name(instruction->op), dest, lhs);
+        break;
+      case IR_OP_COUNT_WORD_STARTS:
+        fprintf(output, "%s %s = count_word_starts(buf=%s, len=%s)\n",
+                ir_opcode_name(instruction->op), dest, lhs, rhs);
         break;
       case IR_OP_NOP:
       default:
