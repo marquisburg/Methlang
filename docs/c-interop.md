@@ -34,7 +34,7 @@ function main() -> int32 {
 With the internal linker, common Windows DLLs are probed directly:
 
 ```bash
-mettle --build --emit-obj --linker internal main.mettle -o main.exe
+mettle --build main.mettle -o main.exe
 ```
 
 The default native import set includes `kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, `ucrtbase`, and `msvcrt`. If you call APIs from another DLL, pass it with `--link-arg -lname` for DLL export probing or a `.lib` path for import-library resolution.
@@ -62,12 +62,12 @@ On Windows, the recommended path is to let Mettle do the assemble/link step for 
 
 ```bash
 mettle --build main.mettle -o main.exe
-mettle --build --emit-obj --linker internal main.mettle -o main.exe
+mettle --build main.mettle -o main.exe
 ```
 
 When using the internal linker, common Win32 APIs and the C runtime resolve without external C toolchains. Use `--link-arg -lcustomdll` or `--link-arg path/to/custom.lib` for additional DLLs/import libraries.
 
-If you use the manual assembly/link flow, link the compiled assembly with the C runtime and any required libraries. For programs using `new` (GC), include the bundled `gc.o` in the link. Example:
+If you use the manual assembly/link flow, link the compiled assembly with the C runtime and any required libraries. For programs using `new` or heap-backed string helpers, include the bundled `gc.o` runtime object in the link. Example:
 
 ```bash
 # Windows (manual GCC link)

@@ -165,15 +165,15 @@ async fn worker() -> int32 {
 
 ## Allocation
 
-The `new` expression allocates a value on the GC heap and returns a pointer. In the normal Windows flow, `mettle --build` links the bundled GC runtime automatically. The pointer is managed; no explicit `free` is needed. The GC performs conservative mark-and-sweep collection. See [Garbage Collector](garbage-collector.md) for details.
+The `new` expression allocates a zero-initialized value on the bundled heap runtime and returns a pointer. In the normal Windows flow, `mettle --build` links that runtime automatically. Allocations are retained until `gc_shutdown` frees the tracked heap at process teardown. See [Heap Allocator Runtime](heap-allocator-runtime.md) for details.
 
 ```mettle
 var p: MyStruct* = new MyStruct;
 ```
 
-**Initialization:** `new` allocates memory that is **zeroed**. All bytes of the allocated object are set to zero before the pointer is returned. This avoids uninitialized pointer-shaped values that could confuse the conservative GC scanner.
+**Initialization:** `new` allocates memory that is **zeroed**. All bytes of the allocated object are set to zero before the pointer is returned.
 
-**Allocation failure:** `gc_alloc` does not return null on failure. If allocation fails (e.g. out of memory), it first attempts a GC collection and retries. If allocation still fails, it prints a fatal error and exits the process. The `new` expression never yields a null pointer in normal operation.
+**Allocation failure:** `gc_alloc` does not return null on failure for nonzero allocations. If allocation fails (e.g. out of memory), it prints a fatal error and exits the process. The `new` expression never yields a null pointer in normal operation.
 
 ## Expression Evaluation Order
 
@@ -211,6 +211,6 @@ Comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) produce `int32` with val
 
 ## String Expressions
 
-**Concatenation:** The `+` operator concatenates two `string` values. Both operands must be `string`; the result is a new GC-managed string whose `.chars` points to a freshly allocated buffer and whose `.length` is the sum of the operand lengths. Because the runtime allocates via `gc_alloc`, use `mettle --build` or otherwise link the bundled GC runtime before using string concatenation or other heap-backed string helpers. `gc_init` is handled automatically by the generated entry point.
+**Concatenation:** The `+` operator concatenates two `string` values. Both operands must be `string`; the result is a heap-backed string whose `.chars` points to a freshly allocated buffer and whose `.length` is the sum of the operand lengths. Because the runtime allocates via `gc_alloc`, use `mettle --build` or otherwise link the bundled heap runtime before using string concatenation or other heap-backed string helpers. `gc_init` is handled automatically by the generated entry point.
 
 **Indexing:** Use `s.chars[i]` to access the i-th byte of a string. The `.chars` field is a pointer; indexing advances by 1 byte (element size of `uint8`). Pointer indexing is not bounds-checked; ensure `i < s.length` to avoid undefined behavior.

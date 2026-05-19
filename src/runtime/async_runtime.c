@@ -284,13 +284,6 @@ int64_t meth_coro_task_create(MethCoroStepFn step_fn, void *state) {
   task->done = 0;
   task->queued = 0;
 
-  /*
-   * Keep coroutine frame/state reachable by GC for the full task lifetime.
-   * The caller's Future<T> handle may transiently live only in registers while
-   * awaiting, so task runtime ownership must be an explicit root.
-   */
-  gc_register_root((void **)&task->state);
-
   AcquireSRWLockExclusive(&g_meth_coro_task_runtime.lock);
   task->next_all = g_meth_coro_task_runtime.all_head;
   g_meth_coro_task_runtime.all_head = task;
@@ -348,7 +341,6 @@ int32_t meth_coro_task_destroy(int64_t task_handle) {
   }
   ReleaseSRWLockExclusive(&g_meth_coro_task_runtime.lock);
 
-  gc_unregister_root((void **)&target->state);
   free(target);
   return 1;
 }
@@ -918,13 +910,6 @@ int64_t meth_coro_task_create(MethCoroStepFn step_fn, void *state) {
   task->done = 0;
   task->queued = 0;
 
-  /*
-   * Keep coroutine frame/state reachable by GC for the full task lifetime.
-   * The caller's Future<T> handle may transiently live only in registers while
-   * awaiting, so task runtime ownership must be an explicit root.
-   */
-  gc_register_root((void **)&task->state);
-
   pthread_mutex_lock(&g_meth_coro_task_runtime.lock);
   task->next_all = g_meth_coro_task_runtime.all_head;
   g_meth_coro_task_runtime.all_head = task;
@@ -983,7 +968,6 @@ int32_t meth_coro_task_destroy(int64_t task_handle) {
   }
   pthread_mutex_unlock(&g_meth_coro_task_runtime.lock);
 
-  gc_unregister_root((void **)&target->state);
   free(target);
   return 1;
 }
@@ -2165,4 +2149,3 @@ int32_t meth_async_state(const char *ctx) {
   }
   return meth_async_atomic_load_i32((volatile int32_t *)&header->state);
 }
-

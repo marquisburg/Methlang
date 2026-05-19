@@ -352,7 +352,7 @@ static void print_doc_reference(const char *argv0, const char *relative_path) {
 
 /* Single source of truth for the help-topic list. Referenced by print_usage,
  * the topic dispatcher, and the unknown-topic error so they cannot drift. */
-#define METTLE_HELP_TOPICS "build, gc, interop, stdlib, web"
+#define METTLE_HELP_TOPICS "build, heap, gc, interop, stdlib, web"
 
 static int print_help_topic(const char *program_name, const char *argv0,
                             const char *topic) {
@@ -396,16 +396,17 @@ static int print_help_topic(const char *program_name, const char *argv0,
     return 0;
   }
 
-  if (strcmp(topic, "gc") == 0 || strcmp(topic, "runtime") == 0) {
-    printf("gc - garbage collector and runtime linking\n\n");
+  if (strcmp(topic, "gc") == 0 || strcmp(topic, "heap") == 0 ||
+      strcmp(topic, "runtime") == 0) {
+    printf("heap - heap allocator runtime linking\n\n");
     printf("  Emitted assembly calls gc_alloc/gc_init; it does not contain "
-           "the GC implementation itself.\n");
+           "the heap runtime implementation itself.\n");
     printf("  mettle --build links the bundled runtime automatically.\n");
     printf("  Manual assembly/linking still requires the bundled runtime "
            "objects (link gc.o yourself).\n");
-    printf("  Anything using new or GC-backed string concatenation needs the "
+    printf("  Anything using new or heap-backed string concatenation needs the "
            "runtime: use --build or link gc.o manually.\n");
-    print_doc_reference(argv0, "garbage-collector.md");
+    print_doc_reference(argv0, "heap-allocator-runtime.md");
     return 0;
   }
 
@@ -945,7 +946,7 @@ static int object_has_undefined_symbol_prefix(const char *object_path,
   return found;
 }
 
-static int object_needs_gc_runtime(const char *object_path) {
+static int object_needs_heap_runtime(const char *object_path) {
   return object_has_undefined_symbol_prefix(object_path, "gc_") ||
          object_has_undefined_symbol_prefix(object_path, "meth_runtime_") ||
          object_has_undefined_symbol_prefix(object_path, "meth_async_") ||
@@ -1618,7 +1619,7 @@ static int mettle_build_executable(const char *asm_filename,
 
   if (_access(gc_gcc_object, 0) != 0 && _access(gc_msvc_object, 0) != 0) {
     fprintf(stderr,
-            "Error: Bundled GC runtime object not found in '%s'\n",
+            "Error: Bundled heap runtime object not found in '%s'\n",
             runtime_directory);
     free(gcc_object_filename);
     free(msvc_object_filename);
@@ -1649,7 +1650,7 @@ static int mettle_build_executable(const char *asm_filename,
     if (run_nasm_assemble(asm_filename, msvc_object_filename) != 0) {
       goto cleanup;
     }
-    needs_gc = object_needs_gc_runtime(msvc_object_filename);
+    needs_gc = object_needs_heap_runtime(msvc_object_filename);
     needs_thread = object_needs_thread_runtime(msvc_object_filename);
     needs_entry = object_needs_mettle_entry(msvc_object_filename);
     if (needs_gc) {
@@ -1820,7 +1821,7 @@ static int mettle_link_object_file(const char *object_filename,
 
   if (_access(gc_gcc_object, 0) != 0 && _access(gc_msvc_object, 0) != 0) {
     fprintf(stderr,
-            "Error: Bundled GC runtime object not found in '%s'\n",
+            "Error: Bundled heap runtime object not found in '%s'\n",
             runtime_directory);
     free(gc_gcc_object);
     free(async_gcc_object);
@@ -1841,7 +1842,7 @@ static int mettle_link_object_file(const char *object_filename,
     const char *thread_object = NULL;
     char *startup_object = replace_extension(executable_filename, ".startup.obj");
     size_t object_count = 0u;
-    int needs_gc = object_needs_gc_runtime(object_filename);
+    int needs_gc = object_needs_heap_runtime(object_filename);
     int needs_thread = object_needs_thread_runtime(object_filename);
     int startup_ready = 0;
 
@@ -2030,10 +2031,10 @@ int main(int argc, char *argv[]) {
       if (argc >= 3) {
         return print_help_topic(argv[0], argv[0], argv[2]);
       }
-      printf("Mettle documentation topics: build, gc, interop, stdlib, web\n");
+      printf("Mettle documentation topics: build, heap, gc, interop, stdlib, web\n");
       print_doc_reference(argv[0], "LANGUAGE.md");
       print_doc_reference(argv[0], "compilation.md");
-      print_doc_reference(argv[0], "garbage-collector.md");
+      print_doc_reference(argv[0], "heap-allocator-runtime.md");
       return 0;
     }
   }

@@ -17,7 +17,7 @@ The **`pool`** model is **not** a coroutine/event-loop model: it is explicit fut
 | Call result | `T` | `Future<T>` |
 | Execution start | Runs immediately on the caller thread | Evaluates arguments, allocates task context, enqueues task on the async executor |
 | Wait behavior | Caller stays inside the call until return | Caller gets a future immediately; `await` waits later |
-| Runtime requirement | None beyond normal program/runtime needs | Requires the bundled async runtime and GC runtime (coroutine model also relies on coroutine/IOCP pieces in the same async runtime object where applicable) |
+| Runtime requirement | None beyond normal program/runtime needs | Requires the bundled async runtime and heap runtime (coroutine model also relies on coroutine/IOCP pieces in the same async runtime object where applicable) |
 
 ## Declaring Functions
 
@@ -78,7 +78,7 @@ The following describes the **`pool`** lowering model (default). The **`coroutin
 An async call still evaluates its arguments at the call site, but instead of returning the payload immediately it:
 
 1. Evaluates the arguments.
-2. Allocates a runtime-owned async context on the managed heap.
+2. Allocates a runtime-owned async context on the bundled heap runtime.
 3. Copies argument values into that context.
 4. Enqueues work on the async executor.
 5. Returns a `Future<T>` handle immediately.
@@ -328,21 +328,21 @@ The safe mental model is:
 
 Typical code should still keep ownership simple: create a future, pass it deliberately, and avoid inventing ad-hoc aliasing patterns unless you really need them.
 
-## GC and Runtime Interaction
+## Heap Runtime Interaction
 
 Async execution is tied to the runtime:
 
-- async task contexts are allocated on the managed heap,
+- async task contexts are allocated through the bundled heap runtime,
 - the async runtime object is required for `async`, `await`, `cancel`, and `cancelled`,
-- executor worker threads attach to the GC automatically.
+- executor worker threads call the compatibility heap attach/detach hooks automatically.
 
 This means:
 
 - `mettle --build` is the easiest way to build async code on Windows,
 - manual link flows must include the bundled runtime objects,
-- user-created threads still need explicit `gc_thread_attach()` / `gc_thread_detach()`.
+- `gc_thread_attach()` / `gc_thread_detach()` remain compatibility no-ops for older thread wrappers.
 
-Worker teardown always runs `gc_thread_detach()` on worker-thread exit paths. For embedding, shut down async runtime before `gc_shutdown()` so worker detach/join is complete before GC global teardown.
+Worker teardown still runs `gc_thread_detach()` on worker-thread exit paths for ABI compatibility. For embedding, shut down async runtime before `gc_shutdown()` so workers are joined before heap runtime memory is released.
 
 ## Coroutine reactor preview (C runtime API)
 
@@ -409,7 +409,7 @@ When the program uses async features, the build links the bundled async runtime 
 
 ### Manual Assembly/Link Flow
 
-If you assemble and link manually, async programs need both the GC runtime and the async runtime:
+If you assemble and link manually, async programs need both the heap runtime and the async runtime:
 
 ```bash
 mettle app.mettle -o app.s
@@ -487,15 +487,11 @@ Current internal lowering behavior:
 - Suspend points are collected from `await` sites and persisted as coroutine-frame metadata (`resume_state`, `suspend_count`) in the generated async context.
 - Locals that must survive suspension are carried via the heap async context, so values remain available across resumes.
 
-GC/root visibility note:
-
-- Coroutine-frame visibility still relies on the generated context-object field layout and current runtime scanning behavior; a separate standalone root-map artifact is not exposed as a user-facing format yet.
-
 ## See Also
 
 - [Declarations](declarations.md) for async function syntax
 - [Types](types.md) for `Future<T>`
 - [Expressions](expressions.md) for `await`, `cancel`, and `cancelled`
 - [Compilation](compilation.md) for runtime/build requirements
-- [Garbage Collector](garbage-collector.md) for thread attachment details
+- [Heap Allocator Runtime](heap-allocator-runtime.md) for allocation/runtime details
 - [Known Limitations](known-limitations.md) for current async caveats

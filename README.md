@@ -67,7 +67,7 @@ in, one executable out.
 - Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`); line (`//`) and nesting block (`/* */`) comments
 - Async execution with `async`, `await`, `Future<T>`, and cooperative cancellation (default **pool** executor; optional experimental **`--async-model coroutine`** with a portable reactor: IOCP on Windows, `poll(2)` on POSIX; see `docs/async.md`)
 - C interop via `extern` and `cstring`
-- Optional conservative GC runtime for `new` and GC-backed string concatenation
+- Bundled heap allocator runtime for `new` and heap-backed string concatenation
 - Standard library modules for I/O, conversion, networking, process, threading, and more
 - Developer-friendly diagnostics: stable error codes, source snippets with carets, and scope-aware "did you mean?" suggestions for typos
 - Cross-platform symbolized crash tracebacks (Windows SEH and POSIX signal handlers)
@@ -83,18 +83,18 @@ in, one executable out.
 1. Build an executable with the native Windows path:
 
 ```powershell
-.\bin\mettle.exe --build --emit-obj --linker internal hello.mettle -o hello.exe
+.\bin\mettle.exe --build hello.mettle -o hello.exe
 .\hello.exe
 ```
 
-This path does not require `NASM`, `gcc`, or `link.exe` for the target build. Plain `--build` still defaults to the assembly-based auto path unless you also pass `--emit-obj`.
+This path does not require `NASM`, `gcc`, or `link.exe` for the target build.
 
 No project-local `stdlib/` folder is required. The compiler auto-loads the stdlib bundled with the Mettle installation/build output. Use `--stdlib <dir>` only when you want to override that.
 
 For production builds, use `--release`:
 
 ```powershell
-.\bin\mettle.exe --build --emit-obj --linker internal --release hello.mettle -o hello.exe
+.\bin\mettle.exe --build --release hello.mettle -o hello.exe
 ```
 
 `--release` enables `-O`, strips assembly comments, removes unreachable functions, and lowers without generated runtime null/bounds trap checks.
@@ -132,23 +132,24 @@ Use the CLI help/docs commands to jump to the right topic quickly:
 
 ```powershell
 .\bin\mettle.exe help
-.\bin\mettle.exe help gc
+.\bin\mettle.exe help heap
 .\bin\mettle.exe help build
 .\bin\mettle.exe docs
 ```
 
-Available topics: `build`, `gc`, `interop`, `stdlib`, `web`.
+Available topics: `build`, `heap`, `gc`, `interop`, `stdlib`, `web`.
 
 ## Runtime and Linking Notes
 
-- `mettle --build --emit-obj --linker internal` uses the bundled runtime objects plus Mettle's internal PE linker on Windows.
-- `mettle --build` in `auto` mode tries the internal linker first and falls back to external linkers if needed.
+- `mettle --build` uses the bundled runtime objects plus Mettle's internal PE linker on Windows.
+- `mettle --build --linker auto` tries the internal linker first and falls back to external linkers if needed.
+- `mettle --build --emit-asm` selects the legacy NASM assembly path.
 - If you use the manual assembly/link flow, link bundled `runtime/gc.o` from your Mettle installation when using `new` or string concatenation.
 - If you use async features, also link bundled `runtime/async_runtime.o`.
 - Compile with `-s` to embed runtime crash traceback support, or use `-d` to enable it alongside normal debug output.
 - On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated runtime traps with Meth function/source frames.
 - The internal PE linker resolves common Win32 DLLs directly; use `--link-arg` only for additional DLLs/import libraries.
-- For GC use from worker threads, use `gc_thread_attach` and `gc_thread_detach`.
+- `gc_thread_attach` and `gc_thread_detach` remain compatibility no-ops for older worker-thread code.
 
 Example runtime crash output:
 
@@ -209,7 +210,7 @@ See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](d
 - Control flow: [docs/control-flow.md](docs/control-flow.md)
 - Async and sync execution: [docs/async.md](docs/async.md)
 - C interop: [docs/c-interop.md](docs/c-interop.md)
-- Garbage collector: [docs/garbage-collector.md](docs/garbage-collector.md)
+- Heap allocator runtime: [docs/heap-allocator-runtime.md](docs/heap-allocator-runtime.md)
 - Standard library: [docs/standard-library.md](docs/standard-library.md)
 
 ## Quick Dev Commands

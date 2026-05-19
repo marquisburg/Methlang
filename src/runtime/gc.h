@@ -22,12 +22,12 @@ typedef struct {
 } MethRuntimeLocationInfo;
 
 /**
- * @brief Initialize the garbage collector.
+ * @brief Initialize heap allocation runtime state.
  *
- * Captures the base of the stack to anchor the root scanning phase.
- * Handled automatically in the entry point built by Mettle.
+ * Kept as a compatibility entry point for generated programs.
+ * Heap allocation no longer performs tracing or root scanning.
  *
- * @param stack_base Pointer to the bottom (highest address) of the stack.
+ * @param stack_base Ignored.
  */
 void gc_init(void *stack_base);
 void meth_runtime_debug_install_crash_handler(void);
@@ -175,22 +175,21 @@ int32_t meth_coro_task_run_one(int32_t timeout_ms);
 int32_t meth_coro_task_is_done(int64_t task_handle);
 
 /**
- * @brief Attach the current thread to the GC runtime.
+ * @brief Attach the current thread to the heap runtime.
  *
- * Registers the calling thread so GC runtime bookkeeping remains consistent
- * when allocations happen from worker threads.
+ * Compatibility no-op. Allocations are thread-safe without thread attachment.
  */
 int32_t gc_thread_attach(void);
 
 /**
- * @brief Detach the current thread from the GC runtime.
+ * @brief Detach the current thread from the heap runtime.
  *
- * Call this before a worker thread exits.
+ * Compatibility no-op.
  */
 int32_t gc_thread_detach(void);
 
 /**
- * @brief Allocate tracked memory on the heap.
+ * @brief Allocate zeroed tracked memory on the heap.
  *
  * @param size The number of bytes to allocate.
  * @return void* Pointer to the allocated memory.
@@ -198,76 +197,68 @@ int32_t gc_thread_detach(void);
 void *gc_alloc(size_t size);
 
 /**
- * @brief Run a garbage collection cycle.
+ * @brief Compatibility no-op.
  *
- * Performs a conservative mark-and-sweep starting from the current stack
- * pointer up to the anchor stack base.
- *
- * @param current_rsp The current stack pointer at the time of invocation.
+ * @param current_rsp Ignored.
  */
 void gc_collect(void *current_rsp);
 
 /**
- * @brief Cooperative safepoint poll for mutator threads.
+ * @brief Compatibility no-op.
  *
- * Generated code should call this at safe poll points (for example, function
- * entry) so GC can stop the world and capture each thread stack.
- *
- * @param current_rsp Approximate current stack pointer of caller frame.
+ * @param current_rsp Ignored.
  */
 void gc_safepoint(void *current_rsp);
 
 /**
- * @brief Register a pointer slot as a GC root.
+ * @brief Compatibility no-op.
  *
- * The slot should point to a variable that stores a managed pointer.
+ * Root registration is not used because heap allocations are no longer traced.
  */
 void gc_register_root(void **root_slot);
 
 /**
- * @brief Unregister a previously registered root slot.
+ * @brief Compatibility no-op.
  */
 void gc_unregister_root(void **root_slot);
 
 /**
- * @brief Run a garbage collection cycle using the current stack frame as root.
- *
- * Convenience wrapper around gc_collect().
+ * @brief Compatibility no-op.
  */
 void gc_collect_now(void);
 
 /**
- * @brief Set the auto-collection threshold in bytes.
+ * @brief Set the retained allocation threshold diagnostic value.
  *
- * When tracked allocated bytes reach this threshold, gc_alloc() will attempt
- * a collection before allocating a new block.
+ * This value is retained for embedders/tests that query it. It does not trigger
+ * collection.
  */
 void gc_set_collection_threshold(size_t bytes);
 
 /**
- * @brief Get the current auto-collection threshold in bytes.
+ * @brief Get the retained allocation threshold diagnostic value.
  */
 size_t gc_get_collection_threshold(void);
 
 /**
- * @brief Get the number of currently tracked allocations.
+ * @brief Get the number of currently tracked heap allocations.
  */
 size_t gc_get_allocation_count(void);
 
 /**
- * @brief Get the total bytes currently allocated and tracked by GC.
+ * @brief Get the total bytes currently tracked by the heap runtime.
  */
 size_t gc_get_allocated_bytes(void);
 
 /**
- * @brief Get the number of currently retained TLAB chunks across threads.
+ * @brief Compatibility diagnostic for the removed TLAB allocator.
  *
- * Primarily useful for runtime diagnostics and tests.
+ * Always returns 0.
  */
 size_t gc_get_tlab_chunk_count(void);
 
 /**
- * @brief Free all tracked allocations and reset collector state.
+ * @brief Free all tracked allocations and reset heap runtime state.
  */
 void gc_shutdown(void);
 

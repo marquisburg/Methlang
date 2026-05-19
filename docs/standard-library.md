@@ -18,7 +18,7 @@ Console and file I/O. `puts` writes a null-terminated string and appends a newli
 
 ## std/mem
 
-Memory management. C runtime functions: `malloc`, `calloc`, `realloc`, `free`, `memset`, `memcpy`, `memmove`, `memcmp`. Helpers: `alloc_zeroed` (allocate and zero-initialize), `buf_dup` (allocate and copy a buffer). Use `malloc` for buffers, C interop, or when the GC is not linked. Use `new` for Mettle struct instances that should be garbage-collected. See [Garbage Collector](garbage-collector.md).
+Memory management. C runtime functions: `malloc`, `calloc`, `realloc`, `free`, `memset`, `memcpy`, `memmove`, `memcmp`. Helpers: `alloc_zeroed` (allocate and zero-initialize), `buf_dup` (allocate and copy a buffer). Use `malloc`/`free` for buffers, C interop, and explicit lifetimes. Use `new` for zero-initialized Mettle struct instances retained by the bundled heap runtime until shutdown. See [Heap Allocator Runtime](heap-allocator-runtime.md).
 
 ## std/math
 
@@ -115,5 +115,4 @@ The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process
 ```bash
 mettle --prelude main.mettle -o main.s
 ```
-
 

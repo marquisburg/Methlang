@@ -1,7 +1,7 @@
 // Mettle standard library: Memory
 //
 // Raw memory management and buffer operations.
-// For GC-managed heap objects, use the `new` keyword instead.
+// For runtime-tracked heap objects, use the `new` keyword instead.
 
 // ─── C runtime memory functions ─────────────────────────────────────────────
 export extern function malloc(size: int64) -> cstring = "malloc";

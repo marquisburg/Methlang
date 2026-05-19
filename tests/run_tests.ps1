@@ -693,12 +693,6 @@ $cases = @(
   },
   @{ Name = "defer_complex_interleaving"; Path = "tests/test_defer_complex_interleaving.mettle"; ShouldSucceed = $true },
   @{
-    Name            = "warn_gc_escape_extern"
-    Path            = "tests/test_warn_gc_escape_extern.mettle"
-    ShouldSucceed   = $true
-    OutputMustMatch = @("Managed pointer passed to extern function 'sink' may escape GC visibility")
-  },
-  @{
     Name            = "warn_recv_buffer_extent"
     Path            = "tests/test_warn_recv_buffer_extent.mettle"
     ShouldSucceed   = $true
@@ -2898,26 +2892,26 @@ catch {
 if (-not $SkipRuntime) {
   $total++
   try {
-    $runtimeExe = "bin\gc_runtime_test.exe"
-    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\gc_runtime_test.c src\runtime\gc.c -o $runtimeExe
+    $runtimeExe = "bin\heap_runtime_test.exe"
+    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\heap_runtime_test.c src\runtime\gc.c -o $runtimeExe
     if ($LASTEXITCODE -ne 0) {
-      throw "Failed to compile GC runtime test"
+      throw "Failed to compile heap runtime test"
     }
 
     $runtimeOutput = & $runtimeExe 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
-      throw "GC runtime test exited with code $LASTEXITCODE"
+      throw "Heap runtime test exited with code $LASTEXITCODE"
     }
 
-    if ($runtimeOutput -notmatch "GC runtime tests passed") {
-      throw "GC runtime test output did not contain pass marker"
+    if ($runtimeOutput -notmatch "Heap runtime tests passed") {
+      throw "Heap runtime test output did not contain pass marker"
     }
 
-    Write-CaseResult -Name "gc_runtime" -Passed $true
+    Write-CaseResult -Name "heap_runtime" -Passed $true
   }
   catch {
     $failed++
-    Write-CaseResult -Name "gc_runtime" -Passed $false -Reason $_.Exception.Message
+    Write-CaseResult -Name "heap_runtime" -Passed $false -Reason $_.Exception.Message
   }
 
   $total++

@@ -13,7 +13,7 @@ Mettle is a typed, assembly-inspired language that compiles to x86-64 assembly. 
 7. [Modules](modules.md)
 8. [Imports](imports.md)
 9. [Standard Library](standard-library.md)
-10. [Garbage Collector](garbage-collector.md)
+10. [Heap Allocator Runtime](heap-allocator-runtime.md)
 11. [C Interoperability](c-interop.md)
 12. [Compilation](compilation.md)
 13. [Quick Reference](quick-reference.md)

@@ -463,7 +463,7 @@ static int test_shutdown_drain_timeout_then_abort(void) {
   return 1;
 }
 
-static void test_init_gc_runtime(void) {
+static void test_init_heap_runtime(void) {
 #if defined(__GNUC__) || defined(__clang__)
   gc_init(__builtin_frame_address(0));
 #else
@@ -475,7 +475,7 @@ static void test_init_gc_runtime(void) {
 int main(void) {
   int passed = 1;
 
-  test_init_gc_runtime();
+  test_init_heap_runtime();
   if (!test_runtime_prepare(1, 4)) {
     fprintf(stderr, "FAIL: unable to configure async runtime before start\n");
     return 1;

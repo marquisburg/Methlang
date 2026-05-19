@@ -47,7 +47,7 @@ export function thread_sleep_ms(milliseconds: uint32) {
   Sleep(milliseconds);
 }
 
-// GC lifecycle helpers for worker threads.
+// Compatibility heap-runtime lifecycle helpers for worker threads.
 // Call thread_gc_attach() near the beginning of a worker entry function
 // and thread_gc_detach() just before thread exit.
 export function thread_gc_attach() {

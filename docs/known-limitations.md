@@ -38,13 +38,13 @@ Cancellation is cooperative only. `cancel(future)` sets a flag; the async task m
 
 Async runtime shutdown is explicit for embedders. Call `meth_async_runtime_shutdown(...)` before `gc_shutdown()`. If a task ignores cooperative cancellation forever, graceful drain/abort can time out instead of forcing unsafe thread termination.
 
-Coroutine frame GC visibility currently comes from lifted frame locals stored as fields on the heap async context plus conservative scanning. A separate precise coroutine root-map format is not implemented yet.
+Heap allocations from `new`, string concatenation, and async task contexts are retained until `gc_shutdown`; there is no tracing collector.
 
 Unreachable code analysis is currently block-local and conservative; some dead paths in complex control-flow may not be diagnosed yet.
 
-String concatenation via `+` is now supported, but it allocates via the GC runtime (`gc_alloc`). Use `mettle --build` or otherwise link the bundled GC runtime before using `string + string`.
+String concatenation via `+` is now supported, but it allocates via the heap runtime (`gc_alloc`). Use `mettle --build` or otherwise link the bundled heap runtime before using `string + string`.
 
-Managed pointers that cross into C remain a hazard. The compiler now warns when a managed struct pointer is passed to an `extern function` or stored in an `extern` variable, but C code that retains such pointers must still register the storage slot with `gc_register_root`.
+Pointers that cross into C remain an ownership hazard. C code that takes ownership of manually allocated buffers must still follow the C library's allocation/free contract; `new` allocations are released only by `gc_shutdown`.
 
 No conditional imports. All `import` directives are unconditional; there is no platform or flag-based import.
 

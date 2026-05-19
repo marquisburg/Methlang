@@ -89,9 +89,9 @@ function main() -> int32 {
 }
 ```
 
-## With GC and Structs
+## With Heap Allocation and Structs
 
-Uses `new` for heap allocation. `mettle --build` links the bundled GC/runtime automatically on Windows. Async programs use the same bundled runtime flow. See [Garbage Collector](garbage-collector.md) and [Async and Sync Execution](async.md).
+Uses `new` for zero-initialized heap allocation. `mettle --build` links the bundled heap/runtime objects automatically on Windows. Async programs use the same bundled runtime flow. See [Heap Allocator Runtime](heap-allocator-runtime.md) and [Async and Sync Execution](async.md).
 
 ```mettle
 struct Point {

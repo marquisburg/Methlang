@@ -874,11 +874,11 @@ static int code_generator_try_emit_ir_compare_branch_register_fastpath(
   return 1;
 }
 
-static int ir_call_skips_entry_safepoint(const char *callee_name) {
+static int ir_call_ignores_register_promotion_barrier(const char *callee_name) {
   if (!callee_name) {
     return 0;
   }
-  /* Pure native helpers: no GC roots, no cooperative safepoint contract. */
+  /* Pure native helpers that do not clobber promoted arithmetic state. */
   if (strcmp(callee_name, "meth_runtime_debug_trap") == 0 ||
       strcmp(callee_name, "GetTickCount64") == 0) {
     return 1;
@@ -886,7 +886,7 @@ static int ir_call_skips_entry_safepoint(const char *callee_name) {
   return 0;
 }
 
-static int ir_function_requires_entry_safepoint(const IRFunction *function) {
+static int ir_function_blocks_register_promotion(const IRFunction *function) {
   if (!function) {
     return 0;
   }
@@ -898,7 +898,8 @@ static int ir_function_requires_entry_safepoint(const IRFunction *function) {
     }
 
     if (instruction->op == IR_OP_CALL) {
-      if (instruction->text && ir_call_skips_entry_safepoint(instruction->text)) {
+      if (instruction->text &&
+          ir_call_ignores_register_promotion_barrier(instruction->text)) {
         continue;
       }
       return 1;
@@ -4048,7 +4049,8 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
 
   const size_t max_promoted =
       sizeof(IR_PROMOTION_REGISTERS) / sizeof(IR_PROMOTION_REGISTERS[0]);
-  int function_has_no_calls = !ir_function_requires_entry_safepoint(ir_function);
+  int function_has_no_calls =
+      !ir_function_blocks_register_promotion(ir_function);
 
   if (function_has_no_calls) {
     for (size_t insn_i = 0;
@@ -4203,250 +4205,6 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
     }
     code_generator_emit(generator, "    mov [rbp - %d], %s\n",
                         promoted_symbols[i].save_offset, reg_name);
-  }
-
-  if (ir_function_requires_entry_safepoint(ir_function)) {
-    {
-    CallingConventionSpec *conv_spec =
-        generator->register_allocator
-            ? generator->register_allocator->calling_convention
-            : NULL;
-    const char *first_param_reg = "rdi";
-    if (conv_spec && conv_spec->int_param_count > 0) {
-      const char *candidate =
-          code_generator_get_register_name(conv_spec->int_param_registers[0]);
-      if (candidate) {
-        first_param_reg = candidate;
-      }
-    }
-    if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
-      code_generator_emit(generator,
-                          "    ; Spill GPRs so GC sees register-held roots\n");
-      code_generator_emit(generator, "    push rax\n");
-      code_generator_emit(generator, "    push rbx\n");
-      code_generator_emit(generator, "    push rcx\n");
-      code_generator_emit(generator, "    push rdx\n");
-      code_generator_emit(generator, "    push rsi\n");
-      code_generator_emit(generator, "    push rdi\n");
-      code_generator_emit(generator, "    push r8\n");
-      code_generator_emit(generator, "    push r9\n");
-      code_generator_emit(generator, "    push r10\n");
-      code_generator_emit(generator, "    push r11\n");
-      code_generator_emit(generator, "    push r12\n");
-      code_generator_emit(generator, "    push r13\n");
-      code_generator_emit(generator, "    push r14\n");
-      code_generator_emit(generator, "    push r15\n");
-      code_generator_emit(generator,
-                          "    ; Spill XMM registers for conservative root scan\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    sub rsp, 512\n");
-#else
-      code_generator_emit(generator, "    sub rsp, 256\n");
-#endif
-      code_generator_emit(generator, "    movdqu [rsp + 0], xmm0\n");
-      code_generator_emit(generator, "    movdqu [rsp + 16], xmm1\n");
-      code_generator_emit(generator, "    movdqu [rsp + 32], xmm2\n");
-      code_generator_emit(generator, "    movdqu [rsp + 48], xmm3\n");
-      code_generator_emit(generator, "    movdqu [rsp + 64], xmm4\n");
-      code_generator_emit(generator, "    movdqu [rsp + 80], xmm5\n");
-      code_generator_emit(generator, "    movdqu [rsp + 96], xmm6\n");
-      code_generator_emit(generator, "    movdqu [rsp + 112], xmm7\n");
-      code_generator_emit(generator, "    movdqu [rsp + 128], xmm8\n");
-      code_generator_emit(generator, "    movdqu [rsp + 144], xmm9\n");
-      code_generator_emit(generator, "    movdqu [rsp + 160], xmm10\n");
-      code_generator_emit(generator, "    movdqu [rsp + 176], xmm11\n");
-      code_generator_emit(generator, "    movdqu [rsp + 192], xmm12\n");
-      code_generator_emit(generator, "    movdqu [rsp + 208], xmm13\n");
-      code_generator_emit(generator, "    movdqu [rsp + 224], xmm14\n");
-      code_generator_emit(generator, "    movdqu [rsp + 240], xmm15\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    movdqu [rsp + 256], xmm16\n");
-      code_generator_emit(generator, "    movdqu [rsp + 272], xmm17\n");
-      code_generator_emit(generator, "    movdqu [rsp + 288], xmm18\n");
-      code_generator_emit(generator, "    movdqu [rsp + 304], xmm19\n");
-      code_generator_emit(generator, "    movdqu [rsp + 320], xmm20\n");
-      code_generator_emit(generator, "    movdqu [rsp + 336], xmm21\n");
-      code_generator_emit(generator, "    movdqu [rsp + 352], xmm22\n");
-      code_generator_emit(generator, "    movdqu [rsp + 368], xmm23\n");
-      code_generator_emit(generator, "    movdqu [rsp + 384], xmm24\n");
-      code_generator_emit(generator, "    movdqu [rsp + 400], xmm25\n");
-      code_generator_emit(generator, "    movdqu [rsp + 416], xmm26\n");
-      code_generator_emit(generator, "    movdqu [rsp + 432], xmm27\n");
-      code_generator_emit(generator, "    movdqu [rsp + 448], xmm28\n");
-      code_generator_emit(generator, "    movdqu [rsp + 464], xmm29\n");
-      code_generator_emit(generator, "    movdqu [rsp + 480], xmm30\n");
-      code_generator_emit(generator, "    movdqu [rsp + 496], xmm31\n");
-#endif
-      code_generator_emit(generator, "    sub rsp, 32\n");
-      code_generator_emit(generator, "    mov %s, rsp\n", first_param_reg);
-      code_generator_emit(generator, "    extern gc_safepoint\n");
-      code_generator_emit(generator, "    call gc_safepoint\n");
-      code_generator_emit(generator, "    add rsp, 32\n");
-      code_generator_emit(generator, "    movdqu xmm0, [rsp + 0]\n");
-      code_generator_emit(generator, "    movdqu xmm1, [rsp + 16]\n");
-      code_generator_emit(generator, "    movdqu xmm2, [rsp + 32]\n");
-      code_generator_emit(generator, "    movdqu xmm3, [rsp + 48]\n");
-      code_generator_emit(generator, "    movdqu xmm4, [rsp + 64]\n");
-      code_generator_emit(generator, "    movdqu xmm5, [rsp + 80]\n");
-      code_generator_emit(generator, "    movdqu xmm6, [rsp + 96]\n");
-      code_generator_emit(generator, "    movdqu xmm7, [rsp + 112]\n");
-      code_generator_emit(generator, "    movdqu xmm8, [rsp + 128]\n");
-      code_generator_emit(generator, "    movdqu xmm9, [rsp + 144]\n");
-      code_generator_emit(generator, "    movdqu xmm10, [rsp + 160]\n");
-      code_generator_emit(generator, "    movdqu xmm11, [rsp + 176]\n");
-      code_generator_emit(generator, "    movdqu xmm12, [rsp + 192]\n");
-      code_generator_emit(generator, "    movdqu xmm13, [rsp + 208]\n");
-      code_generator_emit(generator, "    movdqu xmm14, [rsp + 224]\n");
-      code_generator_emit(generator, "    movdqu xmm15, [rsp + 240]\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    movdqu xmm16, [rsp + 256]\n");
-      code_generator_emit(generator, "    movdqu xmm17, [rsp + 272]\n");
-      code_generator_emit(generator, "    movdqu xmm18, [rsp + 288]\n");
-      code_generator_emit(generator, "    movdqu xmm19, [rsp + 304]\n");
-      code_generator_emit(generator, "    movdqu xmm20, [rsp + 320]\n");
-      code_generator_emit(generator, "    movdqu xmm21, [rsp + 336]\n");
-      code_generator_emit(generator, "    movdqu xmm22, [rsp + 352]\n");
-      code_generator_emit(generator, "    movdqu xmm23, [rsp + 368]\n");
-      code_generator_emit(generator, "    movdqu xmm24, [rsp + 384]\n");
-      code_generator_emit(generator, "    movdqu xmm25, [rsp + 400]\n");
-      code_generator_emit(generator, "    movdqu xmm26, [rsp + 416]\n");
-      code_generator_emit(generator, "    movdqu xmm27, [rsp + 432]\n");
-      code_generator_emit(generator, "    movdqu xmm28, [rsp + 448]\n");
-      code_generator_emit(generator, "    movdqu xmm29, [rsp + 464]\n");
-      code_generator_emit(generator, "    movdqu xmm30, [rsp + 480]\n");
-      code_generator_emit(generator, "    movdqu xmm31, [rsp + 496]\n");
-      code_generator_emit(generator, "    add rsp, 512\n");
-#else
-      code_generator_emit(generator, "    add rsp, 256\n");
-#endif
-      code_generator_emit(generator, "    pop r15\n");
-      code_generator_emit(generator, "    pop r14\n");
-      code_generator_emit(generator, "    pop r13\n");
-      code_generator_emit(generator, "    pop r12\n");
-      code_generator_emit(generator, "    pop r11\n");
-      code_generator_emit(generator, "    pop r10\n");
-      code_generator_emit(generator, "    pop r9\n");
-      code_generator_emit(generator, "    pop r8\n");
-      code_generator_emit(generator, "    pop rdi\n");
-      code_generator_emit(generator, "    pop rsi\n");
-      code_generator_emit(generator, "    pop rdx\n");
-      code_generator_emit(generator, "    pop rcx\n");
-      code_generator_emit(generator, "    pop rbx\n");
-      code_generator_emit(generator, "    pop rax\n");
-    } else {
-      code_generator_emit(generator,
-                          "    ; Spill GPRs so GC sees register-held roots\n");
-      code_generator_emit(generator, "    push rax\n");
-      code_generator_emit(generator, "    push rbx\n");
-      code_generator_emit(generator, "    push rcx\n");
-      code_generator_emit(generator, "    push rdx\n");
-      code_generator_emit(generator, "    push rsi\n");
-      code_generator_emit(generator, "    push rdi\n");
-      code_generator_emit(generator, "    push r8\n");
-      code_generator_emit(generator, "    push r9\n");
-      code_generator_emit(generator, "    push r10\n");
-      code_generator_emit(generator, "    push r11\n");
-      code_generator_emit(generator, "    push r12\n");
-      code_generator_emit(generator, "    push r13\n");
-      code_generator_emit(generator, "    push r14\n");
-      code_generator_emit(generator, "    push r15\n");
-      code_generator_emit(generator,
-                          "    ; Spill XMM registers for conservative root scan\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    sub rsp, 512\n");
-#else
-      code_generator_emit(generator, "    sub rsp, 256\n");
-#endif
-      code_generator_emit(generator, "    movdqu [rsp + 0], xmm0\n");
-      code_generator_emit(generator, "    movdqu [rsp + 16], xmm1\n");
-      code_generator_emit(generator, "    movdqu [rsp + 32], xmm2\n");
-      code_generator_emit(generator, "    movdqu [rsp + 48], xmm3\n");
-      code_generator_emit(generator, "    movdqu [rsp + 64], xmm4\n");
-      code_generator_emit(generator, "    movdqu [rsp + 80], xmm5\n");
-      code_generator_emit(generator, "    movdqu [rsp + 96], xmm6\n");
-      code_generator_emit(generator, "    movdqu [rsp + 112], xmm7\n");
-      code_generator_emit(generator, "    movdqu [rsp + 128], xmm8\n");
-      code_generator_emit(generator, "    movdqu [rsp + 144], xmm9\n");
-      code_generator_emit(generator, "    movdqu [rsp + 160], xmm10\n");
-      code_generator_emit(generator, "    movdqu [rsp + 176], xmm11\n");
-      code_generator_emit(generator, "    movdqu [rsp + 192], xmm12\n");
-      code_generator_emit(generator, "    movdqu [rsp + 208], xmm13\n");
-      code_generator_emit(generator, "    movdqu [rsp + 224], xmm14\n");
-      code_generator_emit(generator, "    movdqu [rsp + 240], xmm15\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    movdqu [rsp + 256], xmm16\n");
-      code_generator_emit(generator, "    movdqu [rsp + 272], xmm17\n");
-      code_generator_emit(generator, "    movdqu [rsp + 288], xmm18\n");
-      code_generator_emit(generator, "    movdqu [rsp + 304], xmm19\n");
-      code_generator_emit(generator, "    movdqu [rsp + 320], xmm20\n");
-      code_generator_emit(generator, "    movdqu [rsp + 336], xmm21\n");
-      code_generator_emit(generator, "    movdqu [rsp + 352], xmm22\n");
-      code_generator_emit(generator, "    movdqu [rsp + 368], xmm23\n");
-      code_generator_emit(generator, "    movdqu [rsp + 384], xmm24\n");
-      code_generator_emit(generator, "    movdqu [rsp + 400], xmm25\n");
-      code_generator_emit(generator, "    movdqu [rsp + 416], xmm26\n");
-      code_generator_emit(generator, "    movdqu [rsp + 432], xmm27\n");
-      code_generator_emit(generator, "    movdqu [rsp + 448], xmm28\n");
-      code_generator_emit(generator, "    movdqu [rsp + 464], xmm29\n");
-      code_generator_emit(generator, "    movdqu [rsp + 480], xmm30\n");
-      code_generator_emit(generator, "    movdqu [rsp + 496], xmm31\n");
-#endif
-      code_generator_emit(generator, "    mov %s, rsp\n", first_param_reg);
-      code_generator_emit(generator, "    extern gc_safepoint\n");
-      code_generator_emit(generator, "    call gc_safepoint\n");
-      code_generator_emit(generator, "    movdqu xmm0, [rsp + 0]\n");
-      code_generator_emit(generator, "    movdqu xmm1, [rsp + 16]\n");
-      code_generator_emit(generator, "    movdqu xmm2, [rsp + 32]\n");
-      code_generator_emit(generator, "    movdqu xmm3, [rsp + 48]\n");
-      code_generator_emit(generator, "    movdqu xmm4, [rsp + 64]\n");
-      code_generator_emit(generator, "    movdqu xmm5, [rsp + 80]\n");
-      code_generator_emit(generator, "    movdqu xmm6, [rsp + 96]\n");
-      code_generator_emit(generator, "    movdqu xmm7, [rsp + 112]\n");
-      code_generator_emit(generator, "    movdqu xmm8, [rsp + 128]\n");
-      code_generator_emit(generator, "    movdqu xmm9, [rsp + 144]\n");
-      code_generator_emit(generator, "    movdqu xmm10, [rsp + 160]\n");
-      code_generator_emit(generator, "    movdqu xmm11, [rsp + 176]\n");
-      code_generator_emit(generator, "    movdqu xmm12, [rsp + 192]\n");
-      code_generator_emit(generator, "    movdqu xmm13, [rsp + 208]\n");
-      code_generator_emit(generator, "    movdqu xmm14, [rsp + 224]\n");
-      code_generator_emit(generator, "    movdqu xmm15, [rsp + 240]\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    movdqu xmm16, [rsp + 256]\n");
-      code_generator_emit(generator, "    movdqu xmm17, [rsp + 272]\n");
-      code_generator_emit(generator, "    movdqu xmm18, [rsp + 288]\n");
-      code_generator_emit(generator, "    movdqu xmm19, [rsp + 304]\n");
-      code_generator_emit(generator, "    movdqu xmm20, [rsp + 320]\n");
-      code_generator_emit(generator, "    movdqu xmm21, [rsp + 336]\n");
-      code_generator_emit(generator, "    movdqu xmm22, [rsp + 352]\n");
-      code_generator_emit(generator, "    movdqu xmm23, [rsp + 368]\n");
-      code_generator_emit(generator, "    movdqu xmm24, [rsp + 384]\n");
-      code_generator_emit(generator, "    movdqu xmm25, [rsp + 400]\n");
-      code_generator_emit(generator, "    movdqu xmm26, [rsp + 416]\n");
-      code_generator_emit(generator, "    movdqu xmm27, [rsp + 432]\n");
-      code_generator_emit(generator, "    movdqu xmm28, [rsp + 448]\n");
-      code_generator_emit(generator, "    movdqu xmm29, [rsp + 464]\n");
-      code_generator_emit(generator, "    movdqu xmm30, [rsp + 480]\n");
-      code_generator_emit(generator, "    movdqu xmm31, [rsp + 496]\n");
-      code_generator_emit(generator, "    add rsp, 512\n");
-#else
-      code_generator_emit(generator, "    add rsp, 256\n");
-#endif
-      code_generator_emit(generator, "    pop r15\n");
-      code_generator_emit(generator, "    pop r14\n");
-      code_generator_emit(generator, "    pop r13\n");
-      code_generator_emit(generator, "    pop r12\n");
-      code_generator_emit(generator, "    pop r11\n");
-      code_generator_emit(generator, "    pop r10\n");
-      code_generator_emit(generator, "    pop r9\n");
-      code_generator_emit(generator, "    pop r8\n");
-      code_generator_emit(generator, "    pop rdi\n");
-      code_generator_emit(generator, "    pop rsi\n");
-      code_generator_emit(generator, "    pop rdx\n");
-      code_generator_emit(generator, "    pop rcx\n");
-      code_generator_emit(generator, "    pop rbx\n");
-      code_generator_emit(generator, "    pop rax\n");
-    }
-  }
   }
 
   for (size_t i = 0; i < promoted_symbol_count; i++) {

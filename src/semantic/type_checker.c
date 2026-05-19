@@ -963,27 +963,6 @@ static int type_checker_is_null_pointer_constant(ASTNode *expression) {
   return type_checker_eval_integer_constant(expression, &value) && value == 0;
 }
 
-static int type_checker_is_gc_managed_pointer_type(Type *type) {
-  return type && type->kind == TYPE_POINTER && type->base_type &&
-         type->base_type->kind == TYPE_STRUCT;
-}
-
-static void type_checker_warn_gc_escape_to_c(TypeChecker *checker,
-                                             ASTNode *argument,
-                                             const char *callee_name) {
-  if (!checker || !checker->error_reporter || !argument || !callee_name) {
-    return;
-  }
-
-  char message[512];
-  snprintf(message, sizeof(message),
-           "Managed pointer passed to extern function '%s' may escape GC "
-           "visibility; register C-held slots with gc_register_root",
-           callee_name);
-  error_reporter_add_warning(checker->error_reporter, ERROR_SEMANTIC,
-                             argument->location, message);
-}
-
 static void type_checker_init_tracker_reset(TypeChecker *checker) {
   if (!checker) {
     return;
@@ -2137,11 +2116,6 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
         return NULL;
       }
 
-      if (func_symbol->is_extern &&
-          type_checker_is_gc_managed_pointer_type(arg_type)) {
-        type_checker_warn_gc_escape_to_c(checker, call->arguments[i],
-                                         call->function_name);
-      }
     }
 
     type_checker_warn_recv_buffer_bounds(checker, call);
@@ -4771,15 +4745,6 @@ int type_checker_process_declaration(TypeChecker *checker,
             "Cannot infer type of assignment value");
       }
       return 0;
-    }
-
-    if (var_symbol->is_extern &&
-        type_checker_is_gc_managed_pointer_type(value_type) &&
-        checker->error_reporter) {
-      error_reporter_add_warning(
-          checker->error_reporter, ERROR_SEMANTIC, assignment->value->location,
-          "Managed pointer stored in extern variable may escape GC visibility; "
-          "register the C-held slot with gc_register_root");
     }
 
     // Validate assignment compatibility

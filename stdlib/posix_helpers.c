@@ -10,7 +10,7 @@
  *   macOS:
  *     gcc -o myapp output.s posix_helpers.c
  *
- * If you also use the GC runtime, add gc.c:
+ * If you also use the heap runtime, add gc.c:
  *     gcc -o myapp output.s posix_helpers.c src/runtime/gc.c -lpthread
  *
  * Functions provided:
@@ -65,7 +65,7 @@ int posix_atomic_add_i32(int *ptr, int val) {
  *   macOS:
  *     gcc -o myapp output.s posix_helpers.c
  *
- * If you also use the GC runtime, add gc.c:
+ * If you also use the heap runtime, add gc.c:
  *     gcc -o myapp output.s posix_helpers.c src/runtime/gc.c -lpthread
  *
  * Functions provided:
@@ -109,4 +109,3 @@ int posix_atomic_exchange_i32(int *ptr, int val) {
 int posix_atomic_add_i32(int *ptr, int val) {
     return __sync_fetch_and_add(ptr, val);
 }
-
