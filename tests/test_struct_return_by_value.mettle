@@ -1,0 +1,100 @@
+// Indirect-return ABI: a struct larger than 8 bytes returned by value must
+// arrive at the caller with every field intact. Exercises:
+//   - Building a struct in the callee and returning it by value
+//   - Reading every field of the returned struct in the caller
+//   - Chained pattern: callee A returns a struct, callee B consumes it
+//   - Local var assigned from a struct-returning call (caller-side memcpy)
+//
+// Build:
+//   bin\mettle.exe --build --linker internal tests\test_struct_return_by_value.mettle -o test_struct_return_by_value.exe
+// Run:
+//   test_struct_return_by_value.exe
+import "std/conv";
+import "std/io";
+
+struct ThreeI32 {
+  a: int32;
+  b: int32;
+  c: int32;
+}
+
+struct Six {
+  a: int32;
+  b: int32;
+  c: int32;
+  d: int32;
+  e: int32;
+  f: int32;
+}
+
+function write_s(s: cstring) {
+  if (s != 0) {
+    fputs(s, get_stdout());
+  }
+}
+
+function write_i64(v: int64) {
+  var buf: uint8[32];
+  int_to_dec((cstring)((int64)(&(buf[0]))), v);
+  write_s((cstring)((int64)(&(buf[0]))));
+}
+
+function line_i64(label: cstring, v: int64) {
+  write_s(label);
+  write_s(cstr(" "));
+  write_i64(v);
+  write_s(cstr("\n"));
+}
+
+// 12-byte struct return.
+function make_three(a: int32, b: int32, c: int32) -> ThreeI32 {
+  var t: ThreeI32;
+  t.a = a;
+  t.b = b;
+  t.c = c;
+  return t;
+}
+
+// 24-byte struct return; goes well past the old 8-byte truncation window.
+function make_six() -> Six {
+  var s: Six;
+  s.a = 10;
+  s.b = 20;
+  s.c = 30;
+  s.d = 40;
+  s.e = 50;
+  s.f = 60;
+  return s;
+}
+
+// Indirect-arg consuming an indirect-return value: pass a returned struct
+// straight into a function that takes it by value.
+function sum_three(t: ThreeI32) -> int32 {
+  return t.a + t.b + t.c;
+}
+
+function main() -> int32 {
+  write_s(cstr("struct return by value\n"));
+
+  // Read every field of a 12-byte return through a local variable.
+  var t: ThreeI32 = make_three(11, 22, 33);
+  line_i64(cstr("three_a"), (int64)t.a);
+  line_i64(cstr("three_b"), (int64)t.b);
+  line_i64(cstr("three_c"), (int64)t.c);
+
+  // Pass a struct-returning call directly into a struct-taking call. The
+  // returned struct must survive long enough to be passed by value into
+  // sum_three.
+  line_i64(cstr("chained_sum"), (int64)sum_three(make_three(1, 2, 3)));
+
+  // 24-byte struct: read every field, ensuring nothing past byte 8 is lost.
+  var s: Six = make_six();
+  line_i64(cstr("six_a"), (int64)s.a);
+  line_i64(cstr("six_b"), (int64)s.b);
+  line_i64(cstr("six_c"), (int64)s.c);
+  line_i64(cstr("six_d"), (int64)s.d);
+  line_i64(cstr("six_e"), (int64)s.e);
+  line_i64(cstr("six_f"), (int64)s.f);
+
+  return 0;
+}

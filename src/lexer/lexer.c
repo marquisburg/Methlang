@@ -781,14 +781,6 @@ Token lexer_next_token(Lexer *lexer) {
       token.type = TOKEN_FN;
     else if (strcmp(token.value, "match") == 0)
       token.type = TOKEN_MATCH;
-    else if (strcmp(token.value, "async") == 0)
-      token.type = TOKEN_ASYNC;
-    else if (strcmp(token.value, "await") == 0)
-      token.type = TOKEN_AWAIT;
-    else if (strcmp(token.value, "spawn") == 0)
-      token.type = TOKEN_SPAWN;
-    else if (strcmp(token.value, "channel") == 0)
-      token.type = TOKEN_CHANNEL;
 
     // Type keywords
     else if (strcmp(token.value, "int8") == 0)

@@ -4,7 +4,7 @@ This directory contains the files needed to build a native Windows installer (`.
 
 ## Features
 - Copies `mettle.exe`, `stdlib\`, and `runtime\` to the installation directory (`C:\Program Files\Mettle`).
-- Installs bundled runtime objects so the GC/runtime links automatically in `--build` mode.
+- Installs the optional debug/thread runtime object so `--build` can link it when a program uses crash tracebacks or thread atomics. Heap allocation and argc/argv startup do not require Mettle runtime objects.
 - Installs `mettle-build.bat` as a thin wrapper over `mettle --build`.
 - Optionally adds Mettle's `bin\` directory to the system `%PATH%` (installer task, enabled by default).
 - Optionally registers the `.mettle` file extension with Mettle's icon and open command.
@@ -31,6 +31,6 @@ For quick discovery from the installed CLI:
 
 ```bat
 mettle help
-mettle help gc
+mettle help heap
 mettle docs
 ```

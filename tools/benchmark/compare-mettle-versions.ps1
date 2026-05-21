@@ -5,7 +5,7 @@
 # - new compiler: current working tree
 #
 # Outputs are written under bin/benchmark-compare by default, which is ignored by
-# git and keeps the checked-in Meth-vs-C benchmark data untouched.
+# git and keeps the checked-in Mettle-vs-C benchmark data untouched.
 #
 # Usage:
 #   .\tools\benchmark\compare-mettle-versions.ps1
@@ -167,11 +167,17 @@ function Get-BenchmarkSource {
         return Normalize-Path ([string]$Bench.source)
     }
 
-    if ($null -eq $Bench.meth_exe -or [string]::IsNullOrWhiteSpace([string]$Bench.meth_exe)) {
-        throw "Benchmark '$($Bench.name)' does not define source or meth_exe."
+    if ($null -eq $Bench.mettle_exe -and ($null -eq $Bench.meth_exe -or [string]::IsNullOrWhiteSpace([string]$Bench.meth_exe))) {
+        throw "Benchmark '$($Bench.name)' does not define source or mettle_exe."
     }
 
-    return [System.IO.Path]::ChangeExtension((Normalize-Path ([string]$Bench.meth_exe)), ".mettle")
+    $exePath = if ($null -ne $Bench.mettle_exe -and -not [string]::IsNullOrWhiteSpace([string]$Bench.mettle_exe)) {
+        [string]$Bench.mettle_exe
+    } else {
+        [string]$Bench.meth_exe
+    }
+
+    return [System.IO.Path]::ChangeExtension((Normalize-Path $exePath), ".mettle")
 }
 
 function Export-BaselineSource {

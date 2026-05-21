@@ -369,8 +369,6 @@ void parser_synchronize(Parser *parser) {
 
     switch (parser->peek_token.type) {
     case TOKEN_FUNCTION:
-    case TOKEN_ASYNC:
-    case TOKEN_SPAWN:
     case TOKEN_VAR:
     case TOKEN_STRUCT:
     case TOKEN_RETURN:
@@ -462,7 +460,6 @@ int parser_is_unary_operator(TokenType type) {
   case TOKEN_AMPERSAND:
   case TOKEN_TILDE:
   case TOKEN_NOT:
-  case TOKEN_AWAIT:
     return 1;
   default:
     return 0;
@@ -513,8 +510,6 @@ ASTNode *parser_parse_program(Parser *parser) {
 }
 
 static ASTNode *parser_parse_extern_var_declaration(Parser *parser);
-static ASTNode *parser_parse_function_declaration_with_async(Parser *parser,
-                                                             int is_async);
 
 ASTNode *parser_parse_declaration(Parser *parser) {
   if (!parser)
@@ -523,32 +518,10 @@ ASTNode *parser_parse_declaration(Parser *parser) {
   switch (parser->current_token.type) {
   case TOKEN_IMPORT:
     return parser_parse_import_declaration(parser);
-  case TOKEN_ASYNC: {
-    parser_advance(parser); // consume 'async'
-    if (parser->current_token.type != TOKEN_FUNCTION &&
-        parser->current_token.type != TOKEN_FN) {
-      parser_set_error(parser, "Expected 'function' or 'fn' after 'async'");
-      return NULL;
-    }
-    return parser_parse_function_declaration_with_async(parser, 1);
-  }
   case TOKEN_EXTERN: {
     parser_advance(parser); // consume 'extern'
-    if (parser->current_token.type == TOKEN_FUNCTION ||
-        parser->current_token.type == TOKEN_ASYNC) {
-      ASTNode *decl = NULL;
-      if (parser->current_token.type == TOKEN_ASYNC) {
-        parser_advance(parser); // consume 'async'
-        if (parser->current_token.type != TOKEN_FUNCTION &&
-            parser->current_token.type != TOKEN_FN) {
-          parser_set_error(parser,
-                           "Expected 'function' or 'fn' after 'extern async'");
-          return NULL;
-        }
-        decl = parser_parse_function_declaration_with_async(parser, 1);
-      } else {
-        decl = parser_parse_function_declaration(parser);
-      }
+    if (parser->current_token.type == TOKEN_FUNCTION) {
+      ASTNode *decl = parser_parse_function_declaration(parser);
       if (decl && decl->data) {
         FunctionDeclaration *func_data = (FunctionDeclaration *)decl->data;
         if (func_data->body != NULL) {
@@ -569,20 +542,8 @@ ASTNode *parser_parse_declaration(Parser *parser) {
   case TOKEN_EXPORT: {
     parser_advance(parser); // consume 'export'
     ASTNode *decl = NULL;
-    if (parser->current_token.type == TOKEN_FUNCTION ||
-        parser->current_token.type == TOKEN_ASYNC) {
-      if (parser->current_token.type == TOKEN_ASYNC) {
-        parser_advance(parser); // consume 'async'
-        if (parser->current_token.type != TOKEN_FUNCTION &&
-            parser->current_token.type != TOKEN_FN) {
-          parser_set_error(parser,
-                           "Expected 'function' or 'fn' after 'export async'");
-          return NULL;
-        }
-        decl = parser_parse_function_declaration_with_async(parser, 1);
-      } else {
-        decl = parser_parse_function_declaration(parser);
-      }
+    if (parser->current_token.type == TOKEN_FUNCTION) {
+      decl = parser_parse_function_declaration(parser);
       if (decl && decl->data) {
         ((FunctionDeclaration *)decl->data)->is_exported = 1;
       }
@@ -608,21 +569,8 @@ ASTNode *parser_parse_declaration(Parser *parser) {
       }
     } else if (parser->current_token.type == TOKEN_EXTERN) {
       parser_advance(parser); // consume 'extern'
-      if (parser->current_token.type == TOKEN_FUNCTION ||
-          parser->current_token.type == TOKEN_ASYNC) {
-        if (parser->current_token.type == TOKEN_ASYNC) {
-          parser_advance(parser); // consume 'async'
-          if (parser->current_token.type != TOKEN_FUNCTION &&
-              parser->current_token.type != TOKEN_FN) {
-            parser_set_error(
-                parser,
-                "Expected 'function' or 'fn' after 'export extern async'");
-            return NULL;
-          }
-          decl = parser_parse_function_declaration_with_async(parser, 1);
-        } else {
-          decl = parser_parse_function_declaration(parser);
-        }
+      if (parser->current_token.type == TOKEN_FUNCTION) {
+        decl = parser_parse_function_declaration(parser);
         if (decl && decl->data) {
           FunctionDeclaration *func_data = (FunctionDeclaration *)decl->data;
           if (func_data->body != NULL) {
@@ -926,8 +874,6 @@ ASTNode *parser_parse_expression(Parser *parser) {
 int parser_is_identifier_like(TokenType type) {
   // Check if token can be used as an identifier in expression context
   return type == TOKEN_IDENTIFIER ||
-         // threading keywords that can also appear as type/function names
-         type == TOKEN_CHANNEL ||
          // x86 mnemonics can be used as function names
          (type >= TOKEN_MOV && type <= TOKEN_SYSCALL) ||
          // x86 registers can be used as identifiers in high-level context
@@ -1755,35 +1701,6 @@ ASTNode *parser_parse_unary_expression(Parser *parser) {
 
   SourceLocation location = parser_current_location(parser);
 
-  if (parser->current_token.type == TOKEN_AWAIT) {
-    parser_advance(parser);
-
-    ASTNode *operand = parser_parse_unary_expression(parser);
-    if (!operand) {
-      return NULL;
-    }
-
-    return ast_create_unary_expression("await", operand, location);
-  }
-
-  if (parser->current_token.type == TOKEN_SPAWN) {
-    parser_advance(parser);
-
-    ASTNode *call = parser_parse_postfix_expression(parser);
-    if (!call) {
-      if (!parser->has_error)
-        parser_set_error(parser, "Expected function call after 'spawn'");
-      return NULL;
-    }
-    if (call->type != AST_FUNCTION_CALL && call->type != AST_FUNC_PTR_CALL) {
-      parser_set_error(parser, "'spawn' requires a function call expression");
-      ast_destroy_node(call);
-      return NULL;
-    }
-
-    return ast_create_spawn_expression(call, location);
-  }
-
   if (parser->current_token.type == TOKEN_LPAREN) {
     ASTNode *cast = parser_parse_cast_expression(parser);
     if (cast) {
@@ -2465,8 +2382,7 @@ ASTNode *parser_parse_var_declaration(Parser *parser) {
   return var_decl;
 }
 
-static ASTNode *parser_parse_function_declaration_with_async(Parser *parser,
-                                                             int is_async) {
+ASTNode *parser_parse_function_declaration(Parser *parser) {
   if (!parser)
     return NULL;
 
@@ -2734,7 +2650,6 @@ static ASTNode *parser_parse_function_declaration_with_async(Parser *parser,
                                       param_count, return_type, body, location);
   if (func_decl && func_decl->data) {
     FunctionDeclaration *func_data = (FunctionDeclaration *)func_decl->data;
-    func_data->is_async = is_async ? 1 : 0;
     if (link_name) {
       func_data->link_name = strdup(link_name);
       if (!func_data->link_name) {
@@ -2772,10 +2687,6 @@ static ASTNode *parser_parse_function_declaration_with_async(Parser *parser,
   free(param_types);
 
   return func_decl;
-}
-
-ASTNode *parser_parse_function_declaration(Parser *parser) {
-  return parser_parse_function_declaration_with_async(parser, 0);
 }
 
 ASTNode *parser_parse_trait_declaration(Parser *parser) {

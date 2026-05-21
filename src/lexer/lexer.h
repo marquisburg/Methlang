@@ -40,10 +40,6 @@ typedef enum {
   TOKEN_WHERE,
   TOKEN_FN,
   TOKEN_MATCH,
-  TOKEN_ASYNC,
-  TOKEN_AWAIT,
-  TOKEN_SPAWN,
-  TOKEN_CHANNEL,
 
   // Type keywords
   TOKEN_INT8,

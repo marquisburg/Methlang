@@ -1,0 +1,91 @@
+﻿{
+    "generated":  "2026-05-20T13:14:58Z",
+    "harness":  {
+                    "config":  "docs/benchmarks/harness.json",
+                    "mode":  "rust-vs-c",
+                    "runs":  5,
+                    "warmup":  1,
+                    "rustc":  "C:\\Users\\Marquis\\.cargo\\bin\\rustc.exe",
+                    "gcc":  "C:\\msys64\\mingw64\\bin\\gcc.exe"
+                },
+    "benchmarks":  [
+                       {
+                           "name":  "fib",
+                           "description":  "Fibonacci fib(35) x 10M",
+                           "rust_us":  159699,
+                           "c_us":  39683,
+                           "rust_ms":  159.699,
+                           "c_ms":  39.683,
+                           "relative":  4.02,
+                           "rust_compile_ms":  941,
+                           "c_compile_ms":  459,
+                           "compile_relative":  2.05,
+                           "rust_exe_bytes":  131072,
+                           "c_exe_bytes":  260003,
+                           "size_relative":  0.5
+                       },
+                       {
+                           "name":  "word_count",
+                           "description":  "Word count 256 KB buffer x 500",
+                           "rust_us":  24740,
+                           "c_us":  57786,
+                           "rust_ms":  24.74,
+                           "c_ms":  57.786,
+                           "relative":  0.43,
+                           "rust_compile_ms":  343,
+                           "c_compile_ms":  465,
+                           "compile_relative":  0.74,
+                           "rust_exe_bytes":  131072,
+                           "c_exe_bytes":  261538,
+                           "size_relative":  0.5
+                       },
+                       {
+                           "name":  "grep",
+                           "description":  "Grep ERROR 1 MiB x 2000",
+                           "rust_us":  1018345,
+                           "c_us":  1191751,
+                           "rust_ms":  1018.345,
+                           "c_ms":  1191.751,
+                           "relative":  0.85,
+                           "rust_compile_ms":  373,
+                           "c_compile_ms":  461,
+                           "compile_relative":  0.81,
+                           "rust_exe_bytes":  131072,
+                           "c_exe_bytes":  260592,
+                           "size_relative":  0.5
+                       },
+                       {
+                           "name":  "sum_squares",
+                           "description":  "Sum of squares 1..100000 x 500",
+                           "rust_us":  45717,
+                           "c_us":  17430,
+                           "rust_ms":  45.717,
+                           "c_ms":  17.43,
+                           "relative":  2.62,
+                           "rust_compile_ms":  278,
+                           "c_compile_ms":  469,
+                           "compile_relative":  0.59,
+                           "rust_exe_bytes":  130560,
+                           "c_exe_bytes":  259315,
+                           "size_relative":  0.5
+                       },
+                       {
+                           "name":  "collatz",
+                           "description":  "Collatz steps 1..100000 x 10",
+                           "rust_us":  90245,
+                           "c_us":  119597,
+                           "rust_ms":  90.245,
+                           "c_ms":  119.597,
+                           "relative":  0.75,
+                           "rust_compile_ms":  328,
+                           "c_compile_ms":  452,
+                           "compile_relative":  0.73,
+                           "rust_exe_bytes":  131584,
+                           "c_exe_bytes":  259827,
+                           "size_relative":  0.51
+                       }
+                   ],
+    "failed":  [
+
+               ]
+}

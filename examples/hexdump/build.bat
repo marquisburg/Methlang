@@ -1,6 +1,6 @@
 @echo off
 REM Build Mettle Hex Dump Utility
-REM Requires: argc/argv -> mettle_entry.o and -lshell32
+REM argc/argv startup is emitted directly through CRT __getmainargs.
 set APP=%~dp0
 set ROOT=%APP%..\..
 cd /d "%ROOT%"
@@ -26,11 +26,7 @@ if %ERRORLEVEL% EQU 0 (
         echo NASM assembly failed.
         exit /b 1
     )
-    gcc -c src\runtime\gc.c -o examples\hexdump\gc.o -Isrc
-    if %ERRORLEVEL% NEQ 0 exit /b 1
-    gcc -c src\runtime\mettle_entry.c -o examples\hexdump\mettle_entry.o -Isrc
-    if %ERRORLEVEL% NEQ 0 exit /b 1
-    gcc -nostartfiles examples\hexdump\hexdump.o examples\hexdump\gc.o examples\hexdump\mettle_entry.o -o examples\hexdump\hexdump.exe -lkernel32 -lshell32
+    gcc -nostartfiles examples\hexdump\hexdump.o -o examples\hexdump\hexdump.exe -lkernel32
 ) else (
     echo NASM required. Install from https://www.nasm.us/
     exit /b 1

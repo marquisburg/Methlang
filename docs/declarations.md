@@ -29,40 +29,6 @@ fn greet() {  // void return
 
 A function named `main` with signature `() -> int32` serves as the program entry point when present. The compiler emits `_start` which calls `main` and passes its return value to the runtime.
 
-## Async Functions
-
-Async functions are declared with `async function` or `async fn`.
-
-```mettle
-async function fetch_count() -> int32 {
-  return 42;
-}
-
-async fn fetch_value() -> int32 {
-  return 7;
-}
-```
-
-Important behavior:
-
-- The declared return type is the payload type.
-- Calling an async function returns `Future<payload>`.
-- `await` unwraps the future and yields the payload value.
-- Async functions use the runtime task model described in [Async and Sync Execution](async.md).
-
-Example:
-
-```mettle
-async fn add_one(x: int32) -> int32 {
-  return x + 1;
-}
-
-function main() -> int32 {
-  var f: Future<int32> = add_one(41);
-  return await f;
-}
-```
-
 ## Generic Functions
 
 Functions can declare type parameters in angle brackets before the parameter list. Call sites must provide type arguments: `f<T>(args)` or `f<int32>(args)`.

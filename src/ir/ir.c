@@ -379,19 +379,6 @@ static const char *ir_opcode_name(IROpcode op) {
     return "inline_asm";
   case IR_OP_CAST:
     return "cast";
-  case IR_OP_THREAD_SPAWN:     return "thread_spawn";
-  case IR_OP_THREAD_JOIN:      return "thread_join";
-  case IR_OP_MUTEX_NEW:        return "mutex_new";
-  case IR_OP_MUTEX_LOCK:       return "mutex_lock";
-  case IR_OP_MUTEX_UNLOCK:     return "mutex_unlock";
-  case IR_OP_ATOMIC_LOAD:      return "atomic_load";
-  case IR_OP_ATOMIC_STORE:     return "atomic_store";
-  case IR_OP_ATOMIC_FETCH_ADD: return "atomic_fetch_add";
-  case IR_OP_ATOMIC_FETCH_SUB: return "atomic_fetch_sub";
-  case IR_OP_ATOMIC_CAS:       return "atomic_cas";
-  case IR_OP_CHAN_NEW:          return "chan_new";
-  case IR_OP_CHAN_SEND:         return "chan_send";
-  case IR_OP_CHAN_RECV:         return "chan_recv";
   case IR_OP_COUNT_WORD_STARTS: return "count_word_starts";
   default:
     return "unknown";
@@ -538,52 +525,6 @@ int ir_program_dump(IRProgram *program, FILE *output) {
         fprintf(output, "%s %s = (%s)%s%s\n", ir_opcode_name(instruction->op),
                 dest, instruction->text ? instruction->text : "<type>", lhs,
                 instruction->is_float ? " (float)" : "");
-        break;
-      case IR_OP_THREAD_SPAWN:
-        fprintf(output, "%s %s = spawn %s(", ir_opcode_name(instruction->op),
-                dest, instruction->text ? instruction->text : "?");
-        for (size_t a = 0; a < instruction->argument_count; a++) {
-          char abuf[64]; ir_format_operand(&instruction->arguments[a], abuf, sizeof(abuf));
-          fprintf(output, "%s%s", a ? ", " : "", abuf);
-        }
-        fprintf(output, ")\n");
-        break;
-      case IR_OP_THREAD_JOIN:
-        fprintf(output, "%s %s = join(%s)\n", ir_opcode_name(instruction->op),
-                dest, lhs);
-        break;
-      case IR_OP_MUTEX_NEW:
-        fprintf(output, "%s %s = mutex_new()\n", ir_opcode_name(instruction->op), dest);
-        break;
-      case IR_OP_MUTEX_LOCK:
-        fprintf(output, "%s %s = mutex_lock(%s)\n", ir_opcode_name(instruction->op), dest, lhs);
-        break;
-      case IR_OP_MUTEX_UNLOCK:
-        fprintf(output, "%s mutex_unlock(%s)\n", ir_opcode_name(instruction->op), lhs);
-        break;
-      case IR_OP_ATOMIC_LOAD:
-        fprintf(output, "%s %s = atomic_load(%s)\n", ir_opcode_name(instruction->op), dest, lhs);
-        break;
-      case IR_OP_ATOMIC_STORE:
-        fprintf(output, "%s atomic_store(%s, %s)\n", ir_opcode_name(instruction->op), lhs, rhs);
-        break;
-      case IR_OP_ATOMIC_FETCH_ADD:
-        fprintf(output, "%s %s = atomic_fetch_add(%s, %s)\n", ir_opcode_name(instruction->op), dest, lhs, rhs);
-        break;
-      case IR_OP_ATOMIC_FETCH_SUB:
-        fprintf(output, "%s %s = atomic_fetch_sub(%s, %s)\n", ir_opcode_name(instruction->op), dest, lhs, rhs);
-        break;
-      case IR_OP_ATOMIC_CAS:
-        fprintf(output, "%s %s = atomic_cas(%s, %s, ...)\n", ir_opcode_name(instruction->op), dest, lhs, rhs);
-        break;
-      case IR_OP_CHAN_NEW:
-        fprintf(output, "%s %s = chan_new(%s)\n", ir_opcode_name(instruction->op), dest, lhs);
-        break;
-      case IR_OP_CHAN_SEND:
-        fprintf(output, "%s chan_send(%s, %s)\n", ir_opcode_name(instruction->op), lhs, rhs);
-        break;
-      case IR_OP_CHAN_RECV:
-        fprintf(output, "%s %s = chan_recv(%s)\n", ir_opcode_name(instruction->op), dest, lhs);
         break;
       case IR_OP_COUNT_WORD_STARTS:
         fprintf(output, "%s %s = count_word_starts(buf=%s, len=%s)\n",

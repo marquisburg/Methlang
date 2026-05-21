@@ -25,8 +25,6 @@ static Type *type_checker_build_tagged_enum_type(TypeChecker *checker,
 static Type *type_checker_instantiate_generic_enum(TypeChecker *checker,
                                                    const char *generic_name,
                                                    const char *type_arg_str);
-static Type *type_checker_parse_future_type(TypeChecker *checker,
-                                            const char *name);
 static int type_checker_process_tagged_enum(TypeChecker *checker,
                                             ASTNode *enum_decl_node);
 static int type_checker_check_match_statement(TypeChecker *checker,
@@ -149,75 +147,6 @@ static Type *type_checker_parse_pointer_type(TypeChecker *checker,
   return current;
 }
 
-static Type *type_checker_parse_future_type(TypeChecker *checker,
-                                            const char *name) {
-  if (!checker || !name || strncmp(name, "Future<", 7) != 0) {
-    return NULL;
-  }
-
-  size_t name_len = strlen(name);
-  if (name_len <= 8 || name[name_len - 1] != '>') {
-    return NULL;
-  }
-
-  size_t payload_len = name_len - 8;
-  char *payload_name = malloc(payload_len + 1);
-  if (!payload_name) {
-    return NULL;
-  }
-
-  memcpy(payload_name, name + 7, payload_len);
-  payload_name[payload_len] = '\0';
-
-  Type *payload_type = type_checker_get_type_by_name(checker, payload_name);
-  free(payload_name);
-  if (!payload_type) {
-    return NULL;
-  }
-
-  Type *future_type = type_create(TYPE_FUTURE, name);
-  if (!future_type) {
-    return NULL;
-  }
-
-  future_type->base_type = payload_type;
-  future_type->size = 8;
-  future_type->alignment = 8;
-  return future_type;
-}
-
-// Generic helper: parse "TypeName<Inner>" → kind with base_type=Inner
-static Type *type_checker_parse_generic1_type(TypeChecker *checker,
-                                              const char *name,
-                                              const char *prefix,
-                                              TypeKind kind) {
-  size_t prefix_len = strlen(prefix);
-  if (!checker || !name || strncmp(name, prefix, prefix_len) != 0)
-    return NULL;
-  size_t name_len = strlen(name);
-  if (name_len <= prefix_len + 1 || name[name_len - 1] != '>')
-    return NULL;
-
-  size_t inner_len = name_len - prefix_len - 1;
-  char *inner_name = malloc(inner_len + 1);
-  if (!inner_name)
-    return NULL;
-  memcpy(inner_name, name + prefix_len, inner_len);
-  inner_name[inner_len] = '\0';
-
-  Type *inner = type_checker_get_type_by_name(checker, inner_name);
-  free(inner_name);
-  if (!inner)
-    return NULL;
-
-  Type *t = type_create(kind, name);
-  if (!t)
-    return NULL;
-  t->base_type = inner;
-  t->size = 8;
-  t->alignment = 8;
-  return t;
-}
 
 static int type_checker_types_equal(const Type *lhs, const Type *rhs) {
   if (lhs == rhs) {
@@ -232,13 +161,6 @@ static int type_checker_types_equal(const Type *lhs, const Type *rhs) {
 
   switch (lhs->kind) {
   case TYPE_POINTER:
-  case TYPE_FUTURE:
-  case TYPE_THREAD:
-  case TYPE_MUTEX:
-  case TYPE_GUARD:
-  case TYPE_ATOMIC:
-  case TYPE_SENDER:
-  case TYPE_RECEIVER:
     return type_checker_types_equal(lhs->base_type, rhs->base_type);
   case TYPE_ARRAY:
     return lhs->array_size == rhs->array_size &&
@@ -1572,20 +1494,6 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       return NULL;
     }
 
-    if (strcmp(unop->operator, "await") == 0) {
-      Type *operand_type = type_checker_infer_type(checker, unop->operand);
-      if (!operand_type) {
-        return NULL;
-      }
-      if (operand_type->kind != TYPE_FUTURE || !operand_type->base_type) {
-        type_checker_set_error_at_location(
-            checker, expression->location,
-            "Await operator requires a Future<T> operand");
-        return NULL;
-      }
-      return operand_type->base_type;
-    }
-
     if (strcmp(unop->operator, "&") == 0) {
       // Check if operand is an identifier that refers to a function
       if (unop->operand->type == AST_IDENTIFIER) {
@@ -1725,272 +1633,12 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
                    : NULL;
       }
 
-      if (strcmp(call->function_name, "cancelled") == 0 ||
-          strcmp(call->function_name, "__meth_async_current_cancelled") == 0) {
-        if (call->argument_count != 0) {
-          type_checker_set_error_at_location(
-              checker, expression->location,
-              "Function '%s' expects 0 arguments, got %llu",
-              call->function_name, (unsigned long long)call->argument_count);
-          return NULL;
-        }
-        return checker->builtin_int32;
-      }
-
-      if (strcmp(call->function_name, "cancel") == 0 ||
-          strcmp(call->function_name, "__meth_async_cancel") == 0) {
-        if (call->argument_count != 1) {
-          type_checker_set_error_at_location(
-              checker, expression->location,
-              "Function '%s' expects 1 argument, got %llu",
-              call->function_name, (unsigned long long)call->argument_count);
-          return NULL;
-        }
-        Type *arg_type = type_checker_infer_type(checker, call->arguments[0]);
-        if (!arg_type) {
-          return NULL;
-        }
-        if (strcmp(call->function_name, "cancel") == 0 &&
-            arg_type->kind != TYPE_FUTURE) {
-          type_checker_set_error_at_location(
-              checker, call->arguments[0]->location,
-              "cancel expects a Future<T> argument");
-          return NULL;
-        }
-        return checker->builtin_int32;
-      }
-
-      if (strcmp(call->function_name, "__meth_async_start") == 0 ||
-          strcmp(call->function_name, "__meth_async_finish") == 0 ||
-          strcmp(call->function_name, "__meth_async_wait") == 0 ||
-          strcmp(call->function_name, "__meth_async_state") == 0) {
-        if (call->argument_count != 1) {
-          type_checker_set_error_at_location(
-              checker, expression->location,
-              "Function '%s' expects 1 argument, got %llu",
-              call->function_name, (unsigned long long)call->argument_count);
-          return NULL;
-        }
-        if (!type_checker_infer_type(checker, call->arguments[0])) {
-          return NULL;
-        }
-        return checker->builtin_int32;
-      }
-
-      if (strcmp(call->function_name, "__meth_coro_task_create") == 0) {
-        if (call->argument_count != 2) {
-          type_checker_set_error_at_location(
-              checker, expression->location,
-              "Function '%s' expects 2 arguments, got %llu",
-              call->function_name, (unsigned long long)call->argument_count);
-          return NULL;
-        }
-        for (size_t i = 0; i < call->argument_count; i++) {
-          if (!type_checker_infer_type(checker, call->arguments[i])) {
-            return NULL;
-          }
-        }
-        return checker->builtin_int64;
-      }
-
-      if (strcmp(call->function_name, "__meth_coro_task_schedule") == 0 ||
-          strcmp(call->function_name, "__meth_coro_task_bind_token") == 0 ||
-          strcmp(call->function_name, "__meth_coro_task_destroy") == 0 ||
-          strcmp(call->function_name, "__meth_coro_task_is_done") == 0 ||
-          strcmp(call->function_name, "__meth_coro_task_run_one") == 0) {
-        size_t expected_args = 0;
-        if (strcmp(call->function_name, "__meth_coro_task_schedule") == 0) {
-          expected_args = 4;
-        } else if (strcmp(call->function_name, "__meth_coro_task_bind_token") ==
-                   0) {
-          expected_args = 2;
-        } else {
-          expected_args = 1;
-        }
-
-        if (call->argument_count != expected_args) {
-          type_checker_set_error_at_location(
-              checker, expression->location,
-              "Function '%s' expects %llu arguments, got %llu",
-              call->function_name, (unsigned long long)expected_args,
-              (unsigned long long)call->argument_count);
-          return NULL;
-        }
-        for (size_t i = 0; i < call->argument_count; i++) {
-          if (!type_checker_infer_type(checker, call->arguments[i])) {
-            return NULL;
-          }
-        }
-        return checker->builtin_int32;
-      }
     }
 
     // Method calls on threading types:
     // Thread.join(), Mutex.new(), mutex.lock(), guard (unlock via drop),
     // Atomic.new(), atomic.load/store/fetch_add/fetch_sub/cas(),
     // channel(), tx.send(), rx.recv()
-    if (call->object) {
-      Type *obj_type = type_checker_infer_type(checker, call->object);
-      if (!obj_type)
-        return NULL;
-
-      if (obj_type->kind == TYPE_THREAD) {
-        // thread.join() -> T (base_type)
-        if (strcmp(call->function_name, "join") == 0) {
-          if (call->argument_count != 0) {
-            type_checker_set_error_at_location(checker, expression->location,
-                "Thread.join() takes no arguments");
-            return NULL;
-          }
-          return obj_type->base_type ? obj_type->base_type : checker->builtin_void;
-        }
-        type_checker_set_error_at_location(checker, expression->location,
-            "Unknown method on Thread<T>: '%s'", call->function_name);
-        return NULL;
-      }
-
-      if (obj_type->kind == TYPE_MUTEX) {
-        // mutex.lock() -> Guard<T>
-        if (strcmp(call->function_name, "lock") == 0) {
-          if (call->argument_count != 0) {
-            type_checker_set_error_at_location(checker, expression->location,
-                "Mutex.lock() takes no arguments");
-            return NULL;
-          }
-          const char *inner = obj_type->base_type && obj_type->base_type->name
-                              ? obj_type->base_type->name : "void";
-          size_t gname_len = strlen("Guard<") + strlen(inner) + 2;
-          char *gname = malloc(gname_len);
-          if (!gname) return NULL;
-          snprintf(gname, gname_len, "Guard<%s>", inner);
-          Type *guard = type_create(TYPE_GUARD, gname);
-          free(gname);
-          if (!guard) return NULL;
-          guard->base_type = obj_type->base_type;
-          guard->size = 8; guard->alignment = 8;
-          return guard;
-        }
-        type_checker_set_error_at_location(checker, expression->location,
-            "Unknown method on Mutex<T>: '%s'", call->function_name);
-        return NULL;
-      }
-
-      if (obj_type->kind == TYPE_ATOMIC) {
-        // atomic.load() -> T
-        if (strcmp(call->function_name, "load") == 0) {
-          return obj_type->base_type ? obj_type->base_type : checker->builtin_int64;
-        }
-        // atomic.store(val) -> void
-        if (strcmp(call->function_name, "store") == 0) {
-          if (call->argument_count != 1) {
-            type_checker_set_error_at_location(checker, expression->location,
-                "Atomic.store() takes exactly 1 argument");
-            return NULL;
-          }
-          if (!type_checker_infer_type(checker, call->arguments[0]))
-            return NULL;
-          return checker->builtin_void;
-        }
-        // atomic.fetch_add/fetch_sub(delta) -> T (old value)
-        if (strcmp(call->function_name, "fetch_add") == 0 ||
-            strcmp(call->function_name, "fetch_sub") == 0) {
-          if (call->argument_count != 1) {
-            type_checker_set_error_at_location(checker, expression->location,
-                "Atomic.%s() takes exactly 1 argument", call->function_name);
-            return NULL;
-          }
-          if (!type_checker_infer_type(checker, call->arguments[0]))
-            return NULL;
-          return obj_type->base_type ? obj_type->base_type : checker->builtin_int64;
-        }
-        // atomic.cas(expected, desired) -> T (old value)
-        if (strcmp(call->function_name, "cas") == 0) {
-          if (call->argument_count != 2) {
-            type_checker_set_error_at_location(checker, expression->location,
-                "Atomic.cas() takes exactly 2 arguments");
-            return NULL;
-          }
-          for (size_t i = 0; i < 2; i++)
-            if (!type_checker_infer_type(checker, call->arguments[i]))
-              return NULL;
-          return obj_type->base_type ? obj_type->base_type : checker->builtin_int64;
-        }
-        type_checker_set_error_at_location(checker, expression->location,
-            "Unknown method on Atomic<T>: '%s'", call->function_name);
-        return NULL;
-      }
-
-      if (obj_type->kind == TYPE_SENDER) {
-        // tx.send(val) -> void
-        if (strcmp(call->function_name, "send") == 0) {
-          if (call->argument_count != 1) {
-            type_checker_set_error_at_location(checker, expression->location,
-                "Sender.send() takes exactly 1 argument");
-            return NULL;
-          }
-          if (!type_checker_infer_type(checker, call->arguments[0]))
-            return NULL;
-          return checker->builtin_void;
-        }
-        type_checker_set_error_at_location(checker, expression->location,
-            "Unknown method on Sender<T>: '%s'", call->function_name);
-        return NULL;
-      }
-
-      if (obj_type->kind == TYPE_RECEIVER) {
-        // rx.recv() -> T
-        if (strcmp(call->function_name, "recv") == 0) {
-          if (call->argument_count != 0) {
-            type_checker_set_error_at_location(checker, expression->location,
-                "Receiver.recv() takes no arguments");
-            return NULL;
-          }
-          return obj_type->base_type ? obj_type->base_type : checker->builtin_void;
-        }
-        // rx.try_recv() -> T (returns default-zero if empty; future: Option<T>)
-        if (strcmp(call->function_name, "try_recv") == 0) {
-          if (call->argument_count != 0) {
-            type_checker_set_error_at_location(checker, expression->location,
-                "Receiver.try_recv() takes no arguments");
-            return NULL;
-          }
-          return obj_type->base_type ? obj_type->base_type : checker->builtin_void;
-        }
-        type_checker_set_error_at_location(checker, expression->location,
-            "Unknown method on Receiver<T>: '%s'", call->function_name);
-        return NULL;
-      }
-    }
-
-    // Static methods: Mutex.new(), Atomic.new()
-    if (!call->object && call->function_name &&
-        strcmp(call->function_name, "new") == 0 &&
-        call->type_arg_count == 0 && call->argument_count <= 1) {
-      // Handled in IR lowering — the parser turns Mutex.new() into a call
-      // with function_name="new" and object=identifier("Mutex"). We can't
-      // reach here with object==NULL for those cases; but if somehow we do,
-      // fall through to symbol lookup which will fail gracefully.
-    }
-
-    // channel() / channel(N) builtin — returns (Sender<T>, Receiver<T>) pair
-    // We model it as returning void* since the pair is handled structurally
-    // in IR lowering; the user writes: var (tx, rx): (Sender<T>, Receiver<T>) = channel()
-    if (call->function_name &&
-        strcmp(call->function_name, "channel") == 0) {
-      if (call->argument_count > 1) {
-        type_checker_set_error_at_location(checker, expression->location,
-            "channel() expects 0 or 1 arguments (capacity)");
-        return NULL;
-      }
-      if (call->argument_count == 1 &&
-          !type_checker_infer_type(checker, call->arguments[0])) {
-        return NULL;
-      }
-      // Type is resolved from the variable declaration annotation;
-      // return an opaque cstring* placeholder that IR lowering replaces.
-      return checker->builtin_cstring;
-    }
-
     Symbol *func_symbol =
         symbol_table_lookup(checker->symbol_table, call->function_name);
     if (!func_symbol) {
@@ -2379,34 +2027,6 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
                                                 target_type);
 
     return target_type;
-  }
-
-  case AST_SPAWN_EXPRESSION: {
-    SpawnExpression *spawn = (SpawnExpression *)expression->data;
-    if (!spawn || !spawn->call) {
-      type_checker_set_error_at_location(checker, expression->location,
-                                         "Invalid spawn expression");
-      return NULL;
-    }
-    // Type-check the inner call so any argument errors surface
-    Type *call_return = type_checker_infer_type(checker, spawn->call);
-    if (!call_return)
-      return NULL;
-    // Build Thread<ReturnType>
-    const char *ret_name = call_return->name ? call_return->name : "void";
-    size_t tname_len = strlen("Thread<") + strlen(ret_name) + 2;
-    char *thread_name = malloc(tname_len);
-    if (!thread_name)
-      return NULL;
-    snprintf(thread_name, tname_len, "Thread<%s>", ret_name);
-    Type *t = type_create(TYPE_THREAD, thread_name);
-    free(thread_name);
-    if (!t)
-      return NULL;
-    t->base_type = call_return;
-    t->size = 8;
-    t->alignment = 8;
-    return t;
   }
 
   case AST_MATCH_STATEMENT: {
@@ -2823,35 +2443,6 @@ Type *type_checker_get_type_by_name(TypeChecker *checker, const char *name) {
   if (strcmp(name, "void") == 0)
     return checker->builtin_void;
 
-  if (strncmp(name, "Future<", 7) == 0) {
-    Type *future_type = type_checker_parse_future_type(checker, name);
-    if (future_type) {
-      return future_type;
-    }
-  }
-
-  // Thread generic types
-  {
-    static const struct { const char *prefix; TypeKind kind; } thread_types[] = {
-      { "Thread<",   TYPE_THREAD   },
-      { "Mutex<",    TYPE_MUTEX    },
-      { "Guard<",    TYPE_GUARD    },
-      { "Atomic<",   TYPE_ATOMIC   },
-      { "Sender<",   TYPE_SENDER   },
-      { "Receiver<", TYPE_RECEIVER },
-    };
-    for (int i = 0; i < 6; i++) {
-      if (strncmp(name, thread_types[i].prefix,
-                  strlen(thread_types[i].prefix)) == 0) {
-        Type *t = type_checker_parse_generic1_type(checker, name,
-                                                   thread_types[i].prefix,
-                                                   thread_types[i].kind);
-        if (t)
-          return t;
-      }
-    }
-  }
-
   // Check for function pointer types: fn(param1,param2)->returntype
   if (strncmp(name, "fn(", 3) == 0) {
     Type *fp_type = type_checker_parse_function_pointer_type(checker, name);
@@ -3087,12 +2678,6 @@ int type_checker_is_cast_valid(Type *from, Type *to) {
     return 1;
   }
 
-  // Pointer ↔ future
-  if ((from->kind == TYPE_POINTER && to->kind == TYPE_FUTURE) ||
-      (from->kind == TYPE_FUTURE && to->kind == TYPE_POINTER)) {
-    return 1;
-  }
-
   // Integer ↔ function pointer
   if ((type_checker_is_integer_type(from) &&
        to->kind == TYPE_FUNCTION_POINTER) ||
@@ -3101,19 +2686,9 @@ int type_checker_is_cast_valid(Type *from, Type *to) {
     return 1;
   }
 
-  // Integer ↔ future
-  if ((type_checker_is_integer_type(from) && to->kind == TYPE_FUTURE) ||
-      (from->kind == TYPE_FUTURE && type_checker_is_integer_type(to))) {
-    return 1;
-  }
-
   // Function pointer ↔ function pointer
   if (from->kind == TYPE_FUNCTION_POINTER &&
       to->kind == TYPE_FUNCTION_POINTER) {
-    return 1;
-  }
-
-  if (from->kind == TYPE_FUTURE && to->kind == TYPE_FUTURE) {
     return 1;
   }
 
@@ -5028,12 +4603,6 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     // Function call as statement (no return value used)
     Type *return_type = type_checker_infer_type(checker, statement);
     return return_type != NULL; // Error already reported if NULL
-  }
-
-  case AST_SPAWN_EXPRESSION: {
-    // spawn foo() used as a fire-and-forget statement
-    Type *t = type_checker_infer_type(checker, statement);
-    return t != NULL;
   }
 
   case AST_RETURN_STATEMENT: {

@@ -8,7 +8,7 @@ The compiler and most stdlib modules work on Linux and Windows. The compiler emi
 
 **Cross-platform modules:** `std/io`, `std/mem`, `std/math`, `std/conv`, and `std/process` use the C runtime and work on both Linux and Windows.
 
-**Windows-only:** `std/win32` provides native Win32 bindings, `std/net` provides Winsock2 bindings, and `std/thread` provides Win32 threading bindings. They do not work on Linux. Programs that import these modules or use `--prelude` (which includes `std/net`) will fail to link on Linux with undefined references to Win32 symbols. For networking/threading on Linux, use `std/net_posix` and `std/thread_posix` respectively.
+**Windows-only:** `std/win32` provides native Win32 bindings, `std/net` provides Winsock2 bindings, `std/thread` provides Win32 threading bindings, and `std/ui` provides a Win32 GUI layer. They do not work on Linux. Programs that import these modules or use `--prelude` (which includes `std/net`) will fail to link on Linux with undefined references to Win32 symbols. For networking/threading on Linux, use `std/net_posix` and `std/thread_posix` respectively.
 
 **Linux/macOS:** `std/net_posix` provides POSIX socket bindings and `std/thread_posix` provides pthread-based threading. These modules require linking with `stdlib/posix_helpers.c`.
 
@@ -18,7 +18,7 @@ Console and file I/O. `puts` writes a null-terminated string and appends a newli
 
 ## std/mem
 
-Memory management. C runtime functions: `malloc`, `calloc`, `realloc`, `free`, `memset`, `memcpy`, `memmove`, `memcmp`. Helpers: `alloc_zeroed` (allocate and zero-initialize), `buf_dup` (allocate and copy a buffer). Use `malloc`/`free` for buffers, C interop, and explicit lifetimes. Use `new` for zero-initialized Mettle struct instances retained by the bundled heap runtime until shutdown. See [Heap Allocator Runtime](heap-allocator-runtime.md).
+Memory management. C runtime functions: `malloc`, `calloc`, `realloc`, `free`, `memset`, `memcpy`, `memmove`, `memcmp`. Helpers: `alloc_zeroed` (allocate and zero-initialize), `buf_dup` (allocate and copy a buffer). Use `malloc`/`free` for buffers, C interop, and explicit lifetimes. `new` emits direct zero-initialized `calloc` allocation. See [Heap Allocation](heap-allocator-runtime.md).
 
 ## std/math
 
@@ -37,6 +37,46 @@ Process control. `exit` terminates the program with an exit code. `rand`, `srand
 Native Win32 bindings for Windows-only programs. The module exports prefixed raw bindings such as `Win32_GetLastError`, `Win32_GetStdHandle`, `Win32_WriteFile`, `Win32_GetSystemMetrics`, and `Win32_MessageBoxA`, plus friendlier wrappers such as `win32_last_error`, `win32_stdout`, `win32_write_stdout`, `win32_get_system_metrics`, `win32_tick_count64`, and `win32_sleep_ms`.
 
 The internal PE linker probes common Win32 DLLs directly (`kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, plus the C runtime DLLs), so `mettle --build --emit-obj --linker internal` can call those APIs without a C bridge or import-library link flags. External GCC/MSVC linking may still need the matching `-l...` or `.lib` arguments.
+
+## std/ui
+
+Windows-only native GUI library built on Win32 (`user32` + `gdi32`). Does not work on Linux. Import with `import "std/ui";` and build with the internal linker:
+
+```bash
+mettle --build --linker internal app.mettle -o app.exe
+```
+
+Core lifecycle:
+
+- `ui_init()` registers the shared window class (safe to call multiple times)
+- `ui_window_create(title, x, y, width, height, window_proc) -> int64` creates a top-level window; pass `&your_proc` as the callback
+- `ui_window_show(hwnd)` displays the window
+- `ui_run_message_loop() -> int32` runs until `ui_quit(code)` or `WM_DESTROY`
+- `ui_shutdown()` unregisters the window class (optional)
+
+Window procedure helpers:
+
+- `ui_def_window_proc(hwnd, msg, wparam, lparam)` forwards to `DefWindowProcA`
+- Message constants such as `UI_WM_PAINT()`, `UI_WM_COMMAND()`, `UI_WM_DESTROY()`
+- `ui_command_id(wparam)` / `ui_command_notify(wparam)` decode `WM_COMMAND`
+- `ui_mouse_x(lparam)` / `ui_mouse_y(lparam)` decode mouse coordinates
+
+Drawing (typically inside `UI_WM_PAINT`):
+
+- `ui_begin_paint(hwnd, &ps) -> hdc`, `ui_end_paint(hwnd, &ps)`
+- `ui_fill_rect_color(hdc, left, top, right, bottom, color)`
+- `ui_draw_text(hdc, x, y, text)` and `ui_draw_text_color(...)`
+- `ui_rgb(r, g, b)` builds a `COLORREF`
+
+Common controls (child windows):
+
+- `ui_button_create(parent, x, y, w, h, label, id)`
+- `ui_button_create_default(...)` for the default push button
+- `ui_label_create(parent, x, y, w, h, text, id)`
+- `ui_textbox_create(parent, x, y, w, h, id)`
+- `ui_control_set_text(control, text)` / `ui_control_get_text(control, buf, max_len)`
+
+See `examples/ui_demo/ui_demo.mettle` for a complete sample with custom painting, a button, label, and text field.
 
 ## std/system
 
@@ -115,4 +155,3 @@ The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process
 ```bash
 mettle --prelude main.mettle -o main.s
 ```
-

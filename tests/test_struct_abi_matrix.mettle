@@ -1,0 +1,107 @@
+// Struct ABI matrix: small direct structs, odd-size indirect structs,
+// value receivers, and nested by-value calls.
+import "std/conv";
+import "std/io";
+
+struct Small4 {
+  a: int32;
+}
+
+struct Small8 {
+  a: int32;
+  b: int32;
+}
+
+struct Odd3 {
+  a: uint8;
+  b: uint8;
+  c: uint8;
+}
+
+struct Big3 {
+  a: int32;
+  b: int32;
+  c: int32;
+}
+
+function write_s(s: cstring) {
+  if (s != 0) {
+    fputs(s, get_stdout());
+  }
+}
+
+function write_i64(v: int64) {
+  var buf: uint8[32];
+  int_to_dec((cstring)((int64)(&(buf[0]))), v);
+  write_s((cstring)((int64)(&(buf[0]))));
+}
+
+function line_i64(label: cstring, v: int64) {
+  write_s(label);
+  write_s(cstr(" "));
+  write_i64(v);
+  write_s(cstr("\n"));
+}
+
+function small4_value(s: Small4) -> int32 {
+  return s.a;
+}
+
+function small8_sum(s: Small8) -> int32 {
+  return s.a + s.b;
+}
+
+function odd3_sum(o: Odd3) -> int32 {
+  return (int32)o.a + (int32)o.b + (int32)o.c;
+}
+
+function make_odd3(a: uint8, b: uint8, c: uint8) -> Odd3 {
+  var o: Odd3;
+  o.a = a;
+  o.b = b;
+  o.c = c;
+  return o;
+}
+
+function make_big(a: int32, b: int32, c: int32) -> Big3 {
+  var v: Big3;
+  v.a = a;
+  v.b = b;
+  v.c = c;
+  return v;
+}
+
+function consume_big(v: Big3) -> int32 {
+  return v.a + v.b + v.c;
+}
+
+function value_receiver_total(v: Big3) -> int32 {
+  return v.a + v.b + v.c;
+}
+
+function nested_big_sum() -> int32 {
+  return consume_big(make_big(7, 8, 9)) + consume_big(make_big(1, 2, 3));
+}
+
+function main() -> int32 {
+  write_s(cstr("struct abi matrix\n"));
+
+  var s4: Small4;
+  s4.a = 41;
+  line_i64(cstr("small4"), (int64)small4_value(s4));
+
+  var s8: Small8;
+  s8.a = 11;
+  s8.b = 22;
+  line_i64(cstr("small8"), (int64)small8_sum(s8));
+
+  var odd: Odd3 = make_odd3(5, 6, 7);
+  line_i64(cstr("odd3"), (int64)odd3_sum(odd));
+  line_i64(cstr("odd3_return"), (int64)odd3_sum(make_odd3(9, 10, 11)));
+
+  var big: Big3 = make_big(10, 20, 30);
+  line_i64(cstr("value_receiver_total"), (int64)value_receiver_total(big));
+  line_i64(cstr("nested_big"), (int64)nested_big_sum());
+
+  return 0;
+}

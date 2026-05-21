@@ -1,0 +1,79 @@
+// Mettle UI Demo
+//
+// A small native Windows GUI showing custom painting and common controls.
+//
+// Build:
+//   mettle --build --linker internal examples/ui_demo/ui_demo.mettle -o ui_demo.exe
+//
+// Run:
+//   ui_demo.exe
+
+import "std/ui";
+import "std/io";
+import "std/conv";
+
+var g_main_window: int64 = 0;
+var g_status_label: int64 = 0;
+var g_click_count: int32 = 0;
+
+function on_paint(hwnd: int64) {
+  var ps: UiPaintStruct;
+  var hdc: int64 = ui_begin_paint(hwnd, &ps);
+  var width: int32 = ui_client_width(hwnd);
+  var height: int32 = ui_client_height(hwnd);
+
+  ui_fill_rect_color(hdc, 0, 0, width, height, ui_rgb(245, 247, 250));
+  ui_fill_rect_color(hdc, 24, 24, width - 24, 120, ui_rgb(58, 123, 213));
+  ui_draw_text_color(hdc, 40, 48, cstr("Mettle UI"), ui_rgb(255, 255, 255), ui_rgb(58, 123, 213));
+  ui_draw_text_color(hdc, 40, 76, cstr("Native Win32 desktop widgets and drawing"), ui_rgb(230, 240, 255), ui_rgb(58, 123, 213));
+
+  var hint: string = "Click the button to update the status label.";
+  ui_draw_text(hdc, 24, 140, cstr(hint));
+
+  ui_end_paint(hwnd, &ps);
+}
+
+function window_proc(hwnd: int64, msg: uint32, wparam: int64, lparam: int64) -> int64 {
+  if (msg == UI_WM_PAINT()) {
+    on_paint(hwnd);
+    return 0;
+  }
+
+  if (msg == UI_WM_COMMAND()) {
+    if (ui_command_notify(wparam) == UI_BN_CLICKED()) {
+      if (ui_command_id(wparam) == 1001) {
+        g_click_count = g_click_count + 1;
+        var status: uint8[64];
+        format_i64(&status[0], 64, "Clicks: %d", g_click_count);
+        ui_control_set_text(g_status_label, &status[0]);
+        ui_window_invalidate(g_main_window);
+        return 0;
+      }
+    }
+  }
+
+  if (msg == UI_WM_DESTROY()) {
+    ui_quit(0);
+    return 0;
+  }
+
+  return ui_def_window_proc(hwnd, msg, wparam, lparam);
+}
+
+function main() -> int32 {
+  if (ui_init() == 0) {
+    return 1;
+  }
+
+  g_main_window = ui_window_create(cstr("Mettle UI Demo"), 120, 120, 720, 480, &window_proc);
+  if (g_main_window == 0) {
+    return 2;
+  }
+
+  g_status_label = ui_label_create(g_main_window, 24, 180, 640, 24, cstr("Clicks: 0"), 1002);
+  ui_button_create_default(g_main_window, 24, 220, 160, 36, cstr("Click me"), 1001);
+  ui_textbox_create(g_main_window, 24, 280, 320, 28, 1003);
+
+  ui_window_show(g_main_window);
+  return ui_run_message_loop();
+}

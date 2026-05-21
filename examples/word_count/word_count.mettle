@@ -8,8 +8,7 @@
 
 import "std/io";
 import "std/mem";
-
-extern function GetTickCount64() -> uint64 = "GetTickCount64";
+import "std/bench";
 
 // Count words in buf[0..len-1]. Word = non-empty sequence of non-whitespace bytes.
 function word_count(buf: cstring, len: int64) -> int64 {
@@ -55,15 +54,14 @@ function main() -> int32 {
   var wc: int64 = word_count(buf, buf_size);
 
   var passes: int32 = 500;
-  var t0: uint64 = GetTickCount64();
+  var t0: uint64 = bench_time_us();
   var total: int64 = 0;
   var p: int32 = 0;
   while (p < passes) {
     total = total + word_count(buf, buf_size);
     p = p + 1;
   }
-  var t1: uint64 = GetTickCount64();
-  var elapsed_ms: uint64 = t1 - t0;
+  var elapsed_us: uint64 = bench_time_us() - t0;
 
   var header: string = "Word count: 256 KB buffer (a b pattern)";
   println(cstr(header));
@@ -81,10 +79,10 @@ function main() -> int32 {
 
   var time_str: string = "Time: ";
   print(cstr(time_str));
-  print_int(elapsed_ms);
-  println(cstr(" ms"));
+  print_int(elapsed_us);
+  println(cstr(" us"));
 
-  var per_pass: uint64 = elapsed_ms * 1000 / passes;
+  var per_pass: uint64 = elapsed_us / passes;
   var us_str: string = "Per pass: ~";
   print(cstr(us_str));
   print_int(per_pass);

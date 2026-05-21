@@ -201,7 +201,6 @@ static int symbol_table_types_compatible(const Type *lhs, const Type *rhs) {
     return lhs->array_size == rhs->array_size &&
            symbol_table_types_compatible(lhs->base_type, rhs->base_type);
   case TYPE_POINTER:
-  case TYPE_FUTURE:
     return symbol_table_types_compatible(lhs->base_type, rhs->base_type);
   case TYPE_STRUCT:
     if (lhs->name && rhs->name) {
@@ -489,7 +488,6 @@ Type *type_create(TypeKind kind, const char *name) {
   case TYPE_UINT64:
   case TYPE_FLOAT64:
   case TYPE_POINTER:
-  case TYPE_FUTURE:
   case TYPE_ENUM:
     type->size = 8;
     type->alignment = 8;
@@ -658,6 +656,7 @@ Symbol *symbol_create(const char *name, SymbolKind kind, Type *type) {
     symbol->data.variable.register_id = -1;
     symbol->data.variable.memory_offset = 0;
     symbol->data.variable.is_in_register = 0;
+    symbol->data.variable.is_indirect_param = 0;
     break;
   case SYMBOL_FUNCTION:
     symbol->data.function.parameter_names = NULL;

@@ -38,8 +38,7 @@ typedef enum {
   AST_MEMBER_ACCESS,
   AST_INDEX_EXPRESSION,
   AST_NEW_EXPRESSION,
-  AST_CAST_EXPRESSION,
-  AST_SPAWN_EXPRESSION
+  AST_CAST_EXPRESSION
 } ASTNodeType;
 
 typedef struct {
@@ -86,7 +85,6 @@ typedef struct {
   ASTNode *body;
   int is_exported;
   int is_extern;
-  int is_async;
   char *link_name;
   char **type_params;
   char **type_param_traits;
@@ -284,10 +282,6 @@ typedef struct {
   ASTNode *statement;
 } DeferStatement;
 
-typedef struct {
-  ASTNode *call; // The function call expression being spawned
-} SpawnExpression;
-
 // Function declarations
 ASTNode *ast_create_node(ASTNodeType type, SourceLocation location);
 ASTNode *ast_clone_node(ASTNode *node);
@@ -376,6 +370,5 @@ ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
                                     size_t arm_count, SourceLocation location);
 ASTNode *ast_create_match_expression(ASTNode *expression, MatchArm *arms,
                                      size_t arm_count, SourceLocation location);
-ASTNode *ast_create_spawn_expression(ASTNode *call, SourceLocation location);
 
 #endif // AST_H

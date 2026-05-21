@@ -33,6 +33,7 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->control_flow_stack_size = 0;
   generator->control_flow_stack_capacity = 0;
   generator->generate_debug_info = 0;
+  generator->generate_stack_trace_support = 0;
   generator->emit_asm_comments = 1;
   generator->eliminate_unreachable_functions = 0;
   generator->has_error = 0;
@@ -51,6 +52,12 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->pending_spill_single_use = 0;
   generator->flushing_pending = 0;
   generator->current_temp_use_map = NULL;
+  generator->indirect_return_slot_offsets = NULL;
+  generator->indirect_return_slot_count = 0;
+  generator->indirect_return_slot_capacity = 0;
+  generator->indirect_return_slot_cursor = 0;
+  generator->current_fn_returns_indirect = 0;
+  generator->current_fn_indirect_return_size = 0;
   generator->binary_emitter =
       binary_emitter_create(BINARY_TARGET_FORMAT_COFF_WIN64);
 
@@ -103,6 +110,7 @@ void code_generator_destroy(CodeGenerator *generator) {
       }
     }
     free(generator->extern_symbols);
+    free(generator->indirect_return_slot_offsets);
     free(generator);
   }
 }
@@ -161,6 +169,14 @@ void code_generator_set_emit_asm_comments(CodeGenerator *generator, int enable) 
     return;
   }
   generator->emit_asm_comments = enable ? 1 : 0;
+}
+
+void code_generator_set_stack_trace_support(CodeGenerator *generator,
+                                            int enable) {
+  if (!generator) {
+    return;
+  }
+  generator->generate_stack_trace_support = enable ? 1 : 0;
 }
 
 void code_generator_set_eliminate_unreachable_functions(
@@ -429,6 +445,50 @@ int code_generator_emit_extern_symbol(CodeGenerator *generator,
   return !generator->has_error;
 }
 
+void code_generator_emit_calloc_call(CodeGenerator *generator,
+                                     const char *size_register) {
+  if (!generator || !size_register || size_register[0] == '\0') {
+    return;
+  }
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator
+          ? generator->register_allocator->calling_convention
+          : NULL;
+  const char *count_register = "rdi";
+  const char *bytes_register = "rsi";
+  if (conv_spec && conv_spec->int_param_count > 0) {
+    const char *candidate =
+        code_generator_get_register_name(conv_spec->int_param_registers[0]);
+    if (candidate) {
+      count_register = candidate;
+    }
+  }
+  if (conv_spec && conv_spec->int_param_count > 1) {
+    const char *candidate =
+        code_generator_get_register_name(conv_spec->int_param_registers[1]);
+    if (candidate) {
+      bytes_register = candidate;
+    }
+  }
+
+  code_generator_emit(generator, "    mov %s, %s\n", bytes_register,
+                      size_register);
+  code_generator_emit(generator, "    mov %s, 1\n", count_register);
+  if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
+    code_generator_emit(
+        generator,
+        "    sub rsp, %d      ; 32-byte shadow + 8-byte align pad\n",
+        conv_spec->shadow_space_size + 8);
+  }
+  code_generator_emit(generator, "    extern calloc\n");
+  code_generator_emit(generator, "    call calloc\n");
+  if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
+    code_generator_emit(generator, "    add rsp, %d\n",
+                        conv_spec->shadow_space_size + 8);
+  }
+}
+
 int code_generator_emit_escaped_string_bytes(CodeGenerator *generator,
                                              const char *value,
                                              int include_null_terminator) {
@@ -567,4 +627,3 @@ void code_generator_emit_to_global_buffer(CodeGenerator *generator, const char *
 
   free(rendered);
 }
-

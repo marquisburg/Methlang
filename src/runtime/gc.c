@@ -1,5 +1,4 @@
 #include "gc.h"
-#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,18 +20,6 @@
 #include <ucontext.h>
 #endif
 #endif
-
-typedef struct GCAllocation {
-  size_t size;
-  struct GCAllocation *next;
-  // Payload follows this struct.
-} GCAllocation;
-
-static GCAllocation *g_allocations = NULL;
-static size_t g_allocation_count = 0;
-static size_t g_allocated_bytes = 0;
-static size_t g_allocation_threshold = SIZE_MAX;
-static atomic_flag g_gc_lock = ATOMIC_FLAG_INIT;
 
 static const MethRuntimeFunctionInfo *g_runtime_debug_functions = NULL;
 static size_t g_runtime_debug_function_count = 0;
@@ -495,18 +482,6 @@ void meth_runtime_debug_register_image(const MethRuntimeFunctionInfo *functions,
   g_runtime_debug_location_count = location_count;
 }
 
-static void gc_fatal_error(const char *message) {
-#if defined(_WIN32) || defined(_WIN64)
-  meth_runtime_write_stderr(message ? message : "Fatal runtime error");
-  meth_runtime_write_stderr("\r\n");
-  meth_runtime_terminate_with_code(1);
-#else
-  meth_runtime_write_stderr(message ? message : "Fatal runtime error");
-  meth_runtime_write_stderr("\n");
-  meth_runtime_terminate_with_code(1);
-#endif
-}
-
 void meth_runtime_debug_install_crash_handler(void) {
 #if defined(_WIN32) || defined(_WIN64)
   if (InterlockedCompareExchange(&g_runtime_debug_handler_installed, 1, 0) == 0) {
@@ -622,145 +597,4 @@ int32_t meth_atomic_dec_i32(int32_t *target) {
 #else
   return (int32_t)__sync_sub_and_fetch(target, 1);
 #endif
-}
-
-static void gc_lock(void) {
-  while (atomic_flag_test_and_set_explicit(&g_gc_lock, memory_order_acquire)) {
-  }
-}
-
-static void gc_unlock(void) {
-  atomic_flag_clear_explicit(&g_gc_lock, memory_order_release);
-}
-
-static int gc_try_add_size(size_t a, size_t b, size_t *out) {
-  if (!out) {
-    return 0;
-  }
-  if (a > SIZE_MAX - b) {
-    return 0;
-  }
-  *out = a + b;
-  return 1;
-}
-
-void gc_safepoint(void *current_rsp) {
-  (void)current_rsp;
-}
-
-void gc_register_root(void **root_slot) {
-  (void)root_slot;
-}
-
-void gc_unregister_root(void **root_slot) {
-  (void)root_slot;
-}
-
-void gc_init(void *stack_base) {
-  (void)stack_base;
-}
-
-int32_t gc_thread_attach(void) {
-  return 0;
-}
-
-int32_t gc_thread_detach(void) {
-  return 0;
-}
-
-void *gc_alloc(size_t size) {
-  if (size == 0) {
-    return NULL;
-  }
-
-  size_t total_size = 0;
-  if (!gc_try_add_size(sizeof(GCAllocation), size, &total_size)) {
-    gc_fatal_error("Fatal error: Allocation size overflow during gc_alloc");
-  }
-
-  GCAllocation *allocation = (GCAllocation *)calloc(1, total_size);
-  if (!allocation) {
-    gc_fatal_error("Fatal error: Out of memory during gc_alloc");
-  }
-  allocation->size = size;
-
-  gc_lock();
-
-  size_t next_allocated_bytes = 0;
-  if (!gc_try_add_size(g_allocated_bytes, size, &next_allocated_bytes)) {
-    gc_unlock();
-    free(allocation);
-    gc_fatal_error(
-        "Fatal error: allocated-byte accounting overflow during gc_alloc");
-  }
-
-  allocation->next = g_allocations;
-  g_allocations = allocation;
-  g_allocation_count++;
-  g_allocated_bytes = next_allocated_bytes;
-
-  void *payload = (void *)(allocation + 1);
-  gc_unlock();
-  return payload;
-}
-
-void gc_collect(void *current_rsp) {
-  (void)current_rsp;
-}
-
-void gc_collect_now(void) {
-}
-
-void gc_set_collection_threshold(size_t bytes) {
-  gc_lock();
-  g_allocation_threshold = bytes;
-  gc_unlock();
-}
-
-size_t gc_get_collection_threshold(void) {
-  gc_lock();
-  size_t value = g_allocation_threshold;
-  gc_unlock();
-  return value;
-}
-
-size_t gc_get_allocation_count(void) {
-  gc_lock();
-  size_t value = g_allocation_count;
-  gc_unlock();
-  return value;
-}
-
-size_t gc_get_allocated_bytes(void) {
-  gc_lock();
-  size_t value = g_allocated_bytes;
-  gc_unlock();
-  return value;
-}
-
-size_t gc_get_tlab_chunk_count(void) {
-  return 0;
-}
-
-void gc_shutdown(void) {
-  gc_lock();
-
-  GCAllocation *current = g_allocations;
-  while (current) {
-    GCAllocation *next = current->next;
-    free(current);
-    current = next;
-  }
-
-  g_allocations = NULL;
-  g_allocation_count = 0;
-  g_allocated_bytes = 0;
-  g_allocation_threshold = SIZE_MAX;
-
-  g_runtime_debug_functions = NULL;
-  g_runtime_debug_function_count = 0;
-  g_runtime_debug_locations = NULL;
-  g_runtime_debug_location_count = 0;
-
-  gc_unlock();
 }

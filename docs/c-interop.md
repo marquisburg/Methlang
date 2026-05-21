@@ -45,7 +45,17 @@ The default native import set includes `kernel32`, `user32`, `gdi32`, `advapi32`
 
 ## Passing Structs to C
 
-Structs are laid out in declaration order. For C interop, define the struct to match the C layout exactly. Field order, types, and alignment must be compatible. Padding between fields follows the target ABI. Avoid passing large structs by value to C; the ABI may pass them by pointer. When a C API expects a pointer to a struct, pass `&my_struct` or a `T*` variable. On MS x64, the first four arguments go in RCX, RDX, R8, R9; structs larger than 8 bytes are often passed by pointer.
+Structs are laid out in declaration order. For C interop, define the struct to match the C layout exactly. Field order, types, and alignment must be compatible. Padding between fields follows the target ABI.
+
+On Windows, Mettle follows the Microsoft x64 aggregate rule for struct-by-value calls:
+
+- structs sized exactly 1, 2, 4, or 8 bytes pass and return directly in one integer register
+- all other aggregate sizes pass indirectly by pointer
+- indirect returns use a hidden first argument in RCX, and the callee returns that pointer in RAX
+
+This is covered for Mettle calling C functions that take or return structs by value, including `--emit-obj` builds linked with Mettle's internal linker. C calling exported Mettle functions with struct-by-value arguments or returns is not yet documented as supported.
+
+When a C API expects a pointer to a struct, pass `&my_struct` or a `T*` variable. For portable Linux/macOS C interop, prefer pointer parameters until the System V AMD64 aggregate classifier is implemented.
 
 ```mettle
 struct SockAddrIn {
@@ -62,19 +72,11 @@ On Windows, the recommended path is to let Mettle do the assemble/link step for 
 
 ```bash
 mettle --build main.mettle -o main.exe
-mettle --build main.mettle -o main.exe
 ```
 
-When using the internal linker, common Win32 APIs and the C runtime resolve without external C toolchains. Use `--link-arg -lcustomdll` or `--link-arg path/to/custom.lib` for additional DLLs/import libraries.
+When using the internal linker, common Win32 APIs and the C runtime resolve without external C toolchains. Use `--link-arg -lcustomdll` or `--link-arg path/to/custom.lib` for additional DLLs/import libraries. Raw COFF `.o` / `.obj` files passed through `--link-arg` are also included in the internal linker object list.
 
-If you use the manual assembly/link flow, link the compiled assembly with the C runtime and any required libraries. For programs using `new` or heap-backed string helpers, include the bundled `gc.o` runtime object in the link. Example:
-
-```bash
-# Windows (manual GCC link)
-gcc -nostartfiles main.o gc.o -o main -lws2_32 -lkernel32
-```
-
-Use `-nostartfiles` when the program provides its own entry point, such as `_start` or `mainCRTStartup`.
+For Windows builds, prefer the internal linker path above. It is the path covered by current struct ABI and Win32 interop tests.
 
 ## POSIX Networking (Linux / macOS)
 

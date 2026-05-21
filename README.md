@@ -65,10 +65,9 @@ in, one executable out.
 - Strong typing with pointers, arrays, structs, enums, and function pointers
 - Control flow: `if`, `while`, `for`, `switch`, `match`, `defer`, `errdefer`, and labeled `break`/`continue`
 - Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`); line (`//`) and nesting block (`/* */`) comments
-- Async execution with `async`, `await`, `Future<T>`, and cooperative cancellation (default **pool** executor; optional experimental **`--async-model coroutine`** with a portable reactor: IOCP on Windows, `poll(2)` on POSIX; see `docs/async.md`)
 - C interop via `extern` and `cstring`
-- Bundled heap allocator runtime for `new` and heap-backed string concatenation
-- Standard library modules for I/O, conversion, networking, process, threading, and more
+- Transitional heap allocator shim for `new` and heap-backed string concatenation (calloc-backed; no GC, no runtime tracing)
+- Standard library modules for I/O, conversion, networking, process, threading (thin Win32/pthread wrappers), and more
 - Developer-friendly diagnostics: stable error codes, source snippets with carets, and scope-aware "did you mean?" suggestions for typos
 - Cross-platform symbolized crash tracebacks (Windows SEH and POSIX signal handlers)
 
@@ -147,7 +146,7 @@ Available topics: `build`, `heap`, `gc`, `interop`, `stdlib`, `web`.
 - If you use the manual assembly/link flow, link bundled `runtime/gc.o` from your Mettle installation when using `new` or string concatenation.
 - If you use async features, also link bundled `runtime/async_runtime.o`.
 - Compile with `-s` to embed runtime crash traceback support, or use `-d` to enable it alongside normal debug output.
-- On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated runtime traps with Meth function/source frames.
+- On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated runtime traps with Mettle function/source frames.
 - The internal PE linker resolves common Win32 DLLs directly; use `--link-arg` only for additional DLLs/import libraries.
 - `gc_thread_attach` and `gc_thread_detach` remain compatibility no-ops for older worker-thread code.
 
@@ -172,11 +171,10 @@ compiler. The compiler owns every phase from source text to machine code:
 2. **Parsing** - build the AST
 3. **Import resolution** - resolve and inline `import` directives
 4. **Monomorphization** - expand generics into concrete instantiations
-5. **Async rewrite** - lower `async` per `--async-model` (`pool` or experimental `coroutine`)
-6. **Type checking** - semantic analysis and symbol resolution
-7. **IR lowering** - convert the AST to Mettle's own intermediate representation
-8. **Optimization** (optional, `-O`) - propagation, folding, branch and codegen peepholes
-9. **Code generation** - emit x86-64
+5. **Type checking** - semantic analysis and symbol resolution
+6. **IR lowering** - convert the AST to Mettle's own intermediate representation
+7. **Optimization** (optional, `-O`) - propagation, folding, branch and codegen peepholes
+8. **Code generation** - emit x86-64
 
 The final phase has two outputs. By default it writes **NASM assembly**, which
 NASM then assembles. On Windows, `--emit-obj` skips the assembler entirely and

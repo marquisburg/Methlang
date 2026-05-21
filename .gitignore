@@ -1,8 +1,9 @@
 bin/
 obj/
 .claude/
+.cursor/
+web/
 
-# Build artifacts
 *.exe
 *.o
 *.obj

@@ -1,0 +1,513 @@
+// Mettle standard library: GUI (Windows)
+//
+// A small Win32-based UI layer for native desktop windows, drawing, and
+// common controls. Requires Windows and the internal PE linker (user32/gdi32
+// are resolved automatically).
+//
+// Quick start:
+//   import "std/ui";
+//
+//   function on_paint(hwnd: int64) {
+//     var ps: UiPaintStruct;
+//     var hdc: int64 = ui_begin_paint(hwnd, &ps);
+//     ui_fill_rect_color(hdc, 0, 0, 400, 300, ui_rgb(240, 248, 255));
+//     ui_draw_text(hdc, 16, 16, cstr("Hello from Mettle UI"));
+//     ui_end_paint(hwnd, &ps);
+//   }
+//
+//   function window_proc(hwnd: int64, msg: uint32, wparam: int64, lparam: int64) -> int64 {
+//     if (msg == UI_WM_PAINT()) {
+//       on_paint(hwnd);
+//       return 0;
+//     }
+//     if (msg == UI_WM_DESTROY()) {
+//       ui_quit(0);
+//       return 0;
+//     }
+//     return ui_def_window_proc(hwnd, msg, wparam, lparam);
+//   }
+//
+//   function main() -> int32 {
+//     if (ui_init() == 0) { return 1; }
+//     var hwnd: int64 = ui_window_create(cstr("Demo"), 100, 100, 640, 480, &window_proc);
+//     if (hwnd == 0) { return 2; }
+//     ui_window_show(hwnd);
+//     return ui_run_message_loop();
+//   }
+
+import "std/win32";
+import "std/mem";
+import "std/io";
+
+// ─── Layout structs (match Win32) ───────────────────────────────────────────
+export struct UiRect {
+  left: int32;
+  top: int32;
+  right: int32;
+  bottom: int32;
+}
+
+export struct UiPoint {
+  x: int32;
+  y: int32;
+}
+
+export struct UiMsg {
+  hwnd: int64;
+  message: uint32;
+  wparam: int64;
+  lparam: int64;
+  time: uint32;
+  pt: UiPoint;
+}
+
+export struct UiPaintStruct {
+  hdc: int64;
+  erase: int32;
+  rc_paint: UiRect;
+  restore: int32;
+  inc_update: int32;
+  reserved: uint8[32];
+}
+
+export struct UiWndClassEx {
+  cb_size: uint32;
+  style: uint32;
+  wnd_proc: fn(int64, uint32, int64, int64) -> int64;
+  cls_extra: int32;
+  wnd_extra: int32;
+  instance: int64;
+  icon: int64;
+  cursor: int64;
+  background: int64;
+  menu_name: cstring;
+  class_name: cstring;
+  icon_sm: int64;
+}
+
+export struct UiWindowConfig {
+  title: cstring;
+  x: int32;
+  y: int32;
+  width: int32;
+  height: int32;
+}
+
+// ─── Window / message constants ─────────────────────────────────────────────
+export function UI_WM_CREATE() -> uint32 { return 1; }
+export function UI_WM_DESTROY() -> uint32 { return 2; }
+export function UI_WM_PAINT() -> uint32 { return 15; }
+export function UI_WM_CLOSE() -> uint32 { return 16; }
+export function UI_WM_COMMAND() -> uint32 { return 273; }
+export function UI_WM_LBUTTONDOWN() -> uint32 { return 513; }
+export function UI_WM_SIZE() -> uint32 { return 5; }
+export function UI_WM_SETTEXT() -> uint32 { return 12; }
+export function UI_WM_GETTEXT() -> uint32 { return 13; }
+export function UI_WM_GETTEXTLENGTH() -> uint32 { return 14; }
+
+export function UI_WS_OVERLAPPEDWINDOW() -> uint32 { return 0x00CF0000; }
+export function UI_WS_VISIBLE() -> uint32 { return 0x10000000; }
+export function UI_WS_CHILD() -> uint32 { return 0x40000000; }
+export function UI_WS_TABSTOP() -> uint32 { return 0x00010000; }
+export function UI_WS_BORDER() -> uint32 { return 0x00800000; }
+
+export function UI_WS_EX_CLIENTEDGE() -> uint32 { return 0x00000200; }
+export function UI_WS_EX_APPWINDOW() -> uint32 { return 0x00040000; }
+
+export function UI_SW_SHOW() -> int32 { return 5; }
+export function UI_SW_SHOWNORMAL() -> int32 { return 1; }
+
+export function UI_CS_HREDRAW() -> uint32 { return 0x0001; }
+export function UI_CS_VREDRAW() -> uint32 { return 0x0002; }
+export function UI_CS_DBLCLKS() -> uint32 { return 0x0008; }
+
+export function UI_COLOR_WINDOW() -> int32 { return 5; }
+export function UI_IDC_ARROW() -> int32 { return 32512; }
+
+export function UI_BS_PUSHBUTTON() -> uint32 { return 0; }
+export function UI_BS_DEFPUSHBUTTON() -> uint32 { return 1; }
+export function UI_SS_LEFT() -> uint32 { return 0; }
+export function UI_ES_LEFT() -> uint32 { return 0; }
+
+export function UI_BN_CLICKED() -> uint32 { return 0; }
+
+export function UI_PM_REMOVE() -> uint32 { return 0x0001; }
+
+export function UI_GWLP_USERDATA() -> int32 { return -21; }
+
+// ─── User32 / GDI32 bindings ────────────────────────────────────────────────
+export extern function Ui_GetModuleHandleA(name: cstring) -> int64 = "GetModuleHandleA";
+export extern function Ui_LoadCursorA(instance: int64, name: cstring) -> int64 = "LoadCursorA";
+export extern function Ui_RegisterClassExA(wnd_class: UiWndClassEx*) -> uint16 = "RegisterClassExA";
+export extern function Ui_UnregisterClassA(class_name: cstring, instance: int64) -> int32 = "UnregisterClassA";
+export extern function Ui_CreateWindowExA(ex_style: uint32, class_name: cstring, window_name: cstring, style: uint32, x: int32, y: int32, width: int32, height: int32, parent: int64, menu: int64, instance: int64, param: cstring) -> int64 = "CreateWindowExA";
+export extern function Ui_DestroyWindow(hwnd: int64) -> int32 = "DestroyWindow";
+export extern function Ui_ShowWindow(hwnd: int64, cmd: int32) -> int32 = "ShowWindow";
+export extern function Ui_UpdateWindow(hwnd: int64) -> int32 = "UpdateWindow";
+export extern function Ui_SetWindowTextA(hwnd: int64, text: cstring) -> int32 = "SetWindowTextA";
+export extern function Ui_GetWindowTextA(hwnd: int64, text: cstring, max_len: int32) -> int32 = "GetWindowTextA";
+export extern function Ui_GetClientRect(hwnd: int64, rect: UiRect*) -> int32 = "GetClientRect";
+export extern function Ui_MoveWindow(hwnd: int64, x: int32, y: int32, width: int32, height: int32, repaint: int32) -> int32 = "MoveWindow";
+export extern function Ui_InvalidateRect(hwnd: int64, rect: UiRect*, erase: int32) -> int32 = "InvalidateRect";
+export extern function Ui_DefWindowProcA(hwnd: int64, msg: uint32, wparam: int64, lparam: int64) -> int64 = "DefWindowProcA";
+export extern function Ui_PostQuitMessage(exit_code: int32) = "PostQuitMessage";
+export extern function Ui_GetMessageA(msg: UiMsg*, hwnd: int64, filter_min: uint32, filter_max: uint32) -> int32 = "GetMessageA";
+export extern function Ui_PeekMessageA(msg: UiMsg*, hwnd: int64, filter_min: uint32, filter_max: uint32, remove: uint32) -> int32 = "PeekMessageA";
+export extern function Ui_TranslateMessage(msg: UiMsg*) -> int32 = "TranslateMessage";
+export extern function Ui_DispatchMessageA(msg: UiMsg*) -> int64 = "DispatchMessageA";
+export extern function Ui_SendMessageA(hwnd: int64, msg: uint32, wparam: int64, lparam: int64) -> int64 = "SendMessageA";
+export extern function Ui_BeginPaint(hwnd: int64, paint: UiPaintStruct*) -> int64 = "BeginPaint";
+export extern function Ui_EndPaint(hwnd: int64, paint: UiPaintStruct*) -> int32 = "EndPaint";
+export extern function Ui_GetDC(hwnd: int64) -> int64 = "GetDC";
+export extern function Ui_ReleaseDC(hwnd: int64, hdc: int64) -> int32 = "ReleaseDC";
+export extern function Ui_FillRect(hdc: int64, rect: UiRect*, brush: int64) -> int32 = "FillRect";
+
+export extern function Ui_CreateSolidBrush(color: uint32) -> int64 = "CreateSolidBrush";
+export extern function Ui_DeleteObject(obj: int64) -> int32 = "DeleteObject";
+export extern function Ui_SetBkColor(hdc: int64, color: uint32) -> uint32 = "SetBkColor";
+export extern function Ui_SetTextColor(hdc: int64, color: uint32) -> uint32 = "SetTextColor";
+export extern function Ui_TextOutA(hdc: int64, x: int32, y: int32, text: cstring, length: int32) -> int32 = "TextOutA";
+export extern function Ui_GetStockObject(index: int32) -> int64 = "GetStockObject";
+export extern function Ui_SetWindowLongPtrA(hwnd: int64, index: int32, value: int64) -> int64 = "SetWindowLongPtrA";
+export extern function Ui_GetWindowLongPtrA(hwnd: int64, index: int32) -> int64 = "GetWindowLongPtrA";
+
+// ─── Module state ───────────────────────────────────────────────────────────
+var UI_CLASS_NAME: string = "MettleUiWindow";
+var ui_class_registered: int32 = 0;
+var ui_app_instance: int64 = 0;
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+export function ui_rgb(r: uint32, g: uint32, b: uint32) -> uint32 {
+  return r | (g << 8) | (b << 16);
+}
+
+export function ui_lo_word(value: int64) -> uint32 {
+  return (uint32)value & 0xFFFF;
+}
+
+export function ui_hi_word(value: int64) -> uint32 {
+  return ((uint32)value >> 16) & 0xFFFF;
+}
+
+export function ui_make_rect(left: int32, top: int32, right: int32, bottom: int32) -> UiRect {
+  var rect: UiRect;
+  rect.left = left;
+  rect.top = top;
+  rect.right = right;
+  rect.bottom = bottom;
+  return rect;
+}
+
+export function ui_rect_width(rect: UiRect) -> int32 {
+  return rect.right - rect.left;
+}
+
+export function ui_rect_height(rect: UiRect) -> int32 {
+  return rect.bottom - rect.top;
+}
+
+export function ui_client_width(hwnd: int64) -> int32 {
+  var rect: UiRect;
+  if (Ui_GetClientRect(hwnd, &rect) == 0) {
+    return 0;
+  }
+  return ui_rect_width(rect);
+}
+
+export function ui_client_height(hwnd: int64) -> int32 {
+  var rect: UiRect;
+  if (Ui_GetClientRect(hwnd, &rect) == 0) {
+    return 0;
+  }
+  return ui_rect_height(rect);
+}
+
+export function ui_command_id(wparam: int64) -> uint32 {
+  return ui_lo_word(wparam);
+}
+
+export function ui_command_notify(wparam: int64) -> uint32 {
+  return ui_hi_word(wparam);
+}
+
+export function ui_mouse_x(lparam: int64) -> int32 {
+  return (int32)(lparam & 0xFFFF);
+}
+
+export function ui_mouse_y(lparam: int64) -> int32 {
+  return (int32)((lparam >> 16) & 0xFFFF);
+}
+
+// ─── Initialization ─────────────────────────────────────────────────────────
+export function ui_init() -> int32 {
+  if (ui_class_registered != 0) {
+    return 1;
+  }
+
+  ui_app_instance = Ui_GetModuleHandleA(0);
+  if (ui_app_instance == NULL_HANDLE()) {
+    return 0;
+  }
+
+  var wnd_class: UiWndClassEx;
+  wnd_class.cb_size = 80;
+  wnd_class.style = UI_CS_HREDRAW() | UI_CS_VREDRAW() | UI_CS_DBLCLKS();
+  wnd_class.wnd_proc = &ui_trampoline_window_proc;
+  wnd_class.cls_extra = 0;
+  wnd_class.wnd_extra = 0;
+  wnd_class.instance = ui_app_instance;
+  wnd_class.icon = 0;
+  wnd_class.cursor = Ui_LoadCursorA(0, (cstring)(int64)UI_IDC_ARROW());
+  wnd_class.background = (int64)(UI_COLOR_WINDOW() + 1);
+  wnd_class.menu_name = 0;
+  wnd_class.class_name = cstr(UI_CLASS_NAME);
+  wnd_class.icon_sm = 0;
+
+  if (Ui_RegisterClassExA(&wnd_class) == 0) {
+    return 0;
+  }
+
+  ui_class_registered = 1;
+  return 1;
+}
+
+export function ui_shutdown() {
+  if (ui_class_registered == 0) {
+    return;
+  }
+  Ui_UnregisterClassA(cstr(UI_CLASS_NAME), ui_app_instance);
+  ui_class_registered = 0;
+}
+
+// Routes messages to the per-window proc stored in GWLP_USERDATA.
+function ui_trampoline_window_proc(hwnd: int64, msg: uint32, wparam: int64, lparam: int64) -> int64 {
+  if (msg == UI_WM_CREATE()) {
+    var create_params: int64 = *((int64*)lparam);
+    if (create_params != 0) {
+      Ui_SetWindowLongPtrA(hwnd, UI_GWLP_USERDATA(), create_params);
+    }
+  }
+
+  var stored: int64 = Ui_GetWindowLongPtrA(hwnd, UI_GWLP_USERDATA());
+  if (stored != 0) {
+    var proc: fn(int64, uint32, int64, int64) -> int64 = (fn(int64, uint32, int64, int64) -> int64)stored;
+    return proc(hwnd, msg, wparam, lparam);
+  }
+
+  if (msg == UI_WM_DESTROY()) {
+    ui_quit(0);
+    return 0;
+  }
+  return Ui_DefWindowProcA(hwnd, msg, wparam, lparam);
+}
+
+// ─── Window lifecycle ───────────────────────────────────────────────────────
+export function ui_window_create(title: cstring, x: int32, y: int32, width: int32, height: int32, proc: fn(int64, uint32, int64, int64) -> int64) -> int64 {
+  if (ui_init() == 0) {
+    return 0;
+  }
+
+  var proc_addr: int64 = (int64)proc;
+  var hwnd: int64 = Ui_CreateWindowExA(
+    UI_WS_EX_APPWINDOW(),
+    cstr(UI_CLASS_NAME),
+    title,
+    UI_WS_OVERLAPPEDWINDOW(),
+    x,
+    y,
+    width,
+    height,
+    0,
+    0,
+    ui_app_instance,
+    (cstring)proc_addr
+  );
+
+  if (hwnd == 0) {
+    return 0;
+  }
+  return hwnd;
+}
+
+export function ui_window_create_config(config: UiWindowConfig, proc: fn(int64, uint32, int64, int64) -> int64) -> int64 {
+  return ui_window_create(config.title, config.x, config.y, config.width, config.height, proc);
+}
+
+export function ui_window_show(hwnd: int64) {
+  Ui_ShowWindow(hwnd, UI_SW_SHOW());
+  Ui_UpdateWindow(hwnd);
+}
+
+export function ui_window_close(hwnd: int64) {
+  Ui_DestroyWindow(hwnd);
+}
+
+export function ui_window_set_title(hwnd: int64, title: cstring) {
+  Ui_SetWindowTextA(hwnd, title);
+}
+
+export function ui_window_get_title(hwnd: int64, buf: cstring, max_len: int32) -> int32 {
+  return Ui_GetWindowTextA(hwnd, buf, max_len);
+}
+
+export function ui_window_invalidate(hwnd: int64) {
+  Ui_InvalidateRect(hwnd, 0, 1);
+}
+
+export function ui_def_window_proc(hwnd: int64, msg: uint32, wparam: int64, lparam: int64) -> int64 {
+  return Ui_DefWindowProcA(hwnd, msg, wparam, lparam);
+}
+
+// ─── Message loop ───────────────────────────────────────────────────────────
+export function ui_quit(exit_code: int32) {
+  Ui_PostQuitMessage(exit_code);
+}
+
+export function ui_run_message_loop() -> int32 {
+  var msg: UiMsg;
+  while (Ui_GetMessageA(&msg, 0, 0, 0) > 0) {
+    Ui_TranslateMessage(&msg);
+    Ui_DispatchMessageA(&msg);
+  }
+  return (int32)msg.wparam;
+}
+
+export function ui_pump_messages() -> int32 {
+  var msg: UiMsg;
+  var had_message: int32 = 0;
+  while (Ui_PeekMessageA(&msg, 0, 0, 0, UI_PM_REMOVE()) != 0) {
+    had_message = 1;
+    Ui_TranslateMessage(&msg);
+    Ui_DispatchMessageA(&msg);
+  }
+  return had_message;
+}
+
+// ─── Drawing ────────────────────────────────────────────────────────────────
+export function ui_begin_paint(hwnd: int64, paint: UiPaintStruct*) -> int64 {
+  return Ui_BeginPaint(hwnd, paint);
+}
+
+export function ui_end_paint(hwnd: int64, paint: UiPaintStruct*) {
+  Ui_EndPaint(hwnd, paint);
+}
+
+export function ui_fill_rect(hdc: int64, rect: UiRect*, brush: int64) -> int32 {
+  return Ui_FillRect(hdc, rect, brush);
+}
+
+export function ui_fill_rect_color(hdc: int64, left: int32, top: int32, right: int32, bottom: int32, color: uint32) -> int32 {
+  var rect: UiRect = ui_make_rect(left, top, right, bottom);
+  var brush: int64 = Ui_CreateSolidBrush(color);
+  if (brush == 0) {
+    return 0;
+  }
+  var result: int32 = Ui_FillRect(hdc, &rect, brush);
+  Ui_DeleteObject(brush);
+  return result;
+}
+
+export function ui_draw_text(hdc: int64, x: int32, y: int32, text: cstring) -> int32 {
+  var len: int32 = 0;
+  while (text[len] != 0) {
+    len = len + 1;
+  }
+  Ui_SetBkColor(hdc, ui_rgb(255, 255, 255));
+  Ui_SetTextColor(hdc, ui_rgb(0, 0, 0));
+  return Ui_TextOutA(hdc, x, y, text, len);
+}
+
+export function ui_draw_text_color(hdc: int64, x: int32, y: int32, text: cstring, text_color: uint32, bg_color: uint32) -> int32 {
+  var len: int32 = 0;
+  while (text[len] != 0) {
+    len = len + 1;
+  }
+  Ui_SetBkColor(hdc, bg_color);
+  Ui_SetTextColor(hdc, text_color);
+  return Ui_TextOutA(hdc, x, y, text, len);
+}
+
+export function ui_get_white_brush() -> int64 {
+  return Ui_GetStockObject(0);
+}
+
+// ─── Controls ───────────────────────────────────────────────────────────────
+export function ui_button_create(parent: int64, x: int32, y: int32, width: int32, height: int32, label: cstring, control_id: int32) -> int64 {
+  return Ui_CreateWindowExA(
+    0,
+    cstr("BUTTON"),
+    label,
+    UI_WS_CHILD() | UI_WS_VISIBLE() | UI_WS_TABSTOP() | UI_BS_PUSHBUTTON(),
+    x,
+    y,
+    width,
+    height,
+    parent,
+    (int64)control_id,
+    ui_app_instance,
+    0
+  );
+}
+
+export function ui_button_create_default(parent: int64, x: int32, y: int32, width: int32, height: int32, label: cstring, control_id: int32) -> int64 {
+  return Ui_CreateWindowExA(
+    0,
+    cstr("BUTTON"),
+    label,
+    UI_WS_CHILD() | UI_WS_VISIBLE() | UI_WS_TABSTOP() | UI_BS_DEFPUSHBUTTON(),
+    x,
+    y,
+    width,
+    height,
+    parent,
+    (int64)control_id,
+    ui_app_instance,
+    0
+  );
+}
+
+export function ui_label_create(parent: int64, x: int32, y: int32, width: int32, height: int32, text: cstring, control_id: int32) -> int64 {
+  return Ui_CreateWindowExA(
+    0,
+    cstr("STATIC"),
+    text,
+    UI_WS_CHILD() | UI_WS_VISIBLE() | UI_SS_LEFT(),
+    x,
+    y,
+    width,
+    height,
+    parent,
+    (int64)control_id,
+    ui_app_instance,
+    0
+  );
+}
+
+export function ui_textbox_create(parent: int64, x: int32, y: int32, width: int32, height: int32, control_id: int32) -> int64 {
+  return Ui_CreateWindowExA(
+    UI_WS_EX_CLIENTEDGE(),
+    cstr("EDIT"),
+    cstr(""),
+    UI_WS_CHILD() | UI_WS_VISIBLE() | UI_WS_TABSTOP() | UI_WS_BORDER() | UI_ES_LEFT(),
+    x,
+    y,
+    width,
+    height,
+    parent,
+    (int64)control_id,
+    ui_app_instance,
+    0
+  );
+}
+
+export function ui_control_set_text(control: int64, text: cstring) {
+  Ui_SetWindowTextA(control, text);
+}
+
+export function ui_control_get_text(control: int64, buf: cstring, max_len: int32) -> int32 {
+  return Ui_GetWindowTextA(control, buf, max_len);
+}
+
+export function ui_control_move(control: int64, x: int32, y: int32, width: int32, height: int32) {
+  Ui_MoveWindow(control, x, y, width, height, 1);
+}

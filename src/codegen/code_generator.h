@@ -40,6 +40,7 @@ typedef struct {
   size_t control_flow_stack_size;
   size_t control_flow_stack_capacity;
   int generate_debug_info;
+  int generate_stack_trace_support;
   int emit_asm_comments;
   int eliminate_unreachable_functions;
   int has_error;
@@ -83,6 +84,21 @@ typedef struct {
    * Typed void* because IRTempUseMap is private to code_generator_ir.c. Used
    * to decide whether a deferred temp spill is dead (single-use). */
   void *current_temp_use_map;
+  /* Per-function FIFO of frame offsets for indirect-return hidden out-pointer
+   * slots. Populated in instruction order during the IR pre-pass that
+   * computes the function's stack size; consumed in the same order by
+   * emit_ir_call. Each entry is the slot's rbp-relative byte offset
+   * (positive: the slot lives at [rbp - offset]). NULL between functions. */
+  int *indirect_return_slot_offsets;
+  size_t indirect_return_slot_count;
+  size_t indirect_return_slot_capacity;
+  size_t indirect_return_slot_cursor;
+  /* Set during emission of a function whose return type is INDIRECT. The
+   * hidden out-pointer lives at [rbp - 8] (home slot 0). IR_OP_RETURN
+   * dispatches to memcpy-through-pointer when this is non-zero. The byte
+   * count is the function's return-type size. */
+  int current_fn_returns_indirect;
+  size_t current_fn_indirect_return_size;
 } CodeGenerator;
 
 // Function declarations
@@ -106,6 +122,8 @@ void code_generator_generate_statement(CodeGenerator *generator,
 void code_generator_generate_expression(CodeGenerator *generator,
                                         ASTNode *expression);
 void code_generator_set_emit_asm_comments(CodeGenerator *generator, int enable);
+void code_generator_set_stack_trace_support(CodeGenerator *generator,
+                                            int enable);
 void code_generator_set_eliminate_unreachable_functions(CodeGenerator *generator,
                                                         int enable);
 void code_generator_emit(CodeGenerator *generator, const char *format, ...);
@@ -117,7 +135,8 @@ BinaryEmitter *code_generator_get_binary_emitter(CodeGenerator *generator);
 void code_generator_function_prologue(CodeGenerator *generator,
                                       const char *function_name,
                                       int stack_size);
-void code_generator_function_epilogue(CodeGenerator *generator);
+void code_generator_function_epilogue(CodeGenerator *generator,
+                                      Type *return_type);
 char *code_generator_generate_label(CodeGenerator *generator,
                                     const char *prefix);
 

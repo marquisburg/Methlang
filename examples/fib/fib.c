@@ -11,12 +11,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#else
-#include <sys/time.h>
-#endif
+#include "../bench_time.h"
 
 static int64_t fib(int32_t n) {
     if (n <= 1) {
@@ -32,28 +27,15 @@ static int64_t fib(int32_t n) {
     return b;
 }
 
-#ifdef _WIN32
-static uint64_t get_time_ms(void) {
-    return (uint64_t)GetTickCount64();
-}
-#else
-static uint64_t get_time_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000;
-}
-#endif
-
 int main(void) {
     const int32_t iter = 10000000;
 
-    uint64_t t0 = get_time_ms();
+    uint64_t t0 = bench_time_us();
     int64_t bench_sum = 0;
     for (int32_t j = 0; j < iter; j++) {
         bench_sum += fib(35);
     }
-    uint64_t t1 = get_time_ms();
-    uint64_t elapsed_ms = t1 - t0;
+    uint64_t elapsed_us = bench_time_us() - t0;
 
     int64_t check = fib(35);
 
@@ -73,9 +55,9 @@ int main(void) {
     printf("Benchmark: fib(35) x 10,000,000\n");
     printf("fib(35) = %" PRId64 "\n", check);
     printf("Bench sum mod check = %" PRId64 "\n", bench_sum % check);
-    printf("Time: %" PRIu64 " ms\n", elapsed_ms);
+    printf("Time: %" PRIu64 " us\n", elapsed_us);
 
-    uint64_t per_call = elapsed_ms * 1000000 / (uint64_t)iter;
+    uint64_t per_call = elapsed_us * 1000 / (uint64_t)iter;
     printf("Per call: ~%" PRIu64 " ns\n", per_call);
 
     return 0;

@@ -11,10 +11,10 @@ The following sizes and alignments apply on x86-64. Use these when laying out st
 | `int8`, `uint8` | 1 | 1 |
 | `int16`, `uint16` | 2 | 2 |
 | `int32`, `uint32`, `float32` | 4 | 4 |
-| `int64`, `uint64`, `float64`, pointers, `Future<T>`, plain enums | 8 | 8 |
+| `int64`, `uint64`, `float64`, pointers, plain enums | 8 | 8 |
 | `string` | 16 | 8 |
 
-Struct and array sizes are derived from their fields and element types. Pointers, futures, and plain integer-valued enums are 8 bytes. Tagged enums are sized from their tag and largest payload.
+Struct and array sizes are derived from their fields and element types. Pointers and plain integer-valued enums are 8 bytes. Tagged enums are sized from their tag and largest payload.
 
 ## Primitive Types
 
@@ -90,28 +90,6 @@ function main() -> int32 {
 ```
 
 **Type equality:** Two function pointer types are equal if they have the same parameter types and return type. `fn(int32) -> int32` is compatible with `fn(int32) -> int32` but not with `fn(int32, int32) -> int32`.
-
-## Future Types
-
-`Future<T>` is the built-in type produced by async function calls. It represents an in-flight asynchronous computation that will eventually produce a payload of type `T`.
-
-```mettle
-async fn load() -> int32 {
-  return 42;
-}
-
-var future: Future<int32> = load();
-var value: int32 = await future;
-```
-
-Key properties:
-
-- Calling `async fn f(...) -> T` yields `Future<T>`.
-- `await future` yields `T`.
-- `Future<void>` is valid for async functions with no payload result.
-- `Future<T>` is pointer-sized on x86-64 and should be treated as an opaque runtime handle.
-
-Futures are first-class values: they can be stored, passed to functions, and returned from functions. See [Async and Sync Execution](async.md) for the execution and threading contract behind them.
 
 ## Array Types
 
@@ -266,8 +244,6 @@ Valid cast conversions include:
 - Any numeric type (integer or float) to any other numeric type.
 - Any pointer type to any other pointer type.
 - Any integer type to any pointer type, and vice versa.
-- `Future<T>` to/from pointers and integers.
-- `Future<A>` to `Future<B>` with an explicit cast.
 - Function pointers to other function pointers, or to/from regular pointers and integers.
 
 Casting across different sizes might result in zero-extension, sign-extension, or truncation, depending on the target type and the sign of the source type. Floating-point to integer conversions truncate towards zero.

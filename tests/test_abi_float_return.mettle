@@ -1,12 +1,39 @@
 // ABI: float return value in XMM0
+struct Measure {
+  a: float64;
+  b: float64;
+}
+
 function get_pi() -> float64 {
   return 3.14159;
 }
 
+function get_b(m: Measure) -> float64 {
+  return m.b;
+}
+
+function add_float(a: float64, b: float64) -> float64 {
+  return a + b;
+}
+
 function main() -> int32 {
   var x: float64 = get_pi();
-  if (x >= 3.1 && x <= 3.2) {
-    return 1;
+  if (x < 3.1 || x > 3.2) {
+    return 0;
   }
-  return 0;
+
+  var m: Measure;
+  m.a = 1.25;
+  m.b = 2.5;
+  var y: float64 = get_b(m);
+  if (y < 2.4 || y > 2.6) {
+    return 0;
+  }
+
+  var z: float64 = add_float(1.25, 2.25);
+  if (z < 3.4 || z > 3.6) {
+    return 0;
+  }
+
+  return 1;
 }

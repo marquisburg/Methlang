@@ -157,118 +157,19 @@ $cases = @(
   },
   @{ Name = "cstring_alias_type"; Path = "tests/test_cstring_alias_type.mettle"; ShouldSucceed = $true },
   @{ Name = "nested_function_pointer_type_annotation"; Path = "tests/test_nested_function_pointer_type_annotation.mettle"; ShouldSucceed = $true },
-  @{ Name = "gc_alloc"; Path = "tests/test_gc_alloc.mettle"; ShouldSucceed = $true },
-  @{ Name = "gc_alloc_fixed"; Path = "tests/test_gc_alloc_fixed.mettle"; ShouldSucceed = $true },
   @{
-    Name          = "async_await"
-    Path          = "tests/test_async_await.mettle"
-    ShouldSucceed = $true
-    AsmMustMatch  = @(
-      "global __meth_async_body_add_one_",
-      "global __meth_async_entry_add_one_",
-      "extern __meth_async_start",
-      "extern __meth_async_wait"
-    )
+    Name            = "new_calloc"
+    Path            = "tests/test_gc_alloc.mettle"
+    ShouldSucceed   = $true
+    AsmMustMatch    = @("\bextern calloc\b", "\bcall calloc\b")
+    AsmMustNotMatch = @("\bgc_alloc\b", "\bmeth_runtime_debug_install_crash_handler\b")
   },
   @{
-    Name          = "async_cancel"
-    Path          = "tests/test_async_cancel.mettle"
-    ShouldSucceed = $true
-    AsmMustMatch  = @(
-      "extern __meth_async_cancel",
-      "extern __meth_async_current_cancelled",
-      "extern __meth_async_wait"
-    )
-  },
-  @{
-    Name          = "async_nested_await"
-    Path          = "tests/test_async_nested_await.mettle"
-    ShouldSucceed = $true
-    AsmMustMatch  = @(
-      "extern __meth_async_start",
-      "extern __meth_async_wait"
-    )
-  },
-  @{
-    Name          = "async_coro_basic"
-    Path          = "tests/test_async_coro_basic.mettle"
-    ShouldSucceed = $true
-    Args          = @("--async-model", "coroutine")
-    AsmMustMatch  = @(
-      "extern __meth_coro_task_create",
-      "extern __meth_coro_task_schedule",
-      "global __meth_async_entry_add_one_"
-    )
-  },
-  @{
-    Name          = "async_coro_internal_await_return"
-    Path          = "tests/test_async_coro_internal_await_return.mettle"
-    ShouldSucceed = $true
-    Args          = @("--async-model", "coroutine")
-    AsmMustMatch  = @(
-      "extern __meth_async_wait",
-      "extern __meth_coro_task_schedule"
-    )
-  },
-  @{
-    Name          = "async_coro_internal_await_var_return"
-    Path          = "tests/test_async_coro_internal_await_var_return.mettle"
-    ShouldSucceed = $true
-    Args          = @("--async-model", "coroutine")
-    AsmMustMatch  = @(
-      "extern __meth_async_wait",
-      "extern __meth_coro_task_schedule"
-    )
-  },
-  @{
-    Name          = "async_coro_future_var_return_await"
-    Path          = "tests/test_async_coro_future_var_return_await.mettle"
-    ShouldSucceed = $true
-    Args          = @("--async-model", "coroutine")
-    AsmMustMatch  = @(
-      "extern __meth_async_wait",
-      "extern __meth_coro_task_schedule"
-    )
-  },
-  @{
-    Name          = "async_coro_future_var_await_var_return"
-    Path          = "tests/test_async_coro_future_var_await_var_return.mettle"
-    ShouldSucceed = $true
-    Args          = @("--async-model", "coroutine")
-    AsmMustMatch  = @(
-      "extern __meth_async_wait",
-      "extern __meth_coro_task_schedule"
-    )
-  },
-  @{
-    Name          = "async_coro_two_await_chain"
-    Path          = "tests/test_async_coro_two_await_chain.mettle"
-    ShouldSucceed = $true
-    Args          = @("--async-model", "coroutine")
-    AsmMustMatch  = @(
-      "extern __meth_async_wait",
-      "extern __meth_coro_task_schedule"
-    )
-  },
-  @{
-    Name          = "async_coro_two_await_pointer_chain"
-    Path          = "tests/test_async_coro_two_await_pointer_chain.mettle"
-    ShouldSucceed = $true
-    Args          = @("--async-model", "coroutine")
-    AsmMustMatch  = @(
-      "extern __meth_async_wait",
-      "extern __meth_coro_task_schedule"
-    )
-  },
-  @{
-    Name          = "async_coro_nested_expr_await"
-    Path          = "tests/test_async_nested_await.mettle"
-    ShouldSucceed = $true
-    Args          = @("--async-model", "coroutine")
-    AsmMustMatch  = @(
-      "extern __meth_coro_task_create",
-      "extern __meth_coro_task_schedule"
-    )
+    Name            = "new_calloc_fixed"
+    Path            = "tests/test_gc_alloc_fixed.mettle"
+    ShouldSucceed   = $true
+    AsmMustMatch    = @("\bextern calloc\b", "\bcall calloc\b")
+    AsmMustNotMatch = @("\bgc_alloc\b", "\bmeth_runtime_debug_install_crash_handler\b")
   },
   @{ Name = "pointers"; Path = "tests/test_pointers.mettle"; ShouldSucceed = $true },
   @{ Name = "pointer_null"; Path = "tests/test_pointer_null.mettle"; ShouldSucceed = $true },
@@ -276,7 +177,8 @@ $cases = @(
     Name          = "runtime_null_deref_check"
     Path          = "tests/test_runtime_null_deref_check.mettle"
     ShouldSucceed = $true
-    AsmMustMatch  = @("Fatal error: Null pointer dereference", "\bcall meth_runtime_debug_trap\b")
+    AsmMustMatch  = @("Fatal error: Null pointer dereference", "\bcall puts\b", "\bcall exit\b")
+    AsmMustNotMatch = @("\bmeth_runtime_debug_trap\b", "\bmeth_runtime_debug_install_crash_handler\b")
   },
   @{
     Name          = "runtime_array_bounds_check"
@@ -317,6 +219,7 @@ $cases = @(
   @{ Name = "import_std_core"; Path = "tests/test_import_std_core.mettle"; ShouldSucceed = $true },
   @{ Name = "std_io"; Path = "tests/test_std_io.mettle"; ShouldSucceed = $true },
   @{ Name = "std_win32"; Path = "tests/test_internal_link_win32_user32.mettle"; ShouldSucceed = $true },
+  @{ Name = "std_ui"; Path = "tests/test_internal_link_ui.mettle"; ShouldSucceed = $true },
   @{ Name = "enum"; Path = "tests/test_enum.mettle"; ShouldSucceed = $true },
   @{
     Name          = "prelude"
@@ -791,7 +694,6 @@ $cases = @(
   @{ Name = "err_return_type_mismatch"; Path = "tests/err_return_type_mismatch.mettle"; ShouldSucceed = $false; Pattern = "Type mismatch" },
   @{ Name = "err_static_assert_sizeof"; Path = "tests/err_static_assert_sizeof.mettle"; ShouldSucceed = $false; Pattern = "static_assert failed" },
   @{ Name = "err_defer_top_level"; Path = "tests/err_defer_top_level.mettle"; ShouldSucceed = $false; Pattern = "Defer statement outside of a function" },
-  @{ Name = "err_await_non_future"; Path = "tests/err_await_non_future.mettle"; ShouldSucceed = $false; Pattern = "Await operator requires a Future<T> operand" },
   @{
     Name          = "err_import_private"
     Path          = "tests/err_import_private.mettle"
@@ -1179,302 +1081,6 @@ catch {
   Write-CaseResult -Name "struct_new_runtime" -Passed $false -Reason $_.Exception.Message
 }
 
-# Async runtime test: build with the internal linker and await a worker result.
-$total++
-try {
-  $asyncExe = Join-Path $tmpDir "test_async_await.exe"
-
-  $asyncOut = & $CompilerPath --build --linker internal tests\test_async_await.mettle -o $asyncExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Async await build failed: $asyncOut"
-  }
-  if (-not (Test-Path $asyncExe)) {
-    throw "Async await build did not produce an executable"
-  }
-
-  & $asyncExe 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 42) {
-    throw "Async await executable exited with $LASTEXITCODE (expected 42)"
-  }
-
-  Write-CaseResult -Name "async_build_await" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "async_build_await" -Passed $false -Reason $_.Exception.Message
-}
-
-# Async cancellation test: cancellation should propagate through the same Future contract.
-$total++
-try {
-  $asyncCancelExe = Join-Path $tmpDir "test_async_cancel.exe"
-
-  $asyncCancelOut = & $CompilerPath --build --linker internal tests\test_async_cancel.mettle -o $asyncCancelExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Async cancellation build failed: $asyncCancelOut"
-  }
-  if (-not (Test-Path $asyncCancelExe)) {
-    throw "Async cancellation build did not produce an executable"
-  }
-
-  & $asyncCancelExe 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 17) {
-    throw "Async cancellation executable exited with $LASTEXITCODE (expected 17)"
-  }
-
-  Write-CaseResult -Name "async_build_cancel" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "async_build_cancel" -Passed $false -Reason $_.Exception.Message
-}
-
-# Coroutine async internal-await test: single 'return await expr;' should lower
-# into resumable coroutine entry logic and complete with expected value.
-$total++
-try {
-  $asyncCoroAwaitExe = Join-Path $tmpDir "test_async_coro_internal_await_return.exe"
-
-  $asyncCoroAwaitOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_internal_await_return.mettle -o $asyncCoroAwaitExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Coroutine internal-await build failed: $asyncCoroAwaitOut"
-  }
-  if (-not (Test-Path $asyncCoroAwaitExe)) {
-    throw "Coroutine internal-await build did not produce an executable"
-  }
-
-  & $asyncCoroAwaitExe 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 42) {
-    throw "Coroutine internal-await executable exited with $LASTEXITCODE (expected 42)"
-  }
-
-  Write-CaseResult -Name "async_coro_internal_await_build" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "async_coro_internal_await_build" -Passed $false -Reason $_.Exception.Message
-}
-
-# Coroutine async internal-await test: single 'var x = await expr; return x;'
-# should lower into the same resumable coroutine pattern.
-$total++
-try {
-  $asyncCoroAwaitVarExe = Join-Path $tmpDir "test_async_coro_internal_await_var_return.exe"
-
-  $asyncCoroAwaitVarOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_internal_await_var_return.mettle -o $asyncCoroAwaitVarExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Coroutine internal-await(var-return) build failed: $asyncCoroAwaitVarOut"
-  }
-  if (-not (Test-Path $asyncCoroAwaitVarExe)) {
-    throw "Coroutine internal-await(var-return) build did not produce an executable"
-  }
-
-  & $asyncCoroAwaitVarExe 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 42) {
-    throw "Coroutine internal-await(var-return) executable exited with $LASTEXITCODE (expected 42)"
-  }
-
-  Write-CaseResult -Name "async_coro_internal_await_var_return_build" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "async_coro_internal_await_var_return_build" -Passed $false -Reason $_.Exception.Message
-}
-
-# Coroutine async internal-await test: single 'var fut = future_expr; return await fut;'
-# should lower into the same resumable coroutine pattern.
-$total++
-try {
-  $asyncCoroFutureVarAwaitExe = Join-Path $tmpDir "test_async_coro_future_var_return_await.exe"
-
-  $asyncCoroFutureVarAwaitOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_future_var_return_await.mettle -o $asyncCoroFutureVarAwaitExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Coroutine internal-await(future-var-return-await) build failed: $asyncCoroFutureVarAwaitOut"
-  }
-  if (-not (Test-Path $asyncCoroFutureVarAwaitExe)) {
-    throw "Coroutine internal-await(future-var-return-await) build did not produce an executable"
-  }
-
-  & $asyncCoroFutureVarAwaitExe 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 42) {
-    throw "Coroutine internal-await(future-var-return-await) executable exited with $LASTEXITCODE (expected 42)"
-  }
-
-  Write-CaseResult -Name "async_coro_future_var_return_await_build" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "async_coro_future_var_return_await_build" -Passed $false -Reason $_.Exception.Message
-}
-
-# Coroutine async internal-await test: single 'var fut = future_expr; var x = await fut; return x;'
-# should lower into the same resumable coroutine pattern.
-$total++
-try {
-  $asyncCoroFutureVarAwaitVarExe = Join-Path $tmpDir "test_async_coro_future_var_await_var_return.exe"
-
-  $asyncCoroFutureVarAwaitVarOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_future_var_await_var_return.mettle -o $asyncCoroFutureVarAwaitVarExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Coroutine internal-await(future-var-await-var-return) build failed: $asyncCoroFutureVarAwaitVarOut"
-  }
-  if (-not (Test-Path $asyncCoroFutureVarAwaitVarExe)) {
-    throw "Coroutine internal-await(future-var-await-var-return) build did not produce an executable"
-  }
-
-  & $asyncCoroFutureVarAwaitVarExe 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 42) {
-    throw "Coroutine internal-await(future-var-await-var-return) executable exited with $LASTEXITCODE (expected 42)"
-  }
-
-  Write-CaseResult -Name "async_coro_future_var_await_var_return_build" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "async_coro_future_var_await_var_return_build" -Passed $false -Reason $_.Exception.Message
-}
-
-# Coroutine async two-await test: 'var x = await a(); return await b(x);'
-# should lower into a multi-state coroutine entry machine.
-$total++
-try {
-  $asyncCoroTwoAwaitExe = Join-Path $tmpDir "test_async_coro_two_await_chain.exe"
-
-  $asyncCoroTwoAwaitOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_two_await_chain.mettle -o $asyncCoroTwoAwaitExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Coroutine two-await(chain) build failed: $asyncCoroTwoAwaitOut"
-  }
-  if (-not (Test-Path $asyncCoroTwoAwaitExe)) {
-    throw "Coroutine two-await(chain) build did not produce an executable"
-  }
-
-  & $asyncCoroTwoAwaitExe 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 42) {
-    throw "Coroutine two-await(chain) executable exited with $LASTEXITCODE (expected 42)"
-  }
-
-  Write-CaseResult -Name "async_coro_two_await_chain_build" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "async_coro_two_await_chain_build" -Passed $false -Reason $_.Exception.Message
-}
-
-# Coroutine async two-await pointer test: lifted pointer local from first await
-# must remain available through the resumed state machine when building second await.
-$total++
-try {
-  $asyncCoroTwoAwaitPtrExe = Join-Path $tmpDir "test_async_coro_two_await_pointer_chain.exe"
-
-  $asyncCoroTwoAwaitPtrOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_coro_two_await_pointer_chain.mettle -o $asyncCoroTwoAwaitPtrExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Coroutine two-await(pointer-chain) build failed: $asyncCoroTwoAwaitPtrOut"
-  }
-  if (-not (Test-Path $asyncCoroTwoAwaitPtrExe)) {
-    throw "Coroutine two-await(pointer-chain) build did not produce an executable"
-  }
-
-  & $asyncCoroTwoAwaitPtrExe 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 42) {
-    throw "Coroutine two-await(pointer-chain) executable exited with $LASTEXITCODE (expected 42)"
-  }
-
-  Write-CaseResult -Name "async_coro_two_await_pointer_chain_build" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "async_coro_two_await_pointer_chain_build" -Passed $false -Reason $_.Exception.Message
-}
-
-# Coroutine async generic-body test: non-linear internal await expression
-# should compile and execute through the unified coroutine lowering path.
-$total++
-try {
-  $asyncCoroNestedExprExe = Join-Path $tmpDir "test_async_coro_nested_expr_await.exe"
-
-  $asyncCoroNestedExprOut = & $CompilerPath --build --linker internal --async-model coroutine tests\test_async_nested_await.mettle -o $asyncCoroNestedExprExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Coroutine nested-expr-await build failed: $asyncCoroNestedExprOut"
-  }
-  if (-not (Test-Path $asyncCoroNestedExprExe)) {
-    throw "Coroutine nested-expr-await build did not produce an executable"
-  }
-
-  & $asyncCoroNestedExprExe 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 41) {
-    throw "Coroutine nested-expr-await executable exited with $LASTEXITCODE (expected 41)"
-  }
-
-  Write-CaseResult -Name "async_coro_nested_expr_await_build" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "async_coro_nested_expr_await_build" -Passed $false -Reason $_.Exception.Message
-}
-
-# Async nested-await test: with a single worker, parent-await-child would deadlock
-# under naive pooling unless the runtime prevents worker starvation.
-$total++
-try {
-  $asyncNestedExe = Join-Path $tmpDir "test_async_nested_await.exe"
-
-  $asyncNestedOut = & $CompilerPath --build --linker internal tests\test_async_nested_await.mettle -o $asyncNestedExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Async nested-await build failed: $asyncNestedOut"
-  }
-  if (-not (Test-Path $asyncNestedExe)) {
-    throw "Async nested-await build did not produce an executable"
-  }
-
-  $hadWorkersEnv = Test-Path Env:METH_ASYNC_WORKERS
-  $previousWorkersEnv = $env:METH_ASYNC_WORKERS
-  $env:METH_ASYNC_WORKERS = "1"
-  try {
-    & $asyncNestedExe 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 41) {
-      throw "Async nested-await executable exited with $LASTEXITCODE (expected 41)"
-    }
-  }
-  finally {
-    if ($hadWorkersEnv) {
-      $env:METH_ASYNC_WORKERS = $previousWorkersEnv
-    }
-    else {
-      Remove-Item Env:METH_ASYNC_WORKERS -ErrorAction SilentlyContinue
-    }
-  }
-
-  Write-CaseResult -Name "async_build_nested_await_single_worker" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "async_build_nested_await_single_worker" -Passed $false -Reason $_.Exception.Message
-}
-
-# Async direct-object test: Future<T> returns and async runtime helpers should
-# stay compatible with the COFF object backend too.
-$total++
-try {
-  $asyncDirectExe = Join-Path $tmpDir "test_async_direct_object.exe"
-
-  $asyncDirectOut = & $CompilerPath --build --emit-obj tests\test_async_await.mettle -o $asyncDirectExe 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) {
-    throw "Async direct-object build failed: $asyncDirectOut"
-  }
-  if (-not (Test-Path $asyncDirectExe)) {
-    throw "Async direct-object build did not produce an executable"
-  }
-
-  & $asyncDirectExe 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 42) {
-    throw "Async direct-object executable exited with $LASTEXITCODE (expected 42)"
-  }
-
-  Write-CaseResult -Name "direct_object_async_await" -Passed $true
-}
-catch {
-  $failed++
-  Write-CaseResult -Name "direct_object_async_await" -Passed $false -Reason $_.Exception.Message
-}
 
 # Direct object backend test: emit COFF object directly, then build and run
 $total++
@@ -1745,7 +1351,7 @@ try {
   $asmExePath = Join-Path $tmpDir "internal_link_float_negative_comparison.exe"
   $objExePath = Join-Path $tmpDir "internal_link_emit_obj_float_negative_comparison.exe"
 
-  $buildOut = & $CompilerPath --build --linker internal tests\test_float_negative_comparison.mettle -o $asmExePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --emit-asm --linker internal tests\test_float_negative_comparison.mettle -o $asmExePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Internal linker float-negative asm build failed: $buildOut"
   }
@@ -1758,7 +1364,7 @@ try {
     throw "Internal linker float-negative asm executable exited with $LASTEXITCODE (expected 0)"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_float_negative_comparison.mettle -o $objExePath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --linker internal tests\test_float_negative_comparison.mettle -o $objExePath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Internal linker float-negative emit-obj build failed: $buildOut"
   }
@@ -1776,6 +1382,31 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "internal_link_float_negative_comparison" -Passed $false -Reason $_.Exception.Message
+}
+
+# Text-asm runtime coverage for float returns. The assembly-only ABI check above
+# can see XMM0 mentions without proving the callee actually returns through XMM0.
+$total++
+try {
+  $exePath = Join-Path $tmpDir "internal_link_abi_float_return.exe"
+  $buildOut = & $CompilerPath --build --emit-asm --linker internal tests\test_abi_float_return.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker ABI float-return build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Internal linker ABI float-return build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 1) {
+    throw "Internal linker ABI float-return executable exited with $LASTEXITCODE (expected 1)"
+  }
+
+  Write-CaseResult -Name "internal_link_abi_float_return" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "internal_link_abi_float_return" -Passed $false -Reason $_.Exception.Message
 }
 
 # Whole-struct assignment must copy every byte, not just the first machine word.
@@ -1802,10 +1433,10 @@ foreach ($mode in @("asm", "emitobj")) {
   try {
     $exePath = Join-Path $tmpDir "$caseName.exe"
     if ($mode -eq "asm") {
-      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_copy.mettle -o $exePath 2>&1 | Out-String
+      $buildOut = & $CompilerPath --build --emit-asm --linker internal tests\test_struct_copy.mettle -o $exePath 2>&1 | Out-String
     }
     else {
-      $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_struct_copy.mettle -o $exePath 2>&1 | Out-String
+      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_copy.mettle -o $exePath 2>&1 | Out-String
     }
     if ($LASTEXITCODE -ne 0) {
       throw "Struct copy build failed ($mode): $buildOut"
@@ -1830,6 +1461,207 @@ foreach ($mode in @("asm", "emitobj")) {
   }
 }
 
+# Indirect-arg ABI: a struct larger than 8 bytes passed by value must reach
+# the callee with every field intact, and mutations on the callee's parameter
+# must not leak back to the caller's original.
+$structPassByValueExpected = @(
+  "struct pass by value",
+  "sum_three 66",
+  "third 33",
+  "after_clobber_a 11",
+  "after_clobber_b 22",
+  "after_clobber_c 33",
+  "mixed_b_mm -3500",
+  "mixed_c 22"
+) -join "`r`n"
+
+foreach ($mode in @("asm", "emitobj")) {
+  $total++
+  $caseName = "internal_link_struct_pass_by_value_$mode"
+  try {
+    $exePath = Join-Path $tmpDir "$caseName.exe"
+    if ($mode -eq "asm") {
+      $buildOut = & $CompilerPath --build --emit-asm --linker internal tests\test_struct_pass_by_value.mettle -o $exePath 2>&1 | Out-String
+    }
+    else {
+      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_pass_by_value.mettle -o $exePath 2>&1 | Out-String
+    }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct pass-by-value build failed ($mode): $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "Struct pass-by-value build ($mode) did not produce an executable"
+    }
+
+    $runOut = (& $exePath 2>&1 | Out-String).TrimEnd()
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct pass-by-value executable exited with $LASTEXITCODE ($mode)"
+    }
+    if ($runOut -ne $structPassByValueExpected) {
+      throw "Struct pass-by-value output mismatch ($mode):`n--- expected ---`n$structPassByValueExpected`n--- got ---`n$runOut"
+    }
+
+    Write-CaseResult -Name $caseName -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
+  }
+}
+
+# Indirect-return ABI: a struct larger than 8 bytes returned by value must
+# arrive at the caller with every field intact. Validates the hidden
+# out-pointer convention for IR-path text-asm builds.
+$structReturnByValueExpected = @(
+  "struct return by value",
+  "three_a 11",
+  "three_b 22",
+  "three_c 33",
+  "chained_sum 6",
+  "six_a 10",
+  "six_b 20",
+  "six_c 30",
+  "six_d 40",
+  "six_e 50",
+  "six_f 60"
+) -join "`r`n"
+
+foreach ($mode in @("asm", "emitobj")) {
+  $total++
+  $caseName = "internal_link_struct_return_by_value_$mode"
+  try {
+    $exePath = Join-Path $tmpDir "$caseName.exe"
+    if ($mode -eq "asm") {
+      $buildOut = & $CompilerPath --build --emit-asm --linker internal tests\test_struct_return_by_value.mettle -o $exePath 2>&1 | Out-String
+    }
+    else {
+      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_return_by_value.mettle -o $exePath 2>&1 | Out-String
+    }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct return-by-value build failed ($mode): $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "Struct return-by-value build ($mode) did not produce an executable"
+    }
+
+    $runOut = (& $exePath 2>&1 | Out-String).TrimEnd()
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct return-by-value executable exited with $LASTEXITCODE ($mode)"
+    }
+    if ($runOut -ne $structReturnByValueExpected) {
+      throw "Struct return-by-value output mismatch ($mode):`n--- expected ---`n$structReturnByValueExpected`n--- got ---`n$runOut"
+    }
+
+    Write-CaseResult -Name $caseName -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
+  }
+}
+
+# Struct ABI classifier matrix: small power-of-two structs stay direct, odd-size
+# structs go indirect, value receivers work, and nested temp regions do not alias.
+$structAbiMatrixExpected = @(
+  "struct abi matrix",
+  "small4 41",
+  "small8 33",
+  "odd3 18",
+  "odd3_return 30",
+  "value_receiver_total 60",
+  "nested_big 30"
+) -join "`r`n"
+
+foreach ($mode in @("asm", "emitobj")) {
+  $total++
+  $caseName = "internal_link_struct_abi_matrix_$mode"
+  try {
+    $exePath = Join-Path $tmpDir "$caseName.exe"
+    if ($mode -eq "asm") {
+      $buildOut = & $CompilerPath --build --emit-asm --linker internal tests\test_struct_abi_matrix.mettle -o $exePath 2>&1 | Out-String
+    }
+    else {
+      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_abi_matrix.mettle -o $exePath 2>&1 | Out-String
+    }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct ABI matrix build failed ($mode): $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "Struct ABI matrix build ($mode) did not produce an executable"
+    }
+
+    $runOut = (& $exePath 2>&1 | Out-String).TrimEnd()
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct ABI matrix executable exited with $LASTEXITCODE ($mode)"
+    }
+    if ($runOut -ne $structAbiMatrixExpected) {
+      throw "Struct ABI matrix output mismatch ($mode):`n--- expected ---`n$structAbiMatrixExpected`n--- got ---`n$runOut"
+    }
+
+    Write-CaseResult -Name $caseName -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
+  }
+}
+
+# Struct ABI C boundary: MinGW C and Mettle agree on indirect pass/return for
+# >8-byte and odd-size structs. GCC is used only to compile the small C shim;
+# linking stays on Mettle's internal linker.
+$structAbiExternExpected = @(
+  "struct abi extern c",
+  "c_sum_three 66",
+  "c_make_three_sum 12",
+  "c_make_odd3_sum 24"
+) -join "`r`n"
+
+foreach ($mode in @("asm", "emitobj")) {
+  $total++
+  $caseName = "internal_link_struct_abi_extern_c_$mode"
+  try {
+    $gccCmd = Get-Command gcc -ErrorAction SilentlyContinue
+    if (-not $gccCmd) {
+      Write-CaseResult -Name $caseName -Passed $true -Reason "skipped: gcc not on PATH"
+      continue
+    }
+
+    $cObjPath = Join-Path $tmpDir "$caseName.c.o"
+    $cOut = & gcc -c tests\struct_abi_c_shim.c -o $cObjPath 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct ABI C shim compile failed ($mode): $cOut"
+    }
+
+    $exePath = Join-Path $tmpDir "$caseName.exe"
+    if ($mode -eq "asm") {
+      $buildOut = & $CompilerPath --build --emit-asm --linker internal tests\test_struct_abi_extern_c.mettle -o $exePath --link-arg $cObjPath 2>&1 | Out-String
+    }
+    else {
+      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_abi_extern_c.mettle -o $exePath --link-arg $cObjPath 2>&1 | Out-String
+    }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct ABI extern C build failed ($mode): $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "Struct ABI extern C build ($mode) did not produce an executable"
+    }
+
+    $runOut = (& $exePath 2>&1 | Out-String).TrimEnd()
+    if ($LASTEXITCODE -ne 0) {
+      throw "Struct ABI extern C executable exited with $LASTEXITCODE ($mode)"
+    }
+    if ($runOut -ne $structAbiExternExpected) {
+      throw "Struct ABI extern C output mismatch ($mode):`n--- expected ---`n$structAbiExternExpected`n--- got ---`n$runOut"
+    }
+
+    Write-CaseResult -Name $caseName -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
+  }
+}
+
 # Companion repro: large structs containing float64 fields and engine-style
 # layouts (float64-first, trailing int32) plus heap allocation. Just verify the
 # repro builds and runs cleanly under both link modes; full byte-level scrutiny
@@ -1840,10 +1672,10 @@ foreach ($mode in @("asm", "emitobj")) {
   try {
     $exePath = Join-Path $tmpDir "$caseName.exe"
     if ($mode -eq "asm") {
-      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_float.mettle -o $exePath 2>&1 | Out-String
+      $buildOut = & $CompilerPath --build --emit-asm --linker internal tests\test_struct_float.mettle -o $exePath 2>&1 | Out-String
     }
     else {
-      $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_struct_float.mettle -o $exePath 2>&1 | Out-String
+      $buildOut = & $CompilerPath --build --linker internal tests\test_struct_float.mettle -o $exePath 2>&1 | Out-String
     }
     if ($LASTEXITCODE -ne 0) {
       throw "Struct/float build failed ($mode): $buildOut"
@@ -1872,7 +1704,7 @@ foreach ($mode in @("asm", "emitobj")) {
   }
 }
 
-# Emit-obj + MinGW gcc link (parity with asm path: nostartfiles + mettle_entry.o)
+# Emit-obj + MinGW gcc link (parity with asm path: nostartfiles + CRT imports)
 $total++
 try {
   $gccCmd = Get-Command gcc -ErrorAction SilentlyContinue
@@ -1948,6 +1780,31 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "internal_link_win32_user32" -Passed $false -Reason $_.Exception.Message
+}
+
+# Internal linker UI test: std/ui resolves user32/gdi32 without link args
+$total++
+try {
+  $exePath = Join-Path $tmpDir "internal_link_ui.exe"
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal tests\test_internal_link_ui.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker UI build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Internal linker UI build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Internal linker UI executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "internal_link_ui" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "internal_link_ui" -Passed $false -Reason $_.Exception.Message
 }
 
 # Internal linker UCRT test: std/io path resolves __acrt_iob_func via default DLL imports
@@ -2081,7 +1938,7 @@ int fallback_value(void) {
     throw "Static-library archive build failed: $arOut"
   }
 
-  $buildOut = & $CompilerPath --build --emit-obj tests\test_auto_link_fallback_static_lib.mettle -o $exePath --link-arg $libPath 2>&1 | Out-String
+  $buildOut = & $CompilerPath --build --linker auto tests\test_auto_link_fallback_static_lib.mettle -o $exePath --link-arg $libPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Auto linker fallback build failed: $buildOut"
   }
@@ -2327,7 +2184,9 @@ try {
   $requiredPatterns = @(
     'cmp\s+\$0xc,%rax',
     'shl\s+\$0x2,%rax',
-    '(?s)<even_branch>.*and\s+\$0x1,%rax.*cmp\s+\$0x0,%rax.*jne',
+    '(?s)<scale_by_eight>.*shl\s+\$0x3,%rax',
+    '(?s)<zero_const>.*xor\s+%eax,%eax',
+    '(?s)<even_branch>.*and\s+\$0x1,%rax.*test\s+%rax,%rax.*jne',
     '(?s)<fused_mul_add>.*%r12'
   )
   foreach ($pattern in $requiredPatterns) {
@@ -2747,13 +2606,11 @@ catch {
   Write-CaseResult -Name "direct_object_runtime_null_deref" -Passed $false -Reason $_.Exception.Message
 }
 
-# main(argc, argv) test: requires mettle_entry.o and shell32 on Windows
+# main(argc, argv) test: emitted startup calls CRT __getmainargs directly.
 $total++
 try {
   $avAsm = Join-Path $tmpDir "test_main_argc_argv.s"
   $avObj = Join-Path $tmpDir "test_main_argc_argv.o"
-  $avGc = Join-Path $tmpDir "test_main_argc_argv_gc.o"
-  $avEntry = Join-Path $tmpDir "test_main_argc_argv_entry.o"
   $avExe = Join-Path $tmpDir "test_main_argc_argv.exe"
 
   $avOut = & $CompilerPath tests\test_main_argc_argv.mettle -o $avAsm 2>&1 | Out-String
@@ -2766,19 +2623,15 @@ try {
     throw "main(argc,argv) NASM assembly failed"
   }
 
-  & gcc -c src\runtime\gc.c -o $avGc -Isrc 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    throw "main(argc,argv) gc.c compile failed"
+  $avAsmText = Get-Content -Raw $avAsm
+  if ($avAsmText -notmatch "\bextern __getmainargs\b" -or
+      $avAsmText -match "\bmettle_entry_get_args\b") {
+    throw "main(argc,argv) assembly did not use direct __getmainargs startup"
   }
 
-  & gcc -c src\runtime\mettle_entry.c -o $avEntry -Isrc 2>&1 | Out-Null
+  & gcc -nostartfiles $avObj -o $avExe -lkernel32 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) {
-    throw "main(argc,argv) mettle_entry.c compile failed"
-  }
-
-  & gcc -nostartfiles $avObj $avGc $avEntry -o $avExe -lkernel32 -lshell32 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    throw "main(argc,argv) link failed (need -lshell32 for CommandLineToArgvW)"
+    throw "main(argc,argv) link failed"
   }
 
   $avResult = & $avExe 2>&1
@@ -2831,7 +2684,7 @@ try {
     throw "Runtime null trace output missing stack trace header"
   }
   if ($nullRuntime -notmatch "main") {
-    throw "Runtime null trace output missing Meth frame names"
+    throw "Runtime null trace output missing Mettle frame names"
   }
 
   Write-CaseResult -Name "runtime_null_trace" -Passed $true
@@ -2887,80 +2740,6 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "runtime_access_violation_trace" -Passed $false -Reason $_.Exception.Message
-}
-
-if (-not $SkipRuntime) {
-  $total++
-  try {
-    $runtimeExe = "bin\heap_runtime_test.exe"
-    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\heap_runtime_test.c src\runtime\gc.c -o $runtimeExe
-    if ($LASTEXITCODE -ne 0) {
-      throw "Failed to compile heap runtime test"
-    }
-
-    $runtimeOutput = & $runtimeExe 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
-      throw "Heap runtime test exited with code $LASTEXITCODE"
-    }
-
-    if ($runtimeOutput -notmatch "Heap runtime tests passed") {
-      throw "Heap runtime test output did not contain pass marker"
-    }
-
-    Write-CaseResult -Name "heap_runtime" -Passed $true
-  }
-  catch {
-    $failed++
-    Write-CaseResult -Name "heap_runtime" -Passed $false -Reason $_.Exception.Message
-  }
-
-  $total++
-  try {
-    $asyncRuntimeExe = "bin\async_runtime_test.exe"
-    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\async_runtime_test.c src\runtime\async_runtime.c src\runtime\gc.c -Isrc -o $asyncRuntimeExe
-    if ($LASTEXITCODE -ne 0) {
-      throw "Failed to compile async runtime pool test"
-    }
-
-    $asyncRuntimeOutput = & $asyncRuntimeExe 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
-      throw "Async runtime pool test exited with code $LASTEXITCODE"
-    }
-
-    if ($asyncRuntimeOutput -notmatch "Async runtime pool tests passed") {
-      throw "Async runtime pool test output did not contain pass marker"
-    }
-
-    Write-CaseResult -Name "async_runtime_pool" -Passed $true
-  }
-  catch {
-    $failed++
-    Write-CaseResult -Name "async_runtime_pool" -Passed $false -Reason $_.Exception.Message
-  }
-
-  $total++
-  try {
-    $coroIocpRuntimeExe = "bin\coro_iocp_runtime_test.exe"
-    & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\coro_iocp_runtime_test.c src\runtime\async_runtime.c src\runtime\gc.c -Isrc -lpthread -o $coroIocpRuntimeExe
-    if ($LASTEXITCODE -ne 0) {
-      throw "Failed to compile coroutine reactor runtime test"
-    }
-
-    $coroIocpRuntimeOutput = & $coroIocpRuntimeExe 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
-      throw "Coroutine reactor runtime test exited with code $LASTEXITCODE"
-    }
-
-    if ($coroIocpRuntimeOutput -notmatch "Coroutine reactor runtime tests passed") {
-      throw "Coroutine reactor runtime test output did not contain pass marker"
-    }
-
-    Write-CaseResult -Name "coro_iocp_runtime" -Passed $true
-  }
-  catch {
-    $failed++
-    Write-CaseResult -Name "coro_iocp_runtime" -Passed $false -Reason $_.Exception.Message
-  }
 }
 
 # Crash handler test. On Windows this compiles and runs but is a documented

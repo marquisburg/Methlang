@@ -1,5 +1,5 @@
 // test_gc_alloc.mettle
-// Tests that the `new` keyword triggers `gc_alloc` via runtime properly.
+// Tests that the `new` keyword emits direct zeroed allocation.
 
 struct Vector3 {
     x: int32;
