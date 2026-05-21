@@ -69,7 +69,7 @@ See [docs/struct-abi-design.md](struct-abi-design.md) for the full contract.
 **Practical guidance:**
 
 - Struct-by-value **arguments and returns** are safe in the text-asm backend and in `--emit-obj` mode.
-- For C interop, struct passing and returning matches the Microsoft x64 C ABI on Windows for the covered Mettle-calls-C direction. See [C Interoperability - Passing Structs to C](c-interop.md#passing-structs-to-c).
+- For C interop, struct passing and returning matches the Microsoft x64 C ABI on Windows for the covered Mettle-calls-C direction. See [C Interoperability - Passing Structs to C](c-interop.md).
 - With `--linker internal`, raw COFF `.o` / `.obj` files can be supplied through `--link-arg`; the final executable link remains inside Mettle.
 
 Arrays follow the same rule as in [Types - Array Types](types.md#array-types): they are not passed by value; use `&arr[0]` or a `T*` parameter.
