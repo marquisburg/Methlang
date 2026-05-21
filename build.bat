@@ -79,8 +79,12 @@ echo Compiling debug info...
 gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\debug\debug_info.c -o obj\debug\debug_info.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-echo Compiling optional debug/thread runtime...
-gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\runtime\gc.c -o obj\runtime\gc.o
+echo Compiling crash-handler runtime (opt-in: -d / -s / -g / IR trap)...
+gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\runtime\crash_handler.c -o obj\runtime\crash_handler.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+
+echo Compiling atomics helpers (opt-in: std/thread)...
+gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -c src\runtime\atomics.c -o obj\runtime\atomics.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling error reporter...
@@ -106,8 +110,10 @@ xcopy stdlib bin\stdlib\ /E /I /Y >nul
 echo Bundling runtime into bin\runtime...
 if exist bin\runtime rmdir /S /Q bin\runtime
 xcopy src\runtime bin\runtime\ /E /I /Y >nul
-copy /Y obj\runtime\gc.o bin\runtime\gc.o >nul
-copy /Y obj\runtime\gc.o bin\runtime\gc.obj >nul
+copy /Y obj\runtime\crash_handler.o bin\runtime\crash_handler.o >nul
+copy /Y obj\runtime\crash_handler.o bin\runtime\crash_handler.obj >nul
+copy /Y obj\runtime\atomics.o bin\runtime\atomics.o >nul
+copy /Y obj\runtime\atomics.o bin\runtime\atomics.obj >nul
 
 if exist installer\mettle-build.bat copy /Y installer\mettle-build.bat bin\mettle-build.bat >nul
 

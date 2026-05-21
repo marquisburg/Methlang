@@ -20,10 +20,10 @@ export extern function CreateMutexA(lpMutexAttributes: cstring, bInitialOwner: i
 export extern function ReleaseMutex(hMutex: int64) -> int32 = "ReleaseMutex";
 
 // Interlocked atomics
-export extern function InterlockedCompareExchange(target: int32*, exchange: int32, comparand: int32) -> int32 = "meth_atomic_compare_exchange_i32";
-export extern function InterlockedExchange(target: int32*, value: int32) -> int32 = "meth_atomic_exchange_i32";
-export extern function InterlockedIncrement(target: int32*) -> int32 = "meth_atomic_inc_i32";
-export extern function InterlockedDecrement(target: int32*) -> int32 = "meth_atomic_dec_i32";
+export extern function InterlockedCompareExchange(target: int32*, exchange: int32, comparand: int32) -> int32 = "mettle_atomic_compare_exchange_i32";
+export extern function InterlockedExchange(target: int32*, value: int32) -> int32 = "mettle_atomic_exchange_i32";
+export extern function InterlockedIncrement(target: int32*) -> int32 = "mettle_atomic_inc_i32";
+export extern function InterlockedDecrement(target: int32*) -> int32 = "mettle_atomic_dec_i32";
 
 export function thread_close(handle: int64) -> int32 {
   return CloseHandle(handle);

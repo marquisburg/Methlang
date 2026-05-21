@@ -10,8 +10,9 @@
 //   Linux:  gcc -o myapp output.s stdlib/posix_helpers.c -lpthread
 //   macOS:  gcc -o myapp output.s stdlib/posix_helpers.c
 //
-// If you also link gc.c, add it to the command:
-//   gcc -o myapp output.s stdlib/posix_helpers.c src/runtime/gc.c -lpthread
+// For crash tracebacks (-d/-s) or std/thread atomics, also link:
+//   gcc -o myapp output.s stdlib/posix_helpers.c \
+//       src/runtime/crash_handler.c src/runtime/atomics.c -lpthread
 //
 // Usage pattern with defer for automatic cleanup:
 //   var sock: int64 = socket(AF_INET_POSIX(), SOCK_STREAM_POSIX(), IPPROTO_TCP_POSIX());

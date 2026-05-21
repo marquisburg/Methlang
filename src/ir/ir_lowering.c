@@ -1492,7 +1492,7 @@ static int ir_emit_runtime_trap(IRLoweringContext *context,
   IRInstruction trap_call = {0};
   trap_call.op = IR_OP_CALL;
   trap_call.location = location;
-  trap_call.text = "meth_runtime_debug_trap";
+  trap_call.text = "mettle_crash_trap";
   trap_call.argument_count = 1;
   trap_call.arguments = malloc(sizeof(IROperand));
   if (!trap_call.arguments) {

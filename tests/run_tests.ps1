@@ -162,14 +162,14 @@ $cases = @(
     Path            = "tests/test_gc_alloc.mettle"
     ShouldSucceed   = $true
     AsmMustMatch    = @("\bextern calloc\b", "\bcall calloc\b")
-    AsmMustNotMatch = @("\bgc_alloc\b", "\bmeth_runtime_debug_install_crash_handler\b")
+    AsmMustNotMatch = @("\bgc_alloc\b", "\bmettle_crash_install\b")
   },
   @{
     Name            = "new_calloc_fixed"
     Path            = "tests/test_gc_alloc_fixed.mettle"
     ShouldSucceed   = $true
     AsmMustMatch    = @("\bextern calloc\b", "\bcall calloc\b")
-    AsmMustNotMatch = @("\bgc_alloc\b", "\bmeth_runtime_debug_install_crash_handler\b")
+    AsmMustNotMatch = @("\bgc_alloc\b", "\bmettle_crash_install\b")
   },
   @{ Name = "pointers"; Path = "tests/test_pointers.mettle"; ShouldSucceed = $true },
   @{ Name = "pointer_null"; Path = "tests/test_pointer_null.mettle"; ShouldSucceed = $true },
@@ -178,7 +178,7 @@ $cases = @(
     Path          = "tests/test_runtime_null_deref_check.mettle"
     ShouldSucceed = $true
     AsmMustMatch  = @("Fatal error: Null pointer dereference", "\bcall puts\b", "\bcall exit\b")
-    AsmMustNotMatch = @("\bmeth_runtime_debug_trap\b", "\bmeth_runtime_debug_install_crash_handler\b")
+    AsmMustNotMatch = @("\bmettle_crash_trap\b", "\bmettle_crash_install\b")
   },
   @{
     Name          = "runtime_array_bounds_check"
@@ -192,10 +192,10 @@ $cases = @(
     ShouldSucceed = $true
     Args          = @("-s")
     AsmMustMatch  = @(
-      "extern meth_runtime_debug_install_crash_handler",
-      "call meth_runtime_debug_install_crash_handler",
-      "extern meth_runtime_debug_register_image",
-      "extern meth_runtime_debug_trap",
+      "extern mettle_crash_install",
+      "call mettle_crash_install",
+      "extern mettle_crash_register_image",
+      "extern mettle_crash_trap",
       "meth_debug_functions:",
       "meth_debug_locations:"
     )
@@ -1021,7 +1021,7 @@ $total++
 try {
   $fpAsm = Join-Path $tmpDir "test_function_pointer.s"
   $fpObj = Join-Path $tmpDir "test_function_pointer.o"
-  $fpGc = Join-Path $tmpDir "test_function_pointer_gc.o"
+  $fpCrash = Join-Path $tmpDir "test_function_pointer_crash.o"
   $fpExe = Join-Path $tmpDir "test_function_pointer.exe"
 
   $fpOut = & $CompilerPath tests\test_function_pointer.mettle -o $fpAsm 2>&1 | Out-String
@@ -1034,12 +1034,12 @@ try {
     throw "Function pointer NASM assembly failed"
   }
 
-  & gcc -c src\runtime\gc.c -o $fpGc -Isrc 2>&1 | Out-Null
+  & gcc -c src\runtime\crash_handler.c -o $fpCrash -Isrc 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) {
-    throw "Function pointer gc.c compile failed"
+    throw "Function pointer crash_handler.c compile failed"
   }
 
-  & gcc -nostartfiles $fpObj $fpGc -o $fpExe -lkernel32 2>&1 | Out-Null
+  & gcc -nostartfiles $fpObj $fpCrash -o $fpExe -lkernel32 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "Function pointer link failed (use -nostartfiles like web server)"
   }
@@ -2650,7 +2650,7 @@ $total++
 try {
   $nullAsm = Join-Path $tmpDir "test_runtime_null_trace.s"
   $nullObj = Join-Path $tmpDir "test_runtime_null_trace.o"
-  $nullGc = Join-Path $tmpDir "test_runtime_null_trace_gc.o"
+  $nullCrash = Join-Path $tmpDir "test_runtime_null_trace_crash.o"
   $nullExe = Join-Path $tmpDir "test_runtime_null_trace.exe"
 
   $nullOut = & $CompilerPath -s tests\test_runtime_null_deref_check.mettle -o $nullAsm 2>&1 | Out-String
@@ -2663,12 +2663,12 @@ try {
     throw "Runtime null trace NASM assembly failed"
   }
 
-  & gcc -c src\runtime\gc.c -o $nullGc -Isrc 2>&1 | Out-Null
+  & gcc -c src\runtime\crash_handler.c -o $nullCrash -Isrc 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) {
-    throw "Runtime null trace gc.c compile failed"
+    throw "Runtime null trace crash_handler.c compile failed"
   }
 
-  & gcc -nostartfiles $nullObj $nullGc -o $nullExe -lkernel32 2>&1 | Out-Null
+  & gcc -nostartfiles $nullObj $nullCrash -o $nullExe -lkernel32 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "Runtime null trace link failed"
   }
@@ -2698,7 +2698,7 @@ $total++
 try {
   $avAsm = Join-Path $tmpDir "test_runtime_av_trace.s"
   $avObj2 = Join-Path $tmpDir "test_runtime_av_trace.o"
-  $avGc2 = Join-Path $tmpDir "test_runtime_av_trace_gc.o"
+  $avCrash2 = Join-Path $tmpDir "test_runtime_av_trace_crash.o"
   $avExe2 = Join-Path $tmpDir "test_runtime_av_trace.exe"
 
   $avTraceOut = & $CompilerPath -s tests\test_runtime_access_violation_trace.mettle -o $avAsm 2>&1 | Out-String
@@ -2711,12 +2711,12 @@ try {
     throw "Runtime access-violation trace NASM assembly failed"
   }
 
-  & gcc -c src\runtime\gc.c -o $avGc2 -Isrc 2>&1 | Out-Null
+  & gcc -c src\runtime\crash_handler.c -o $avCrash2 -Isrc 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) {
-    throw "Runtime access-violation trace gc.c compile failed"
+    throw "Runtime access-violation trace crash_handler.c compile failed"
   }
 
-  & gcc -nostartfiles $avObj2 $avGc2 -o $avExe2 -lkernel32 2>&1 | Out-Null
+  & gcc -nostartfiles $avObj2 $avCrash2 -o $avExe2 -lkernel32 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "Runtime access-violation trace link failed"
   }
@@ -2748,7 +2748,7 @@ catch {
 $total++
 try {
   $crashHandlerExe = "bin\crash_handler_test.exe"
-  & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\crash_handler_test.c src\runtime\gc.c -Isrc -o $crashHandlerExe
+  & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\crash_handler_test.c src\runtime\crash_handler.c -Isrc -o $crashHandlerExe
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to compile crash handler test"
   }

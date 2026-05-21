@@ -30,7 +30,7 @@
 
 <hr>
 
-This is the main source code repository for Mettle. It contains the compiler, standard library, runtime, and documentation.
+This is the main source code repository for Mettle. It contains the compiler, standard library, tests, and documentation.
 
 > [!TIP]
 > **New to Mettle?** Start with the **[Language Reference](docs/LANGUAGE.md)** for a guided tour, or run `mettle help` for built-in CLI docs (`build`, `gc`, `interop`, `stdlib`, `web`).
@@ -66,7 +66,7 @@ in, one executable out.
 - Control flow: `if`, `while`, `for`, `switch`, `match`, `defer`, `errdefer`, and labeled `break`/`continue`
 - Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`); line (`//`) and nesting block (`/* */`) comments
 - C interop via `extern` and `cstring`
-- Transitional heap allocator shim for `new` and heap-backed string concatenation (calloc-backed; no GC, no runtime tracing)
+- No Mettle runtime: `new` and heap-backed string concatenation emit direct `calloc(1, n)` calls
 - Standard library modules for I/O, conversion, networking, process, threading (thin Win32/pthread wrappers), and more
 - Developer-friendly diagnostics: stable error codes, source snippets with carets, and scope-aware "did you mean?" suggestions for typos
 - Cross-platform symbolized crash tracebacks (Windows SEH and POSIX signal handlers)
@@ -96,14 +96,14 @@ For production builds, use `--release`:
 .\bin\mettle.exe --build --release hello.mettle -o hello.exe
 ```
 
-`--release` enables `-O`, strips assembly comments, removes unreachable functions, and lowers without generated runtime null/bounds trap checks.
+`--release` enables `-O`, strips assembly comments, removes unreachable functions, and lowers without generated null/bounds trap checks.
 
 1. Optional: emit assembly only:
 
 ```powershell
 .\bin\mettle.exe hello.mettle -o hello.s
 nasm -f win64 hello.s -o hello.o
-gcc -nostartfiles hello.o "$env:ProgramFiles\Mettle\runtime\gc.o" -o hello.exe -lkernel32
+gcc -nostartfiles hello.o -o hello.exe -lkernel32
 .\hello.exe
 ```
 
@@ -115,7 +115,7 @@ Use `-nostartfiles` so Mettle's entry point (`mainCRTStartup`) is used instead o
 make
 ./bin/mettle hello.mettle -o hello.s
 nasm -f elf64 hello.s -o hello.o
-gcc -nostartfiles hello.o /usr/local/runtime/gc.o -o hello
+gcc -nostartfiles hello.o -o hello
 ./hello
 ```
 
@@ -138,19 +138,18 @@ Use the CLI help/docs commands to jump to the right topic quickly:
 
 Available topics: `build`, `heap`, `gc`, `interop`, `stdlib`, `web`.
 
-## Runtime and Linking Notes
+## Linking Notes
 
-- `mettle --build` uses the bundled runtime objects plus Mettle's internal PE linker on Windows.
+- `mettle --build` emits and links without a Mettle runtime for ordinary programs.
 - `mettle --build --linker auto` tries the internal linker first and falls back to external linkers if needed.
 - `mettle --build --emit-asm` selects the legacy NASM assembly path.
-- If you use the manual assembly/link flow, link bundled `runtime/gc.o` from your Mettle installation when using `new` or string concatenation.
-- If you use async features, also link bundled `runtime/async_runtime.o`.
-- Compile with `-s` to embed runtime crash traceback support, or use `-d` to enable it alongside normal debug output.
-- On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated runtime traps with Mettle function/source frames.
+- If you use the manual assembly/link flow, `new` and string concatenation only need the platform C runtime because they call `calloc` directly.
+- Link the optional helper objects only when needed: `runtime/crash_handler.o` for crash traceback support (`-s`/`-d`/`-g` or IR null/bounds traps) and `runtime/atomics.o` for `std/thread` interlocked atomics.
+- Compile with `-s` to embed crash traceback support, or use `-d` to enable it alongside normal debug output.
+- On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated traps with Mettle function/source frames.
 - The internal PE linker resolves common Win32 DLLs directly; use `--link-arg` only for additional DLLs/import libraries.
-- `gc_thread_attach` and `gc_thread_detach` remain compatibility no-ops for older worker-thread code.
 
-Example runtime crash output:
+Example crash traceback output:
 
 ```text
 Unhandled runtime exception 0xC0000005 (access violation)
@@ -192,9 +191,9 @@ See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](d
 
 ## Repository Layout
 
-- `src/` compiler source (lexer, parser, semantic analysis, IR, codegen, runtime support)
+- `src/` compiler source (lexer, parser, semantic analysis, IR, codegen, linker, optional debug/atomic helper)
 - `stdlib/` standard library modules and helper C shims
-- `tests/` compiler/runtime test suite
+- `tests/` compiler and linker test suite
 - `web/` web server demo
 - `docs/` language and tooling documentation
 
@@ -206,9 +205,8 @@ See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](d
 - Types: [docs/types.md](docs/types.md)
 - Expressions: [docs/expressions.md](docs/expressions.md)
 - Control flow: [docs/control-flow.md](docs/control-flow.md)
-- Async and sync execution: [docs/async.md](docs/async.md)
 - C interop: [docs/c-interop.md](docs/c-interop.md)
-- Heap allocator runtime: [docs/heap-allocator-runtime.md](docs/heap-allocator-runtime.md)
+- Heap allocation: [docs/heap-allocator-runtime.md](docs/heap-allocator-runtime.md)
 - Standard library: [docs/standard-library.md](docs/standard-library.md)
 
 ## Quick Dev Commands

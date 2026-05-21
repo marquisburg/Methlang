@@ -5412,7 +5412,7 @@ static int ir_symbol_address_taken(const IRFunction *function,
  *   branch_zero @SYM -> ir_trap_null_N
  *   jump ir_nonnull_M
  *   label ir_trap_null_N
- *   call _ = meth_runtime_debug_trap(...)
+ *   call _ = mettle_crash_trap(...)
  *   label ir_nonnull_M
  * Allows NOPs interleaved. On match, fills the indices and the operand name.
  * @start_index is the index of the branch_zero; on success @end_index is the
@@ -5458,7 +5458,7 @@ static int ir_match_null_trap_diamond(const IRFunction *function,
   }
   const IRInstruction *call = &function->instructions[idx];
   if (call->op != IR_OP_CALL || !call->text ||
-      strcmp(call->text, "meth_runtime_debug_trap") != 0) {
+      strcmp(call->text, "mettle_crash_trap") != 0) {
     return 0;
   }
 

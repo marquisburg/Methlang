@@ -2943,10 +2943,6 @@ static int code_generator_binary_resolved_type_is_supported(Type *type,
 static int code_generator_binary_type_is_abi_supported(CodeGenerator *generator,
                                                        const char *type_name,
                                                        int allow_void) {
-  if (type_name && strncmp(type_name, "Future<", 7) == 0) {
-    return 1;
-  }
-
   if (!generator || !generator->type_checker) {
     return 1;
   }
@@ -5075,7 +5071,7 @@ static int code_generator_binary_emit_runtime_trap_call(
     const IRInstruction *instruction) {
   char *trap_pc_label = NULL;
   size_t displacement_offset = 0;
-  const char *trap_symbol = "meth_runtime_debug_trap";
+  const char *trap_symbol = "mettle_crash_trap";
 
   if (!generator || !context || !instruction || instruction->argument_count == 0) {
     return 0;
@@ -5659,7 +5655,7 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
     return 0;
   }
 
-  if (strcmp(instruction->text, "meth_runtime_debug_trap") == 0) {
+  if (strcmp(instruction->text, "mettle_crash_trap") == 0) {
     return code_generator_binary_emit_runtime_trap_call(generator, context,
                                                         instruction);
   }

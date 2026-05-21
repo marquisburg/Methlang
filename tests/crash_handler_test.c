@@ -2,7 +2,7 @@
  * Crash-handler regression test.
  *
  * Verifies the runtime's fault diagnostics on POSIX:
- *   1. meth_runtime_debug_trap() prints its message + a symbolized stack
+ *   1. mettle_crash_trap() prints its message + a symbolized stack
  *      trace using the registered debug-info image (the path compiler-emitted
  *      null/bounds checks take).
  *   2. An installed signal handler turns a real SIGSEGV into a readable
@@ -16,7 +16,7 @@
  * coverage in run_tests.ps1 via runtime_null_trace / access_violation_trace).
  */
 
-#include "../src/runtime/gc.h"
+#include "../src/runtime/crash_handler.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -49,14 +49,14 @@ static void victim_function(void) {
 static void victim_function_end(void) {}
 
 static void register_fake_image(void) {
-  static MethRuntimeFunctionInfo functions[1];
+  static MettleCrashFunctionInfo functions[1];
   functions[0].start_address = (const void *)(uintptr_t)&victim_function;
   functions[0].end_address = (const void *)(uintptr_t)&victim_function_end;
   functions[0].function_name = "victim_function";
   functions[0].filename = "crash_demo.mettle";
   functions[0].line = 7;
   functions[0].column = 3;
-  meth_runtime_debug_register_image(functions, 1, NULL, 0);
+  mettle_crash_register_image(functions, 1, NULL, 0);
 }
 
 /* Run `child` in a forked process, capture its stderr into `buf`, and return
@@ -104,16 +104,16 @@ static size_t run_child_capture(void (*child)(void), char *buf, size_t buf_cap,
 
 static void scenario_debug_trap(void) {
   register_fake_image();
-  meth_runtime_debug_install_crash_handler();
+  mettle_crash_install();
   /* Mimic a compiler-emitted runtime check firing. */
-  meth_runtime_debug_trap("Fatal error: Null pointer dereference",
+  mettle_crash_trap("Fatal error: Null pointer dereference",
                           (const void *)(uintptr_t)&victim_function, NULL);
   _exit(0);
 }
 
 static void scenario_real_segfault(void) {
   register_fake_image();
-  meth_runtime_debug_install_crash_handler();
+  mettle_crash_install();
   victim_function();
   _exit(0);
 }

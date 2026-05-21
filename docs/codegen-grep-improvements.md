@@ -288,7 +288,7 @@ lea rcx, [rip+0]        # 8ac  ← reads its own address as a "format string"
 lea rdx, [rip-0xe]      # 8a5  ← reads the trampoline's own start
 mov r8, rbp
 sub rsp, 0x20
-call meth_runtime_debug_trap
+call mettle_crash_trap
 ```
 
 The `lea`s with `[rip+0]` and `[rip-0xe]` are clearly bogus operand
@@ -302,7 +302,7 @@ null pointer DOES come through, the trap will print garbage.
 
 ### What to do
 
-Audit `meth_runtime_debug_trap` call lowering — the symbolic string argument
+Audit `mettle_crash_trap` call lowering — the symbolic string argument
 isn't being relocated. Should produce a proper R_X86_64_REL32 relocation to
 the rdata string.
 

@@ -52,7 +52,7 @@ clean:
 
 test: $(TARGET)
 	@echo "Running crash handler tests..."
-	$(CC) $(CFLAGS) -D_GNU_SOURCE tests/crash_handler_test.c src/runtime/gc.c -Isrc -o $(BINDIR)/crash_handler_test
+	$(CC) $(CFLAGS) -D_GNU_SOURCE tests/crash_handler_test.c src/runtime/crash_handler.c -Isrc -o $(BINDIR)/crash_handler_test
 	@$(BINDIR)/crash_handler_test
 
 install: $(TARGET) bundle-stdlib bundle-runtime

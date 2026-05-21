@@ -1,4 +1,4 @@
-#include "gc.h"
+#include "crash_handler.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,9 +21,9 @@
 #endif
 #endif
 
-static const MethRuntimeFunctionInfo *g_runtime_debug_functions = NULL;
+static const MettleCrashFunctionInfo *g_runtime_debug_functions = NULL;
 static size_t g_runtime_debug_function_count = 0;
-static const MethRuntimeLocationInfo *g_runtime_debug_locations = NULL;
+static const MettleCrashLocationInfo *g_runtime_debug_locations = NULL;
 static size_t g_runtime_debug_location_count = 0;
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -43,14 +43,14 @@ static volatile sig_atomic_t g_runtime_debug_in_handler = 0;
  * The symbolization and frame-walking logic below is identical on every
  * platform: it only reads the registered debug-info tables and walks saved
  * frame pointers. Only three things are platform-specific and isolated:
- *   - meth_runtime_write_stderr_bytes (raw, async-signal-safe stderr write)
- *   - meth_runtime_address_is_readable (probe before dereferencing a frame)
+ *   - mettle_crash_write_stderr_bytes (raw, async-signal-safe stderr write)
+ *   - mettle_crash_address_is_readable (probe before dereferencing a frame)
  *   - the fault interception entry point (SEH filter / POSIX sigaction)
  * Keeping the shared code common is what gives Linux/macOS the same
  * symbolized backtraces Windows already produced.
  * ------------------------------------------------------------------------- */
 
-static void meth_runtime_write_stderr_bytes(const char *text, size_t length) {
+static void mettle_crash_write_stderr_bytes(const char *text, size_t length) {
   if (!text || length == 0) {
     return;
   }
@@ -79,14 +79,14 @@ static void meth_runtime_write_stderr_bytes(const char *text, size_t length) {
 #endif
 }
 
-static void meth_runtime_write_stderr(const char *text) {
+static void mettle_crash_write_stderr(const char *text) {
   if (!text) {
     return;
   }
-  meth_runtime_write_stderr_bytes(text, strlen(text));
+  mettle_crash_write_stderr_bytes(text, strlen(text));
 }
 
-static void meth_runtime_write_decimal_uintptr(uintptr_t value) {
+static void mettle_crash_write_decimal_uintptr(uintptr_t value) {
   char buffer[32];
   size_t index = sizeof(buffer);
   buffer[--index] = '\0';
@@ -96,10 +96,10 @@ static void meth_runtime_write_decimal_uintptr(uintptr_t value) {
     value /= 10u;
   } while (value != 0 && index > 0);
 
-  meth_runtime_write_stderr(buffer + index);
+  mettle_crash_write_stderr(buffer + index);
 }
 
-static void meth_runtime_write_hex_uintptr(uintptr_t value, size_t width) {
+static void mettle_crash_write_hex_uintptr(uintptr_t value, size_t width) {
   static const char digits[] = "0123456789ABCDEF";
   char buffer[2 + (sizeof(uintptr_t) * 2) + 1];
   size_t index = sizeof(buffer);
@@ -114,15 +114,15 @@ static void meth_runtime_write_hex_uintptr(uintptr_t value, size_t width) {
 
   buffer[--index] = 'x';
   buffer[--index] = '0';
-  meth_runtime_write_stderr(buffer + index);
+  mettle_crash_write_stderr(buffer + index);
 }
 
-static void meth_runtime_write_pointer(const void *value) {
-  meth_runtime_write_hex_uintptr((uintptr_t)value, sizeof(uintptr_t) * 2);
+static void mettle_crash_write_pointer(const void *value) {
+  mettle_crash_write_hex_uintptr((uintptr_t)value, sizeof(uintptr_t) * 2);
 }
 
 #if defined(_WIN32) || defined(_WIN64)
-static const char *meth_runtime_exception_name(DWORD code) {
+static const char *mettle_crash_exception_name(DWORD code) {
   switch (code) {
   case EXCEPTION_ACCESS_VIOLATION:
     return "access violation";
@@ -155,7 +155,7 @@ static const char *meth_runtime_exception_name(DWORD code) {
    write(2) returns EFAULT instead of faulting when the buffer is unmapped. */
 static int g_runtime_probe_pipe[2] = {-1, -1};
 
-static const char *meth_runtime_signal_name(int signo) {
+static const char *mettle_crash_signal_name(int signo) {
   switch (signo) {
   case SIGSEGV:
     return "segmentation fault (invalid memory access)";
@@ -173,7 +173,7 @@ static const char *meth_runtime_signal_name(int signo) {
 }
 #endif
 
-static int meth_runtime_address_is_readable(const void *address,
+static int mettle_crash_address_is_readable(const void *address,
                                             size_t length) {
   if (!address || length == 0) {
     return 0;
@@ -228,10 +228,10 @@ static int meth_runtime_address_is_readable(const void *address,
 #endif
 }
 
-static const MethRuntimeFunctionInfo *
-meth_runtime_find_function(uintptr_t program_counter) {
+static const MettleCrashFunctionInfo *
+mettle_crash_find_function(uintptr_t program_counter) {
   for (size_t i = 0; i < g_runtime_debug_function_count; i++) {
-    const MethRuntimeFunctionInfo *info = &g_runtime_debug_functions[i];
+    const MettleCrashFunctionInfo *info = &g_runtime_debug_functions[i];
     uintptr_t start = (uintptr_t)info->start_address;
     uintptr_t end = (uintptr_t)info->end_address;
     if (program_counter >= start && program_counter < end) {
@@ -241,17 +241,17 @@ meth_runtime_find_function(uintptr_t program_counter) {
   return NULL;
 }
 
-static const MethRuntimeLocationInfo *
-meth_runtime_find_location(uintptr_t program_counter,
-                           const MethRuntimeFunctionInfo *function_info) {
-  const MethRuntimeLocationInfo *best = NULL;
+static const MettleCrashLocationInfo *
+mettle_crash_find_location(uintptr_t program_counter,
+                           const MettleCrashFunctionInfo *function_info) {
+  const MettleCrashLocationInfo *best = NULL;
   uintptr_t best_address = 0;
   uintptr_t function_start = function_info ? (uintptr_t)function_info->start_address : 0;
   uintptr_t function_end =
       function_info ? (uintptr_t)function_info->end_address : UINTPTR_MAX;
 
   for (size_t i = 0; i < g_runtime_debug_location_count; i++) {
-    const MethRuntimeLocationInfo *info = &g_runtime_debug_locations[i];
+    const MettleCrashLocationInfo *info = &g_runtime_debug_locations[i];
     uintptr_t address = (uintptr_t)info->address;
     if (address < function_start || address >= function_end) {
       continue;
@@ -265,11 +265,11 @@ meth_runtime_find_location(uintptr_t program_counter,
   return best;
 }
 
-static void meth_runtime_print_frame(size_t index, uintptr_t program_counter) {
-  const MethRuntimeFunctionInfo *function_info =
-      meth_runtime_find_function(program_counter);
-  const MethRuntimeLocationInfo *location_info =
-      meth_runtime_find_location(program_counter, function_info);
+static void mettle_crash_print_frame(size_t index, uintptr_t program_counter) {
+  const MettleCrashFunctionInfo *function_info =
+      mettle_crash_find_function(program_counter);
+  const MettleCrashLocationInfo *location_info =
+      mettle_crash_find_location(program_counter, function_info);
   const char *function_name = "<unknown>";
   const char *filename = NULL;
   uintptr_t line = 0;
@@ -290,34 +290,34 @@ static void meth_runtime_print_frame(size_t index, uintptr_t program_counter) {
   }
 
   if (filename && line > 0) {
-    meth_runtime_write_stderr("  #");
-    meth_runtime_write_decimal_uintptr((uintptr_t)index);
-    meth_runtime_write_stderr(" ");
-    meth_runtime_write_stderr(function_name);
-    meth_runtime_write_stderr(" at ");
-    meth_runtime_write_stderr(filename);
-    meth_runtime_write_stderr(":");
-    meth_runtime_write_decimal_uintptr(line);
-    meth_runtime_write_stderr(":");
-    meth_runtime_write_decimal_uintptr(column);
-    meth_runtime_write_stderr(" (");
-    meth_runtime_write_pointer((void *)program_counter);
-    meth_runtime_write_stderr(")\r\n");
+    mettle_crash_write_stderr("  #");
+    mettle_crash_write_decimal_uintptr((uintptr_t)index);
+    mettle_crash_write_stderr(" ");
+    mettle_crash_write_stderr(function_name);
+    mettle_crash_write_stderr(" at ");
+    mettle_crash_write_stderr(filename);
+    mettle_crash_write_stderr(":");
+    mettle_crash_write_decimal_uintptr(line);
+    mettle_crash_write_stderr(":");
+    mettle_crash_write_decimal_uintptr(column);
+    mettle_crash_write_stderr(" (");
+    mettle_crash_write_pointer((void *)program_counter);
+    mettle_crash_write_stderr(")\r\n");
   } else {
-    meth_runtime_write_stderr("  #");
-    meth_runtime_write_decimal_uintptr((uintptr_t)index);
-    meth_runtime_write_stderr(" ");
-    meth_runtime_write_stderr(function_name);
-    meth_runtime_write_stderr(" (");
-    meth_runtime_write_pointer((void *)program_counter);
-    meth_runtime_write_stderr(")\r\n");
+    mettle_crash_write_stderr("  #");
+    mettle_crash_write_decimal_uintptr((uintptr_t)index);
+    mettle_crash_write_stderr(" ");
+    mettle_crash_write_stderr(function_name);
+    mettle_crash_write_stderr(" (");
+    mettle_crash_write_pointer((void *)program_counter);
+    mettle_crash_write_stderr(")\r\n");
   }
 }
 
-static void meth_runtime_print_trace_from_frame(uintptr_t program_counter,
+static void mettle_crash_print_trace_from_frame(uintptr_t program_counter,
                                                 uintptr_t frame_pointer) {
-  meth_runtime_write_stderr("Stack trace:\r\n");
-  meth_runtime_print_frame(0, program_counter);
+  mettle_crash_write_stderr("Stack trace:\r\n");
+  mettle_crash_print_frame(0, program_counter);
 
   uintptr_t current_frame = frame_pointer;
   for (size_t index = 1; index < 32; index++) {
@@ -325,7 +325,7 @@ static void meth_runtime_print_trace_from_frame(uintptr_t program_counter,
     uintptr_t return_address = 0;
 
     if (!current_frame ||
-        !meth_runtime_address_is_readable((const void *)current_frame,
+        !mettle_crash_address_is_readable((const void *)current_frame,
                                           sizeof(uintptr_t) * 2)) {
       break;
     }
@@ -337,25 +337,25 @@ static void meth_runtime_print_trace_from_frame(uintptr_t program_counter,
       break;
     }
 
-    meth_runtime_print_frame(index, return_address - 1u);
+    mettle_crash_print_frame(index, return_address - 1u);
     current_frame = next_frame;
   }
 }
 
 #if defined(_WIN32) || defined(_WIN64)
-static void meth_runtime_terminate_with_code(UINT exit_code) {
+static void mettle_crash_terminate_with_code(UINT exit_code) {
   HANDLE process = GetCurrentProcess();
   TerminateProcess(process, exit_code);
 }
 
 static LONG WINAPI
-meth_runtime_unhandled_exception_filter(EXCEPTION_POINTERS *exception_info) {
+mettle_crash_unhandled_exception_filter(EXCEPTION_POINTERS *exception_info) {
   if (!exception_info || !exception_info->ExceptionRecord) {
     return EXCEPTION_CONTINUE_SEARCH;
   }
 
   if (InterlockedExchange(&g_runtime_debug_in_handler, 1) != 0) {
-    meth_runtime_terminate_with_code(1);
+    mettle_crash_terminate_with_code(1);
   }
 
   const EXCEPTION_RECORD *record = exception_info->ExceptionRecord;
@@ -363,15 +363,15 @@ meth_runtime_unhandled_exception_filter(EXCEPTION_POINTERS *exception_info) {
   uintptr_t program_counter = (uintptr_t)record->ExceptionAddress;
   uintptr_t frame_pointer = context ? (uintptr_t)context->Rbp : 0;
 
-  meth_runtime_write_stderr("Unhandled runtime exception ");
-  meth_runtime_write_hex_uintptr((uintptr_t)record->ExceptionCode, 8);
-  meth_runtime_write_stderr(" (");
-  meth_runtime_write_stderr(
-      meth_runtime_exception_name(record->ExceptionCode));
-  meth_runtime_write_stderr(")\r\n");
-  meth_runtime_write_stderr("Exception address: ");
-  meth_runtime_write_pointer((void *)program_counter);
-  meth_runtime_write_stderr("\r\n");
+  mettle_crash_write_stderr("Unhandled runtime exception ");
+  mettle_crash_write_hex_uintptr((uintptr_t)record->ExceptionCode, 8);
+  mettle_crash_write_stderr(" (");
+  mettle_crash_write_stderr(
+      mettle_crash_exception_name(record->ExceptionCode));
+  mettle_crash_write_stderr(")\r\n");
+  mettle_crash_write_stderr("Exception address: ");
+  mettle_crash_write_pointer((void *)program_counter);
+  mettle_crash_write_stderr("\r\n");
 
   if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
       record->NumberParameters >= 2) {
@@ -381,19 +381,19 @@ meth_runtime_unhandled_exception_filter(EXCEPTION_POINTERS *exception_info) {
     } else if (record->ExceptionInformation[0] == 8u) {
       operation = "execute";
     }
-    meth_runtime_write_stderr(operation);
-    meth_runtime_write_stderr(" access violation at ");
-    meth_runtime_write_pointer((void *)record->ExceptionInformation[1]);
-    meth_runtime_write_stderr("\r\n");
+    mettle_crash_write_stderr(operation);
+    mettle_crash_write_stderr(" access violation at ");
+    mettle_crash_write_pointer((void *)record->ExceptionInformation[1]);
+    mettle_crash_write_stderr("\r\n");
   }
 
-  meth_runtime_print_trace_from_frame(program_counter, frame_pointer);
-  meth_runtime_terminate_with_code(1);
+  mettle_crash_print_trace_from_frame(program_counter, frame_pointer);
+  mettle_crash_terminate_with_code(1);
   return EXCEPTION_EXECUTE_HANDLER;
 }
 #else /* POSIX */
 
-static void meth_runtime_terminate_with_code(int exit_code) {
+static void mettle_crash_terminate_with_code(int exit_code) {
   /* _exit(2) is async-signal-safe and skips atexit/stdio flushing, which is
      exactly what we want from inside a fatal signal handler. */
   _exit(exit_code);
@@ -403,7 +403,7 @@ static void meth_runtime_terminate_with_code(int exit_code) {
    signal's machine context so the backtrace starts at the real crash site
    rather than inside the handler. Layout is arch/OS specific; we cover the
    common x86-64 Linux/macOS cases and degrade gracefully otherwise. */
-static void meth_runtime_extract_fault_context(void *ucontext_raw,
+static void mettle_crash_extract_fault_context(void *ucontext_raw,
                                                uintptr_t *out_pc,
                                                uintptr_t *out_fp) {
   *out_pc = 0;
@@ -431,50 +431,50 @@ static void meth_runtime_extract_fault_context(void *ucontext_raw,
 #endif
 }
 
-static void meth_runtime_crash_signal_handler(int signo, siginfo_t *info,
+static void mettle_crash_crash_signal_handler(int signo, siginfo_t *info,
                                                void *ucontext_raw) {
   /* Reentrancy guard: a fault inside the handler must hard-exit. */
   if (g_runtime_debug_in_handler) {
-    meth_runtime_terminate_with_code(128 + signo);
+    mettle_crash_terminate_with_code(128 + signo);
   }
   g_runtime_debug_in_handler = 1;
 
-  meth_runtime_write_stderr("Unhandled runtime signal ");
-  meth_runtime_write_decimal_uintptr((uintptr_t)signo);
-  meth_runtime_write_stderr(" (");
-  meth_runtime_write_stderr(meth_runtime_signal_name(signo));
-  meth_runtime_write_stderr(")\n");
+  mettle_crash_write_stderr("Unhandled runtime signal ");
+  mettle_crash_write_decimal_uintptr((uintptr_t)signo);
+  mettle_crash_write_stderr(" (");
+  mettle_crash_write_stderr(mettle_crash_signal_name(signo));
+  mettle_crash_write_stderr(")\n");
 
   if (info && (signo == SIGSEGV || signo == SIGBUS)) {
-    meth_runtime_write_stderr("Faulting address: ");
-    meth_runtime_write_pointer(info->si_addr);
+    mettle_crash_write_stderr("Faulting address: ");
+    mettle_crash_write_pointer(info->si_addr);
     if (info->si_addr == NULL) {
-      meth_runtime_write_stderr("  (null pointer dereference)");
+      mettle_crash_write_stderr("  (null pointer dereference)");
     }
-    meth_runtime_write_stderr("\n");
+    mettle_crash_write_stderr("\n");
   }
 
   uintptr_t program_counter = 0;
   uintptr_t frame_pointer = 0;
-  meth_runtime_extract_fault_context(ucontext_raw, &program_counter,
+  mettle_crash_extract_fault_context(ucontext_raw, &program_counter,
                                      &frame_pointer);
   if (program_counter != 0) {
-    meth_runtime_write_stderr("Fault instruction: ");
-    meth_runtime_write_pointer((void *)program_counter);
-    meth_runtime_write_stderr("\n");
-    meth_runtime_print_trace_from_frame(program_counter, frame_pointer);
+    mettle_crash_write_stderr("Fault instruction: ");
+    mettle_crash_write_pointer((void *)program_counter);
+    mettle_crash_write_stderr("\n");
+    mettle_crash_print_trace_from_frame(program_counter, frame_pointer);
   } else {
-    meth_runtime_write_stderr(
+    mettle_crash_write_stderr(
         "Stack trace unavailable (no machine context for this platform)\n");
   }
 
-  meth_runtime_terminate_with_code(128 + signo);
+  mettle_crash_terminate_with_code(128 + signo);
 }
 #endif
 
-void meth_runtime_debug_register_image(const MethRuntimeFunctionInfo *functions,
+void mettle_crash_register_image(const MettleCrashFunctionInfo *functions,
                                        size_t function_count,
-                                       const MethRuntimeLocationInfo *locations,
+                                       const MettleCrashLocationInfo *locations,
                                        size_t location_count) {
   g_runtime_debug_functions = functions;
   g_runtime_debug_function_count = function_count;
@@ -482,12 +482,12 @@ void meth_runtime_debug_register_image(const MethRuntimeFunctionInfo *functions,
   g_runtime_debug_location_count = location_count;
 }
 
-void meth_runtime_debug_install_crash_handler(void) {
+void mettle_crash_install(void) {
 #if defined(_WIN32) || defined(_WIN64)
   if (InterlockedCompareExchange(&g_runtime_debug_handler_installed, 1, 0) == 0) {
     g_runtime_debug_vectored_handler =
-        AddVectoredExceptionHandler(1, meth_runtime_unhandled_exception_filter);
-    SetUnhandledExceptionFilter(meth_runtime_unhandled_exception_filter);
+        AddVectoredExceptionHandler(1, mettle_crash_unhandled_exception_filter);
+    SetUnhandledExceptionFilter(mettle_crash_unhandled_exception_filter);
   }
 #else
   if (g_runtime_debug_handler_installed) {
@@ -520,7 +520,7 @@ void meth_runtime_debug_install_crash_handler(void) {
 
   struct sigaction sa;
   memset(&sa, 0, sizeof(sa));
-  sa.sa_sigaction = meth_runtime_crash_signal_handler;
+  sa.sa_sigaction = mettle_crash_crash_signal_handler;
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
 
@@ -534,67 +534,34 @@ void meth_runtime_debug_install_crash_handler(void) {
 #endif
 }
 
-void meth_runtime_debug_trap(const char *message, const void *program_counter,
+void mettle_crash_trap(const char *message, const void *program_counter,
                              const void *frame_pointer) {
 #if defined(_WIN32) || defined(_WIN64)
   if (InterlockedExchange(&g_runtime_debug_in_handler, 1) != 0) {
-    meth_runtime_terminate_with_code(1);
+    mettle_crash_terminate_with_code(1);
     return;
   }
 
-  meth_runtime_write_stderr(message ? message : "Fatal runtime trap");
-  meth_runtime_write_stderr("\r\n");
-  meth_runtime_print_trace_from_frame((uintptr_t)program_counter,
+  mettle_crash_write_stderr(message ? message : "Fatal runtime trap");
+  mettle_crash_write_stderr("\r\n");
+  mettle_crash_print_trace_from_frame((uintptr_t)program_counter,
                                       (uintptr_t)frame_pointer);
-  meth_runtime_terminate_with_code(1);
+  mettle_crash_terminate_with_code(1);
 #else
   if (g_runtime_debug_in_handler) {
-    meth_runtime_terminate_with_code(1);
+    mettle_crash_terminate_with_code(1);
     return;
   }
   g_runtime_debug_in_handler = 1;
 
-  meth_runtime_write_stderr(
+  mettle_crash_write_stderr(
       (message && message[0] != '\0') ? message : "Fatal runtime trap");
-  meth_runtime_write_stderr("\n");
+  mettle_crash_write_stderr("\n");
   if (program_counter || frame_pointer) {
-    meth_runtime_print_trace_from_frame((uintptr_t)program_counter,
+    mettle_crash_print_trace_from_frame((uintptr_t)program_counter,
                                         (uintptr_t)frame_pointer);
   }
-  meth_runtime_terminate_with_code(1);
+  mettle_crash_terminate_with_code(1);
 #endif
 }
 
-int32_t meth_atomic_compare_exchange_i32(int32_t *target, int32_t exchange,
-                                         int32_t comparand) {
-#if defined(_WIN32) || defined(_WIN64)
-  return (int32_t)InterlockedCompareExchange((volatile LONG *)target,
-                                             (LONG)exchange, (LONG)comparand);
-#else
-  return (int32_t)__sync_val_compare_and_swap(target, comparand, exchange);
-#endif
-}
-
-int32_t meth_atomic_exchange_i32(int32_t *target, int32_t value) {
-#if defined(_WIN32) || defined(_WIN64)
-  return (int32_t)InterlockedExchange((volatile LONG *)target, (LONG)value);
-#else
-  return (int32_t)__sync_lock_test_and_set(target, value);
-#endif
-}
-
-int32_t meth_atomic_inc_i32(int32_t *target) {
-#if defined(_WIN32) || defined(_WIN64)
-  return (int32_t)InterlockedIncrement((volatile LONG *)target);
-#else
-  return (int32_t)__sync_add_and_fetch(target, 1);
-#endif
-}
-
-int32_t meth_atomic_dec_i32(int32_t *target) {
-#if defined(_WIN32) || defined(_WIN64)
-  return (int32_t)InterlockedDecrement((volatile LONG *)target);
-#else
-  return (int32_t)__sync_sub_and_fetch(target, 1);
-#endif
-}

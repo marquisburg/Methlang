@@ -700,13 +700,13 @@ int code_generator_generate_program(CodeGenerator *generator,
   if (generator->generate_stack_trace_support) {
     code_generator_emit(generator, "    ; Initialize runtime trace support\n");
     code_generator_emit(
-        generator, "    extern meth_runtime_debug_install_crash_handler\n");
-    code_generator_emit(generator, "    call meth_runtime_debug_install_crash_handler\n");
+        generator, "    extern mettle_crash_install\n");
+    code_generator_emit(generator, "    call mettle_crash_install\n");
   }
   if (generator->generate_stack_trace_support && generator->debug_info &&
       generator->debug_info->runtime_function_count > 0) {
     code_generator_emit(generator,
-                        "    extern meth_runtime_debug_register_image\n");
+                        "    extern mettle_crash_register_image\n");
     code_generator_emit(generator, "    lea %s, [rel meth_debug_functions]\n",
                         first_param_reg);
     code_generator_emit(generator, "    mov %s, %zu\n", second_param_reg,
@@ -715,7 +715,7 @@ int code_generator_generate_program(CodeGenerator *generator,
                         third_param_reg);
     code_generator_emit(generator, "    mov %s, %zu\n", fourth_param_reg,
                         generator->debug_info->runtime_location_count);
-    code_generator_emit(generator, "    call meth_runtime_debug_register_image\n");
+    code_generator_emit(generator, "    call mettle_crash_register_image\n");
   }
   if (has_main) {
     code_generator_emit(generator, "    ; Call user main function\n");

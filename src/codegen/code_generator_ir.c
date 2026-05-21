@@ -878,7 +878,7 @@ static int ir_call_ignores_register_promotion_barrier(const char *callee_name) {
     return 0;
   }
   /* Pure native helpers that do not clobber promoted arithmetic state. */
-  if (strcmp(callee_name, "meth_runtime_debug_trap") == 0 ||
+  if (strcmp(callee_name, "mettle_crash_trap") == 0 ||
       strcmp(callee_name, "GetTickCount64") == 0 ||
       strcmp(callee_name, "QueryPerformanceCounter") == 0 ||
       strcmp(callee_name, "QueryPerformanceFrequency") == 0) {
@@ -3117,7 +3117,7 @@ static int code_generator_emit_ir_runtime_trap_call(
     return 1;
   }
 
-  if (!code_generator_emit_extern_symbol(generator, "meth_runtime_debug_trap")) {
+  if (!code_generator_emit_extern_symbol(generator, "mettle_crash_trap")) {
     return 0;
   }
 
@@ -3159,7 +3159,7 @@ static int code_generator_emit_ir_runtime_trap_call(
   if (call_stack_total > 0) {
     code_generator_emit(generator, "    sub rsp, %d\n", call_stack_total);
   }
-  code_generator_emit(generator, "    call meth_runtime_debug_trap\n");
+  code_generator_emit(generator, "    call mettle_crash_trap\n");
   if (call_stack_total > 0) {
     code_generator_emit(generator, "    add rsp, %d\n", call_stack_total);
   }
@@ -3189,7 +3189,7 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
     code_generator_set_error(generator, "Invalid IR call target");
     return 0;
   }
-  if (strcmp(call_target, "meth_runtime_debug_trap") == 0) {
+  if (strcmp(call_target, "mettle_crash_trap") == 0) {
     return code_generator_emit_ir_runtime_trap_call(generator, instruction,
                                                     temp_table);
   }

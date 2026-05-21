@@ -76,7 +76,7 @@ function main() -> int32 {
 
 ## With Heap Allocation and Structs
 
-Uses `new` for zero-initialized heap allocation. `mettle --build` links the bundled `gc.o` shim automatically on Windows. See [Heap Allocator Runtime](heap-allocator-runtime.md).
+Uses `new` for zero-initialized heap allocation. The emitted code calls `calloc(1, n)` directly; no Mettle runtime object is linked unless the program also uses `-d`/`-s` crash tracebacks or `std/thread` atomics. See [Heap Allocator Runtime](heap-allocator-runtime.md).
 
 ```mettle
 struct Point {

@@ -63,7 +63,7 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 3. Legacy assembly path: `mettle --build --emit-asm main.mettle -o main.exe`
 4. External linker fallback: `mettle --build --linker auto main.mettle -o main.exe`
 
-`--build` keeps compilation inside Mettle's COFF object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. The internal linker probes common Win32 DLLs directly (`kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, `ucrtbase`, and `msvcrt`), so `std/win32`, `std/thread`, and `std/net` work without hand-written C bridge objects or default import-library flags. `--linker auto` tries the internal linker first and falls back to external linkers if needed. `--emit-asm` selects the NASM assembly path instead. The bundled `gc.o` shim is part of the Mettle installation output and is linked automatically only when a program actually uses `new`, string concatenation, or crash tracebacks.
+`--build` keeps compilation inside Mettle's COFF object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. The internal linker probes common Win32 DLLs directly (`kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, `ucrtbase`, and `msvcrt`), so `std/win32`, `std/thread`, and `std/net` work without hand-written C bridge objects or default import-library flags. `--linker auto` tries the internal linker first and falls back to external linkers if needed. `--emit-asm` selects the NASM assembly path instead. Two optional helper objects ship with the Mettle installation — `crash_handler.o` (linked only for `-d`/`-s`/`-g` or IR null/bounds traps) and `atomics.o` (linked only when `std/thread` interlocked atomics are referenced) — and `--build` pulls them in automatically when needed.
 
 ### Manual Assembly/Link Flow
 
@@ -71,13 +71,21 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 2. Assemble: `nasm -f win64 main.s -o main.o` (or `-f elf64` on Linux)
 3. Link: `gcc -nostartfiles main.o -o main -lkernel32` (plus libraries such as `-lws2_32` for networking). Use `-nostartfiles` so Mettle's entry point (`mainCRTStartup`) is used instead of the C runtime's.
 
-The emitted entry point does not call `gc_init` or `gc_shutdown`. Programs that do not use `-d`/`-s` crash tracebacks or `std/thread` atomics link **zero** Mettle runtime objects, even when they use `new` or string concatenation.
+The emitted entry point does not call any Mettle runtime initialization. Programs that do not use `-d`/`-s` crash tracebacks or `std/thread` interlocked atomics link **zero** Mettle runtime objects, even when they use `new` or string concatenation.
 
-Link `gc.o` only when your program references `meth_runtime_*` (crash tracebacks) or `meth_atomic_*` (`std/thread`):
+Link the relevant helper object(s) only when your program references their symbols:
+
+- `crash_handler.o` if the program references `mettle_crash_*` (compiled with `-d`, `-s`, `-g`, or with IR null/bounds traps left enabled).
+- `atomics.o` if the program references `mettle_atomic_*` (any use of `std/thread`'s `atomic_compare_exchange_i32` / `_exchange_i32` / `_inc_i32` / `_dec_i32`).
 
 ```bash
-gcc -nostartfiles main.o path/to/runtime/gc.o -o main -lkernel32
+gcc -nostartfiles main.o \
+    path/to/runtime/crash_handler.o \
+    path/to/runtime/atomics.o \
+    -o main -lkernel32
 ```
+
+Omit either object when the corresponding symbols are not referenced.
 
 For concurrency, import `std/thread` (Windows) or `std/thread_posix` and call `CreateThread`/`pthread_create` directly — Mettle no longer has built-in `async`/`spawn`/`Channel<T>` keywords.
 

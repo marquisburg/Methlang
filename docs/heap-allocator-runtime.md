@@ -15,12 +15,17 @@ exit unless user code explicitly manages a buffer through `std/mem`.
 
 ## Runtime Objects
 
-Ordinary heap allocation does not link a Mettle runtime object. `gc.o` remains
-only as the optional debug/atomic helper object and is linked when an emitted
-object references:
+Ordinary heap allocation does not link a Mettle runtime object. Two optional
+helper objects ship with the compiler and are pulled in only when their symbols
+are actually referenced:
 
-- `meth_runtime_*` for `-s`/`-d` runtime crash tracebacks.
-- `meth_atomic_*` for `std/thread` atomics.
+- `crash_handler.o` — installs the SEH/sigaction crash handler and provides
+  `mettle_crash_trap`. Linked when an emitted object references
+  `mettle_crash_*` (i.e. compiled with `-d`, `-s`, `-g`, or with IR null/bounds
+  traps left enabled in non-release builds).
+- `atomics.o` — thin platform wrappers over Win32 Interlocked* / GCC `__sync_*`
+  intrinsics. Linked when an emitted object references `mettle_atomic_*` (any
+  use of `std/thread` atomic helpers).
 
 A program that uses `new` or string concatenation but does not use crash
 tracebacks or thread atomics links zero Mettle runtime objects.
@@ -53,4 +58,6 @@ nasm -f win64 main.s -o main.o
 gcc -nostartfiles main.o -o main -lkernel32
 ```
 
-Add `runtime/gc.o` only for runtime tracebacks or `std/thread` atomics.
+Add `runtime/crash_handler.o` only for runtime tracebacks (`-d`/`-s`/IR
+traps); add `runtime/atomics.o` only when `std/thread` atomic helpers are
+used.
