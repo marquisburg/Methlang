@@ -350,7 +350,7 @@ static void print_doc_reference(const char *argv0, const char *relative_path) {
 
 /* Single source of truth for the help-topic list. Referenced by print_usage,
  * the topic dispatcher, and the unknown-topic error so they cannot drift. */
-#define METTLE_HELP_TOPICS "build, heap, gc, interop, stdlib, web"
+#define METTLE_HELP_TOPICS "build, runtime (alias: heap, gc), interop, stdlib, web"
 
 static int print_help_topic(const char *program_name, const char *argv0,
                             const char *topic) {
@@ -363,7 +363,7 @@ static int print_help_topic(const char *program_name, const char *argv0,
     printf("Mettle help topics\n\n");
     print_help_topic(program_name, argv0, "build");
     printf("\n");
-    print_help_topic(program_name, argv0, "gc");
+    print_help_topic(program_name, argv0, "runtime");
     printf("\n");
     print_help_topic(program_name, argv0, "interop");
     printf("\n");
@@ -394,19 +394,25 @@ static int print_help_topic(const char *program_name, const char *argv0,
     return 0;
   }
 
-  if (strcmp(topic, "gc") == 0 || strcmp(topic, "heap") == 0 ||
-      strcmp(topic, "runtime") == 0) {
-    printf("heap - zero-initialized allocation\n\n");
-    printf("  Emitted code calls the C runtime calloc(1, n) directly for "
-           "`new T`, array literals, and string concatenation.\n");
-    printf("  mettle --build links no Mettle heap runtime for ordinary heap "
-           "allocation.\n");
-    printf("  Two optional helper objects ship with the compiler and are "
-           "linked only when actually referenced:\n");
-    printf("    crash_handler.o - stack-trace/crash support (used by -d / -s "
-           "/ -g and IR null/bounds traps).\n");
-    printf("    atomics.o       - std/thread interlocked atomic helpers.\n");
-    print_doc_reference(argv0, "heap-allocator-runtime.md");
+  if (strcmp(topic, "runtime") == 0 || strcmp(topic, "heap") == 0 ||
+      strcmp(topic, "gc") == 0) {
+    printf("runtime - Mettle's (lack of a) language runtime\n\n");
+    printf("  No GC, no async scheduler, no heap manager, no thread pool, no "
+           "mandatory startup shim.\n");
+    printf("  A typical program links libc and nothing else. `new`, array "
+           "literals, and string concatenation\n");
+    printf("  call calloc(1, n) directly.\n\n");
+    printf("  Two opt-in helper objects ship with the compiler and are linked "
+           "only when referenced:\n");
+    printf("    crash_handler.o - symbolized backtraces; linked when an object "
+           "references mettle_crash_*\n");
+    printf("                      (compiled with -d, -s, -g, or with IR "
+           "null/bounds traps active).\n");
+    printf("    atomics.o       - Win32/__sync_* wrappers; linked when an "
+           "object references mettle_atomic_*\n");
+    printf("                      (any use of std/thread interlocked atomic "
+           "helpers).\n");
+    print_doc_reference(argv0, "runtime-model.md");
     return 0;
   }
 
@@ -1957,10 +1963,11 @@ int main(int argc, char *argv[]) {
       if (argc >= 3) {
         return print_help_topic(argv[0], argv[0], argv[2]);
       }
-      printf("Mettle documentation topics: build, heap, gc, interop, stdlib, web\n");
+      printf("Mettle documentation topics: build, runtime (alias: heap, gc), interop, stdlib, web\n");
       print_doc_reference(argv[0], "LANGUAGE.md");
       print_doc_reference(argv[0], "compilation.md");
-      print_doc_reference(argv[0], "heap-allocator-runtime.md");
+      print_doc_reference(argv[0], "runtime-model.md");
+      print_doc_reference(argv[0], "heap-allocation.md");
       return 0;
     }
   }

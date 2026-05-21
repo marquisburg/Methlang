@@ -20,10 +20,10 @@ The compiler includes topic-oriented help commands:
 
 - `mettle help` prints CLI usage.
 - `mettle help build` explains the Windows build flow.
-- `mettle help heap` explains how the bundled heap/runtime object is linked (`gc` remains an alias).
+- `mettle help runtime` explains the runtime model and the two opt-in helper objects (aliases: `heap`, `gc`).
 - `mettle docs` lists the main documentation entry points and their paths.
 
-Available topics: `build`, `heap`, `gc`, `interop`, `stdlib`, `web`.
+Available topics: `build`, `runtime` (aliases `heap`, `gc`), `interop`, `stdlib`, `web`.
 
 ## Options
 

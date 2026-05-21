@@ -2,6 +2,7 @@
 
 #include <limits.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define BINARY_TEXT_SECTION_ALIGNMENT 16
@@ -2553,9 +2554,48 @@ static int code_generator_binary_instruction_in_backward_loop(
   return 0;
 }
 
+static size_t *code_generator_binary_build_loop_weights(
+    const IRFunction *function) {
+  if (!function) {
+    return NULL;
+  }
+
+  size_t count = function->instruction_count;
+  size_t *weights = malloc((count ? count : 1) * sizeof(size_t));
+  if (!weights) {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    weights[i] = 1;
+  }
+
+  for (size_t jump_index = 0; jump_index < count; jump_index++) {
+    const IRInstruction *jump = &function->instructions[jump_index];
+    if (!jump || jump->op != IR_OP_JUMP || !jump->text) {
+      continue;
+    }
+
+    for (size_t label_index = 0; label_index < jump_index; label_index++) {
+      const IRInstruction *label = &function->instructions[label_index];
+      if (!label || label->op != IR_OP_LABEL || !label->text ||
+          strcmp(label->text, jump->text) != 0) {
+        continue;
+      }
+
+      for (size_t i = label_index; i <= jump_index; i++) {
+        weights[i] = 4;
+      }
+      break;
+    }
+  }
+
+  return weights;
+}
+
 static size_t code_generator_binary_function_symbol_score(
     const BinaryFunctionContext *context, const IRFunction *function,
-    const char *name) {
+    const char *name, const size_t *loop_weights) {
   size_t score = 0;
 
   if (!function || !name) {
@@ -2564,8 +2604,7 @@ static size_t code_generator_binary_function_symbol_score(
 
   for (size_t i = 0; i < function->instruction_count; i++) {
     const IRInstruction *instruction = &function->instructions[i];
-    size_t weight =
-        code_generator_binary_instruction_in_backward_loop(function, i) ? 4 : 1;
+    size_t weight = loop_weights ? loop_weights[i] : 1;
     if (!instruction) {
       continue;
     }
@@ -2745,6 +2784,16 @@ static int code_generator_binary_promote_hot_symbols(
   size_t promoted_count = 0;
   int function_has_no_calls =
       !code_generator_binary_function_has_calls(ir_function);
+  size_t *loop_weights =
+      code_generator_binary_build_loop_weights(ir_function);
+  if (!loop_weights) {
+    code_generator_set_error(
+        generator,
+        "Failed to allocate loop-weight metadata for direct object function "
+        "'%s'",
+        function_data->name);
+    return 0;
+  }
 
   if (function_has_no_calls) {
     for (size_t insn_i = 0;
@@ -2816,7 +2865,7 @@ static int code_generator_binary_promote_hot_symbols(
 
       size_t score =
           code_generator_binary_function_symbol_score(context, ir_function,
-                                                      name);
+                                                      name, loop_weights);
       if (score > best_score) {
         best_score = score;
         best_name = name;
@@ -2853,7 +2902,7 @@ static int code_generator_binary_promote_hot_symbols(
 
         size_t score =
             code_generator_binary_function_symbol_score(context, ir_function,
-                                                        name);
+                                                        name, loop_weights);
         if (score > best_score) {
           best_score = score;
           best_name = name;
@@ -2873,10 +2922,12 @@ static int code_generator_binary_promote_hot_symbols(
           generator,
           "Failed to promote hot symbol '%s' in direct object function '%s'",
           best_name, function_data->name);
+      free(loop_weights);
       return 0;
     }
   }
 
+  free(loop_weights);
   return 1;
 }
 
@@ -8739,8 +8790,11 @@ static int code_generator_emit_binary_function(CodeGenerator *generator,
   }
 
   if (!code_generator_binary_validate_signature(generator, function_data,
-                                                ir_function) ||
-      !code_generator_binary_prepare_function_context(generator, function_data,
+                                                ir_function)) {
+    return 0;
+  }
+
+  if (!code_generator_binary_prepare_function_context(generator, function_data,
                                                       ir_function, &context)) {
     return 0;
   }

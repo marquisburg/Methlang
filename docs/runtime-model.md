@@ -1,0 +1,136 @@
+# Runtime Model
+
+Mettle has no GC, async scheduler, heap manager, thread pool, or startup shim that every program must link.
+
+A typical program links **libc only**. The compiler emits `mainCRTStartup` (Windows) or `_start` (Linux), calls your `main`, and exits. Heap use goes straight to `calloc(1, n)`. There is no `runtime_init`, `runtime_shutdown`, background thread, or allocator state inside Mettle.
+
+This page covers what gets emitted, the two optional helper objects in `src/runtime/`, and when the linker pulls them in.
+
+## Call boundary
+
+| Mettle feature | Compiler output | Linked at build time |
+|---|---|---|
+| `main` / `main(argc, argv)` | Entry stub calls `__getmainargs` (Windows) or reads `argc`/`argv` from the stack (Linux), then `main`, then `ExitProcess` / `sys_exit` | libc |
+| `new T`, array literals, `string + string` | `extern calloc`; `call calloc` with `(1, size)` | libc `calloc` |
+| `std/win32` / `std/net` / `std/thread` | `extern` to DLL symbols (`CreateFileA`, etc.) | Win32 DLLs |
+| `std/thread` interlocked atomics | `extern mettle_atomic_*`; `call mettle_atomic_*` | `atomics.o` |
+| Null/bounds traps (normal build), `-d` / `-s` / `-g` | `extern mettle_crash_trap`, `mettle_crash_install` at entry | `crash_handler.o` |
+| `--release` | Traps off; entry stub skips `mettle_crash_install` | nothing extra |
+
+Older Mettle shipped a large runtime (GC, async executor, coroutine scheduler, channels, tracked heap). That code is removed. What remains are two small helper objects, linked only when referenced.
+
+## Helper objects
+
+Sources live in `src/runtime/`. Installed copies sit under `bin/runtime/` (local build) or `runtime/` (installer). The linker includes a helper only if the emitted object has undefined symbols with the matching prefix.
+
+### `crash_handler.o`
+
+Linked when the object references `mettle_crash_*`. That happens if you pass:
+
+- `-d` / `--debug`
+- `-s` / `--stack-trace`
+- `-g` / `--debug-symbols`
+- or you build without `--release` and IR null/bounds checks are enabled (they call `mettle_crash_trap` on failure)
+
+Provides:
+
+- Windows: vectored SEH handler. POSIX: `sigaction` on an alternate stack. Both catch access violations and similar faults.
+- Frame-pointer walk plus compiler-embedded debug tables (`MettleCrashFunctionInfo`, `MettleCrashLocationInfo`) for symbolized backtraces.
+- `mettle_crash_trap(msg, pc, fp)`: trap sites call this with the message and saved frame pointer; prints and exits with status 1.
+
+Example:
+
+```text
+Unhandled runtime exception 0xC0000005 (access violation)
+Exception address: 0x00007FF7DFD71046
+write access violation at 0x0000000000000001
+Stack trace:
+  #0 leaf_crash at app.mettle:2:3 (0x00007FF7DFD71046)
+  #1 main at app.mettle:8:3 (0x00007FF7DFD71080)
+```
+
+Without `-d`, `-s`, or `-g`, and with `--release`, this object is not linked.
+
+### `atomics.o`
+
+Linked when the object references `mettle_atomic_*`. That happens when you use `std/thread` (Windows) or `std/thread_posix` and call:
+
+- `atomic_compare_exchange_i32`
+- `atomic_exchange_i32`
+- `atomic_inc_i32`
+- `atomic_dec_i32`
+
+Each wrapper is a few lines over Win32 `Interlocked*` or GCC `__sync_*` builtins. Mettle cannot call `__sync_*` as normal externs and has no inline assembly, so these live in a linkable object.
+
+`CreateThread` / `pthread_create` without those four helpers does not pull in `atomics.o`.
+
+## `--build`
+
+`mettle --build` scans the emitted object and links helpers as needed. You do not pass them on the command line.
+
+```text
+mettle --build hello.mettle -o hello.exe
+  → hello.obj
+  → libc only
+```
+
+```text
+mettle --build -s hello.mettle -o hello.exe
+  → hello.obj (mettle_crash_* referenced)
+  → libc + crash_handler.o
+```
+
+```text
+mettle --build hello.mettle -o hello.exe   (uses std/thread atomics)
+  → libc + atomics.o
+```
+
+```text
+mettle --build -s hello.mettle -o hello.exe   (crash traces + atomics)
+  → libc + crash_handler.o + atomics.o
+```
+
+## Manual NASM + gcc link
+
+With `-nostartfiles` (Mettle supplies `mainCRTStartup` / `_start`, not the CRT entry):
+
+```bash
+# no helpers
+gcc -nostartfiles main.o -o main -lkernel32
+
+# crash tracebacks (-d / -s / -g, or non-release with traps)
+gcc -nostartfiles main.o path/to/runtime/crash_handler.o -o main -lkernel32
+
+# std/thread atomics
+gcc -nostartfiles main.o path/to/runtime/atomics.o -o main -lkernel32
+
+# both
+gcc -nostartfiles main.o \
+    path/to/runtime/crash_handler.o \
+    path/to/runtime/atomics.o \
+    -o main -lkernel32
+```
+
+## "Runtime: none" in the README
+
+Means no required runtime objects, no managed services, no hidden init/shutdown. Helpers are opt-in. `crash_handler.o` is diagnostics only; neither helper runs before `main`, spawns background work, or owns memory.
+
+Rough analogy: these objects are like `crt0.o` for C: small linker glue, not a language runtime.
+
+## Why two objects
+
+`gc.o` used to bundle everything. Splitting by symbol prefix keeps link size minimal:
+
+- `--release`, no thread atomics: zero helpers
+- `-d` only: `crash_handler.o`
+- atomics only: `atomics.o`
+
+`objdump -t` on the binary shows which `mettle_crash_*` / `mettle_atomic_*` symbols came from which file.
+
+## Possible future removal
+
+`atomics.o`: on Windows, `std/thread` could extern `Interlocked*` from `kernel32.dll` directly. POSIX still needs compiler inline asm or a user C shim (same pattern as `posix_helpers.c` for `std/net_posix`).
+
+`crash_handler.o`: harder to drop without losing line-level backtraces from `-d`/`-s`/`-g`. Opt-in linking already keeps it out of release builds that do not ask for it.
+
+Both helpers are stable for now; ABI is not expected to change.

@@ -119,7 +119,7 @@ obj.method(args)
 
 ## Allocation
 
-The `new` expression allocates a zero-initialized value with a direct `calloc(1, size)` call and returns a pointer. Mettle does not link a heap runtime for this. See [Heap Allocation](heap-allocator-runtime.md) for details.
+The `new` expression allocates a zero-initialized value with a direct `calloc(1, size)` call and returns a pointer. Mettle does not link a heap runtime for this. See [Heap Allocation](heap-allocation.md) for details.
 
 ```mettle
 var p: MyStruct* = new MyStruct;

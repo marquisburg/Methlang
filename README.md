@@ -33,7 +33,7 @@
 This is the main source code repository for Mettle. It contains the compiler, standard library, tests, and documentation.
 
 > [!TIP]
-> **New to Mettle?** Start with the **[Language Reference](docs/LANGUAGE.md)** for a guided tour, or run `mettle help` for built-in CLI docs (`build`, `gc`, `interop`, `stdlib`, `web`).
+> **New to Mettle?** Start with the **[Language Reference](docs/LANGUAGE.md)** for a guided tour, or run `mettle help` for built-in CLI docs (`build`, `runtime`, `interop`, `stdlib`, `web`).
 
 ## Why Mettle?
 
@@ -42,11 +42,18 @@ Mettle is its own compiler end to end: source in, its own IR and x86-64
 backend out. Nothing about how your code becomes instructions is hidden behind
 someone else's optimizer.
 
+**No runtime.**
+No garbage collector, no async scheduler, no heap manager, no managed thread
+pool, no startup support code that every program is forced to link. A normal
+Mettle program links libc and nothing else; `new` and string concatenation
+emit a direct `calloc(1, n)` call. See the [Runtime Model](docs/runtime-model.md)
+for the full picture.
+
 **Performance.**
-Compiles straight to x86-64 with no runtime, emitting NASM assembly or, on
-Windows, a COFF object directly. Generics monomorphize at compile time, casts
-and pointer access are explicit, and `--release` strips bounds and null checks.
-You can predict the instructions your code becomes.
+Compiles straight to x86-64, emitting NASM assembly or, on Windows, a COFF
+object directly. Generics monomorphize at compile time, casts and pointer
+access are explicit, and `--release` strips bounds and null checks. You can
+predict the instructions your code becomes.
 
 **Control.**
 A low-level language without the busywork: static types, generics, structured
@@ -61,15 +68,28 @@ in, one executable out.
 
 ## What's in the box
 
-- Compiles to x86-64 NASM assembly and Windows COFF objects
-- Strong typing with pointers, arrays, structs, enums, and function pointers
-- Control flow: `if`, `while`, `for`, `switch`, `match`, `defer`, `errdefer`, and labeled `break`/`continue`
+- Compiles to x86-64 NASM assembly or directly to Windows COFF objects
+- Strong typing with pointers, arrays, structs, enums, function pointers
+- Control flow: `if`, `while`, `for`, `switch`, `match`, `defer`, `errdefer`, labeled `break`/`continue`
 - Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`); line (`//`) and nesting block (`/* */`) comments
-- C interop via `extern` and `cstring`
-- No Mettle runtime: `new` and heap-backed string concatenation emit direct `calloc(1, n)` calls
+- C interop via `extern` and `cstring` — no binding layer, no FFI runtime
 - Standard library modules for I/O, conversion, networking, process, threading (thin Win32/pthread wrappers), and more
-- Developer-friendly diagnostics: stable error codes, source snippets with carets, and scope-aware "did you mean?" suggestions for typos
-- Cross-platform symbolized crash tracebacks (Windows SEH and POSIX signal handlers)
+- Developer-friendly diagnostics: stable error codes, source snippets with carets, scope-aware "did you mean?" suggestions for typos
+- Cross-platform symbolized crash tracebacks (Windows SEH + POSIX signal handlers), opt-in via `-d` / `-s`
+- Built-in PE linker on Windows; emits executables with no external linker required
+
+## Runtime Model (short version)
+
+The "Runtime: none" badge means there is no language runtime in the traditional sense. Every Mettle program links libc and nothing else, unless it opts into one of two narrowly-scoped helper objects:
+
+| Helper | Linked when… | What it does |
+|---|---|---|
+| `crash_handler.o` | Built with `-d`, `-s`, `-g`, or in non-release mode with IR null/bounds traps active | Installs SEH/sigaction handler; provides `mettle_crash_trap` for compiler-generated checks; prints symbolized backtraces |
+| `atomics.o` | Imports `std/thread` interlocked atomics | Wraps Win32 `Interlocked*` / GCC `__sync_*` intrinsics as callable symbols |
+
+Both ship with the compiler under `bin/runtime/` (or the installer's `runtime/` directory). `mettle --build` links them on demand by scanning emitted objects for `mettle_crash_*` / `mettle_atomic_*` symbol references — you don't pass them on the command line.
+
+For the full story (what gets emitted at each call boundary, the manual-link flow, why there are two files instead of one), see [docs/runtime-model.md](docs/runtime-model.md).
 
 ## Quick Start (Windows)
 
@@ -79,7 +99,7 @@ in, one executable out.
 .\build.bat
 ```
 
-1. Build an executable with the native Windows path:
+2. Build an executable with the native Windows path:
 
 ```powershell
 .\bin\mettle.exe --build hello.mettle -o hello.exe
@@ -96,9 +116,9 @@ For production builds, use `--release`:
 .\bin\mettle.exe --build --release hello.mettle -o hello.exe
 ```
 
-`--release` enables `-O`, strips assembly comments, removes unreachable functions, and lowers without generated null/bounds trap checks.
+`--release` enables `-O`, strips assembly comments, removes unreachable functions, and lowers without generated null/bounds trap checks. Programs built with `--release` link no Mettle helper objects.
 
-1. Optional: emit assembly only:
+3. Optional: emit assembly only:
 
 ```powershell
 .\bin\mettle.exe hello.mettle -o hello.s
@@ -122,8 +142,9 @@ gcc -nostartfiles hello.o -o hello
 ## Toolchain
 
 - Mettle compiler (`bin/mettle.exe` on Windows, `bin/mettle` on Linux)
-- NASM assembler for assembly-based builds
-- System C toolchain/linker (`gcc`/`clang`) for external-link fallback and manual assembly/object flows
+- NASM assembler — only needed for the legacy assembly path (`--emit-asm` or manual flow)
+- System C toolchain/linker (`gcc`/`clang`) — only needed for external-link fallback and manual flows
+- `--build` mode uses none of the above on Windows; the compiler emits COFF objects and links them with a built-in PE linker
 
 ## Built-In Help
 
@@ -131,25 +152,22 @@ Use the CLI help/docs commands to jump to the right topic quickly:
 
 ```powershell
 .\bin\mettle.exe help
-.\bin\mettle.exe help heap
+.\bin\mettle.exe help runtime
 .\bin\mettle.exe help build
 .\bin\mettle.exe docs
 ```
 
-Available topics: `build`, `heap`, `gc`, `interop`, `stdlib`, `web`.
+Available topics: `build`, `runtime` (alias `heap`/`gc`), `interop`, `stdlib`, `web`.
 
-## Linking Notes
+## Crash Traceback Example
 
-- `mettle --build` emits and links without a Mettle runtime for ordinary programs.
-- `mettle --build --linker auto` tries the internal linker first and falls back to external linkers if needed.
-- `mettle --build --emit-asm` selects the legacy NASM assembly path.
-- If you use the manual assembly/link flow, `new` and string concatenation only need the platform C runtime because they call `calloc` directly.
-- Link the optional helper objects only when needed: `runtime/crash_handler.o` for crash traceback support (`-s`/`-d`/`-g` or IR null/bounds traps) and `runtime/atomics.o` for `std/thread` interlocked atomics.
-- Compile with `-s` to embed crash traceback support, or use `-d` to enable it alongside normal debug output.
-- On Windows, embedded crash tracebacks report native exception codes such as `0xC0000005` and compiler-generated traps with Mettle function/source frames.
-- The internal PE linker resolves common Win32 DLLs directly; use `--link-arg` only for additional DLLs/import libraries.
+Compile with `-s` to embed crash-traceback support (or `-d` for full debug output):
 
-Example crash traceback output:
+```powershell
+.\bin\mettle.exe --build -s app.mettle -o app.exe
+```
+
+When the program faults, you get a symbolized stack:
 
 ```text
 Unhandled runtime exception 0xC0000005 (access violation)
@@ -160,20 +178,22 @@ Stack trace:
   #1 main at app.mettle:8:3 (0x00007FF7DFD71080)
 ```
 
+On Windows the underlying mechanism is SEH; on POSIX it is a `sigaction` handler on an alternate signal stack. Both produce the same backtrace format. See [docs/runtime-model.md](docs/runtime-model.md#crash_handlero--symbolized-crash-tracebacks) for the full mechanism.
+
 ## How it compiles
 
 "Straight to x86-64" means there is no third-party code generator in the path.
 Mettle does not lower to LLVM IR, and it does not emit C and shell out to a C
 compiler. The compiler owns every phase from source text to machine code:
 
-1. **Lexing** - tokenize source
-2. **Parsing** - build the AST
-3. **Import resolution** - resolve and inline `import` directives
-4. **Monomorphization** - expand generics into concrete instantiations
-5. **Type checking** - semantic analysis and symbol resolution
-6. **IR lowering** - convert the AST to Mettle's own intermediate representation
-7. **Optimization** (optional, `-O`) - propagation, folding, branch and codegen peepholes
-8. **Code generation** - emit x86-64
+1. **Lexing** — tokenize source
+2. **Parsing** — build the AST
+3. **Import resolution** — resolve and inline `import` directives
+4. **Monomorphization** — expand generics into concrete instantiations
+5. **Type checking** — semantic analysis and symbol resolution
+6. **IR lowering** — convert the AST to Mettle's own intermediate representation
+7. **Optimization** (optional, `-O`) — propagation, folding, branch and codegen peepholes
+8. **Code generation** — emit x86-64
 
 The final phase has two outputs. By default it writes **NASM assembly**, which
 NASM then assembles. On Windows, `--emit-obj` skips the assembler entirely and
@@ -191,23 +211,29 @@ See [docs/compilation.md](docs/compilation.md) and [docs/lexical-structure.md](d
 
 ## Repository Layout
 
-- `src/` compiler source (lexer, parser, semantic analysis, IR, codegen, linker, optional debug/atomic helper)
-- `stdlib/` standard library modules and helper C shims
-- `tests/` compiler and linker test suite
-- `web/` web server demo
-- `docs/` language and tooling documentation
+- `src/`
+  - `lexer/`, `parser/`, `semantic/`, `ir/`, `codegen/`, `linker/` — compiler pipeline
+  - `runtime/` — the two opt-in helper objects: `crash_handler.{c,h}` and `atomics.{c,h}`. See [docs/runtime-model.md](docs/runtime-model.md)
+  - `debug/`, `error/` — debug info and diagnostics
+- `stdlib/` — standard library modules and platform helper C shims
+- `tests/` — compiler, linker, and runtime test suite
+- `web/` — web server demo
+- `docs/` — language and tooling documentation
+- `installer/` — Inno Setup installer scripts (Windows)
 
 ## Documentation
 
 - Language reference: [docs/LANGUAGE.md](docs/LANGUAGE.md)
-- Compilation: [docs/compilation.md](docs/compilation.md)
+- Runtime model: [docs/runtime-model.md](docs/runtime-model.md)
+- Compilation pipeline: [docs/compilation.md](docs/compilation.md)
 - Lexical structure: [docs/lexical-structure.md](docs/lexical-structure.md)
 - Types: [docs/types.md](docs/types.md)
 - Expressions: [docs/expressions.md](docs/expressions.md)
 - Control flow: [docs/control-flow.md](docs/control-flow.md)
 - C interop: [docs/c-interop.md](docs/c-interop.md)
-- Heap allocation: [docs/heap-allocator-runtime.md](docs/heap-allocator-runtime.md)
+- Heap allocation semantics: [docs/heap-allocation.md](docs/heap-allocation.md)
 - Standard library: [docs/standard-library.md](docs/standard-library.md)
+- Known limitations: [docs/known-limitations.md](docs/known-limitations.md)
 
 ## Quick Dev Commands
 

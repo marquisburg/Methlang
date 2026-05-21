@@ -18,7 +18,7 @@ Console and file I/O. `puts` writes a null-terminated string and appends a newli
 
 ## std/mem
 
-Memory management. C runtime functions: `malloc`, `calloc`, `realloc`, `free`, `memset`, `memcpy`, `memmove`, `memcmp`. Helpers: `alloc_zeroed` (allocate and zero-initialize), `buf_dup` (allocate and copy a buffer). Use `malloc`/`free` for buffers, C interop, and explicit lifetimes. `new` emits direct zero-initialized `calloc` allocation. See [Heap Allocation](heap-allocator-runtime.md).
+Memory management. C runtime functions: `malloc`, `calloc`, `realloc`, `free`, `memset`, `memcpy`, `memmove`, `memcmp`. Helpers: `alloc_zeroed` (allocate and zero-initialize), `buf_dup` (allocate and copy a buffer). Use `malloc`/`free` for buffers, C interop, and explicit lifetimes. `new` emits direct zero-initialized `calloc` allocation. See [Heap Allocation](heap-allocation.md).
 
 ## std/math
 
