@@ -1,10 +1,24 @@
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="mettle-syntax/icons/mettle-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="mettle.svg">
+    <img src="mettle.svg" alt="Mettle" width="128" height="128">
+  </picture>
+</p>
 
-# Mettle
+<h1 align="center">Mettle</h1>
 
-**A statically typed systems language that compiles straight to x86-64.**
+<p align="center">
+  <b>A statically typed systems language that compiles straight to x86-64.</b>
+</p>
 
-
+<p align="center">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0">
+  <img src="https://img.shields.io/badge/target-x86--64-orange.svg" alt="Target: x86-64">
+  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-success.svg" alt="Platforms: Windows | Linux">
+  <img src="https://img.shields.io/badge/runtime-none-lightgrey.svg" alt="Runtime: none">
+</p>
 
 Mettle is a low-level language with a compiler it owns end to end: source, IR,
 optimization, x86-64 codegen, and on Windows, native COFF output plus a built-in
@@ -84,4 +98,3 @@ Production build:
 .\tests\run_tests.ps1
 .\tests\run_tests.ps1 -BuildCompiler
 ```
-
