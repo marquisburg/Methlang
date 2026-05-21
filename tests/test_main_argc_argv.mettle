@@ -1,5 +1,5 @@
 // Test: main with argc and argv (command-line arguments)
-// Requires linking mettle_entry.o and shell32 on Windows
+// Windows startup emits __getmainargs directly; no argv shim is required.
 
 import "std/conv";
 

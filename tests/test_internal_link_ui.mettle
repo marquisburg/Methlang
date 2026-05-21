@@ -1,0 +1,37 @@
+import "std/ui";
+
+function noop_window_proc(hwnd: int64, msg: uint32, wparam: int64, lparam: int64) -> int64 {
+  if (msg == UI_WM_DESTROY()) {
+    ui_quit(0);
+    return 0;
+  }
+  return ui_def_window_proc(hwnd, msg, wparam, lparam);
+}
+
+function main() -> int32 {
+  if (ui_init() == 0) {
+    return 1;
+  }
+
+  var rgb: uint32 = ui_rgb(10, 20, 30);
+  if (rgb != 0x001E140A) {
+    return 2;
+  }
+
+  var rect: UiRect = ui_make_rect(0, 0, 100, 50);
+  if (ui_rect_width(rect) != 100) {
+    return 3;
+  }
+  if (ui_rect_height(rect) != 50) {
+    return 4;
+  }
+
+  if (ui_command_id(0x00001234) != 0x1234) {
+    return 5;
+  }
+  if (ui_command_notify(0x00001234) != 0) {
+    return 6;
+  }
+
+  return 0;
+}

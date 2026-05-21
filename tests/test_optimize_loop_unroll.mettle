@@ -1,0 +1,10 @@
+// Counted loop with a compile-time constant bound should unroll to 55.
+function main() -> int32 {
+  var sum: int32 = 0;
+  var i: int32 = 1;
+  while (i <= 10) {
+    sum = sum + i;
+    i = i + 1;
+  }
+  return sum;
+}

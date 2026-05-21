@@ -35,7 +35,6 @@ typedef enum {
   PROFILE_PHASE_PRELUDE,
   PROFILE_PHASE_IMPORTS,
   PROFILE_PHASE_MONOMORPHIZE,
-  PROFILE_PHASE_ASYNC_REWRITE,
   PROFILE_PHASE_TYPE_CHECK,
   PROFILE_PHASE_IR_LOWERING,
   PROFILE_PHASE_IR_OPTIMIZATION,
@@ -87,10 +86,9 @@ static void compiler_profile_print_compile(const CompilerProfile *profile,
   static const char *phase_names[PROFILE_PHASE_COUNT] = {
       "read input",       "lexical validation", "init",
       "parse",            "prelude injection",  "imports",
-      "monomorphize",     "async rewrite",      "type check",
-      "IR lowering",      "IR optimization",    "IR dump",
-      "codegen",          "write output",       "debug info",
-      "cleanup",
+      "monomorphize",     "type check",         "IR lowering",
+      "IR optimization",  "IR dump",            "codegen",
+      "write output",     "debug info",         "cleanup",
   };
   double total_ms = 0.0;
 
@@ -352,7 +350,7 @@ static void print_doc_reference(const char *argv0, const char *relative_path) {
 
 /* Single source of truth for the help-topic list. Referenced by print_usage,
  * the topic dispatcher, and the unknown-topic error so they cannot drift. */
-#define METTLE_HELP_TOPICS "build, gc, interop, stdlib, web"
+#define METTLE_HELP_TOPICS "build, runtime (alias: heap, gc), interop, stdlib, web"
 
 static int print_help_topic(const char *program_name, const char *argv0,
                             const char *topic) {
@@ -365,7 +363,7 @@ static int print_help_topic(const char *program_name, const char *argv0,
     printf("Mettle help topics\n\n");
     print_help_topic(program_name, argv0, "build");
     printf("\n");
-    print_help_topic(program_name, argv0, "gc");
+    print_help_topic(program_name, argv0, "runtime");
     printf("\n");
     print_help_topic(program_name, argv0, "interop");
     printf("\n");
@@ -379,15 +377,15 @@ static int print_help_topic(const char *program_name, const char *argv0,
     printf("build - compile, assemble, and link an executable\n\n");
     printf("  Common:\n");
     printf("    mettle --build app.mettle -o app.exe\n");
-    printf("    mettle --build --emit-obj --linker internal app.mettle -o "
-           "app.exe   (no NASM/gcc/link.exe needed)\n");
     printf("    mettle --build --release app.mettle -o app.exe              "
-           "   (optimized, stripped)\n\n");
+           "   (optimized, stripped)\n");
+    printf("    mettle --build --emit-asm app.mettle -o app.exe             "
+           "   (legacy NASM assembly path)\n\n");
     printf("  Notes:\n");
-    printf("    --build assembles with NASM, then links with the selected "
-           "backend.\n");
-    printf("    --linker auto tries internal, then gcc, then link.exe "
-           "(default).\n");
+    printf("    --build emits a COFF object and links with the internal PE "
+           "linker by default (no NASM/gcc/link.exe needed).\n");
+    printf("    --emit-asm selects the legacy NASM assembly backend instead.\n");
+    printf("    --linker auto tries internal, then gcc, then link.exe.\n");
     printf("    --linker internal forces the native PE linker and probes "
            "common Win32 DLLs directly.\n");
     printf("    --link-arg <arg> passes an extra linker argument (repeatable) "
@@ -396,16 +394,25 @@ static int print_help_topic(const char *program_name, const char *argv0,
     return 0;
   }
 
-  if (strcmp(topic, "gc") == 0 || strcmp(topic, "runtime") == 0) {
-    printf("gc - garbage collector and runtime linking\n\n");
-    printf("  Emitted assembly calls gc_alloc/gc_init; it does not contain "
-           "the GC implementation itself.\n");
-    printf("  mettle --build links the bundled runtime automatically.\n");
-    printf("  Manual assembly/linking still requires the bundled runtime "
-           "objects (link gc.o yourself).\n");
-    printf("  Anything using new or GC-backed string concatenation needs the "
-           "runtime: use --build or link gc.o manually.\n");
-    print_doc_reference(argv0, "garbage-collector.md");
+  if (strcmp(topic, "runtime") == 0 || strcmp(topic, "heap") == 0 ||
+      strcmp(topic, "gc") == 0) {
+    printf("runtime - Mettle's (lack of a) language runtime\n\n");
+    printf("  No GC, no async scheduler, no heap manager, no thread pool, no "
+           "mandatory startup shim.\n");
+    printf("  A typical program links libc and nothing else. `new`, array "
+           "literals, and string concatenation\n");
+    printf("  call calloc(1, n) directly.\n\n");
+    printf("  Two opt-in helper objects ship with the compiler and are linked "
+           "only when referenced:\n");
+    printf("    crash_handler.o - symbolized backtraces; linked when an object "
+           "references mettle_crash_*\n");
+    printf("                      (compiled with -d, -s, -g, or with IR "
+           "null/bounds traps active).\n");
+    printf("    atomics.o       - Win32/__sync_* wrappers; linked when an "
+           "object references mettle_atomic_*\n");
+    printf("                      (any use of std/thread interlocked atomic "
+           "helpers).\n");
+    print_doc_reference(argv0, "runtime-model.md");
     return 0;
   }
 
@@ -586,32 +593,6 @@ static int parse_linker_mode(const char *text, LinkerMode *mode_out) {
     return 1;
   }
 
-  return 0;
-}
-
-static const char *async_model_name(AsyncRewriteModel model) {
-  switch (model) {
-  case ASYNC_REWRITE_MODEL_COROUTINE:
-    return "coroutine";
-  case ASYNC_REWRITE_MODEL_POOL:
-  default:
-    return "pool";
-  }
-}
-
-static int parse_async_model(const char *text, AsyncRewriteModel *model_out) {
-  if (!text || !model_out) {
-    return 0;
-  }
-
-  if (strcmp(text, "pool") == 0) {
-    *model_out = ASYNC_REWRITE_MODEL_POOL;
-    return 1;
-  }
-  if (strcmp(text, "coroutine") == 0 || strcmp(text, "coro") == 0) {
-    *model_out = ASYNC_REWRITE_MODEL_COROUTINE;
-    return 1;
-  }
   return 0;
 }
 
@@ -806,10 +787,10 @@ static int resolve_import_library_path(const char *library_name,
 }
 
 static int collect_internal_link_imports(const CompilerOptions *options,
-                                         int include_shell32,
-                                         StringList *import_library_paths,
-                                         StringList *import_dll_names,
-                                         char **error_message_out) {
+                                          int include_shell32,
+                                          StringList *import_library_paths,
+                                          StringList *import_dll_names,
+                                          char **error_message_out) {
   static const char *default_import_dlls[] = {
       "kernel32.dll", "ucrtbase.dll", "msvcrt.dll", "ws2_32.dll",
       "user32.dll",   "gdi32.dll",    "advapi32.dll"};
@@ -913,6 +894,33 @@ static int collect_internal_link_imports(const CompilerOptions *options,
   return 1;
 }
 
+static int append_internal_link_object_args(const CompilerOptions *options,
+                                            const char **object_paths,
+                                            size_t object_capacity,
+                                            size_t *object_count) {
+  size_t i = 0u;
+  if (!options || !object_paths || !object_count) {
+    return 1;
+  }
+
+  for (i = 0u; i < options->link_argument_count; i++) {
+    const char *argument = options->link_arguments[i];
+    if (!argument || argument[0] == '\0') {
+      continue;
+    }
+    if (!text_ends_with_ignore_case(argument, ".o") &&
+        !text_ends_with_ignore_case(argument, ".obj")) {
+      continue;
+    }
+    if (*object_count >= object_capacity) {
+      return 0;
+    }
+    object_paths[(*object_count)++] = argument;
+  }
+
+  return 1;
+}
+
 static int object_has_undefined_symbol_prefix(const char *object_path,
                                               const char *prefix) {
   CoffObject *object = NULL;
@@ -945,22 +953,12 @@ static int object_has_undefined_symbol_prefix(const char *object_path,
   return found;
 }
 
-static int object_needs_gc_runtime(const char *object_path) {
-  return object_has_undefined_symbol_prefix(object_path, "gc_") ||
-         object_has_undefined_symbol_prefix(object_path, "meth_runtime_") ||
-         object_has_undefined_symbol_prefix(object_path, "meth_async_") ||
-         object_has_undefined_symbol_prefix(object_path, "meth_coro_");
+static int object_needs_crash_handler(const char *object_path) {
+  return object_has_undefined_symbol_prefix(object_path, "mettle_crash_");
 }
 
-static int object_needs_thread_runtime(const char *object_path) {
-  return object_has_undefined_symbol_prefix(object_path, "__meth_thread_") ||
-         object_has_undefined_symbol_prefix(object_path, "__meth_mutex_") ||
-         object_has_undefined_symbol_prefix(object_path, "__meth_atomic_") ||
-         object_has_undefined_symbol_prefix(object_path, "__meth_chan_");
-}
-
-static int object_needs_mettle_entry(const char *object_path) {
-  return object_has_undefined_symbol_prefix(object_path, "mettle_entry_");
+static int object_needs_atomics(const char *object_path) {
+  return object_has_undefined_symbol_prefix(object_path, "mettle_atomic_");
 }
 
 static int append_argument_text(char *buffer, size_t buffer_size, size_t *offset,
@@ -1108,24 +1106,15 @@ static int run_nasm_assemble(const char *asm_filename,
 }
 
 static int mettle_build_with_gcc(const char *object_filename,
-                                   const char *executable_filename,
-                                   const char *gc_object,
-                                   const char *async_object,
-                                   const char *thread_object,
-                                   const char *entry_object,
-                                   const CompilerOptions *options) {
+                                    const char *executable_filename,
+                                    const char *const *runtime_objects,
+                                    size_t runtime_object_count,
+                                    const CompilerOptions *options) {
   size_t gcc_len = strlen(object_filename) + strlen(executable_filename) + 192;
-  if (gc_object && gc_object[0] != '\0') {
-    gcc_len += strlen(gc_object) + 1;
-  }
-  if (async_object && async_object[0] != '\0') {
-    gcc_len += strlen(async_object) + 1;
-  }
-  if (thread_object && thread_object[0] != '\0') {
-    gcc_len += strlen(thread_object) + 1;
-  }
-  if (entry_object && entry_object[0] != '\0') {
-    gcc_len += strlen(entry_object) + 1;
+  for (size_t i = 0; i < runtime_object_count; i++) {
+    if (runtime_objects[i] && runtime_objects[i][0] != '\0') {
+      gcc_len += strlen(runtime_objects[i]) + 1;
+    }
   }
   if (options) {
     for (size_t i = 0; i < options->link_argument_count; i++) {
@@ -1142,53 +1131,33 @@ static int mettle_build_with_gcc(const char *object_filename,
   }
 
   size_t offset = 0;
-  if (entry_object && entry_object[0] != '\0') {
-    if (!append_argument_text(gcc_command, gcc_len, &offset,
-                              "gcc -nostartfiles ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
-        ((gc_object && gc_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object))) ||
-        ((async_object && async_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, async_object))) ||
-        ((thread_object && thread_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, thread_object))) ||
-        !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, entry_object) ||
-        !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
+  if (!append_argument_text(gcc_command, gcc_len, &offset,
+                            "gcc -nostartfiles ") ||
+      !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename)) {
+    free(gcc_command);
+    fprintf(stderr, "Error: Failed to build GCC command\n");
+    return 1;
+  }
+  for (size_t i = 0; i < runtime_object_count; i++) {
+    if (!runtime_objects[i] || runtime_objects[i][0] == '\0') {
+      continue;
+    }
+    if (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
         !append_quoted_argument(gcc_command, gcc_len, &offset,
-                                executable_filename) ||
-        !append_argument_text(gcc_command, gcc_len, &offset,
-                              " -lkernel32 -lshell32") ||
-        !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
+                                runtime_objects[i])) {
       free(gcc_command);
       fprintf(stderr, "Error: Failed to build GCC command\n");
       return 1;
     }
-  } else {
-    if (!append_argument_text(gcc_command, gcc_len, &offset,
-                              "gcc -nostartfiles ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
-        ((gc_object && gc_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object))) ||
-        ((async_object && async_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, async_object))) ||
-        ((thread_object && thread_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, thread_object))) ||
-        !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset,
-                                executable_filename) ||
-        !append_argument_text(gcc_command, gcc_len, &offset, " -lkernel32") ||
-        !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
-      free(gcc_command);
-      fprintf(stderr, "Error: Failed to build GCC command\n");
-      return 1;
-    }
+  }
+  if (!append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
+      !append_quoted_argument(gcc_command, gcc_len, &offset,
+                              executable_filename) ||
+      !append_argument_text(gcc_command, gcc_len, &offset, " -lkernel32") ||
+      !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
+    free(gcc_command);
+    fprintf(stderr, "Error: Failed to build GCC command\n");
+    return 1;
   }
 
   int result = run_system_command(gcc_command);
@@ -1201,24 +1170,15 @@ static int mettle_build_with_gcc(const char *object_filename,
 }
 
 static int mettle_build_with_link(const char *object_filename,
-                                    const char *executable_filename,
-                                    const char *gc_object,
-                                    const char *async_object,
-                                    const char *thread_object,
-                                    const char *entry_object,
-                                    const CompilerOptions *options) {
+                                     const char *executable_filename,
+                                     const char *const *runtime_objects,
+                                     size_t runtime_object_count,
+                                     const CompilerOptions *options) {
   size_t link_len = strlen(object_filename) + strlen(executable_filename) + 320;
-  if (gc_object && gc_object[0] != '\0') {
-    link_len += strlen(gc_object) + 16;
-  }
-  if (async_object && async_object[0] != '\0') {
-    link_len += strlen(async_object) + 16;
-  }
-  if (thread_object && thread_object[0] != '\0') {
-    link_len += strlen(thread_object) + 16;
-  }
-  if (entry_object && entry_object[0] != '\0') {
-    link_len += strlen(entry_object) + 16;
+  for (size_t i = 0; i < runtime_object_count; i++) {
+    if (runtime_objects[i] && runtime_objects[i][0] != '\0') {
+      link_len += strlen(runtime_objects[i]) + 16;
+    }
   }
   if (options) {
     for (size_t i = 0; i < options->link_argument_count; i++) {
@@ -1235,56 +1195,35 @@ static int mettle_build_with_link(const char *object_filename,
   }
 
   size_t offset = 0;
-  if (entry_object && entry_object[0] != '\0') {
-    if (!append_argument_text(
-            link_command, link_len, &offset,
-            "link.exe /nologo /entry:mainCRTStartup /subsystem:console /out:") ||
+  if (!append_argument_text(
+          link_command, link_len, &offset,
+          "link.exe /nologo /entry:mainCRTStartup /subsystem:console /out:") ||
+      !append_quoted_argument(link_command, link_len, &offset,
+                              executable_filename) ||
+      !append_argument_text(link_command, link_len, &offset, " ") ||
+      !append_quoted_argument(link_command, link_len, &offset, object_filename)) {
+    free(link_command);
+    fprintf(stderr, "Error: Failed to build MSVC link command\n");
+    return 1;
+  }
+  for (size_t i = 0; i < runtime_object_count; i++) {
+    if (!runtime_objects[i] || runtime_objects[i][0] == '\0') {
+      continue;
+    }
+    if (!append_argument_text(link_command, link_len, &offset, " ") ||
         !append_quoted_argument(link_command, link_len, &offset,
-                                executable_filename) ||
-        !append_argument_text(link_command, link_len, &offset, " ") ||
-        !append_quoted_argument(link_command, link_len, &offset, object_filename) ||
-        ((gc_object && gc_object[0] != '\0') &&
-         (!append_argument_text(link_command, link_len, &offset, " ") ||
-          !append_quoted_argument(link_command, link_len, &offset, gc_object))) ||
-        ((async_object && async_object[0] != '\0') &&
-         (!append_argument_text(link_command, link_len, &offset, " ") ||
-          !append_quoted_argument(link_command, link_len, &offset, async_object))) ||
-        ((thread_object && thread_object[0] != '\0') &&
-         (!append_argument_text(link_command, link_len, &offset, " ") ||
-          !append_quoted_argument(link_command, link_len, &offset, thread_object))) ||
-        !append_argument_text(link_command, link_len, &offset, " ") ||
-        !append_quoted_argument(link_command, link_len, &offset, entry_object) ||
-        !append_argument_text(link_command, link_len, &offset,
-                              " kernel32.lib shell32.lib msvcrt.lib") ||
-        !append_msvc_link_arguments(link_command, link_len, &offset, options)) {
+                                runtime_objects[i])) {
       free(link_command);
       fprintf(stderr, "Error: Failed to build MSVC link command\n");
       return 1;
     }
-  } else {
-    if (!append_argument_text(
-            link_command, link_len, &offset,
-            "link.exe /nologo /entry:mainCRTStartup /subsystem:console /out:") ||
-        !append_quoted_argument(link_command, link_len, &offset,
-                                executable_filename) ||
-        !append_argument_text(link_command, link_len, &offset, " ") ||
-        !append_quoted_argument(link_command, link_len, &offset, object_filename) ||
-        ((gc_object && gc_object[0] != '\0') &&
-         (!append_argument_text(link_command, link_len, &offset, " ") ||
-          !append_quoted_argument(link_command, link_len, &offset, gc_object))) ||
-        ((async_object && async_object[0] != '\0') &&
-         (!append_argument_text(link_command, link_len, &offset, " ") ||
-          !append_quoted_argument(link_command, link_len, &offset, async_object))) ||
-        ((thread_object && thread_object[0] != '\0') &&
-         (!append_argument_text(link_command, link_len, &offset, " ") ||
-          !append_quoted_argument(link_command, link_len, &offset, thread_object))) ||
-        !append_argument_text(link_command, link_len, &offset,
-                              " kernel32.lib msvcrt.lib") ||
-        !append_msvc_link_arguments(link_command, link_len, &offset, options)) {
-      free(link_command);
-      fprintf(stderr, "Error: Failed to build MSVC link command\n");
-      return 1;
-    }
+  }
+  if (!append_argument_text(link_command, link_len, &offset,
+                            " kernel32.lib msvcrt.lib") ||
+      !append_msvc_link_arguments(link_command, link_len, &offset, options)) {
+    free(link_command);
+    fprintf(stderr, "Error: Failed to build MSVC link command\n");
+    return 1;
   }
 
   int result = run_system_command(link_command);
@@ -1395,27 +1334,17 @@ cleanup:
 }
 
 static int mettle_link_object_with_gcc(const char *object_filename,
-                                         const char *executable_filename,
-                                         const char *gc_object,
-                                         const char *async_object,
-                                         const char *thread_object,
-                                         const char *entry_object,
-                                         const CompilerOptions *options) {
-  /* Keep flags aligned with mettle_build_with_gcc (asm path): -nostartfiles,
-   * optional mettle_entry.o, -lkernel32 and -lshell32 when entry is linked.
-   * See docs/linker-build-pipelines.md. */
+                                          const char *executable_filename,
+                                          const char *const *runtime_objects,
+                                          size_t runtime_object_count,
+                                          const CompilerOptions *options) {
+  /* Keep flags aligned with mettle_build_with_gcc (asm path):
+   * -nostartfiles and kernel32. See docs/linker-build-pipelines.md. */
   size_t gcc_len = strlen(object_filename) + strlen(executable_filename) + 192;
-  if (gc_object && gc_object[0] != '\0') {
-    gcc_len += strlen(gc_object) + 1;
-  }
-  if (async_object && async_object[0] != '\0') {
-    gcc_len += strlen(async_object) + 1;
-  }
-  if (thread_object && thread_object[0] != '\0') {
-    gcc_len += strlen(thread_object) + 1;
-  }
-  if (entry_object && entry_object[0] != '\0') {
-    gcc_len += strlen(entry_object) + 1;
+  for (size_t i = 0; i < runtime_object_count; i++) {
+    if (runtime_objects[i] && runtime_objects[i][0] != '\0') {
+      gcc_len += strlen(runtime_objects[i]) + 1;
+    }
   }
   if (options) {
     for (size_t i = 0; i < options->link_argument_count; i++) {
@@ -1432,53 +1361,33 @@ static int mettle_link_object_with_gcc(const char *object_filename,
   }
 
   size_t offset = 0;
-  if (entry_object && entry_object[0] != '\0') {
-    if (!append_argument_text(gcc_command, gcc_len, &offset,
-                              "gcc -nostartfiles ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
-        ((gc_object && gc_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object))) ||
-        ((async_object && async_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, async_object))) ||
-        ((thread_object && thread_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, thread_object))) ||
-        !append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, entry_object) ||
-        !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
+  if (!append_argument_text(gcc_command, gcc_len, &offset,
+                            "gcc -nostartfiles ") ||
+      !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename)) {
+    free(gcc_command);
+    fprintf(stderr, "Error: Failed to build GCC object link command\n");
+    return 1;
+  }
+  for (size_t i = 0; i < runtime_object_count; i++) {
+    if (!runtime_objects[i] || runtime_objects[i][0] == '\0') {
+      continue;
+    }
+    if (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
         !append_quoted_argument(gcc_command, gcc_len, &offset,
-                                executable_filename) ||
-        !append_argument_text(gcc_command, gcc_len, &offset,
-                              " -lkernel32 -lshell32") ||
-        !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
+                                runtime_objects[i])) {
       free(gcc_command);
       fprintf(stderr, "Error: Failed to build GCC object link command\n");
       return 1;
     }
-  } else {
-    if (!append_argument_text(gcc_command, gcc_len, &offset,
-                              "gcc -nostartfiles ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset, object_filename) ||
-        ((gc_object && gc_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, gc_object))) ||
-        ((async_object && async_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, async_object))) ||
-        ((thread_object && thread_object[0] != '\0') &&
-         (!append_argument_text(gcc_command, gcc_len, &offset, " ") ||
-          !append_quoted_argument(gcc_command, gcc_len, &offset, thread_object))) ||
-        !append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
-        !append_quoted_argument(gcc_command, gcc_len, &offset,
-                                executable_filename) ||
-        !append_argument_text(gcc_command, gcc_len, &offset, " -lkernel32") ||
-        !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
-      free(gcc_command);
-      fprintf(stderr, "Error: Failed to build GCC object link command\n");
-      return 1;
-    }
+  }
+  if (!append_argument_text(gcc_command, gcc_len, &offset, " -o ") ||
+      !append_quoted_argument(gcc_command, gcc_len, &offset,
+                              executable_filename) ||
+      !append_argument_text(gcc_command, gcc_len, &offset, " -lkernel32") ||
+      !append_gcc_link_arguments(gcc_command, gcc_len, &offset, options)) {
+    free(gcc_command);
+    fprintf(stderr, "Error: Failed to build GCC object link command\n");
+    return 1;
   }
 
   int result = run_system_command(gcc_command);
@@ -1492,19 +1401,14 @@ static int mettle_link_object_with_gcc(const char *object_filename,
 
 static int mettle_link_object_with_link(const char *object_filename,
                                           const char *executable_filename,
-                                          const char *gc_object,
-                                          const char *async_object,
-                                          const char *thread_object,
+                                          const char *const *runtime_objects,
+                                          size_t runtime_object_count,
                                           const CompilerOptions *options) {
   size_t link_len = strlen(object_filename) + strlen(executable_filename) + 320;
-  if (gc_object && gc_object[0] != '\0') {
-    link_len += strlen(gc_object) + 16;
-  }
-  if (async_object && async_object[0] != '\0') {
-    link_len += strlen(async_object) + 16;
-  }
-  if (thread_object && thread_object[0] != '\0') {
-    link_len += strlen(thread_object) + 16;
+  for (size_t i = 0; i < runtime_object_count; i++) {
+    if (runtime_objects[i] && runtime_objects[i][0] != '\0') {
+      link_len += strlen(runtime_objects[i]) + 16;
+    }
   }
   if (options) {
     for (size_t i = 0; i < options->link_argument_count; i++) {
@@ -1526,17 +1430,24 @@ static int mettle_link_object_with_link(const char *object_filename,
       !append_quoted_argument(link_command, link_len, &offset,
                               executable_filename) ||
       !append_argument_text(link_command, link_len, &offset, " ") ||
-      !append_quoted_argument(link_command, link_len, &offset, object_filename) ||
-      ((gc_object && gc_object[0] != '\0') &&
-       (!append_argument_text(link_command, link_len, &offset, " ") ||
-        !append_quoted_argument(link_command, link_len, &offset, gc_object))) ||
-      ((async_object && async_object[0] != '\0') &&
-       (!append_argument_text(link_command, link_len, &offset, " ") ||
-        !append_quoted_argument(link_command, link_len, &offset, async_object))) ||
-      ((thread_object && thread_object[0] != '\0') &&
-       (!append_argument_text(link_command, link_len, &offset, " ") ||
-        !append_quoted_argument(link_command, link_len, &offset, thread_object))) ||
-      !append_argument_text(link_command, link_len, &offset,
+      !append_quoted_argument(link_command, link_len, &offset, object_filename)) {
+    free(link_command);
+    fprintf(stderr, "Error: Failed to build MSVC object link command\n");
+    return 1;
+  }
+  for (size_t i = 0; i < runtime_object_count; i++) {
+    if (!runtime_objects[i] || runtime_objects[i][0] == '\0') {
+      continue;
+    }
+    if (!append_argument_text(link_command, link_len, &offset, " ") ||
+        !append_quoted_argument(link_command, link_len, &offset,
+                                runtime_objects[i])) {
+      free(link_command);
+      fprintf(stderr, "Error: Failed to build MSVC object link command\n");
+      return 1;
+    }
+  }
+  if (!append_argument_text(link_command, link_len, &offset,
                             " kernel32.lib msvcrt.lib") ||
       !append_msvc_link_arguments(link_command, link_len, &offset, options)) {
     free(link_command);
@@ -1590,109 +1501,86 @@ static int mettle_build_executable(const char *asm_filename,
   }
   char *gcc_object_filename = replace_extension(executable_filename, ".o");
   char *msvc_object_filename = replace_extension(executable_filename, ".obj");
-  char *gc_gcc_object = join_paths(runtime_directory, "gc.o");
-  char *async_gcc_object = join_paths(runtime_directory, "async_runtime.o");
-  char *thread_gcc_object = join_paths(runtime_directory, "meth_thread.o");
-  char *entry_gcc_object = join_paths(runtime_directory, "mettle_entry.o");
-  char *gc_msvc_object = join_paths(runtime_directory, "gc.obj");
-  char *async_msvc_object = join_paths(runtime_directory, "async_runtime.obj");
-  char *thread_msvc_object = join_paths(runtime_directory, "meth_thread.obj");
-  char *entry_msvc_object = join_paths(runtime_directory, "mettle_entry.obj");
-  if (!gcc_object_filename || !msvc_object_filename || !gc_gcc_object ||
-      !async_gcc_object || !thread_gcc_object || !entry_gcc_object ||
-      !gc_msvc_object || !async_msvc_object || !thread_msvc_object ||
-      !entry_msvc_object) {
+  char *crash_gcc_object = join_paths(runtime_directory, "crash_handler.o");
+  char *crash_msvc_object = join_paths(runtime_directory, "crash_handler.obj");
+  char *atomics_gcc_object = join_paths(runtime_directory, "atomics.o");
+  char *atomics_msvc_object = join_paths(runtime_directory, "atomics.obj");
+  if (!gcc_object_filename || !msvc_object_filename || !crash_gcc_object ||
+      !crash_msvc_object || !atomics_gcc_object || !atomics_msvc_object) {
     fprintf(stderr, "Error: Failed to allocate build paths\n");
     free(gcc_object_filename);
     free(msvc_object_filename);
-    free(gc_gcc_object);
-    free(async_gcc_object);
-    free(thread_gcc_object);
-    free(entry_gcc_object);
-    free(gc_msvc_object);
-    free(async_msvc_object);
-    free(thread_msvc_object);
-    free(entry_msvc_object);
-    return 1;
-  }
-
-  if (_access(gc_gcc_object, 0) != 0 && _access(gc_msvc_object, 0) != 0) {
-    fprintf(stderr,
-            "Error: Bundled GC runtime object not found in '%s'\n",
-            runtime_directory);
-    free(gcc_object_filename);
-    free(msvc_object_filename);
-    free(gc_gcc_object);
-    free(async_gcc_object);
-    free(thread_gcc_object);
-    free(entry_gcc_object);
-    free(gc_msvc_object);
-    free(async_msvc_object);
-    free(thread_msvc_object);
-    free(entry_msvc_object);
+    free(crash_gcc_object);
+    free(crash_msvc_object);
+    free(atomics_gcc_object);
+    free(atomics_msvc_object);
     return 1;
   }
 
   int build_result = 1;
 
   if (linker_mode == LINKER_MODE_INTERNAL || linker_mode == LINKER_MODE_AUTO) {
-    const char *object_paths[5];
+    size_t object_capacity =
+        3u + (options ? options->link_argument_count : 0u);
+    const char **object_paths = calloc(object_capacity, sizeof(const char *));
     size_t object_count = 0u;
-    const char *gc_object = NULL;
-    const char *async_object = NULL;
-    const char *thread_object = NULL;
-    const char *entry_object = NULL;
-    int needs_gc = 0;
-    int needs_thread = 0;
-    int needs_entry = 0;
+    const char *crash_object = NULL;
+    const char *atomics_object = NULL;
 
-    if (run_nasm_assemble(asm_filename, msvc_object_filename) != 0) {
+    if (!object_paths) {
+      fprintf(stderr, "Error: Failed to allocate internal-linker object list\n");
       goto cleanup;
     }
-    needs_gc = object_needs_gc_runtime(msvc_object_filename);
-    needs_thread = object_needs_thread_runtime(msvc_object_filename);
-    needs_entry = object_needs_mettle_entry(msvc_object_filename);
-    if (needs_gc) {
-      gc_object = (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
-      async_object = (_access(async_msvc_object, 0) == 0)
-                         ? async_msvc_object
-                         : ((_access(async_gcc_object, 0) == 0)
-                                ? async_gcc_object
-                                : NULL);
+
+    if (run_nasm_assemble(asm_filename, msvc_object_filename) != 0) {
+      free(object_paths);
+      goto cleanup;
     }
-    if (needs_thread) {
-      thread_object = (_access(thread_msvc_object, 0) == 0)
-                          ? thread_msvc_object
-                          : ((_access(thread_gcc_object, 0) == 0)
-                                 ? thread_gcc_object
-                                 : NULL);
+    if (object_needs_crash_handler(msvc_object_filename)) {
+      crash_object = (_access(crash_msvc_object, 0) == 0) ? crash_msvc_object
+                                                          : crash_gcc_object;
+      if (_access(crash_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled crash-handler runtime object not found in '%s'\n",
+                runtime_directory);
+        free(object_paths);
+        goto cleanup;
+      }
     }
-    if (needs_entry) {
-      entry_object =
-          (_access(entry_msvc_object, 0) == 0)
-              ? entry_msvc_object
-              : ((_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL);
+    if (object_needs_atomics(msvc_object_filename)) {
+      atomics_object = (_access(atomics_msvc_object, 0) == 0)
+                           ? atomics_msvc_object
+                           : atomics_gcc_object;
+      if (_access(atomics_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled atomics runtime object not found in '%s'\n",
+                runtime_directory);
+        free(object_paths);
+        goto cleanup;
+      }
     }
 
     object_paths[object_count++] = msvc_object_filename;
-    if (gc_object) {
-      object_paths[object_count++] = gc_object;
+    if (crash_object) {
+      object_paths[object_count++] = crash_object;
     }
-    if (async_object) {
-      object_paths[object_count++] = async_object;
+    if (atomics_object) {
+      object_paths[object_count++] = atomics_object;
     }
-    if (thread_object) {
-      object_paths[object_count++] = thread_object;
-    }
-    if (entry_object) {
-      object_paths[object_count++] = entry_object;
+    if (!append_internal_link_object_args(options, object_paths, object_capacity,
+                                          &object_count)) {
+      fprintf(stderr, "Error: Too many internal-linker object arguments\n");
+      free(object_paths);
+      goto cleanup;
     }
 
     if (mettle_link_internal(object_paths, object_count, executable_filename,
-                               entry_object != NULL, options) == 0) {
+                               0, options) == 0) {
       build_result = 0;
+      free(object_paths);
       goto cleanup;
     }
+    free(object_paths);
 
     if (linker_mode == LINKER_MODE_INTERNAL) {
       fprintf(stderr, "Error: Internal linker failed to produce an executable\n");
@@ -1711,13 +1599,29 @@ static int mettle_build_executable(const char *asm_filename,
 
   if (has_gcc && linker_mode != LINKER_MODE_MSVC) {
     if (run_nasm_assemble(asm_filename, gcc_object_filename) == 0) {
-      const char *entry_object =
-          (_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL;
-      const char *tobj =
-          (_access(thread_gcc_object, 0) == 0) ? thread_gcc_object : NULL;
+      const char *runtime_objects[2] = {NULL, NULL};
+      size_t runtime_object_count = 0u;
+      if (object_needs_crash_handler(gcc_object_filename)) {
+        if (_access(crash_gcc_object, 0) != 0) {
+          fprintf(stderr,
+                  "Error: Bundled crash-handler runtime object not found in '%s'\n",
+                  runtime_directory);
+          goto cleanup;
+        }
+        runtime_objects[runtime_object_count++] = crash_gcc_object;
+      }
+      if (object_needs_atomics(gcc_object_filename)) {
+        if (_access(atomics_gcc_object, 0) != 0) {
+          fprintf(stderr,
+                  "Error: Bundled atomics runtime object not found in '%s'\n",
+                  runtime_directory);
+          goto cleanup;
+        }
+        runtime_objects[runtime_object_count++] = atomics_gcc_object;
+      }
       if (mettle_build_with_gcc(gcc_object_filename, executable_filename,
-                                  gc_gcc_object, async_gcc_object,
-                                  tobj, entry_object, options) == 0) {
+                                   runtime_objects, runtime_object_count,
+                                   options) == 0) {
         build_result = 0;
         goto cleanup;
       }
@@ -1726,23 +1630,35 @@ static int mettle_build_executable(const char *asm_filename,
 
   if (has_link && linker_mode != LINKER_MODE_GCC) {
     if (run_nasm_assemble(asm_filename, msvc_object_filename) == 0) {
-      const char *gc_object =
-          (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
-      const char *async_object =
-          (_access(async_msvc_object, 0) == 0)
-              ? async_msvc_object
-              : ((_access(async_gcc_object, 0) == 0) ? async_gcc_object : NULL);
-      const char *tobj =
-          (_access(thread_msvc_object, 0) == 0)
-              ? thread_msvc_object
-              : ((_access(thread_gcc_object, 0) == 0) ? thread_gcc_object : NULL);
-      const char *entry_object =
-          (_access(entry_msvc_object, 0) == 0)
-              ? entry_msvc_object
-              : ((_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL);
+      const char *runtime_objects[2] = {NULL, NULL};
+      size_t runtime_object_count = 0u;
+      if (object_needs_crash_handler(msvc_object_filename)) {
+        const char *crash_object = (_access(crash_msvc_object, 0) == 0)
+                                       ? crash_msvc_object
+                                       : crash_gcc_object;
+        if (_access(crash_object, 0) != 0) {
+          fprintf(stderr,
+                  "Error: Bundled crash-handler runtime object not found in '%s'\n",
+                  runtime_directory);
+          goto cleanup;
+        }
+        runtime_objects[runtime_object_count++] = crash_object;
+      }
+      if (object_needs_atomics(msvc_object_filename)) {
+        const char *atomics_object = (_access(atomics_msvc_object, 0) == 0)
+                                         ? atomics_msvc_object
+                                         : atomics_gcc_object;
+        if (_access(atomics_object, 0) != 0) {
+          fprintf(stderr,
+                  "Error: Bundled atomics runtime object not found in '%s'\n",
+                  runtime_directory);
+          goto cleanup;
+        }
+        runtime_objects[runtime_object_count++] = atomics_object;
+      }
       if (mettle_build_with_link(msvc_object_filename, executable_filename,
-                                   gc_object, async_object, tobj, entry_object,
-                                   options) == 0) {
+                                    runtime_objects, runtime_object_count,
+                                    options) == 0) {
         build_result = 0;
         goto cleanup;
       }
@@ -1755,14 +1671,10 @@ static int mettle_build_executable(const char *asm_filename,
 cleanup:
   free(gcc_object_filename);
   free(msvc_object_filename);
-  free(gc_gcc_object);
-  free(async_gcc_object);
-  free(thread_gcc_object);
-  free(entry_gcc_object);
-  free(gc_msvc_object);
-  free(async_msvc_object);
-  free(thread_msvc_object);
-  free(entry_msvc_object);
+  free(crash_gcc_object);
+  free(crash_msvc_object);
+  free(atomics_gcc_object);
+  free(atomics_msvc_object);
   return build_result;
 }
 
@@ -1796,59 +1708,45 @@ static int mettle_link_object_file(const char *object_filename,
             "Error: link.exe was requested with --linker msvc but was not found.\n");
     return 1;
   }
-  char *gc_gcc_object = join_paths(runtime_directory, "gc.o");
-  char *async_gcc_object = join_paths(runtime_directory, "async_runtime.o");
-  char *thread_gcc_object = join_paths(runtime_directory, "meth_thread.o");
-  char *entry_gcc_object =
-      join_paths(runtime_directory, "mettle_entry.o");
-  char *gc_msvc_object = join_paths(runtime_directory, "gc.obj");
-  char *async_msvc_object = join_paths(runtime_directory, "async_runtime.obj");
-  char *thread_msvc_object = join_paths(runtime_directory, "meth_thread.obj");
-  if (!gc_gcc_object || !async_gcc_object || !thread_gcc_object ||
-      !entry_gcc_object || !gc_msvc_object || !async_msvc_object ||
-      !thread_msvc_object) {
+  char *crash_gcc_object = join_paths(runtime_directory, "crash_handler.o");
+  char *crash_msvc_object = join_paths(runtime_directory, "crash_handler.obj");
+  char *atomics_gcc_object = join_paths(runtime_directory, "atomics.o");
+  char *atomics_msvc_object = join_paths(runtime_directory, "atomics.obj");
+  if (!crash_gcc_object || !crash_msvc_object || !atomics_gcc_object ||
+      !atomics_msvc_object) {
     fprintf(stderr, "Error: Failed to allocate build paths\n");
-    free(gc_gcc_object);
-    free(async_gcc_object);
-    free(thread_gcc_object);
-    free(entry_gcc_object);
-    free(gc_msvc_object);
-    free(async_msvc_object);
-    free(thread_msvc_object);
+    free(crash_gcc_object);
+    free(crash_msvc_object);
+    free(atomics_gcc_object);
+    free(atomics_msvc_object);
     return 1;
   }
 
-  if (_access(gc_gcc_object, 0) != 0 && _access(gc_msvc_object, 0) != 0) {
-    fprintf(stderr,
-            "Error: Bundled GC runtime object not found in '%s'\n",
-            runtime_directory);
-    free(gc_gcc_object);
-    free(async_gcc_object);
-    free(thread_gcc_object);
-    free(entry_gcc_object);
-    free(gc_msvc_object);
-    free(async_msvc_object);
-    free(thread_msvc_object);
-    return 1;
-  }
+  int needs_crash = object_needs_crash_handler(object_filename);
+  int needs_atomics = object_needs_atomics(object_filename);
 
   int build_result = 1;
 
   if (linker_mode == LINKER_MODE_INTERNAL || linker_mode == LINKER_MODE_AUTO) {
-    const char *object_paths[5];
-    const char *gc_object = NULL;
-    const char *async_object = NULL;
-    const char *thread_object = NULL;
+    size_t object_capacity =
+        4u + (options ? options->link_argument_count : 0u);
+    const char **object_paths = calloc(object_capacity, sizeof(const char *));
+    const char *crash_object = NULL;
+    const char *atomics_object = NULL;
     char *startup_object = replace_extension(executable_filename, ".startup.obj");
     size_t object_count = 0u;
-    int needs_gc = object_needs_gc_runtime(object_filename);
-    int needs_thread = object_needs_thread_runtime(object_filename);
     int startup_ready = 0;
+
+    if (!object_paths) {
+      fprintf(stderr, "Error: Failed to allocate internal-linker object list\n");
+      goto cleanup;
+    }
 
     if (!startup_object) {
       if (linker_mode == LINKER_MODE_INTERNAL || (!has_gcc && !has_link)) {
         fprintf(stderr,
                 "Error: Failed to allocate internal-linker startup object path\n");
+        free(object_paths);
         goto cleanup;
       }
       fprintf(stderr,
@@ -1859,6 +1757,7 @@ static int mettle_link_object_file(const char *object_filename,
         fprintf(stderr,
                 "Error: Failed to generate internal-linker startup object\n");
         free(startup_object);
+        free(object_paths);
         goto cleanup;
       }
       fprintf(stderr,
@@ -1869,33 +1768,35 @@ static int mettle_link_object_file(const char *object_filename,
     }
 
     if (startup_ready) {
-      if (needs_gc) {
-        gc_object =
-            (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
-        async_object = (_access(async_msvc_object, 0) == 0)
-                           ? async_msvc_object
-                           : ((_access(async_gcc_object, 0) == 0)
-                                  ? async_gcc_object
-                                  : NULL);
+      if (needs_crash) {
+        crash_object = (_access(crash_msvc_object, 0) == 0) ? crash_msvc_object
+                                                            : crash_gcc_object;
       }
-      if (needs_thread) {
-        thread_object = (_access(thread_msvc_object, 0) == 0)
-                            ? thread_msvc_object
-                            : ((_access(thread_gcc_object, 0) == 0)
-                                   ? thread_gcc_object
-                                   : NULL);
+      if (needs_atomics) {
+        atomics_object = (_access(atomics_msvc_object, 0) == 0)
+                             ? atomics_msvc_object
+                             : atomics_gcc_object;
       }
 
       object_paths[object_count++] = startup_object;
       object_paths[object_count++] = object_filename;
-      if (gc_object) {
-        object_paths[object_count++] = gc_object;
+      if (crash_object) {
+        object_paths[object_count++] = crash_object;
       }
-      if (async_object) {
-        object_paths[object_count++] = async_object;
+      if (atomics_object) {
+        object_paths[object_count++] = atomics_object;
       }
-      if (thread_object) {
-        object_paths[object_count++] = thread_object;
+      if (!append_internal_link_object_args(options, object_paths,
+                                            object_capacity, &object_count)) {
+        fprintf(stderr, "Error: Too many internal-linker object arguments\n");
+        free(object_paths);
+        if (startup_object) {
+          if (startup_ready) {
+            _unlink(startup_object);
+          }
+          free(startup_object);
+        }
+        goto cleanup;
       }
 
       if (mettle_link_internal(object_paths, object_count, executable_filename, 0,
@@ -1920,6 +1821,7 @@ static int mettle_link_object_file(const char *object_filename,
       }
       free(startup_object);
     }
+    free(object_paths);
 
     if (build_result == 0 || linker_mode == LINKER_MODE_INTERNAL ||
         (!has_gcc && !has_link)) {
@@ -1928,31 +1830,64 @@ static int mettle_link_object_file(const char *object_filename,
   }
 
   if (has_gcc && linker_mode != LINKER_MODE_MSVC) {
-    const char *tobj =
-        (_access(thread_gcc_object, 0) == 0) ? thread_gcc_object : NULL;
-    const char *entry_object =
-        (_access(entry_gcc_object, 0) == 0) ? entry_gcc_object : NULL;
+    const char *runtime_objects[2] = {NULL, NULL};
+    size_t runtime_object_count = 0u;
+    if (needs_crash) {
+      if (_access(crash_gcc_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled crash-handler runtime object not found in '%s'\n",
+                runtime_directory);
+        goto cleanup;
+      }
+      runtime_objects[runtime_object_count++] = crash_gcc_object;
+    }
+    if (needs_atomics) {
+      if (_access(atomics_gcc_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled atomics runtime object not found in '%s'\n",
+                runtime_directory);
+        goto cleanup;
+      }
+      runtime_objects[runtime_object_count++] = atomics_gcc_object;
+    }
     if (mettle_link_object_with_gcc(object_filename, executable_filename,
-                                      gc_gcc_object, async_gcc_object,
-                                      tobj, entry_object, options) == 0) {
+                                      runtime_objects, runtime_object_count,
+                                      options) == 0) {
       build_result = 0;
       goto cleanup;
     }
   }
 
   if (has_link && linker_mode != LINKER_MODE_GCC) {
-    const char *gc_object =
-        (_access(gc_msvc_object, 0) == 0) ? gc_msvc_object : gc_gcc_object;
-    const char *async_object =
-        (_access(async_msvc_object, 0) == 0)
-            ? async_msvc_object
-            : ((_access(async_gcc_object, 0) == 0) ? async_gcc_object : NULL);
-    const char *tobj =
-        (_access(thread_msvc_object, 0) == 0)
-            ? thread_msvc_object
-            : ((_access(thread_gcc_object, 0) == 0) ? thread_gcc_object : NULL);
+    const char *runtime_objects[2] = {NULL, NULL};
+    size_t runtime_object_count = 0u;
+    if (needs_crash) {
+      const char *crash_object = (_access(crash_msvc_object, 0) == 0)
+                                     ? crash_msvc_object
+                                     : crash_gcc_object;
+      if (_access(crash_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled crash-handler runtime object not found in '%s'\n",
+                runtime_directory);
+        goto cleanup;
+      }
+      runtime_objects[runtime_object_count++] = crash_object;
+    }
+    if (needs_atomics) {
+      const char *atomics_object = (_access(atomics_msvc_object, 0) == 0)
+                                       ? atomics_msvc_object
+                                       : atomics_gcc_object;
+      if (_access(atomics_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled atomics runtime object not found in '%s'\n",
+                runtime_directory);
+        goto cleanup;
+      }
+      runtime_objects[runtime_object_count++] = atomics_object;
+    }
     if (mettle_link_object_with_link(object_filename, executable_filename,
-                                       gc_object, async_object, tobj, options) == 0) {
+                                       runtime_objects, runtime_object_count,
+                                       options) == 0) {
       build_result = 0;
       goto cleanup;
     }
@@ -1962,13 +1897,10 @@ static int mettle_link_object_file(const char *object_filename,
           "Error: Failed to link executable with the available linker backends\n");
 
 cleanup:
-  free(gc_gcc_object);
-  free(async_gcc_object);
-  free(thread_gcc_object);
-  free(entry_gcc_object);
-  free(gc_msvc_object);
-  free(async_msvc_object);
-  free(thread_msvc_object);
+  free(crash_gcc_object);
+  free(crash_msvc_object);
+  free(atomics_gcc_object);
+  free(atomics_msvc_object);
   return build_result;
 }
 #endif
@@ -2017,10 +1949,11 @@ int main(int argc, char *argv[]) {
   char *assembly_output_filename = NULL;
   char *object_output_filename = NULL;
   int build_executable = 0;
+  int emit_asm = 0;
+  int linker_mode_explicit = 0;
   int output_filename_explicit = 0;
   options.output_filename = "output.s"; // Default output filename
   options.debug_format = "dwarf";
-  options.async_model = ASYNC_REWRITE_MODEL_POOL;
 
   if (argc >= 2) {
     if (strcmp(argv[1], "help") == 0) {
@@ -2030,10 +1963,11 @@ int main(int argc, char *argv[]) {
       if (argc >= 3) {
         return print_help_topic(argv[0], argv[0], argv[2]);
       }
-      printf("Mettle documentation topics: build, gc, interop, stdlib, web\n");
+      printf("Mettle documentation topics: build, runtime (alias: heap, gc), interop, stdlib, web\n");
       print_doc_reference(argv[0], "LANGUAGE.md");
       print_doc_reference(argv[0], "compilation.md");
-      print_doc_reference(argv[0], "garbage-collector.md");
+      print_doc_reference(argv[0], "runtime-model.md");
+      print_doc_reference(argv[0], "heap-allocation.md");
       return 0;
     }
   }
@@ -2063,9 +1997,12 @@ int main(int argc, char *argv[]) {
       options.stdlib_directory = argv[++i];
     } else if (strcmp(argv[i], "--build") == 0) {
       build_executable = 1;
+    } else if (strcmp(argv[i], "--emit-asm") == 0) {
+      emit_asm = 1;
     } else if (strcmp(argv[i], "--emit-obj") == 0) {
       options.emit_object = 1;
     } else if (strcmp(argv[i], "--linker") == 0 && i + 1 < argc) {
+      linker_mode_explicit = 1;
       if (!parse_linker_mode(argv[++i], &options.linker_mode)) {
         fprintf(stderr,
                 "Error: Unknown linker mode '%s' (expected auto, internal, gcc, or msvc)\n",
@@ -2080,16 +2017,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error: Failed to add linker argument\n");
         return 1;
       }
-    } else if (strcmp(argv[i], "--async-model") == 0 && i + 1 < argc) {
-      if (!parse_async_model(argv[++i], &options.async_model)) {
-        fprintf(stderr,
-                "Error: Unknown async model '%s' (expected pool or coroutine)\n",
-                argv[i]);
-        return 1;
-      }
-    } else if (strcmp(argv[i], "--async-model") == 0) {
-      fprintf(stderr, "Error: Missing async model after '--async-model'\n");
-      return 1;
     } else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--debug") == 0) {
       options.debug_mode = 1;
       options.generate_debug_symbols = 1;
@@ -2138,6 +2065,17 @@ int main(int argc, char *argv[]) {
     free((void *)options.import_directories);
     free((void *)options.link_arguments);
     return 1;
+  }
+
+  if (build_executable) {
+    if (emit_asm) {
+      options.emit_object = 0;
+    } else {
+      options.emit_object = 1;
+    }
+    if (!linker_mode_explicit) {
+      options.linker_mode = LINKER_MODE_INTERNAL;
+    }
   }
 
   if (!output_filename_explicit && options.emit_object) {
@@ -2244,8 +2182,9 @@ int main(int argc, char *argv[]) {
 #endif
   } else if (result == 0 && auto_runtime_directory && !options.debug_mode) {
     fprintf(stderr,
-            "Note: bundled runtime detected at '%s'. Use --build to assemble "
-            "and link the packaged GC/runtime automatically.\n",
+            "Note: transitional runtime objects detected at '%s'. Use --build "
+            "to assemble and link them automatically when needed (most "
+            "programs link nothing from this directory).\n",
             auto_runtime_directory);
   }
   if (options.profile) {
@@ -2406,6 +2345,8 @@ int compile_file(const char *input_filename, const char *output_filename,
 
   code_generator_set_emit_asm_comments(code_generator,
                                        options->strip_asm_comments ? 0 : 1);
+  code_generator_set_stack_trace_support(
+      code_generator, options->generate_stack_trace_support ? 1 : 0);
   code_generator_set_eliminate_unreachable_functions(
       code_generator, options->release ? 1 : 0);
   compiler_profile_add(&profile, PROFILE_PHASE_INIT, phase_start);
@@ -2508,21 +2449,6 @@ int compile_file(const char *input_filename, const char *output_filename,
     goto cleanup;
   }
   compiler_profile_add(&profile, PROFILE_PHASE_MONOMORPHIZE, phase_start);
-
-  phase_start = compiler_profile_begin(&profile);
-  if (!async_rewrite_program(
-          program, error_reporter,
-          options ? options->async_model : ASYNC_REWRITE_MODEL_POOL)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_ASYNC_REWRITE, phase_start);
-    if (error_reporter_has_errors(error_reporter)) {
-      error_reporter_print_errors(error_reporter);
-    } else {
-      fprintf(stderr, "Async rewrite error\n");
-    }
-    result = 1;
-    goto cleanup;
-  }
-  compiler_profile_add(&profile, PROFILE_PHASE_ASYNC_REWRITE, phase_start);
 
   // Type checking
   phase_start = compiler_profile_begin(&profile);
@@ -2738,18 +2664,17 @@ void print_usage(const char *program_name) {
   printf("  -I <dir>            Add import search directory (repeatable)\n");
   printf("  --stdlib <dir>      Set stdlib root directory (default: auto-detect "
          "bundled stdlib, then ./stdlib)\n");
-  printf("  --build             Compile, assemble, and link to an executable "
-         "(Windows)\n");
+  printf("  --build             Compile and link to an executable (Windows; "
+         "COFF + internal linker by default)\n");
   printf("  --emit-obj          Emit a Win64 COFF object directly "
-         "(experimental subset)\n");
+         "(default with --build)\n");
+  printf("  --emit-asm          Emit NASM assembly instead of COFF "
+         "(legacy; use with --build)\n");
   printf("  --linker <mode>     Linker backend: auto, internal, gcc, or msvc "
-         "(default: %s)\n",
+         "(default: internal with --build, otherwise %s)\n",
          linker_mode_name(LINKER_MODE_AUTO));
   printf("  --link-arg <arg>    Pass an extra linker argument (repeatable; "
          "use with --build)\n");
-  printf("  --async-model <m>   Async lowering model: pool or coroutine "
-         "(default: %s)\n",
-         async_model_name(ASYNC_REWRITE_MODEL_POOL));
   printf("  -d, --debug         Enable debug output and symbols\n");
   printf("  -g, --debug-symbols Generate debug symbols\n");
   printf("  -l, --line-mapping  Generate source line mapping\n");
@@ -2768,10 +2693,9 @@ void print_usage(const char *program_name) {
   printf("  %s app.mettle -o app.s\n", program_name);
   printf("      Compile to x86-64 assembly only.\n");
   printf("  %s --build app.mettle -o app.exe\n", program_name);
-  printf("      Compile, assemble, and link an executable.\n");
-  printf("  %s --build --emit-obj --linker internal app.mettle -o app.exe\n",
-         program_name);
-  printf("      Self-contained build: no NASM, gcc, or link.exe needed.\n");
+  printf("      Self-contained build: COFF object + internal PE linker.\n");
+  printf("  %s --build --emit-asm app.mettle -o app.exe\n", program_name);
+  printf("      Legacy build: NASM assembly + selected linker.\n");
   printf("  %s --build --release app.mettle -o app.exe\n", program_name);
   printf("      Optimized, comment-stripped release build.\n");
   printf("\nHelp:\n");

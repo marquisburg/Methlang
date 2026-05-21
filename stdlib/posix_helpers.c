@@ -10,8 +10,9 @@
  *   macOS:
  *     gcc -o myapp output.s posix_helpers.c
  *
- * If you also use the GC runtime, add gc.c:
- *     gcc -o myapp output.s posix_helpers.c src/runtime/gc.c -lpthread
+ * If you want crash tracebacks (-d/-s) or std/thread atomics, also link:
+ *     gcc -o myapp output.s posix_helpers.c \
+ *         src/runtime/crash_handler.c src/runtime/atomics.c -lpthread
  *
  * Functions provided:
  *   posix_get_errno()           – read errno (thread-local on POSIX)
@@ -65,8 +66,9 @@ int posix_atomic_add_i32(int *ptr, int val) {
  *   macOS:
  *     gcc -o myapp output.s posix_helpers.c
  *
- * If you also use the GC runtime, add gc.c:
- *     gcc -o myapp output.s posix_helpers.c src/runtime/gc.c -lpthread
+ * If you want crash tracebacks (-d/-s) or std/thread atomics, also link:
+ *     gcc -o myapp output.s posix_helpers.c \
+ *         src/runtime/crash_handler.c src/runtime/atomics.c -lpthread
  *
  * Functions provided:
  *   posix_get_errno()           – read errno (thread-local on POSIX)
@@ -109,4 +111,3 @@ int posix_atomic_exchange_i32(int *ptr, int val) {
 int posix_atomic_add_i32(int *ptr, int val) {
     return __sync_fetch_and_add(ptr, val);
 }
-

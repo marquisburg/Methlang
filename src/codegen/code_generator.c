@@ -33,6 +33,7 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->control_flow_stack_size = 0;
   generator->control_flow_stack_capacity = 0;
   generator->generate_debug_info = 0;
+  generator->generate_stack_trace_support = 0;
   generator->emit_asm_comments = 1;
   generator->eliminate_unreachable_functions = 0;
   generator->has_error = 0;
@@ -44,6 +45,19 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->last_runtime_location_line = 0;
   generator->last_runtime_location_column = 0;
   generator->backend_mode = CODEGEN_BACKEND_TEXT_ASSEMBLY;
+  generator->emit_seq = 0;
+  generator->rax_cached_temp_offset = 0;
+  generator->rax_cached_emit_seq = 0;
+  generator->pending_spill_offset = 0;
+  generator->pending_spill_single_use = 0;
+  generator->flushing_pending = 0;
+  generator->current_temp_use_map = NULL;
+  generator->indirect_return_slot_offsets = NULL;
+  generator->indirect_return_slot_count = 0;
+  generator->indirect_return_slot_capacity = 0;
+  generator->indirect_return_slot_cursor = 0;
+  generator->current_fn_returns_indirect = 0;
+  generator->current_fn_indirect_return_size = 0;
   generator->binary_emitter =
       binary_emitter_create(BINARY_TARGET_FORMAT_COFF_WIN64);
 
@@ -96,6 +110,7 @@ void code_generator_destroy(CodeGenerator *generator) {
       }
     }
     free(generator->extern_symbols);
+    free(generator->indirect_return_slot_offsets);
     free(generator);
   }
 }
@@ -154,6 +169,14 @@ void code_generator_set_emit_asm_comments(CodeGenerator *generator, int enable) 
     return;
   }
   generator->emit_asm_comments = enable ? 1 : 0;
+}
+
+void code_generator_set_stack_trace_support(CodeGenerator *generator,
+                                            int enable) {
+  if (!generator) {
+    return;
+  }
+  generator->generate_stack_trace_support = enable ? 1 : 0;
 }
 
 void code_generator_set_eliminate_unreachable_functions(
@@ -278,9 +301,33 @@ static int code_generator_append_text(CodeGenerator *generator, const char *text
   return 1;
 }
 
+/* Emit any deferred temp spill before the next instruction is produced. This
+ * preserves correctness of the deferred-spill peephole: a pending store is
+ * always materialized before anything that could read the slot or clobber rax.
+ * Idempotent; the flushing_pending guard stops the store's own emit call from
+ * re-entering this. */
+void code_generator_flush_pending_spill(CodeGenerator *generator) {
+  if (!generator || generator->flushing_pending ||
+      generator->pending_spill_offset == 0) {
+    return;
+  }
+  int offset = generator->pending_spill_offset;
+  generator->pending_spill_offset = 0;
+  generator->pending_spill_single_use = 0;
+  generator->flushing_pending = 1;
+  code_generator_emit(generator, "    mov [rbp - %d], rax\n", offset);
+  generator->flushing_pending = 0;
+}
+
 void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
   if (!generator || !format || generator->has_error) {
     return;
+  }
+
+  /* Materialize a deferred spill before emitting anything else, unless this
+   * very call IS the deferred spill being flushed. */
+  if (generator->pending_spill_offset != 0 && !generator->flushing_pending) {
+    code_generator_flush_pending_spill(generator);
   }
 
   va_list args;
@@ -321,6 +368,11 @@ void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
     }
     to_append = cleaned;
   }
+
+  /* Every emitted chunk advances the sequence counter. The redundant-spill
+   * peephole relies on this to detect whether anything was emitted between a
+   * store_ir_destination spill and a subsequent load_ir_operand. */
+  generator->emit_seq++;
 
   code_generator_append_text(generator, to_append, strlen(to_append), 0);
 
@@ -391,6 +443,50 @@ int code_generator_emit_extern_symbol(CodeGenerator *generator,
   generator->extern_symbol_count++;
   code_generator_emit(generator, "    extern %s\n", symbol_name);
   return !generator->has_error;
+}
+
+void code_generator_emit_calloc_call(CodeGenerator *generator,
+                                     const char *size_register) {
+  if (!generator || !size_register || size_register[0] == '\0') {
+    return;
+  }
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator
+          ? generator->register_allocator->calling_convention
+          : NULL;
+  const char *count_register = "rdi";
+  const char *bytes_register = "rsi";
+  if (conv_spec && conv_spec->int_param_count > 0) {
+    const char *candidate =
+        code_generator_get_register_name(conv_spec->int_param_registers[0]);
+    if (candidate) {
+      count_register = candidate;
+    }
+  }
+  if (conv_spec && conv_spec->int_param_count > 1) {
+    const char *candidate =
+        code_generator_get_register_name(conv_spec->int_param_registers[1]);
+    if (candidate) {
+      bytes_register = candidate;
+    }
+  }
+
+  code_generator_emit(generator, "    mov %s, %s\n", bytes_register,
+                      size_register);
+  code_generator_emit(generator, "    mov %s, 1\n", count_register);
+  if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
+    code_generator_emit(
+        generator,
+        "    sub rsp, %d      ; 32-byte shadow + 8-byte align pad\n",
+        conv_spec->shadow_space_size + 8);
+  }
+  code_generator_emit(generator, "    extern calloc\n");
+  code_generator_emit(generator, "    call calloc\n");
+  if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
+    code_generator_emit(generator, "    add rsp, %d\n",
+                        conv_spec->shadow_space_size + 8);
+  }
 }
 
 int code_generator_emit_escaped_string_bytes(CodeGenerator *generator,
@@ -531,4 +627,3 @@ void code_generator_emit_to_global_buffer(CodeGenerator *generator, const char *
 
   free(rendered);
 }
-

@@ -18,20 +18,12 @@ typedef enum {
   TYPE_FLOAT64,
   TYPE_STRING,
   TYPE_FUNCTION_POINTER,
-  TYPE_FUTURE,
   TYPE_POINTER,
   TYPE_ARRAY,
   TYPE_STRUCT,
   TYPE_ENUM,
   TYPE_TAGGED_ENUM,
-  TYPE_VOID,
-  // Threading types — base_type holds the inner/payload type
-  TYPE_THREAD,   // Thread<T>  — base_type = T (return type of the spawned fn)
-  TYPE_MUTEX,    // Mutex<T>   — base_type = T (guarded value type)
-  TYPE_GUARD,    // Guard<T>   — base_type = T (returned by Mutex.lock())
-  TYPE_ATOMIC,   // Atomic<T>  — base_type = T (must be integer/pointer)
-  TYPE_SENDER,   // Sender<T>  — base_type = T
-  TYPE_RECEIVER  // Receiver<T> — base_type = T
+  TYPE_VOID
 } TypeKind;
 
 typedef struct Type {
@@ -103,6 +95,11 @@ typedef struct Symbol {
       int register_id;
       int memory_offset;
       int is_in_register;
+      /* Set on SYMBOL_PARAMETER when the parameter is passed indirectly
+       * per the Microsoft x64 ABI (struct >8 bytes or non-power-of-2 ≤8).
+       * memory_offset then names a home slot holding a POINTER to the
+       * struct, not the struct itself. See docs/struct-abi-design.md. */
+      int is_indirect_param;
     } variable;
     struct {
       char **parameter_names;

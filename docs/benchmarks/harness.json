@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "mode": "meth-vs-c",
+  "mode": "mettle-vs-c",
   "outputs": {
     "primary": "docs/benchmarks/latest.json",
     "mirror_web": "web/benchmarks.json"
@@ -10,36 +10,46 @@
       "name": "fib",
       "description": "Fibonacci fib(35) x 10M",
       "build_script": "examples/fib/build.bat",
-      "meth_exe": "examples/fib/fib.exe",
-      "c_exe": "examples/fib/fib_c.exe"
+      "mettle_exe": "examples/fib/fib.exe",
+      "c_exe": "examples/fib/fib_c.exe",
+      "rust_exe": "examples/fib/fib_rs.exe",
+      "rust_source": "examples/fib/fib.rs"
     },
     {
       "name": "word_count",
       "description": "Word count 256 KB buffer x 500",
       "build_script": "examples/word_count/build.bat",
-      "meth_exe": "examples/word_count/word_count.exe",
-      "c_exe": "examples/word_count/word_count_c.exe"
+      "mettle_exe": "examples/word_count/word_count.exe",
+      "c_exe": "examples/word_count/word_count_c.exe",
+      "rust_exe": "examples/word_count/word_count_rs.exe",
+      "rust_source": "examples/word_count/word_count.rs"
     },
     {
       "name": "grep",
-      "description": "Grep ERROR 256 KB x 200",
+      "description": "Grep ERROR 1 MiB x 2000",
       "build_script": "examples/grep/build.bat",
-      "meth_exe": "examples/grep/grep.exe",
-      "c_exe": "examples/grep/grep_c.exe"
+      "mettle_exe": "examples/grep/grep.exe",
+      "c_exe": "examples/grep/grep_c.exe",
+      "rust_exe": "examples/grep/grep_rs.exe",
+      "rust_source": "examples/grep/grep.rs"
     },
     {
       "name": "sum_squares",
       "description": "Sum of squares 1..100000 x 500",
       "build_script": "examples/sum_squares/build.bat",
-      "meth_exe": "examples/sum_squares/sum_squares.exe",
-      "c_exe": "examples/sum_squares/sum_squares_c.exe"
+      "mettle_exe": "examples/sum_squares/sum_squares.exe",
+      "c_exe": "examples/sum_squares/sum_squares_c.exe",
+      "rust_exe": "examples/sum_squares/sum_squares_rs.exe",
+      "rust_source": "examples/sum_squares/sum_squares.rs"
     },
     {
       "name": "collatz",
       "description": "Collatz steps 1..100000 x 10",
       "build_script": "examples/collatz/build.bat",
-      "meth_exe": "examples/collatz/collatz.exe",
-      "c_exe": "examples/collatz/collatz_c.exe"
+      "mettle_exe": "examples/collatz/collatz.exe",
+      "c_exe": "examples/collatz/collatz_c.exe",
+      "rust_exe": "examples/collatz/collatz_rs.exe",
+      "rust_source": "examples/collatz/collatz.rs"
     }
   ]
 }

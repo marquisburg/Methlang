@@ -18,14 +18,12 @@ export extern function GetCurrentThreadId() -> uint32 = "GetCurrentThreadId";
 export extern function Sleep(dwMilliseconds: uint32) = "Sleep";
 export extern function CreateMutexA(lpMutexAttributes: cstring, bInitialOwner: int32, lpName: cstring) -> int64 = "CreateMutexA";
 export extern function ReleaseMutex(hMutex: int64) -> int32 = "ReleaseMutex";
-export extern function gc_thread_attach() -> int32 = "gc_thread_attach";
-export extern function gc_thread_detach() -> int32 = "gc_thread_detach";
 
 // Interlocked atomics
-export extern function InterlockedCompareExchange(target: int32*, exchange: int32, comparand: int32) -> int32 = "meth_atomic_compare_exchange_i32";
-export extern function InterlockedExchange(target: int32*, value: int32) -> int32 = "meth_atomic_exchange_i32";
-export extern function InterlockedIncrement(target: int32*) -> int32 = "meth_atomic_inc_i32";
-export extern function InterlockedDecrement(target: int32*) -> int32 = "meth_atomic_dec_i32";
+export extern function InterlockedCompareExchange(target: int32*, exchange: int32, comparand: int32) -> int32 = "mettle_atomic_compare_exchange_i32";
+export extern function InterlockedExchange(target: int32*, value: int32) -> int32 = "mettle_atomic_exchange_i32";
+export extern function InterlockedIncrement(target: int32*) -> int32 = "mettle_atomic_inc_i32";
+export extern function InterlockedDecrement(target: int32*) -> int32 = "mettle_atomic_dec_i32";
 
 export function thread_close(handle: int64) -> int32 {
   return CloseHandle(handle);
@@ -45,17 +43,6 @@ export function thread_detach(handle: int64) -> int32 {
 
 export function thread_sleep_ms(milliseconds: uint32) {
   Sleep(milliseconds);
-}
-
-// GC lifecycle helpers for worker threads.
-// Call thread_gc_attach() near the beginning of a worker entry function
-// and thread_gc_detach() just before thread exit.
-export function thread_gc_attach() {
-  gc_thread_attach();
-}
-
-export function thread_gc_detach() {
-  gc_thread_detach();
 }
 
 // Mutex wrappers

@@ -40,6 +40,7 @@ typedef struct {
   size_t control_flow_stack_size;
   size_t control_flow_stack_capacity;
   int generate_debug_info;
+  int generate_stack_trace_support;
   int emit_asm_comments;
   int eliminate_unreachable_functions;
   int has_error;
@@ -52,6 +53,52 @@ typedef struct {
   size_t last_runtime_location_column;
   CodegenBackendMode backend_mode;
   BinaryEmitter *binary_emitter;
+  /* Redundant-spill peephole for the IR backend. When
+   * store_ir_destination spills rax into an IR temp's stack slot, it records
+   * that slot here along with the emit sequence number that produced the
+   * spilling instruction. load_ir_operand can then skip the matching reload
+   * iff (a) it wants the same slot and (b) no instruction has been emitted
+   * since (emit_seq unchanged). emit_seq is bumped by every code_generator_emit
+   * call, so any intervening instruction invalidates the cache automatically.
+   * rax_cached_temp_offset == 0 means "nothing cached" (temp offsets are
+   * always > 0). */
+  unsigned long long emit_seq;
+  int rax_cached_temp_offset;
+  unsigned long long rax_cached_emit_seq;
+  /* Deferred dead-spill elimination (IR backend). store_ir_destination for a
+   * temp records the pending "mov [rbp-N], rax" here rather than emitting it.
+   * - If the next IR operand load wants this same temp and the temp is
+   *   single-use, the store is dropped entirely (dead) and the reload skipped:
+   *   the value is already in rax.
+   * - Otherwise code_generator_emit flushes the pending store before emitting
+   *   anything else, so the slot is always written before any reader or any
+   *   instruction that could clobber rax.
+   * pending_spill_offset == 0 means "nothing pending". flushing_pending guards
+   * the flush's own emit call against re-entry. pending_spill_single_use is
+   * the temp's use count == 1, decided at store time. */
+  int pending_spill_offset;
+  int pending_spill_single_use;
+  int flushing_pending;
+  /* Borrowed (not owned) pointer to the current IR function's IRTempUseMap,
+   * set for the duration of that function's emission loop and NULL otherwise.
+   * Typed void* because IRTempUseMap is private to code_generator_ir.c. Used
+   * to decide whether a deferred temp spill is dead (single-use). */
+  void *current_temp_use_map;
+  /* Per-function FIFO of frame offsets for indirect-return hidden out-pointer
+   * slots. Populated in instruction order during the IR pre-pass that
+   * computes the function's stack size; consumed in the same order by
+   * emit_ir_call. Each entry is the slot's rbp-relative byte offset
+   * (positive: the slot lives at [rbp - offset]). NULL between functions. */
+  int *indirect_return_slot_offsets;
+  size_t indirect_return_slot_count;
+  size_t indirect_return_slot_capacity;
+  size_t indirect_return_slot_cursor;
+  /* Set during emission of a function whose return type is INDIRECT. The
+   * hidden out-pointer lives at [rbp - 8] (home slot 0). IR_OP_RETURN
+   * dispatches to memcpy-through-pointer when this is non-zero. The byte
+   * count is the function's return-type size. */
+  int current_fn_returns_indirect;
+  size_t current_fn_indirect_return_size;
 } CodeGenerator;
 
 // Function declarations
@@ -75,9 +122,12 @@ void code_generator_generate_statement(CodeGenerator *generator,
 void code_generator_generate_expression(CodeGenerator *generator,
                                         ASTNode *expression);
 void code_generator_set_emit_asm_comments(CodeGenerator *generator, int enable);
+void code_generator_set_stack_trace_support(CodeGenerator *generator,
+                                            int enable);
 void code_generator_set_eliminate_unreachable_functions(CodeGenerator *generator,
                                                         int enable);
 void code_generator_emit(CodeGenerator *generator, const char *format, ...);
+void code_generator_flush_pending_spill(CodeGenerator *generator);
 char *code_generator_get_output(CodeGenerator *generator);
 BinaryEmitter *code_generator_get_binary_emitter(CodeGenerator *generator);
 
@@ -85,7 +135,8 @@ BinaryEmitter *code_generator_get_binary_emitter(CodeGenerator *generator);
 void code_generator_function_prologue(CodeGenerator *generator,
                                       const char *function_name,
                                       int stack_size);
-void code_generator_function_epilogue(CodeGenerator *generator);
+void code_generator_function_epilogue(CodeGenerator *generator,
+                                      Type *return_type);
 char *code_generator_generate_label(CodeGenerator *generator,
                                     const char *prefix);
 

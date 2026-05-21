@@ -88,20 +88,6 @@ export extern function usleep(usec: uint32) -> int32 = "usleep";
 // Allocate a 16-byte buffer: buf[0..7] = seconds, buf[8..15] = nanoseconds.
 export extern function nanosleep(req: cstring, rem: cstring) -> int32 = "nanosleep";
 
-// ─── GC lifecycle helpers ────────────────────────────────────────────────────
-// Call thread_gc_attach_posix() near the beginning of a worker entry function
-// and thread_gc_detach_posix() just before thread exit.
-export extern function gc_thread_attach() -> int32 = "gc_thread_attach";
-export extern function gc_thread_detach() -> int32 = "gc_thread_detach";
-
-export function thread_gc_attach_posix() {
-  gc_thread_attach();
-}
-
-export function thread_gc_detach_posix() {
-  gc_thread_detach();
-}
-
 // ─── Atomic helpers (via C bridge) ──────────────────────────────────────────
 // GCC/Clang __sync built-ins are compiler intrinsics; we expose them through
 // a small C helper so Mettle can call them without inline assembly.
@@ -199,4 +185,3 @@ export function thread_join_posix(thread: int64) -> int32 {
 export function thread_detach_posix(thread: int64) -> int32 {
   return pthread_detach(thread);
 }
-

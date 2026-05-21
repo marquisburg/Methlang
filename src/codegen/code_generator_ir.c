@@ -149,7 +149,7 @@ typedef struct {
 } IRPromotedSymbol;
 
 static const x86Register IR_PROMOTION_REGISTERS[] = {
-    REG_R12, REG_R13, REG_R14, REG_R15, REG_RBX};
+    REG_R12, REG_R13, REG_R14, REG_R15, REG_RBX, REG_RSI, REG_RDI};
 
 static int ir_binary_operator_is_comparison(const char *op);
 static int ir_binary_operator_is_commutative(const char *op);
@@ -165,6 +165,80 @@ static char *ir_codegen_strdup(const char *text) {
   }
   memcpy(copy, text, length);
   return copy;
+}
+
+/* Per-instruction loop nesting depth, derived from backward branches.
+ *
+ * A label that is targeted by a later JUMP/BRANCH forms a loop whose body is
+ * [label_index, branch_index]. Counting how many such bodies enclose each
+ * instruction yields its nesting depth. Used to weight register-promotion so
+ * variables live inside hot loops outrank one-shot setup code. Returns a
+ * malloc'd array of length instruction_count (caller frees), or NULL on OOM
+ * or when there are no instructions. */
+static unsigned char *ir_compute_loop_depths(const IRFunction *function) {
+  if (!function || function->instruction_count == 0) {
+    return NULL;
+  }
+  size_t n = function->instruction_count;
+
+  /* delta[i] = (loops opening at i) - (loops closing just after i). A prefix
+   * sum then gives the depth at each instruction. int is sufficient: depth is
+   * bounded by the number of branches, far below INT_MAX in practice. */
+  int *delta = calloc(n + 1, sizeof(int));
+  unsigned char *depth = calloc(n, sizeof(unsigned char));
+  if (!delta || !depth) {
+    free(delta);
+    free(depth);
+    return NULL;
+  }
+
+  for (size_t i = 0; i < n; i++) {
+    const IRInstruction *insn = &function->instructions[i];
+    if (insn->op != IR_OP_JUMP && insn->op != IR_OP_BRANCH_ZERO &&
+        insn->op != IR_OP_BRANCH_EQ) {
+      continue;
+    }
+    const char *target = insn->text;
+    if (!target) {
+      continue;
+    }
+    /* Find the label this branch targets; only backward edges form loops. */
+    for (size_t j = 0; j <= i; j++) {
+      const IRInstruction *cand = &function->instructions[j];
+      if (cand->op == IR_OP_LABEL && cand->text &&
+          strcmp(cand->text, target) == 0) {
+        delta[j] += 1;
+        delta[i + 1] -= 1;
+        break;
+      }
+    }
+  }
+
+  int level = 0;
+  for (size_t i = 0; i < n; i++) {
+    level += delta[i];
+    if (level < 0) {
+      level = 0; /* defensive: overlapping/irreducible edges */
+    }
+    depth[i] = (level > 255) ? 255 : (unsigned char)level;
+  }
+
+  free(delta);
+  return depth;
+}
+
+/* Register-promotion weight for an instruction at the given loop depth. Each
+ * nesting level multiplies pressure by 16, capped so the saturating add in
+ * ir_symbol_stats_map_add_use_weighted stays well-behaved. Depth 0 -> 1,
+ * 1 -> 16, 2 -> 256, deep loops clamp at 4096. */
+static size_t ir_loop_depth_weight(unsigned char depth) {
+  if (depth == 0) {
+    return 1;
+  }
+  if (depth >= 3) {
+    return 4096;
+  }
+  return (size_t)1 << (4 * depth);
 }
 
 static int ir_symbol_stats_map_find(const IRSymbolStatsMap *map,
@@ -214,14 +288,26 @@ static IRSymbolStatsEntry *ir_symbol_stats_map_get_or_add(IRSymbolStatsMap *map,
   return entry;
 }
 
-static int ir_symbol_stats_map_add_use(IRSymbolStatsMap *map,
-                                       const char *name) {
+static int ir_symbol_stats_map_add_use_weighted(IRSymbolStatsMap *map,
+                                                const char *name,
+                                                size_t weight) {
   IRSymbolStatsEntry *entry = ir_symbol_stats_map_get_or_add(map, name);
   if (!entry) {
     return 0;
   }
-  entry->use_count++;
+  /* Saturating add: a runaway weight must never wrap use_count back to a
+   * small value and demote a genuinely hot symbol. */
+  if (entry->use_count > (size_t)-1 - weight) {
+    entry->use_count = (size_t)-1;
+  } else {
+    entry->use_count += weight;
+  }
   return 1;
+}
+
+static int ir_symbol_stats_map_add_use(IRSymbolStatsMap *map,
+                                       const char *name) {
+  return ir_symbol_stats_map_add_use_weighted(map, name, 1);
 }
 
 static int ir_symbol_stats_map_mark_address_taken(IRSymbolStatsMap *map,
@@ -266,28 +352,31 @@ static void ir_symbol_stats_map_destroy(IRSymbolStatsMap *map) {
 }
 
 static int ir_symbol_stats_map_record_operand(IRSymbolStatsMap *map,
-                                              const IROperand *operand) {
+                                              const IROperand *operand,
+                                              size_t weight) {
   if (!map || !operand || operand->kind != IR_OPERAND_SYMBOL ||
       !operand->name) {
     return 1;
   }
-  return ir_symbol_stats_map_add_use(map, operand->name);
+  return ir_symbol_stats_map_add_use_weighted(map, operand->name, weight);
 }
 
 static int ir_symbol_stats_map_record_instruction(IRSymbolStatsMap *map,
-                                                  const IRInstruction *instr) {
+                                                  const IRInstruction *instr,
+                                                  size_t weight) {
   if (!map || !instr) {
     return 0;
   }
 
-  if (!ir_symbol_stats_map_record_operand(map, &instr->dest) ||
-      !ir_symbol_stats_map_record_operand(map, &instr->lhs) ||
-      !ir_symbol_stats_map_record_operand(map, &instr->rhs)) {
+  if (!ir_symbol_stats_map_record_operand(map, &instr->dest, weight) ||
+      !ir_symbol_stats_map_record_operand(map, &instr->lhs, weight) ||
+      !ir_symbol_stats_map_record_operand(map, &instr->rhs, weight)) {
     return 0;
   }
 
   for (size_t i = 0; i < instr->argument_count; i++) {
-    if (!ir_symbol_stats_map_record_operand(map, &instr->arguments[i])) {
+    if (!ir_symbol_stats_map_record_operand(map, &instr->arguments[i],
+                                            weight)) {
       return 0;
     }
   }
@@ -422,7 +511,6 @@ static int ir_is_integer_or_pointer_promotable(Type *type) {
   case TYPE_POINTER:
   case TYPE_FUNCTION_POINTER:
   case TYPE_ENUM:
-  case TYPE_FUTURE:
     return 1;
   default:
     return 0;
@@ -785,7 +873,21 @@ static int code_generator_try_emit_ir_compare_branch_register_fastpath(
   return 1;
 }
 
-static int ir_function_requires_entry_safepoint(const IRFunction *function) {
+static int ir_call_ignores_register_promotion_barrier(const char *callee_name) {
+  if (!callee_name) {
+    return 0;
+  }
+  /* Pure native helpers that do not clobber promoted arithmetic state. */
+  if (strcmp(callee_name, "mettle_crash_trap") == 0 ||
+      strcmp(callee_name, "GetTickCount64") == 0 ||
+      strcmp(callee_name, "QueryPerformanceCounter") == 0 ||
+      strcmp(callee_name, "QueryPerformanceFrequency") == 0) {
+    return 1;
+  }
+  return 0;
+}
+
+static int ir_function_blocks_register_promotion(const IRFunction *function) {
   if (!function) {
     return 0;
   }
@@ -797,10 +899,8 @@ static int ir_function_requires_entry_safepoint(const IRFunction *function) {
     }
 
     if (instruction->op == IR_OP_CALL) {
-      // Runtime trap helpers are cold terminal paths and should not force every
-      // hot invocation through entry safepoint spill/restore.
       if (instruction->text &&
-          strcmp(instruction->text, "meth_runtime_debug_trap") == 0) {
+          ir_call_ignores_register_promotion_barrier(instruction->text)) {
         continue;
       }
       return 1;
@@ -998,6 +1098,26 @@ static int code_generator_load_ir_operand(CodeGenerator *generator,
                                operand->name);
       return 0;
     }
+    /* Deferred-spill peephole. If this temp's spill is still pending (nothing
+     * emitted since it was produced), rax still holds the value. */
+    if (offset == generator->pending_spill_offset &&
+        generator->emit_seq == generator->rax_cached_emit_seq) {
+      if (generator->pending_spill_single_use) {
+        /* This load is the temp's only use: the spill is dead. Drop it. */
+        generator->pending_spill_offset = 0;
+        generator->pending_spill_single_use = 0;
+      } else {
+        /* More uses follow: the slot must hold the value. Emit the store now
+         * (flush), but the value is still in rax afterwards so no reload. */
+        code_generator_flush_pending_spill(generator);
+      }
+      return 1; /* value already in rax */
+    }
+    /* Reload-elision: value spilled to this slot and nothing emitted since. */
+    if (offset == generator->rax_cached_temp_offset &&
+        generator->emit_seq == generator->rax_cached_emit_seq) {
+      return 1;
+    }
     code_generator_emit(generator, "    mov rax, [rbp - %d]\n", offset);
     return 1;
   }
@@ -1070,7 +1190,32 @@ static int code_generator_store_ir_destination(CodeGenerator *generator,
                                destination->name);
       return 0;
     }
-    code_generator_emit(generator, "    mov [rbp - %d], rax\n", offset);
+    /* Defer the spill. rax already holds the value; emit nothing yet. If the
+     * next IR operand load wants this same temp we may be able to drop the
+     * store entirely (dead, when single-use) or at least skip the reload. Any
+     * other emission flushes this first (code_generator_emit), so the slot is
+     * always written before any reader or rax clobber.
+     *
+     * A still-pending earlier spill (different temp) must be flushed now: we
+     * are about to overwrite rax, so its value can no longer be recovered. */
+    if (generator->pending_spill_offset != 0 &&
+        generator->pending_spill_offset != offset) {
+      code_generator_flush_pending_spill(generator);
+    }
+    {
+      const IRTempUseMap *use_map =
+          (const IRTempUseMap *)generator->current_temp_use_map;
+      generator->pending_spill_single_use =
+          (use_map &&
+           ir_temp_use_map_get(use_map, destination->name) == 1)
+              ? 1
+              : 0;
+    }
+    generator->pending_spill_offset = offset;
+    /* rax still holds the value. Mark the reload cache too, so even the
+     * multi-use path (store flushed, then read) skips the reload. */
+    generator->rax_cached_temp_offset = offset;
+    generator->rax_cached_emit_seq = generator->emit_seq;
     return 1;
   }
 
@@ -1215,6 +1360,16 @@ static int code_generator_emit_ir_address_of(CodeGenerator *generator,
       return 0;
     }
     code_generator_emit(generator, "    lea rax, [rel %s]\n", symbol_name);
+  } else if (symbol->kind == SYMBOL_PARAMETER &&
+             symbol->data.variable.is_indirect_param) {
+    /* The struct lives in the caller's frame; the home slot holds the
+     * pointer. Loading the pointer IS the address. Note: mutations through
+     * this pointer escape back to the caller — by-value semantics for
+     * indirect params is preserved by the caller-side temp copy, not here. */
+    code_generator_emit(
+        generator,
+        "    mov rax, qword [rbp - %d]  ; addr_of indirect param\n",
+        symbol->data.variable.memory_offset);
   } else {
     code_generator_emit(generator, "    lea rax, [rbp - %d]\n",
                         symbol->data.variable.memory_offset);
@@ -1222,6 +1377,140 @@ static int code_generator_emit_ir_address_of(CodeGenerator *generator,
 
   return code_generator_store_ir_destination(generator, &instruction->dest,
                                              temp_table);
+}
+
+/* SSE2 lowering of IR_OP_COUNT_WORD_STARTS for the text-assembly backend.
+ *
+ * Counts maximal non-whitespace runs in buf[0..len-1] (whitespace =
+ * space/tab/LF/CR), 16 bytes per iteration, plus a scalar tail. The result is
+ * ADDED to the prior value of the count symbol (the recognizer only fires when
+ * the source initialized count to 0, so this matches the scalar semantics).
+ *
+ * Register use: rcx=cursor, rdx=bytes remaining, rax=running count,
+ * r8d=carry (1 iff the byte immediately before the cursor was non-whitespace;
+ * 0 at the start, which is correct since position -1 counts as whitespace).
+ * Per chunk: ws-mask via 4x pcmpeqb+por, pmovmskb to a GPR, nw=~ws, a word
+ * start is a non-ws byte whose predecessor was ws, i.e. popcount(nw & ~prev)
+ * where prev = (nw<<1)|carry; carry for the next chunk = bit 15 of nw. */
+static int code_generator_emit_ir_count_word_starts(
+    CodeGenerator *generator, const IRInstruction *instruction) {
+  if (!generator || !instruction ||
+      instruction->dest.kind != IR_OPERAND_SYMBOL ||
+      instruction->lhs.kind != IR_OPERAND_SYMBOL ||
+      instruction->rhs.kind != IR_OPERAND_SYMBOL) {
+    code_generator_set_error(generator, "Malformed count_word_starts");
+    return 0;
+  }
+
+  char *l_vec = code_generator_generate_label(generator, "_wcs_vec");
+  char *l_tail = code_generator_generate_label(generator, "_wcs_tail");
+  char *l_tailloop = code_generator_generate_label(generator, "_wcs_tl");
+  char *l_done = code_generator_generate_label(generator, "_wcs_done");
+  char *l_ws = code_generator_generate_label(generator, "_wcs_ws");
+  if (!l_vec || !l_tail || !l_tailloop || !l_done || !l_ws) {
+    free(l_vec); free(l_tail); free(l_tailloop); free(l_done); free(l_ws);
+    code_generator_set_error(generator, "OOM in count_word_starts");
+    return 0;
+  }
+
+  /* rax <- current count value; rcx <- buf; rdx <- len. */
+  code_generator_load_variable(generator, instruction->lhs.name);
+  code_generator_emit(generator, "    mov rcx, rax\n");
+  code_generator_load_variable(generator, instruction->rhs.name);
+  code_generator_emit(generator, "    mov rdx, rax\n");
+  code_generator_load_variable(generator, instruction->dest.name);
+  code_generator_emit(generator, "    xor r8d, r8d\n");
+
+  /* Broadcast the four whitespace bytes into xmm1..xmm4. */
+  code_generator_emit(generator, "    mov r9d, 0x20202020\n");
+  code_generator_emit(generator, "    movd xmm1, r9d\n");
+  code_generator_emit(generator, "    pshufd xmm1, xmm1, 0\n");
+  code_generator_emit(generator, "    mov r9d, 0x09090909\n");
+  code_generator_emit(generator, "    movd xmm2, r9d\n");
+  code_generator_emit(generator, "    pshufd xmm2, xmm2, 0\n");
+  code_generator_emit(generator, "    mov r9d, 0x0A0A0A0A\n");
+  code_generator_emit(generator, "    movd xmm3, r9d\n");
+  code_generator_emit(generator, "    pshufd xmm3, xmm3, 0\n");
+  code_generator_emit(generator, "    mov r9d, 0x0D0D0D0D\n");
+  code_generator_emit(generator, "    movd xmm4, r9d\n");
+  code_generator_emit(generator, "    pshufd xmm4, xmm4, 0\n");
+
+  /* ---- vector loop: while (rdx >= 16) ---- */
+  code_generator_emit(generator, "%s:\n", l_vec);
+  code_generator_emit(generator, "    cmp rdx, 16\n");
+  code_generator_emit(generator, "    jb %s\n", l_tail);
+
+  code_generator_emit(generator, "    movdqu xmm0, [rcx]\n");
+  code_generator_emit(generator, "    movdqa xmm5, xmm0\n");
+  code_generator_emit(generator, "    pcmpeqb xmm0, xmm1\n");
+  code_generator_emit(generator, "    movdqa xmm6, xmm5\n");
+  code_generator_emit(generator, "    pcmpeqb xmm6, xmm2\n");
+  code_generator_emit(generator, "    por xmm0, xmm6\n");
+  code_generator_emit(generator, "    movdqa xmm6, xmm5\n");
+  code_generator_emit(generator, "    pcmpeqb xmm6, xmm3\n");
+  code_generator_emit(generator, "    por xmm0, xmm6\n");
+  code_generator_emit(generator, "    movdqa xmm6, xmm5\n");
+  code_generator_emit(generator, "    pcmpeqb xmm6, xmm4\n");
+  code_generator_emit(generator, "    por xmm0, xmm6\n");
+  /* r9d = ws bitmask (bit k set iff byte k is whitespace). */
+  code_generator_emit(generator, "    pmovmskb r9d, xmm0\n");
+  /* r10d = nw = ~ws restricted to 16 bits. */
+  code_generator_emit(generator, "    mov r10d, r9d\n");
+  code_generator_emit(generator, "    not r10d\n");
+  code_generator_emit(generator, "    and r10d, 0xFFFF\n");
+  /* r11d = prev = (nw<<1)|carry  (bit k = "byte k-1 was non-ws"). */
+  code_generator_emit(generator, "    mov r11d, r10d\n");
+  code_generator_emit(generator, "    shl r11d, 1\n");
+  code_generator_emit(generator, "    or r11d, r8d\n");
+  /* new carry = nw bit 15. */
+  code_generator_emit(generator, "    mov r8d, r10d\n");
+  code_generator_emit(generator, "    shr r8d, 15\n");
+  code_generator_emit(generator, "    and r8d, 1\n");
+  /* starts = nw & ~prev ; count += popcount(starts). */
+  code_generator_emit(generator, "    not r11d\n");
+  code_generator_emit(generator, "    and r11d, r10d\n");
+  code_generator_emit(generator, "    and r11d, 0xFFFF\n");
+  code_generator_emit(generator, "    popcnt r11d, r11d\n");
+  code_generator_emit(generator, "    add rax, r11\n");
+
+  code_generator_emit(generator, "    add rcx, 16\n");
+  code_generator_emit(generator, "    sub rdx, 16\n");
+  code_generator_emit(generator, "    jmp %s\n", l_vec);
+
+  /* ---- scalar tail: process remaining rdx (<16) bytes ---- */
+  code_generator_emit(generator, "%s:\n", l_tail);
+  code_generator_emit(generator, "    test rdx, rdx\n");
+  code_generator_emit(generator, "    jz %s\n", l_done);
+  code_generator_emit(generator, "%s:\n", l_tailloop);
+  /* r9d = byte; treat space/tab/LF/CR as whitespace. */
+  code_generator_emit(generator, "    movzx r9d, byte [rcx]\n");
+  code_generator_emit(generator, "    cmp r9d, 32\n");
+  code_generator_emit(generator, "    je %s\n", l_ws);
+  code_generator_emit(generator, "    cmp r9d, 9\n");
+  code_generator_emit(generator, "    je %s\n", l_ws);
+  code_generator_emit(generator, "    cmp r9d, 10\n");
+  code_generator_emit(generator, "    je %s\n", l_ws);
+  code_generator_emit(generator, "    cmp r9d, 13\n");
+  code_generator_emit(generator, "    je %s\n", l_ws);
+  /* non-whitespace: a word starts here iff carry==0 (prev was ws). */
+  code_generator_emit(generator, "    test r8d, r8d\n");
+  code_generator_emit(generator, "    jnz %s_nw\n", l_tailloop);
+  code_generator_emit(generator, "    add rax, 1\n");
+  code_generator_emit(generator, "%s_nw:\n", l_tailloop);
+  code_generator_emit(generator, "    mov r8d, 1\n");
+  code_generator_emit(generator, "    jmp %s_next\n", l_tailloop);
+  code_generator_emit(generator, "%s:\n", l_ws);
+  code_generator_emit(generator, "    xor r8d, r8d\n");
+  code_generator_emit(generator, "%s_next:\n", l_tailloop);
+  code_generator_emit(generator, "    add rcx, 1\n");
+  code_generator_emit(generator, "    sub rdx, 1\n");
+  code_generator_emit(generator, "    jnz %s\n", l_tailloop);
+
+  code_generator_emit(generator, "%s:\n", l_done);
+  code_generator_store_variable(generator, instruction->dest.name, "rax");
+
+  free(l_vec); free(l_tail); free(l_tailloop); free(l_done); free(l_ws);
+  return !generator->has_error;
 }
 
 static int code_generator_emit_ir_load(CodeGenerator *generator,
@@ -1308,8 +1597,7 @@ static int code_generator_emit_ir_new(CodeGenerator *generator,
     code_generator_emit(generator, "    mov %s, %d\n", size_register,
                         allocation_size);
   }
-  code_generator_emit(generator, "    extern gc_alloc\n");
-  code_generator_emit(generator, "    call gc_alloc\n");
+  code_generator_emit_calloc_call(generator, size_register);
   return code_generator_store_ir_destination(generator, &instruction->dest,
                                              temp_table);
 }
@@ -2077,6 +2365,10 @@ static int code_generator_emit_ir_binary_extend_r11(
   return 1;
 }
 
+static int code_generator_find_next_non_nop_in_block(const IRFunction *function,
+                                                     size_t start_index,
+                                                     size_t *out_index);
+
 static int code_generator_try_emit_ir_binary_expression_chain(
     CodeGenerator *generator, const IRFunction *function, size_t start_index,
     const IRTempUseMap *temp_use_map, IRTempTable *temp_table,
@@ -2141,6 +2433,22 @@ static int code_generator_try_emit_ir_binary_expression_chain(
     }
   }
 
+  size_t return_index = last;
+  int consumes_return = 0;
+  if (!consumes_branch && last_instruction->dest.kind == IR_OPERAND_TEMP &&
+      last_instruction->dest.name) {
+    size_t next_index = 0;
+    if (code_generator_find_next_non_nop_in_block(function, last + 1,
+                                                  &next_index)) {
+      const IRInstruction *ret = &function->instructions[next_index];
+      if (ret->op == IR_OP_RETURN && ret->lhs.kind == IR_OPERAND_TEMP &&
+          ret->lhs.name && strcmp(ret->lhs.name, last_instruction->dest.name) == 0) {
+        consumes_return = 1;
+        return_index = next_index;
+      }
+    }
+  }
+
   if (!code_generator_compute_ir_binary_to_r11(generator, first, temp_table)) {
     return 0;
   }
@@ -2165,6 +2473,12 @@ static int code_generator_try_emit_ir_binary_expression_chain(
     const IRInstruction *branch = &function->instructions[last + 1];
     code_generator_emit(generator, "    test r11, r11\n");
     code_generator_emit(generator, "    jz %s\n", branch->text);
+  } else if (consumes_return) {
+    code_generator_emit(generator, "    mov rax, r11\n");
+    code_generator_emit(generator, "    jmp L%s_exit\n",
+                        generator->current_function_name
+                            ? generator->current_function_name
+                            : "function");
   } else {
     code_generator_emit(generator, "    mov rax, r11\n");
     if (!code_generator_store_ir_destination(generator,
@@ -2175,10 +2489,86 @@ static int code_generator_try_emit_ir_binary_expression_chain(
   }
 
   if (last_index_out) {
-    *last_index_out = last;
+    *last_index_out = consumes_return ? return_index : last;
   }
   if (consumed_branch_out) {
     *consumed_branch_out = consumes_branch;
+  }
+  if (emitted) {
+    *emitted = 1;
+  }
+  return 1;
+}
+
+static int code_generator_find_next_non_nop_in_block(const IRFunction *function,
+                                                     size_t start_index,
+                                                     size_t *out_index) {
+  if (!function || !out_index || start_index >= function->instruction_count) {
+    return 0;
+  }
+
+  for (size_t i = start_index; i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_LABEL) {
+      return 0;
+    }
+    if (instruction->op != IR_OP_NOP) {
+      *out_index = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int code_generator_try_emit_ir_binary_return_temp(
+    CodeGenerator *generator, const IRFunction *function, size_t start_index,
+    const IRTempUseMap *temp_use_map, IRTempTable *temp_table,
+    size_t *return_index_out, int *emitted) {
+  if (emitted) {
+    *emitted = 0;
+  }
+  if (return_index_out) {
+    *return_index_out = start_index;
+  }
+  if (!generator || !function || !temp_use_map || !temp_table ||
+      start_index >= function->instruction_count) {
+    return 0;
+  }
+
+  const IRInstruction *instruction = &function->instructions[start_index];
+  if (!instruction || instruction->op != IR_OP_BINARY || instruction->ast_ref ||
+      instruction->dest.kind != IR_OPERAND_TEMP || !instruction->dest.name ||
+      ir_temp_use_map_get(temp_use_map, instruction->dest.name) != 1) {
+    return 1;
+  }
+
+  size_t return_index = 0;
+  if (!code_generator_find_next_non_nop_in_block(function, start_index + 1,
+                                                 &return_index)) {
+    return 1;
+  }
+
+  const IRInstruction *ret = &function->instructions[return_index];
+  if (ret->op != IR_OP_RETURN || ret->lhs.kind != IR_OPERAND_TEMP ||
+      !ret->lhs.name || strcmp(ret->lhs.name, instruction->dest.name) != 0) {
+    return 1;
+  }
+
+  IRInstruction value_instruction = *instruction;
+  value_instruction.dest = ir_operand_none();
+  if (!code_generator_emit_ir_binary_fallback(generator, &value_instruction,
+                                              temp_table)) {
+    return 0;
+  }
+
+  code_generator_emit(generator, "    jmp L%s_exit\n",
+                      generator->current_function_name
+                          ? generator->current_function_name
+                          : "function");
+
+  if (return_index_out) {
+    *return_index_out = return_index;
   }
   if (emitted) {
     *emitted = 1;
@@ -2364,6 +2754,77 @@ static int code_generator_ir_call_argument_is_float(
       generator, &instruction->arguments[argument_index]);
 }
 
+/* Resolve the declared (callee-visible) type of the i-th call argument, used
+ * to classify INDIRECT vs DIRECT. NULL if the callee's signature is unknown
+ * (e.g. indirect calls without a function symbol) — caller treats NULL as
+ * DIRECT for backward compatibility. */
+static Type *code_generator_ir_call_argument_declared_type(
+    Symbol *function_symbol, size_t argument_index) {
+  if (!function_symbol || function_symbol->kind != SYMBOL_FUNCTION ||
+      !function_symbol->data.function.parameter_types ||
+      argument_index >= function_symbol->data.function.parameter_count) {
+    return NULL;
+  }
+  return function_symbol->data.function.parameter_types[argument_index];
+}
+
+static int ir_function_can_promote_rsi_rdi(CodeGenerator *generator,
+                                           const IRFunction *function,
+                                           Type *return_type) {
+  if (!generator || !function || !generator->register_allocator ||
+      !generator->register_allocator->calling_convention) {
+    return 0;
+  }
+
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator->calling_convention;
+  if (conv_spec->convention != CALLING_CONV_MS_X64) {
+    return 0;
+  }
+
+  if (code_generator_abi_classify(return_type) == ABI_PASS_INDIRECT) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (!instruction) {
+      continue;
+    }
+
+    if (instruction->ast_ref || instruction->op == IR_OP_CALL_INDIRECT ||
+        instruction->op == IR_OP_INLINE_ASM || instruction->op == IR_OP_NEW) {
+      return 0;
+    }
+
+    if (instruction->op != IR_OP_CALL || !instruction->text) {
+      continue;
+    }
+
+    Symbol *callee = symbol_table_lookup(generator->symbol_table,
+                                         instruction->text);
+    Type *callee_return = NULL;
+    if (callee && callee->kind == SYMBOL_FUNCTION) {
+      callee_return = callee->data.function.return_type
+                          ? callee->data.function.return_type
+                          : callee->type;
+    }
+    if (code_generator_abi_classify(callee_return) == ABI_PASS_INDIRECT) {
+      return 0;
+    }
+
+    for (size_t arg_i = 0; arg_i < instruction->argument_count; arg_i++) {
+      Type *arg_type = code_generator_ir_call_argument_declared_type(callee,
+                                                                     arg_i);
+      if (code_generator_abi_classify(arg_type) == ABI_PASS_INDIRECT) {
+        return 0;
+      }
+    }
+  }
+
+  return 1;
+}
+
 static int code_generator_emit_ir_call_argument_stack(CodeGenerator *generator,
                                                       const IROperand *operand,
                                                       IRTempTable *temp_table,
@@ -2374,6 +2835,199 @@ static int code_generator_emit_ir_call_argument_stack(CodeGenerator *generator,
   code_generator_emit(generator, "    mov [rsp + %d], rax\n",
                       stack_slot_offset);
   return 1;
+}
+
+/* Per-function side-table: which IR temps currently hold a POINTER to an
+ * indirect-returned struct, and the byte size of that struct. Populated by
+ * emit_ir_call when the callee's return is INDIRECT and the call's dest is
+ * a temp. Consumed by IR_OP_ASSIGN when the source is a tagged temp. Cleared
+ * between functions. */
+typedef struct {
+  char **names;     /* interned IR temp names */
+  size_t *sizes;    /* byte size of the struct each temp points at */
+  size_t count;
+  size_t capacity;
+} IRIndirectTempTable;
+
+static IRIndirectTempTable g_indirect_temps = {0};
+
+static void ir_indirect_temp_table_reset(void) {
+  g_indirect_temps.count = 0;
+  /* Names are borrowed pointers (interned IR strings); do not free them. */
+}
+
+static void ir_indirect_temp_table_destroy(void) {
+  free(g_indirect_temps.names);
+  free(g_indirect_temps.sizes);
+  g_indirect_temps.names = NULL;
+  g_indirect_temps.sizes = NULL;
+  g_indirect_temps.count = 0;
+  g_indirect_temps.capacity = 0;
+}
+
+static int ir_indirect_temp_table_add(const char *name, size_t size) {
+  if (!name) return 0;
+  if (g_indirect_temps.count >= g_indirect_temps.capacity) {
+    size_t new_cap = g_indirect_temps.capacity ? g_indirect_temps.capacity * 2 : 8;
+    char **g_names = realloc(g_indirect_temps.names, new_cap * sizeof(char *));
+    if (!g_names) return 0;
+    g_indirect_temps.names = g_names;
+    size_t *g_sizes = realloc(g_indirect_temps.sizes, new_cap * sizeof(size_t));
+    if (!g_sizes) return 0;
+    g_indirect_temps.sizes = g_sizes;
+    g_indirect_temps.capacity = new_cap;
+  }
+  g_indirect_temps.names[g_indirect_temps.count] = (char *)name;
+  g_indirect_temps.sizes[g_indirect_temps.count] = size;
+  g_indirect_temps.count++;
+  return 1;
+}
+
+/* Look up a temp's struct size, 0 if not registered. */
+static size_t ir_indirect_temp_table_get(const char *name) {
+  if (!name) return 0;
+  for (size_t i = 0; i < g_indirect_temps.count; i++) {
+    if (g_indirect_temps.names[i] == name ||
+        (g_indirect_temps.names[i] && name &&
+         strcmp(g_indirect_temps.names[i], name) == 0)) {
+      return g_indirect_temps.sizes[i];
+    }
+  }
+  return 0;
+}
+
+/* Append a frame offset to the per-function FIFO of indirect-return slots.
+ * Called from the function pre-pass once per IR_OP_CALL that returns an
+ * INDIRECT type. Slots are dispensed in the same order during emission. */
+static int code_generator_ir_push_indirect_return_offset(CodeGenerator *generator,
+                                                         int rbp_offset) {
+  if (!generator) return 0;
+  if (generator->indirect_return_slot_count >=
+      generator->indirect_return_slot_capacity) {
+    size_t new_cap = generator->indirect_return_slot_capacity
+                         ? generator->indirect_return_slot_capacity * 2
+                         : 8;
+    int *grown = realloc(generator->indirect_return_slot_offsets,
+                         new_cap * sizeof(int));
+    if (!grown) return 0;
+    generator->indirect_return_slot_offsets = grown;
+    generator->indirect_return_slot_capacity = new_cap;
+  }
+  generator->indirect_return_slot_offsets[generator->indirect_return_slot_count++] =
+      rbp_offset;
+  return 1;
+}
+
+/* Dispense the next FIFO entry to a call site. Returns 0 if the FIFO is
+ * empty — that indicates a pre-pass/emission mismatch and should be an error. */
+static int code_generator_ir_take_pending_indirect_return_offset(
+    CodeGenerator *generator) {
+  if (!generator) return 0;
+  if (generator->indirect_return_slot_cursor >=
+      generator->indirect_return_slot_count) {
+    return 0;
+  }
+  return generator->indirect_return_slot_offsets
+      [generator->indirect_return_slot_cursor++];
+}
+
+static void code_generator_ir_reset_indirect_return_slots(CodeGenerator *generator) {
+  if (!generator) return;
+  generator->indirect_return_slot_count = 0;
+  generator->indirect_return_slot_cursor = 0;
+}
+
+/* Load the address of an INDIRECT call argument's source into rax. Today
+ * indirect args are always SYMBOL (a struct local/param) or TEMP (a struct
+ * produced by an earlier op). For SYMBOL on an indirect param, the source
+ * is itself a pointer — load it directly. */
+static int code_generator_emit_ir_indirect_arg_source_address(
+    CodeGenerator *generator, const IROperand *operand,
+    IRTempTable *temp_table) {
+  if (!generator || !operand) {
+    return 0;
+  }
+  if (operand->kind == IR_OPERAND_SYMBOL) {
+    if (!operand->name) {
+      code_generator_set_error(generator,
+                               "Malformed IR symbol operand (indirect arg)");
+      return 0;
+    }
+    Symbol *symbol = symbol_table_lookup(generator->symbol_table, operand->name);
+    if (!symbol) {
+      code_generator_set_error(generator,
+                               "Unknown symbol '%s' for indirect call arg",
+                               operand->name);
+      return 0;
+    }
+    if (symbol->kind == SYMBOL_PARAMETER &&
+        symbol->data.variable.is_indirect_param) {
+      code_generator_emit(
+          generator, "    mov rax, qword [rbp - %d]  ; indirect arg src ptr\n",
+          symbol->data.variable.memory_offset);
+      return 1;
+    }
+    if (symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
+      const char *resolved =
+          code_generator_get_link_symbol_name(generator, operand->name);
+      if (!resolved) {
+        code_generator_set_error(generator,
+                                 "Invalid global symbol for indirect arg");
+        return 0;
+      }
+      code_generator_emit(generator,
+                          "    lea rax, [rel %s]  ; indirect arg src\n",
+                          resolved);
+      return 1;
+    }
+    code_generator_emit(generator,
+                        "    lea rax, [rbp - %d]  ; indirect arg src\n",
+                        symbol->data.variable.memory_offset);
+    return 1;
+  }
+  if (operand->kind == IR_OPERAND_TEMP) {
+    if (!operand->name) {
+      code_generator_set_error(generator,
+                               "Malformed IR temp operand (indirect arg)");
+      return 0;
+    }
+    int offset = ir_temp_table_get_offset(temp_table, operand->name);
+    if (offset <= 0) {
+      code_generator_set_error(generator,
+                               "Unknown IR temp '%s' for indirect arg",
+                               operand->name);
+      return 0;
+    }
+    /* If this temp was tagged as holding a pointer to an indirect-returned
+     * struct (chained call pattern), the source address IS the value
+     * stored in the slot, not the slot itself. */
+    if (ir_indirect_temp_table_get(operand->name) > 0) {
+      code_generator_emit(
+          generator,
+          "    mov rax, qword [rbp - %d]  ; indirect arg src (ret-temp)\n",
+          offset);
+      return 1;
+    }
+    code_generator_emit(generator,
+                        "    lea rax, [rbp - %d]  ; indirect arg src (temp)\n",
+                        offset);
+    return 1;
+  }
+  code_generator_set_error(
+      generator, "Indirect call argument must be a struct value (kind=%d)",
+      operand->kind);
+  return 0;
+}
+
+/* Emit a byte-for-byte memcpy from [rsi] (src) to [rdi] (dst) of n bytes.
+ * Caller must place src/dst in rsi/rdi; this preserves them by saving the
+ * non-volatile registers on Win64. Clobbers rcx. Used by call lowering for
+ * indirect arg copies. */
+static void code_generator_emit_rep_movsb(CodeGenerator *generator,
+                                          size_t n) {
+  code_generator_emit(generator, "    mov rcx, %zu\n", n);
+  code_generator_emit(generator, "    cld\n");
+  code_generator_emit(generator, "    rep movsb\n");
 }
 
 static int code_generator_emit_ir_call_argument_register(
@@ -2416,11 +3070,54 @@ static int code_generator_emit_ir_runtime_trap_call(
       generator->register_allocator->calling_convention;
   if (!conv_spec || conv_spec->int_param_count < 3) {
     code_generator_set_error(generator,
-                             "Runtime trap helper requires three integer registers");
+                              "Runtime trap helper requires three integer registers");
     return 0;
   }
 
-  if (!code_generator_emit_extern_symbol(generator, "meth_runtime_debug_trap")) {
+  if (!generator->generate_stack_trace_support) {
+    const char *first_param_reg =
+        code_generator_get_register_name(conv_spec->int_param_registers[0]);
+    if (!first_param_reg) {
+      code_generator_set_error(generator,
+                               "Runtime trap helper requires an integer register");
+      return 0;
+    }
+    if (!code_generator_emit_extern_symbol(generator, "puts") ||
+        !code_generator_emit_extern_symbol(generator, "exit")) {
+      return 0;
+    }
+    code_generator_emit(generator, "    ; IR runtime trap\n");
+    if (instruction->arguments[0].kind == IR_OPERAND_STRING) {
+      code_generator_load_string_literal_as_cstring(
+          generator, instruction->arguments[0].name);
+    } else if (!code_generator_load_ir_operand(generator, &instruction->arguments[0],
+                                               temp_table)) {
+      return 0;
+    }
+    code_generator_emit(generator, "    mov %s, rax\n", first_param_reg);
+    if (conv_spec->convention == CALLING_CONV_MS_X64) {
+      code_generator_emit(generator,
+                          "    sub rsp, %d      ; Shadow space for puts\n",
+                          conv_spec->shadow_space_size);
+      code_generator_emit(generator, "    call puts\n");
+      code_generator_emit(generator, "    add rsp, %d\n",
+                          conv_spec->shadow_space_size);
+      code_generator_emit(generator, "    mov ecx, 1\n");
+      code_generator_emit(generator,
+                          "    sub rsp, %d      ; Shadow space for exit\n",
+                          conv_spec->shadow_space_size);
+      code_generator_emit(generator, "    call exit\n");
+      code_generator_emit(generator, "    add rsp, %d\n",
+                          conv_spec->shadow_space_size);
+    } else {
+      code_generator_emit(generator, "    call puts\n");
+      code_generator_emit(generator, "    mov edi, 1\n");
+      code_generator_emit(generator, "    call exit\n");
+    }
+    return 1;
+  }
+
+  if (!code_generator_emit_extern_symbol(generator, "mettle_crash_trap")) {
     return 0;
   }
 
@@ -2462,7 +3159,7 @@ static int code_generator_emit_ir_runtime_trap_call(
   if (call_stack_total > 0) {
     code_generator_emit(generator, "    sub rsp, %d\n", call_stack_total);
   }
-  code_generator_emit(generator, "    call meth_runtime_debug_trap\n");
+  code_generator_emit(generator, "    call mettle_crash_trap\n");
   if (call_stack_total > 0) {
     code_generator_emit(generator, "    add rsp, %d\n", call_stack_total);
   }
@@ -2492,7 +3189,7 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
     code_generator_set_error(generator, "Invalid IR call target");
     return 0;
   }
-  if (strcmp(call_target, "meth_runtime_debug_trap") == 0) {
+  if (strcmp(call_target, "mettle_crash_trap") == 0) {
     return code_generator_emit_ir_runtime_trap_call(generator, instruction,
                                                     temp_table);
   }
@@ -2502,15 +3199,40 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
     }
   }
 
+  /* Resolve return type up-front: needed to decide whether to allocate a
+   * caller-side return slot and prepend a hidden out-pointer as arg 0. */
+  Type *return_type = NULL;
+  if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
+      function_symbol->type) {
+    return_type = function_symbol->type;
+    if (function_symbol->data.function.return_type) {
+      return_type = function_symbol->data.function.return_type;
+    }
+  }
+  int return_is_indirect =
+      (code_generator_abi_classify(return_type) == ABI_PASS_INDIRECT) ? 1 : 0;
+  size_t return_size =
+      return_is_indirect ? code_generator_abi_type_size(return_type) : 0;
+
   size_t argument_count = instruction->argument_count;
   int *is_float = NULL;
   int *goes_on_stack = NULL;
+  int *is_indirect = NULL;            /* INDIRECT (struct > 8B / non-pow2) */
+  int *indirect_temp_offset = NULL;   /* per-arg byte offset within temp region */
+  size_t *indirect_size = NULL;       /* per-arg sizeof(struct) */
   if (argument_count > 0) {
     is_float = calloc(argument_count, sizeof(int));
     goes_on_stack = calloc(argument_count, sizeof(int));
-    if (!is_float || !goes_on_stack) {
+    is_indirect = calloc(argument_count, sizeof(int));
+    indirect_temp_offset = calloc(argument_count, sizeof(int));
+    indirect_size = calloc(argument_count, sizeof(size_t));
+    if (!is_float || !goes_on_stack || !is_indirect ||
+        !indirect_temp_offset || !indirect_size) {
       free(is_float);
       free(goes_on_stack);
+      free(is_indirect);
+      free(indirect_temp_offset);
+      free(indirect_size);
       code_generator_set_error(
           generator, "Out of memory while planning IR call arguments");
       return 0;
@@ -2526,12 +3248,39 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
       ms_param_slot_count = conv_spec->float_param_count;
     }
   }
+  /* The hidden out-pointer for an INDIRECT return occupies ABI slot 0
+   * (rcx on Win64), shifting every user arg up by one. */
+  size_t hidden_arg_count = return_is_indirect ? 1 : 0;
+  /* SysV-style cursors must also reserve the hidden slot if present. */
+  if (return_is_indirect && conv_spec->convention != CALLING_CONV_MS_X64) {
+    int_reg_cursor = 1;
+  }
   int stack_argument_count = 0;
+  int indirect_temp_region = 0;
   for (size_t i = 0; i < argument_count; i++) {
-    is_float[i] = code_generator_ir_call_argument_is_float(
-        generator, function_symbol, instruction, i);
+    Type *declared_param =
+        code_generator_ir_call_argument_declared_type(function_symbol, i);
+    AbiPassKind abi_kind = code_generator_abi_classify(declared_param);
+    is_indirect[i] = (abi_kind == ABI_PASS_INDIRECT) ? 1 : 0;
+    if (is_indirect[i]) {
+      size_t sz = code_generator_abi_type_size(declared_param);
+      indirect_size[i] = sz;
+      /* 8-byte alignment per temp; the temp region begins at rsp+0 after
+       * the call's sub-rsp, before the shadow space + stack-arg slots. */
+      size_t aligned = (sz + 7u) & ~(size_t)7;
+      indirect_temp_offset[i] = indirect_temp_region;
+      indirect_temp_region += (int)aligned;
+      /* INDIRECT args always travel in an integer slot (pointer in a GPR). */
+      is_float[i] = 0;
+    } else {
+      is_float[i] = code_generator_ir_call_argument_is_float(
+          generator, function_symbol, instruction, i);
+    }
+    /* Win64 uses positional slots; the hidden out-ptr (when present) takes
+     * slot 0, so the user arg's effective ABI slot is i + hidden_arg_count. */
+    size_t abi_slot = i + hidden_arg_count;
     if (conv_spec->convention == CALLING_CONV_MS_X64) {
-      if (i >= ms_param_slot_count) {
+      if (abi_slot >= ms_param_slot_count) {
         goes_on_stack[i] = 1;
         stack_argument_count++;
       }
@@ -2551,6 +3300,21 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
       }
     }
   }
+  /* If the hidden out-ptr itself does not fit in a register (won't happen on
+   * the supported ABIs, but be defensive), force it onto the stack. We
+   * always have at least one int arg register on both supported ABIs, so
+   * this is just an assert in spirit. */
+  if (return_is_indirect && ms_param_slot_count == 0 &&
+      conv_spec->convention == CALLING_CONV_MS_X64) {
+    code_generator_set_error(
+        generator, "Hidden return pointer needs at least one Win64 arg slot");
+    free(is_float);
+    free(goes_on_stack);
+    free(is_indirect);
+    free(indirect_temp_offset);
+    free(indirect_size);
+    return 0;
+  }
 
   code_generator_emit(generator, "    ; IR call: %s (%zu args)\n",
                       instruction->text, argument_count);
@@ -2558,7 +3322,8 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
   int omit_shadow_space = 0;
   if (conv_spec->convention == CALLING_CONV_MS_X64 && function_symbol &&
       function_symbol->kind == SYMBOL_FUNCTION && !function_symbol->is_extern &&
-      argument_count <= ms_param_slot_count) {
+      (argument_count + hidden_arg_count) <= ms_param_slot_count &&
+      indirect_temp_region == 0 && !return_is_indirect) {
     // Internal register-only calls do not need caller home slots.
     omit_shadow_space = 1;
   }
@@ -2567,12 +3332,77 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
           ? conv_spec->shadow_space_size
           : 0;
   int stack_arg_space = stack_argument_count * 8;
-  int call_stack_total = shadow_space + stack_arg_space;
+  /* Layout of the call's sub-rsp region, low to high:
+   *   [rsp + 0 .. indirect_temp_region)              indirect arg temps
+   *   [rsp + post_slots_base .. + shadow_space)      Win64 home space
+   *   [rsp + post_slots_base + shadow .. )           extra stack arg slots
+   *
+   * The hidden return slot for INDIRECT returns lives at a FUNCTION-LEVEL
+   * frame offset (not in this per-call region), because the consumer
+   * accesses it after the call's `add rsp` reclaims the per-call bytes.
+   * That offset is assigned in the function prologue pre-pass and looked
+   * up here via the generator's pending_indirect_return_offset slot. */
+  if (indirect_temp_region > 0) {
+    /* Keep the region a multiple of 16 so downstream offsets stay aligned. */
+    indirect_temp_region = (indirect_temp_region + 15) & ~15;
+  }
+  int post_slots_base = indirect_temp_region;
+  int call_stack_total = post_slots_base + shadow_space + stack_arg_space;
   if ((call_stack_total % 16) != 0) {
     call_stack_total += 8;
   }
   if (call_stack_total > 0) {
     code_generator_emit(generator, "    sub rsp, %d\n", call_stack_total);
+  }
+  int return_slot_rbp_offset = 0;
+  if (return_is_indirect) {
+    return_slot_rbp_offset =
+        code_generator_ir_take_pending_indirect_return_offset(generator);
+    if (return_slot_rbp_offset <= 0) {
+      code_generator_set_error(
+          generator,
+          "Indirect-return frame slot not assigned for call '%s'",
+          instruction->text);
+      free(is_float);
+      free(goes_on_stack);
+      free(is_indirect);
+      free(indirect_temp_offset);
+      free(indirect_size);
+      return 0;
+    }
+    code_generator_emit(
+        generator,
+        "    ; hidden return slot (%zu B) at [rbp - %d]\n",
+        return_size, return_slot_rbp_offset);
+  }
+
+  /* Materialize INDIRECT arguments first: memcpy each struct into its temp.
+   * After this loop the temp region holds the copies and rsi/rdi are
+   * clobbered, which is fine — argument loading happens after. */
+  if (indirect_temp_region > 0) {
+    code_generator_emit(generator,
+                        "    ; %d byte(s) of indirect-arg temp region\n",
+                        indirect_temp_region);
+    for (size_t i = 0; i < argument_count; i++) {
+      if (!is_indirect[i]) {
+        continue;
+      }
+      /* Load source address into rax. */
+      if (!code_generator_emit_ir_indirect_arg_source_address(
+              generator, &instruction->arguments[i], temp_table)) {
+        free(is_float);
+        free(goes_on_stack);
+        free(is_indirect);
+        free(indirect_temp_offset);
+        free(indirect_size);
+        return 0;
+      }
+      /* rsi = source, rdi = dest in temp region. */
+      code_generator_emit(generator, "    mov rsi, rax\n");
+      code_generator_emit(generator, "    lea rdi, [rsp + %d]\n",
+                          indirect_temp_offset[i]);
+      code_generator_emit_rep_movsb(generator, indirect_size[i]);
+    }
   }
 
   // Materialize stack arguments into ABI-defined stack slots.
@@ -2581,11 +3411,21 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
     if (!goes_on_stack || !goes_on_stack[i]) {
       continue;
     }
-    int slot_offset = shadow_space + (stack_arg_index * 8);
-    if (!code_generator_emit_ir_call_argument_stack(
-            generator, &instruction->arguments[i], temp_table, slot_offset)) {
+    int slot_offset =
+        post_slots_base + shadow_space + (stack_arg_index * 8);
+    if (is_indirect[i]) {
+      /* Place &temp into the stack slot. */
+      code_generator_emit(generator, "    lea rax, [rsp + %d]\n",
+                          indirect_temp_offset[i]);
+      code_generator_emit(generator, "    mov [rsp + %d], rax\n", slot_offset);
+    } else if (!code_generator_emit_ir_call_argument_stack(
+                   generator, &instruction->arguments[i], temp_table,
+                   slot_offset)) {
       free(is_float);
       free(goes_on_stack);
+      free(is_indirect);
+      free(indirect_temp_offset);
+      free(indirect_size);
       return 0;
     }
     stack_arg_index++;
@@ -2599,22 +3439,77 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
       continue;
     }
 
+    /* INDIRECT args: pass &temp in the integer arg register for this slot. */
+    if (is_indirect[i]) {
+      x86Register target_register;
+      size_t abi_slot = i + hidden_arg_count;
+      if (conv_spec->convention == CALLING_CONV_MS_X64) {
+        if (abi_slot >= ms_param_slot_count) {
+          code_generator_set_error(
+              generator,
+              "IR call indirect-arg slot mismatch (Win64)");
+          free(is_float);
+          free(goes_on_stack);
+          free(is_indirect);
+          free(indirect_temp_offset);
+          free(indirect_size);
+          return 0;
+        }
+        target_register = conv_spec->int_param_registers[abi_slot];
+      } else {
+        if (int_reg_cursor >= (int)conv_spec->int_param_count) {
+          code_generator_set_error(
+              generator,
+              "IR call indirect-arg slot mismatch (SysV)");
+          free(is_float);
+          free(goes_on_stack);
+          free(is_indirect);
+          free(indirect_temp_offset);
+          free(indirect_size);
+          return 0;
+        }
+        target_register = conv_spec->int_param_registers[int_reg_cursor++];
+      }
+      const char *reg_name = code_generator_get_register_name(target_register);
+      if (!reg_name) {
+        code_generator_set_error(generator,
+                                 "Invalid register for indirect call arg");
+        free(is_float);
+        free(goes_on_stack);
+        free(is_indirect);
+        free(indirect_temp_offset);
+        free(indirect_size);
+        return 0;
+      }
+      code_generator_emit(generator, "    lea %s, [rsp + %d]\n", reg_name,
+                          indirect_temp_offset[i]);
+      continue;
+    }
+
     if (conv_spec->convention == CALLING_CONV_MS_X64) {
-      if (i >= ms_param_slot_count) {
+      size_t abi_slot = i + hidden_arg_count;
+      if (abi_slot >= ms_param_slot_count) {
         code_generator_set_error(
             generator, "IR call argument classification mismatch (Win64)");
         free(is_float);
         free(goes_on_stack);
+        free(is_indirect);
+        free(indirect_temp_offset);
+        free(indirect_size);
         return 0;
       }
-      x86Register target_register = (is_float && is_float[i])
-                                        ? conv_spec->float_param_registers[i]
-                                        : conv_spec->int_param_registers[i];
+      x86Register target_register =
+          (is_float && is_float[i])
+              ? conv_spec->float_param_registers[abi_slot]
+              : conv_spec->int_param_registers[abi_slot];
       if (!code_generator_emit_ir_call_argument_register(
               generator, &instruction->arguments[i], temp_table,
               target_register, (is_float && is_float[i]) ? 1 : 0)) {
         free(is_float);
         free(goes_on_stack);
+        free(is_indirect);
+        free(indirect_temp_offset);
+        free(indirect_size);
         return 0;
       }
     } else {
@@ -2624,6 +3519,9 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
               generator, "IR call argument classification mismatch (float)");
           free(is_float);
           free(goes_on_stack);
+          free(is_indirect);
+          free(indirect_temp_offset);
+          free(indirect_size);
           return 0;
         }
         x86Register target_register =
@@ -2633,6 +3531,9 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
                 target_register, 1)) {
           free(is_float);
           free(goes_on_stack);
+          free(is_indirect);
+          free(indirect_temp_offset);
+          free(indirect_size);
           return 0;
         }
       } else {
@@ -2641,6 +3542,9 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
               generator, "IR call argument classification mismatch (integer)");
           free(is_float);
           free(goes_on_stack);
+          free(is_indirect);
+          free(indirect_temp_offset);
+          free(indirect_size);
           return 0;
         }
         x86Register target_register =
@@ -2650,10 +3554,26 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
                 target_register, 0)) {
           free(is_float);
           free(goes_on_stack);
+          free(is_indirect);
+          free(indirect_temp_offset);
+          free(indirect_size);
           return 0;
         }
       }
     }
+  }
+
+  /* Hidden out-pointer for an INDIRECT return: emitted LAST, after any
+   * user-arg memcpy that may have clobbered rcx via rep movsb. The slot
+   * lives in the caller's function frame (allocated by the pre-pass), so
+   * the value outlives the call's `add rsp`. */
+  if (return_is_indirect) {
+    x86Register out_reg = conv_spec->int_param_registers[0];
+    const char *out_name = code_generator_get_register_name(out_reg);
+    code_generator_emit(
+        generator,
+        "    lea %s, [rbp - %d]  ; hidden out-ptr (return slot)\n",
+        out_name, return_slot_rbp_offset);
   }
 
   code_generator_emit(generator, "    call %s\n", call_target);
@@ -2662,15 +3582,16 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
     code_generator_emit(generator, "    add rsp, %d\n", call_stack_total);
   }
 
-  Type *return_type = NULL;
-  if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
-      function_symbol->type) {
-    return_type = function_symbol->type;
-    if (function_symbol->data.function.return_type) {
-      return_type = function_symbol->data.function.return_type;
-    }
-  }
-  if (return_type && code_generator_is_floating_point_type(return_type)) {
+  if (return_is_indirect) {
+    /* The callee placed the value at [rbp - return_slot_rbp_offset] and
+     * (per ABI) also returned that address in rax. Re-materialize rax
+     * from the known frame slot so subsequent code can treat the call
+     * result as "address of the returned struct" without relying on
+     * callee discipline. */
+    code_generator_emit(generator,
+                        "    lea rax, [rbp - %d]  ; return value base\n",
+                        return_slot_rbp_offset);
+  } else if (return_type && code_generator_is_floating_point_type(return_type)) {
     /* Win64 returns floats in XMM0; move back at the return precision. */
     if (return_type->kind == TYPE_FLOAT32) {
       code_generator_emit(generator, "    movd eax, xmm0\n");
@@ -2678,10 +3599,117 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
       code_generator_emit(generator, "    movq rax, xmm0\n");
     }
   }
-  code_generator_handle_return_value(generator, return_type);
+  if (!return_is_indirect) {
+    code_generator_handle_return_value(generator, return_type);
+  }
 
   free(is_float);
   free(goes_on_stack);
+  free(is_indirect);
+  free(indirect_temp_offset);
+  free(indirect_size);
+  return !generator->has_error;
+}
+
+static int code_generator_emit_ir_rotate_add(CodeGenerator *generator,
+                                             const IRInstruction *instruction,
+                                             IRTempTable *temp_table) {
+  if (!generator || !instruction) {
+    return 0;
+  }
+
+  Symbol *sym_next =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->dest);
+  Symbol *sym_a =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->lhs);
+  Symbol *sym_b =
+      code_generator_ir_lookup_register_symbol(generator, &instruction->rhs);
+
+  if (sym_next && sym_a && sym_b) {
+    const char *reg_next =
+        code_generator_ir_symbol_register_name(sym_next, 64);
+    const char *reg_a = code_generator_ir_symbol_register_name(sym_a, 64);
+    const char *reg_b = code_generator_ir_symbol_register_name(sym_b, 64);
+    if (!reg_next || !reg_a || !reg_b) {
+      code_generator_set_error(generator,
+                               "Invalid register in IR rotate_add fast path");
+      return 0;
+    }
+    code_generator_emit(generator, "    lea %s, [%s + %s]\n", reg_next, reg_a,
+                        reg_b);
+    code_generator_emit(generator, "    mov %s, %s\n", reg_a, reg_b);
+    code_generator_emit(generator, "    mov %s, %s\n", reg_b, reg_next);
+    return 1;
+  }
+
+  if (!instruction->dest.name || !instruction->lhs.name ||
+      !instruction->rhs.name) {
+    code_generator_set_error(generator, "Malformed IR rotate_add operands");
+    return 0;
+  }
+
+  code_generator_load_variable(generator, instruction->lhs.name);
+  if (generator->has_error) {
+    return 0;
+  }
+
+  if (sym_b) {
+    const char *reg_b = code_generator_ir_symbol_register_name(sym_b, 64);
+    if (!reg_b) {
+      code_generator_set_error(generator,
+                               "Invalid RHS register in IR rotate_add");
+      return 0;
+    }
+    code_generator_emit(generator, "    add rax, %s\n", reg_b);
+  } else {
+    code_generator_load_variable(generator, instruction->rhs.name);
+    if (generator->has_error) {
+      return 0;
+    }
+    code_generator_emit(generator, "    add rax, rbx\n");
+  }
+
+  code_generator_emit(generator, "    mov r11, rax\n");
+
+  if (sym_next) {
+    const char *reg_next =
+        code_generator_ir_symbol_register_name(sym_next, 64);
+    if (!reg_next) {
+      code_generator_set_error(generator,
+                               "Invalid next register in IR rotate_add");
+      return 0;
+    }
+    code_generator_emit(generator, "    mov %s, r11\n", reg_next);
+  } else {
+    code_generator_store_variable(generator, instruction->dest.name, "r11");
+  }
+
+  if (sym_a && sym_b) {
+    const char *reg_a = code_generator_ir_symbol_register_name(sym_a, 64);
+    const char *reg_b = code_generator_ir_symbol_register_name(sym_b, 64);
+    code_generator_emit(generator, "    mov %s, %s\n", reg_a, reg_b);
+  } else if (sym_a) {
+    const char *reg_a = code_generator_ir_symbol_register_name(sym_a, 64);
+    code_generator_load_variable(generator, instruction->rhs.name);
+    if (generator->has_error) {
+      return 0;
+    }
+    code_generator_emit(generator, "    mov %s, rax\n", reg_a);
+  } else {
+    code_generator_load_variable(generator, instruction->rhs.name);
+    if (generator->has_error) {
+      return 0;
+    }
+    code_generator_store_variable(generator, instruction->lhs.name, "rax");
+  }
+
+  if (sym_b) {
+    const char *reg_b = code_generator_ir_symbol_register_name(sym_b, 64);
+    code_generator_emit(generator, "    mov %s, r11\n", reg_b);
+  } else {
+    code_generator_store_variable(generator, instruction->rhs.name, "r11");
+  }
+
   return !generator->has_error;
 }
 
@@ -2719,8 +3747,7 @@ static int code_generator_emit_ir_cast(CodeGenerator *generator,
   if (target_size <= 0)
     target_size = 8;
   if (target_type && (target_type->kind == TYPE_POINTER ||
-                      target_type->kind == TYPE_FUNCTION_POINTER ||
-                      target_type->kind == TYPE_FUTURE)) {
+                      target_type->kind == TYPE_FUNCTION_POINTER)) {
     target_size = 8;
   }
 
@@ -3048,7 +4075,34 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
                         instruction->text ? instruction->text : "ir_missing");
     return 1;
 
-  case IR_OP_BRANCH_EQ:
+  case IR_OP_BRANCH_EQ: {
+    const char *eq_target =
+        instruction->text ? instruction->text : "ir_missing";
+    /* Fast path: comparing against a 32-bit immediate (e.g. the whitespace
+     * `c == 32 || c == 9 ...` chain). Emit `cmp <lhs>, imm; je` directly
+     * instead of materializing the constant into r10 first. Works whichever
+     * side holds the immediate since equality is symmetric. */
+    const IROperand *cmp_value = NULL;
+    const IROperand *cmp_imm = NULL;
+    if (instruction->rhs.kind == IR_OPERAND_INT &&
+        ir_immediate_fits_signed_32(instruction->rhs.int_value)) {
+      cmp_value = &instruction->lhs;
+      cmp_imm = &instruction->rhs;
+    } else if (instruction->lhs.kind == IR_OPERAND_INT &&
+               ir_immediate_fits_signed_32(instruction->lhs.int_value)) {
+      cmp_value = &instruction->rhs;
+      cmp_imm = &instruction->lhs;
+    }
+    if (cmp_value && cmp_value->kind != IR_OPERAND_INT) {
+      if (!code_generator_load_ir_operand(generator, cmp_value, temp_table)) {
+        return 0;
+      }
+      code_generator_emit(generator, "    cmp rax, %lld\n",
+                          cmp_imm->int_value);
+      code_generator_emit(generator, "    je %s\n", eq_target);
+      return 1;
+    }
+
     if (!code_generator_load_ir_operand_into_register(
             generator, &instruction->rhs, temp_table, REG_R10)) {
       return 0;
@@ -3058,12 +4112,41 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
       return 0;
     }
     code_generator_emit(generator, "    cmp rax, r10\n");
-    code_generator_emit(generator, "    je %s\n",
-                        instruction->text ? instruction->text : "ir_missing");
+    code_generator_emit(generator, "    je %s\n", eq_target);
     return 1;
+  }
 
   case IR_OP_ASSIGN:
     {
+      /* Indirect-return propagation: if the source is a temp known to hold
+       * a pointer to a struct returned by an INDIRECT-returning call, and
+       * the dest is a struct symbol, memcpy from the temp's struct through
+       * to the dest's storage instead of doing an 8-byte pointer copy. */
+      if (instruction->lhs.kind == IR_OPERAND_TEMP && instruction->lhs.name &&
+          instruction->dest.kind == IR_OPERAND_SYMBOL &&
+          instruction->dest.name) {
+        size_t struct_bytes = ir_indirect_temp_table_get(instruction->lhs.name);
+        if (struct_bytes > 0) {
+          Symbol *dest_sym = symbol_table_lookup(generator->symbol_table,
+                                                 instruction->dest.name);
+          if (dest_sym && dest_sym->type &&
+              code_generator_type_is_aggregate(dest_sym->type)) {
+            /* Load the temp's pointer value into rax via the normal path,
+             * then memcpy struct_bytes from [rax] to &dest. */
+            if (!code_generator_load_ir_operand(generator, &instruction->lhs,
+                                                temp_table)) {
+              return 0;
+            }
+            code_generator_emit(generator, "    mov rsi, rax\n");
+            code_generator_emit(
+                generator,
+                "    lea rdi, [rbp - %d]  ; struct dest (indirect ret)\n",
+                dest_sym->data.variable.memory_offset);
+            code_generator_emit_rep_movsb(generator, struct_bytes);
+            return 1;
+          }
+        }
+      }
       int emitted_fastpath = 0;
       if (!code_generator_try_emit_ir_assign_symbol_to_symbol(
               generator, instruction, &emitted_fastpath)) {
@@ -3097,10 +4180,13 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
         return 0;
       }
       return code_generator_store_ir_destination(generator, &instruction->dest,
-                                                 temp_table);
+                                               temp_table);
     }
     return code_generator_emit_ir_binary_fallback(generator, instruction,
                                                   temp_table);
+
+  case IR_OP_ROTATE_ADD:
+    return code_generator_emit_ir_rotate_add(generator, instruction, temp_table);
 
   case IR_OP_UNARY:
     if (instruction->ast_ref) {
@@ -3114,12 +4200,56 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
     return code_generator_emit_ir_unary_fallback(generator, instruction,
                                                  temp_table);
 
-  case IR_OP_CALL:
+  case IR_OP_CALL: {
     if (!code_generator_emit_ir_call(generator, instruction, temp_table)) {
       return 0;
     }
+    /* If the callee returns an INDIRECT struct and the dest is a symbol of
+     * a struct type, memcpy from rax (the returned pointer) into dest's
+     * storage. The default 8-byte store would only capture the pointer's
+     * low word, defeating the whole point of the indirect return. */
+    Symbol *callee_sym =
+        instruction->text
+            ? symbol_table_lookup(generator->symbol_table, instruction->text)
+            : NULL;
+    Type *callee_ret = NULL;
+    if (callee_sym && callee_sym->kind == SYMBOL_FUNCTION) {
+      callee_ret = callee_sym->data.function.return_type
+                       ? callee_sym->data.function.return_type
+                       : callee_sym->type;
+    }
+    int callee_indirect =
+        (code_generator_abi_classify(callee_ret) == ABI_PASS_INDIRECT) ? 1 : 0;
+    /* Direct memcpy fast path: CALL whose dest is a struct symbol. */
+    if (callee_indirect && instruction->dest.kind == IR_OPERAND_SYMBOL &&
+        instruction->dest.name) {
+      Symbol *dest_sym =
+          symbol_table_lookup(generator->symbol_table, instruction->dest.name);
+      if (dest_sym && dest_sym->type &&
+          code_generator_type_is_aggregate(dest_sym->type)) {
+        size_t copy_bytes = code_generator_abi_type_size(callee_ret);
+        code_generator_emit(generator, "    mov rsi, rax\n");
+        code_generator_emit(generator,
+                            "    lea rdi, [rbp - %d]  ; struct dest\n",
+                            dest_sym->data.variable.memory_offset);
+        code_generator_emit_rep_movsb(generator, copy_bytes);
+        return 1;
+      }
+    }
+    /* Temp dest: register the temp as "holds a struct pointer of size N" so
+     * the next IR_OP_ASSIGN (temp -> struct symbol) can memcpy correctly. */
+    if (callee_indirect && instruction->dest.kind == IR_OPERAND_TEMP &&
+        instruction->dest.name) {
+      size_t sz = code_generator_abi_type_size(callee_ret);
+      if (!ir_indirect_temp_table_add(instruction->dest.name, sz)) {
+        code_generator_set_error(generator,
+                                 "Out of memory tracking indirect-return temp");
+        return 0;
+      }
+    }
     return code_generator_store_ir_destination(generator, &instruction->dest,
                                                temp_table);
+  }
 
   case IR_OP_CALL_INDIRECT: {
     CallingConventionSpec *conv_spec =
@@ -3275,7 +4405,22 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
     return code_generator_emit_ir_cast(generator, instruction, temp_table);
 
   case IR_OP_RETURN:
-    if (instruction->lhs.kind != IR_OPERAND_NONE) {
+    if (generator->current_fn_returns_indirect &&
+        instruction->lhs.kind != IR_OPERAND_NONE) {
+      /* Struct return: memcpy the operand's struct value through the hidden
+       * out-pointer stored at [rbp - 8], then put that pointer into rax. */
+      if (!code_generator_emit_ir_indirect_arg_source_address(
+              generator, &instruction->lhs, temp_table)) {
+        return 0;
+      }
+      code_generator_emit(generator, "    mov rsi, rax\n");
+      code_generator_emit(generator,
+                          "    mov rdi, qword [rbp - 8]  ; hidden out-ptr\n");
+      code_generator_emit_rep_movsb(
+          generator, generator->current_fn_indirect_return_size);
+      code_generator_emit(generator,
+                          "    mov rax, qword [rbp - 8]  ; return out-ptr\n");
+    } else if (instruction->lhs.kind != IR_OPERAND_NONE) {
       if (!code_generator_load_ir_operand(generator, &instruction->lhs,
                                           temp_table)) {
         return 0;
@@ -3295,22 +4440,8 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
     code_generator_restore_registers_after_inline_asm(generator);
     code_generator_emit(generator, "    ; End inline assembly block\n");
     return 1;
-  case IR_OP_THREAD_SPAWN:
-  case IR_OP_THREAD_JOIN:
-  case IR_OP_MUTEX_NEW:
-  case IR_OP_MUTEX_LOCK:
-  case IR_OP_MUTEX_UNLOCK:
-  case IR_OP_ATOMIC_LOAD:
-  case IR_OP_ATOMIC_STORE:
-  case IR_OP_ATOMIC_FETCH_ADD:
-  case IR_OP_ATOMIC_FETCH_SUB:
-  case IR_OP_ATOMIC_CAS:
-  case IR_OP_CHAN_NEW:
-  case IR_OP_CHAN_SEND:
-  case IR_OP_CHAN_RECV:
-    // All thread opcodes are lowered to IR_OP_CALL in the lowering pass.
-    // If they arrive here, emit as a call using instruction->text as target.
-    return code_generator_emit_ir_call(generator, instruction, temp_table);
+  case IR_OP_COUNT_WORD_STARTS:
+    return code_generator_emit_ir_count_word_starts(generator, instruction);
 
   default:
     code_generator_set_error(generator, "Unhandled IR opcode: %d",
@@ -3379,16 +4510,27 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
 
   code_generator_emit(generator, "\nglobal %s\n", function_data->name);
 
+  /* Does this function return INDIRECT? If so, we reserve home slot 0 for
+   * the hidden out-pointer and shift user parameter homes up by one slot. */
+  Type *fn_return_type = NULL;
+  if (function_data->return_type) {
+    fn_return_type = type_checker_get_type_by_name(generator->type_checker,
+                                                   function_data->return_type);
+  }
+  int has_hidden_return =
+      (code_generator_abi_classify(fn_return_type) == ABI_PASS_INDIRECT) ? 1 : 0;
+
   int parameter_home_size = 0;
-  if (function_data->parameter_count > 0) {
-    if (function_data->parameter_count > (size_t)(INT_MAX / 8)) {
+  size_t home_slot_count = function_data->parameter_count + (size_t)has_hidden_return;
+  if (home_slot_count > 0) {
+    if (home_slot_count > (size_t)(INT_MAX / 8)) {
       code_generator_set_error(generator,
                                "Too many parameters in function '%s'",
                                function_data->name);
       symbol_table_exit_scope(generator->symbol_table);
       return 0;
     }
-    parameter_home_size = (int)(function_data->parameter_count * 8);
+    parameter_home_size = (int)(home_slot_count * 8);
   }
 
   int stack_size = parameter_home_size;
@@ -3401,15 +4543,25 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   int promoted_save_bytes = 0;
   int stack_offset_base = parameter_home_size;
 
+  /* Loop-depth weighting: a symbol used inside a nested loop deserves a
+   * promotion register far more than one touched only in straight-line setup
+   * code, even if the latter has more static occurrences. NULL is fine for a
+   * loop-free function (every weight falls back to 1). */
+  unsigned char *loop_depths = ir_compute_loop_depths(ir_function);
+
   for (size_t i = 0; i < ir_function->instruction_count; i++) {
     IRInstruction *instruction = &ir_function->instructions[i];
     if (!instruction) {
       continue;
     }
 
-    if (!ir_symbol_stats_map_record_instruction(&symbol_stats, instruction)) {
+    size_t use_weight =
+        loop_depths ? ir_loop_depth_weight(loop_depths[i]) : 1;
+    if (!ir_symbol_stats_map_record_instruction(&symbol_stats, instruction,
+                                                use_weight)) {
       code_generator_set_error(generator,
                                "Out of memory while tracking IR symbol usage");
+      free(loop_depths);
       ir_temp_table_destroy(&temp_table);
       ir_local_table_destroy(&local_table);
       ir_symbol_stats_map_destroy(&symbol_stats);
@@ -3500,6 +4652,8 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       }
     }
   }
+  free(loop_depths);
+  loop_depths = NULL;
   if (temp_table.count > (size_t)(INT_MAX / (8 + 15))) {
     code_generator_set_error(
         generator, "Stack frame too large in function '%s' (too many temps)",
@@ -3520,9 +4674,100 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
     return 0;
   }
 
-  for (size_t reg_index = 0;
-       reg_index < (sizeof(IR_PROMOTION_REGISTERS) /
-                    sizeof(IR_PROMOTION_REGISTERS[0]));
+  /* Reserve a function-level slot for each IR_OP_CALL whose return type is
+   * INDIRECT. Each slot is sized to the return type and 16-byte aligned. The
+   * call-site emit code pops these in instruction order. */
+  code_generator_ir_reset_indirect_return_slots(generator);
+  for (size_t pp_i = 0; pp_i < ir_function->instruction_count; pp_i++) {
+    const IRInstruction *pp_insn = &ir_function->instructions[pp_i];
+    if (pp_insn->op != IR_OP_CALL || !pp_insn->text) continue;
+    Symbol *callee =
+        symbol_table_lookup(generator->symbol_table, pp_insn->text);
+    Type *ret_t = NULL;
+    if (callee && callee->kind == SYMBOL_FUNCTION) {
+      ret_t = callee->data.function.return_type
+                  ? callee->data.function.return_type
+                  : callee->type;
+    }
+    if (code_generator_abi_classify(ret_t) != ABI_PASS_INDIRECT) continue;
+    size_t sz = code_generator_abi_type_size(ret_t);
+    int slot_bytes = (int)((sz + 15u) & ~(size_t)15);
+    int prev_stack = stack_size;
+    if (!code_generator_add_stack_size(generator, &stack_size, slot_bytes,
+                                       function_data->name)) {
+      ir_temp_table_destroy(&temp_table);
+      ir_local_table_destroy(&local_table);
+      ir_symbol_stats_map_destroy(&symbol_stats);
+      symbol_table_exit_scope(generator->symbol_table);
+      return 0;
+    }
+    /* Slot occupies [rbp - (prev_stack + slot_bytes) .. rbp - prev_stack).
+     * We hand out the high address (start of the slot in low-to-high
+     * terms): the rbp-relative offset of the slot base. */
+    int slot_rbp_offset = prev_stack + slot_bytes;
+    if (!code_generator_ir_push_indirect_return_offset(generator,
+                                                        slot_rbp_offset)) {
+      code_generator_set_error(
+          generator,
+          "Out of memory recording indirect-return slot in '%s'",
+          function_data->name);
+      ir_temp_table_destroy(&temp_table);
+      ir_local_table_destroy(&local_table);
+      ir_symbol_stats_map_destroy(&symbol_stats);
+      symbol_table_exit_scope(generator->symbol_table);
+      return 0;
+    }
+  }
+
+  size_t max_promoted =
+      sizeof(IR_PROMOTION_REGISTERS) / sizeof(IR_PROMOTION_REGISTERS[0]);
+  if (!ir_function_can_promote_rsi_rdi(generator, ir_function, fn_return_type) &&
+      max_promoted >= 2) {
+    max_promoted -= 2;
+  }
+  int function_has_no_calls =
+      !ir_function_blocks_register_promotion(ir_function);
+
+  if (function_has_no_calls) {
+    for (size_t insn_i = 0;
+         insn_i < ir_function->instruction_count &&
+         promoted_symbol_count < max_promoted;
+         insn_i++) {
+      const IRInstruction *insn = &ir_function->instructions[insn_i];
+      if (insn->op != IR_OP_ROTATE_ADD) {
+        continue;
+      }
+
+      const IROperand *operands[3] = {&insn->dest, &insn->lhs, &insn->rhs};
+      for (size_t op_i = 0;
+           op_i < 3 && promoted_symbol_count < max_promoted;
+           op_i++) {
+        const IROperand *operand = operands[op_i];
+        if (operand->kind != IR_OPERAND_SYMBOL || !operand->name ||
+            ir_promoted_symbol_find(promoted_symbols, promoted_symbol_count,
+                                    operand->name) >= 0 ||
+            ir_symbol_stats_map_is_address_taken(&symbol_stats,
+                                                 operand->name)) {
+          continue;
+        }
+
+        Symbol *sym = symbol_table_lookup_current_scope(generator->symbol_table,
+                                                        operand->name);
+        if (!sym || sym->kind != SYMBOL_VARIABLE ||
+            !ir_is_integer_or_pointer_promotable(sym->type)) {
+          continue;
+        }
+
+        promoted_symbols[promoted_symbol_count].name = operand->name;
+        promoted_symbols[promoted_symbol_count].reg =
+            IR_PROMOTION_REGISTERS[promoted_symbol_count];
+        promoted_symbol_count++;
+      }
+    }
+  }
+
+  for (size_t reg_index = promoted_symbol_count;
+       reg_index < max_promoted;
        reg_index++) {
     const char *best_name = NULL;
     size_t best_use_count = 0;
@@ -3574,7 +4819,6 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       }
     }
 
-    // Avoid paying save/restore cost for trivially-used symbols.
     if (!best_name || best_use_count < 3) {
       break;
     }
@@ -3626,7 +4870,11 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   code_generator_function_prologue(generator, function_data->name, stack_size);
   generator->current_stack_offset = stack_offset_base;
   code_generator_register_function_parameters(generator, function_data,
-                                              parameter_home_size);
+                                              parameter_home_size,
+                                              has_hidden_return);
+  generator->current_fn_returns_indirect = has_hidden_return;
+  generator->current_fn_indirect_return_size =
+      has_hidden_return ? code_generator_abi_type_size(fn_return_type) : 0;
   for (size_t i = 0; i < promoted_symbol_count; i++) {
     const char *reg_name = code_generator_get_register_name(promoted_symbols[i].reg);
     if (!reg_name) {
@@ -3637,250 +4885,6 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
     }
     code_generator_emit(generator, "    mov [rbp - %d], %s\n",
                         promoted_symbols[i].save_offset, reg_name);
-  }
-
-  if (ir_function_requires_entry_safepoint(ir_function)) {
-    {
-    CallingConventionSpec *conv_spec =
-        generator->register_allocator
-            ? generator->register_allocator->calling_convention
-            : NULL;
-    const char *first_param_reg = "rdi";
-    if (conv_spec && conv_spec->int_param_count > 0) {
-      const char *candidate =
-          code_generator_get_register_name(conv_spec->int_param_registers[0]);
-      if (candidate) {
-        first_param_reg = candidate;
-      }
-    }
-    if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
-      code_generator_emit(generator,
-                          "    ; Spill GPRs so GC sees register-held roots\n");
-      code_generator_emit(generator, "    push rax\n");
-      code_generator_emit(generator, "    push rbx\n");
-      code_generator_emit(generator, "    push rcx\n");
-      code_generator_emit(generator, "    push rdx\n");
-      code_generator_emit(generator, "    push rsi\n");
-      code_generator_emit(generator, "    push rdi\n");
-      code_generator_emit(generator, "    push r8\n");
-      code_generator_emit(generator, "    push r9\n");
-      code_generator_emit(generator, "    push r10\n");
-      code_generator_emit(generator, "    push r11\n");
-      code_generator_emit(generator, "    push r12\n");
-      code_generator_emit(generator, "    push r13\n");
-      code_generator_emit(generator, "    push r14\n");
-      code_generator_emit(generator, "    push r15\n");
-      code_generator_emit(generator,
-                          "    ; Spill XMM registers for conservative root scan\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    sub rsp, 512\n");
-#else
-      code_generator_emit(generator, "    sub rsp, 256\n");
-#endif
-      code_generator_emit(generator, "    movdqu [rsp + 0], xmm0\n");
-      code_generator_emit(generator, "    movdqu [rsp + 16], xmm1\n");
-      code_generator_emit(generator, "    movdqu [rsp + 32], xmm2\n");
-      code_generator_emit(generator, "    movdqu [rsp + 48], xmm3\n");
-      code_generator_emit(generator, "    movdqu [rsp + 64], xmm4\n");
-      code_generator_emit(generator, "    movdqu [rsp + 80], xmm5\n");
-      code_generator_emit(generator, "    movdqu [rsp + 96], xmm6\n");
-      code_generator_emit(generator, "    movdqu [rsp + 112], xmm7\n");
-      code_generator_emit(generator, "    movdqu [rsp + 128], xmm8\n");
-      code_generator_emit(generator, "    movdqu [rsp + 144], xmm9\n");
-      code_generator_emit(generator, "    movdqu [rsp + 160], xmm10\n");
-      code_generator_emit(generator, "    movdqu [rsp + 176], xmm11\n");
-      code_generator_emit(generator, "    movdqu [rsp + 192], xmm12\n");
-      code_generator_emit(generator, "    movdqu [rsp + 208], xmm13\n");
-      code_generator_emit(generator, "    movdqu [rsp + 224], xmm14\n");
-      code_generator_emit(generator, "    movdqu [rsp + 240], xmm15\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    movdqu [rsp + 256], xmm16\n");
-      code_generator_emit(generator, "    movdqu [rsp + 272], xmm17\n");
-      code_generator_emit(generator, "    movdqu [rsp + 288], xmm18\n");
-      code_generator_emit(generator, "    movdqu [rsp + 304], xmm19\n");
-      code_generator_emit(generator, "    movdqu [rsp + 320], xmm20\n");
-      code_generator_emit(generator, "    movdqu [rsp + 336], xmm21\n");
-      code_generator_emit(generator, "    movdqu [rsp + 352], xmm22\n");
-      code_generator_emit(generator, "    movdqu [rsp + 368], xmm23\n");
-      code_generator_emit(generator, "    movdqu [rsp + 384], xmm24\n");
-      code_generator_emit(generator, "    movdqu [rsp + 400], xmm25\n");
-      code_generator_emit(generator, "    movdqu [rsp + 416], xmm26\n");
-      code_generator_emit(generator, "    movdqu [rsp + 432], xmm27\n");
-      code_generator_emit(generator, "    movdqu [rsp + 448], xmm28\n");
-      code_generator_emit(generator, "    movdqu [rsp + 464], xmm29\n");
-      code_generator_emit(generator, "    movdqu [rsp + 480], xmm30\n");
-      code_generator_emit(generator, "    movdqu [rsp + 496], xmm31\n");
-#endif
-      code_generator_emit(generator, "    sub rsp, 32\n");
-      code_generator_emit(generator, "    mov %s, rsp\n", first_param_reg);
-      code_generator_emit(generator, "    extern gc_safepoint\n");
-      code_generator_emit(generator, "    call gc_safepoint\n");
-      code_generator_emit(generator, "    add rsp, 32\n");
-      code_generator_emit(generator, "    movdqu xmm0, [rsp + 0]\n");
-      code_generator_emit(generator, "    movdqu xmm1, [rsp + 16]\n");
-      code_generator_emit(generator, "    movdqu xmm2, [rsp + 32]\n");
-      code_generator_emit(generator, "    movdqu xmm3, [rsp + 48]\n");
-      code_generator_emit(generator, "    movdqu xmm4, [rsp + 64]\n");
-      code_generator_emit(generator, "    movdqu xmm5, [rsp + 80]\n");
-      code_generator_emit(generator, "    movdqu xmm6, [rsp + 96]\n");
-      code_generator_emit(generator, "    movdqu xmm7, [rsp + 112]\n");
-      code_generator_emit(generator, "    movdqu xmm8, [rsp + 128]\n");
-      code_generator_emit(generator, "    movdqu xmm9, [rsp + 144]\n");
-      code_generator_emit(generator, "    movdqu xmm10, [rsp + 160]\n");
-      code_generator_emit(generator, "    movdqu xmm11, [rsp + 176]\n");
-      code_generator_emit(generator, "    movdqu xmm12, [rsp + 192]\n");
-      code_generator_emit(generator, "    movdqu xmm13, [rsp + 208]\n");
-      code_generator_emit(generator, "    movdqu xmm14, [rsp + 224]\n");
-      code_generator_emit(generator, "    movdqu xmm15, [rsp + 240]\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    movdqu xmm16, [rsp + 256]\n");
-      code_generator_emit(generator, "    movdqu xmm17, [rsp + 272]\n");
-      code_generator_emit(generator, "    movdqu xmm18, [rsp + 288]\n");
-      code_generator_emit(generator, "    movdqu xmm19, [rsp + 304]\n");
-      code_generator_emit(generator, "    movdqu xmm20, [rsp + 320]\n");
-      code_generator_emit(generator, "    movdqu xmm21, [rsp + 336]\n");
-      code_generator_emit(generator, "    movdqu xmm22, [rsp + 352]\n");
-      code_generator_emit(generator, "    movdqu xmm23, [rsp + 368]\n");
-      code_generator_emit(generator, "    movdqu xmm24, [rsp + 384]\n");
-      code_generator_emit(generator, "    movdqu xmm25, [rsp + 400]\n");
-      code_generator_emit(generator, "    movdqu xmm26, [rsp + 416]\n");
-      code_generator_emit(generator, "    movdqu xmm27, [rsp + 432]\n");
-      code_generator_emit(generator, "    movdqu xmm28, [rsp + 448]\n");
-      code_generator_emit(generator, "    movdqu xmm29, [rsp + 464]\n");
-      code_generator_emit(generator, "    movdqu xmm30, [rsp + 480]\n");
-      code_generator_emit(generator, "    movdqu xmm31, [rsp + 496]\n");
-      code_generator_emit(generator, "    add rsp, 512\n");
-#else
-      code_generator_emit(generator, "    add rsp, 256\n");
-#endif
-      code_generator_emit(generator, "    pop r15\n");
-      code_generator_emit(generator, "    pop r14\n");
-      code_generator_emit(generator, "    pop r13\n");
-      code_generator_emit(generator, "    pop r12\n");
-      code_generator_emit(generator, "    pop r11\n");
-      code_generator_emit(generator, "    pop r10\n");
-      code_generator_emit(generator, "    pop r9\n");
-      code_generator_emit(generator, "    pop r8\n");
-      code_generator_emit(generator, "    pop rdi\n");
-      code_generator_emit(generator, "    pop rsi\n");
-      code_generator_emit(generator, "    pop rdx\n");
-      code_generator_emit(generator, "    pop rcx\n");
-      code_generator_emit(generator, "    pop rbx\n");
-      code_generator_emit(generator, "    pop rax\n");
-    } else {
-      code_generator_emit(generator,
-                          "    ; Spill GPRs so GC sees register-held roots\n");
-      code_generator_emit(generator, "    push rax\n");
-      code_generator_emit(generator, "    push rbx\n");
-      code_generator_emit(generator, "    push rcx\n");
-      code_generator_emit(generator, "    push rdx\n");
-      code_generator_emit(generator, "    push rsi\n");
-      code_generator_emit(generator, "    push rdi\n");
-      code_generator_emit(generator, "    push r8\n");
-      code_generator_emit(generator, "    push r9\n");
-      code_generator_emit(generator, "    push r10\n");
-      code_generator_emit(generator, "    push r11\n");
-      code_generator_emit(generator, "    push r12\n");
-      code_generator_emit(generator, "    push r13\n");
-      code_generator_emit(generator, "    push r14\n");
-      code_generator_emit(generator, "    push r15\n");
-      code_generator_emit(generator,
-                          "    ; Spill XMM registers for conservative root scan\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    sub rsp, 512\n");
-#else
-      code_generator_emit(generator, "    sub rsp, 256\n");
-#endif
-      code_generator_emit(generator, "    movdqu [rsp + 0], xmm0\n");
-      code_generator_emit(generator, "    movdqu [rsp + 16], xmm1\n");
-      code_generator_emit(generator, "    movdqu [rsp + 32], xmm2\n");
-      code_generator_emit(generator, "    movdqu [rsp + 48], xmm3\n");
-      code_generator_emit(generator, "    movdqu [rsp + 64], xmm4\n");
-      code_generator_emit(generator, "    movdqu [rsp + 80], xmm5\n");
-      code_generator_emit(generator, "    movdqu [rsp + 96], xmm6\n");
-      code_generator_emit(generator, "    movdqu [rsp + 112], xmm7\n");
-      code_generator_emit(generator, "    movdqu [rsp + 128], xmm8\n");
-      code_generator_emit(generator, "    movdqu [rsp + 144], xmm9\n");
-      code_generator_emit(generator, "    movdqu [rsp + 160], xmm10\n");
-      code_generator_emit(generator, "    movdqu [rsp + 176], xmm11\n");
-      code_generator_emit(generator, "    movdqu [rsp + 192], xmm12\n");
-      code_generator_emit(generator, "    movdqu [rsp + 208], xmm13\n");
-      code_generator_emit(generator, "    movdqu [rsp + 224], xmm14\n");
-      code_generator_emit(generator, "    movdqu [rsp + 240], xmm15\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    movdqu [rsp + 256], xmm16\n");
-      code_generator_emit(generator, "    movdqu [rsp + 272], xmm17\n");
-      code_generator_emit(generator, "    movdqu [rsp + 288], xmm18\n");
-      code_generator_emit(generator, "    movdqu [rsp + 304], xmm19\n");
-      code_generator_emit(generator, "    movdqu [rsp + 320], xmm20\n");
-      code_generator_emit(generator, "    movdqu [rsp + 336], xmm21\n");
-      code_generator_emit(generator, "    movdqu [rsp + 352], xmm22\n");
-      code_generator_emit(generator, "    movdqu [rsp + 368], xmm23\n");
-      code_generator_emit(generator, "    movdqu [rsp + 384], xmm24\n");
-      code_generator_emit(generator, "    movdqu [rsp + 400], xmm25\n");
-      code_generator_emit(generator, "    movdqu [rsp + 416], xmm26\n");
-      code_generator_emit(generator, "    movdqu [rsp + 432], xmm27\n");
-      code_generator_emit(generator, "    movdqu [rsp + 448], xmm28\n");
-      code_generator_emit(generator, "    movdqu [rsp + 464], xmm29\n");
-      code_generator_emit(generator, "    movdqu [rsp + 480], xmm30\n");
-      code_generator_emit(generator, "    movdqu [rsp + 496], xmm31\n");
-#endif
-      code_generator_emit(generator, "    mov %s, rsp\n", first_param_reg);
-      code_generator_emit(generator, "    extern gc_safepoint\n");
-      code_generator_emit(generator, "    call gc_safepoint\n");
-      code_generator_emit(generator, "    movdqu xmm0, [rsp + 0]\n");
-      code_generator_emit(generator, "    movdqu xmm1, [rsp + 16]\n");
-      code_generator_emit(generator, "    movdqu xmm2, [rsp + 32]\n");
-      code_generator_emit(generator, "    movdqu xmm3, [rsp + 48]\n");
-      code_generator_emit(generator, "    movdqu xmm4, [rsp + 64]\n");
-      code_generator_emit(generator, "    movdqu xmm5, [rsp + 80]\n");
-      code_generator_emit(generator, "    movdqu xmm6, [rsp + 96]\n");
-      code_generator_emit(generator, "    movdqu xmm7, [rsp + 112]\n");
-      code_generator_emit(generator, "    movdqu xmm8, [rsp + 128]\n");
-      code_generator_emit(generator, "    movdqu xmm9, [rsp + 144]\n");
-      code_generator_emit(generator, "    movdqu xmm10, [rsp + 160]\n");
-      code_generator_emit(generator, "    movdqu xmm11, [rsp + 176]\n");
-      code_generator_emit(generator, "    movdqu xmm12, [rsp + 192]\n");
-      code_generator_emit(generator, "    movdqu xmm13, [rsp + 208]\n");
-      code_generator_emit(generator, "    movdqu xmm14, [rsp + 224]\n");
-      code_generator_emit(generator, "    movdqu xmm15, [rsp + 240]\n");
-#if defined(Mettle_SAFEPOINT_SPILL_XMM31)
-      code_generator_emit(generator, "    movdqu xmm16, [rsp + 256]\n");
-      code_generator_emit(generator, "    movdqu xmm17, [rsp + 272]\n");
-      code_generator_emit(generator, "    movdqu xmm18, [rsp + 288]\n");
-      code_generator_emit(generator, "    movdqu xmm19, [rsp + 304]\n");
-      code_generator_emit(generator, "    movdqu xmm20, [rsp + 320]\n");
-      code_generator_emit(generator, "    movdqu xmm21, [rsp + 336]\n");
-      code_generator_emit(generator, "    movdqu xmm22, [rsp + 352]\n");
-      code_generator_emit(generator, "    movdqu xmm23, [rsp + 368]\n");
-      code_generator_emit(generator, "    movdqu xmm24, [rsp + 384]\n");
-      code_generator_emit(generator, "    movdqu xmm25, [rsp + 400]\n");
-      code_generator_emit(generator, "    movdqu xmm26, [rsp + 416]\n");
-      code_generator_emit(generator, "    movdqu xmm27, [rsp + 432]\n");
-      code_generator_emit(generator, "    movdqu xmm28, [rsp + 448]\n");
-      code_generator_emit(generator, "    movdqu xmm29, [rsp + 464]\n");
-      code_generator_emit(generator, "    movdqu xmm30, [rsp + 480]\n");
-      code_generator_emit(generator, "    movdqu xmm31, [rsp + 496]\n");
-      code_generator_emit(generator, "    add rsp, 512\n");
-#else
-      code_generator_emit(generator, "    add rsp, 256\n");
-#endif
-      code_generator_emit(generator, "    pop r15\n");
-      code_generator_emit(generator, "    pop r14\n");
-      code_generator_emit(generator, "    pop r13\n");
-      code_generator_emit(generator, "    pop r12\n");
-      code_generator_emit(generator, "    pop r11\n");
-      code_generator_emit(generator, "    pop r10\n");
-      code_generator_emit(generator, "    pop r9\n");
-      code_generator_emit(generator, "    pop r8\n");
-      code_generator_emit(generator, "    pop rdi\n");
-      code_generator_emit(generator, "    pop rsi\n");
-      code_generator_emit(generator, "    pop rdx\n");
-      code_generator_emit(generator, "    pop rcx\n");
-      code_generator_emit(generator, "    pop rbx\n");
-      code_generator_emit(generator, "    pop rax\n");
-    }
-  }
   }
 
   for (size_t i = 0; i < promoted_symbol_count; i++) {
@@ -3973,6 +4977,13 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
       break;
     }
   }
+  /* Expose the use map to the deferred-spill peephole, and start this
+   * function with no inherited pending/cached state. */
+  generator->current_temp_use_map = &temp_use_map;
+  generator->pending_spill_offset = 0;
+  generator->pending_spill_single_use = 0;
+  generator->rax_cached_temp_offset = 0;
+
   if (!generator->has_error) {
     for (size_t i = 0; i < ir_function->instruction_count; i++) {
       const IRInstruction *instruction = &ir_function->instructions[i];
@@ -3986,6 +4997,18 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
         if (instruction->op == IR_OP_BINARY &&
             instruction->dest.kind == IR_OPERAND_TEMP &&
             instruction->dest.name) {
+          size_t return_index = i;
+          int emitted_return = 0;
+          if (!code_generator_try_emit_ir_binary_return_temp(
+                  generator, ir_function, i, &temp_use_map, &temp_table,
+                  &return_index, &emitted_return)) {
+            break;
+          }
+          if (emitted_return) {
+            i = return_index;
+            continue;
+          }
+
           size_t chain_last = i;
           int chain_consumed_branch = 0;
           int emitted_chain = 0;
@@ -4104,10 +5127,22 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
     code_generator_emit(generator, "    mov %s, [rbp - %d]\n", reg_name,
                         promoted_symbols[index].save_offset);
   }
-  code_generator_function_epilogue(generator);
+  code_generator_function_epilogue(generator, fn_return_type);
   if (runtime_end_label) {
     code_generator_emit(generator, "%s:\n", runtime_end_label);
   }
+
+  /* No spill may outlive the function. The epilogue's own emits will have
+   * flushed any pending store; clear the borrowed map pointer before it dies
+   * and drop any stale cache so the next function starts clean. */
+  generator->current_temp_use_map = NULL;
+  generator->pending_spill_offset = 0;
+  generator->pending_spill_single_use = 0;
+  generator->rax_cached_temp_offset = 0;
+  generator->current_fn_returns_indirect = 0;
+  generator->current_fn_indirect_return_size = 0;
+  code_generator_ir_reset_indirect_return_slots(generator);
+  ir_indirect_temp_table_reset();
 
   ir_temp_use_map_destroy(&temp_use_map);
   ir_temp_table_destroy(&temp_table);

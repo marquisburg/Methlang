@@ -263,7 +263,7 @@ void code_generator_generate_binary_operation(CodeGenerator *generator,
     code_generator_emit(generator, "    mov [rsp + 8], rax ; left ptr\n");
     code_generator_emit(generator, "    mov [rsp + 16], rcx ; total_len\n");
 
-    // gc_alloc(total_len + 17)
+    // calloc(1, total_len + 17)
     const char *size_register = "rdi";
     CallingConventionSpec *conv_spec =
         generator->register_allocator
@@ -278,18 +278,7 @@ void code_generator_generate_binary_operation(CodeGenerator *generator,
     code_generator_emit(generator, "    mov %s, rcx\n", size_register);
     code_generator_emit(generator, "    add %s, 17\n", size_register);
 
-    // Call gc_alloc with ABI-safe alignment and shadow space.
-    if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
-      code_generator_emit(
-          generator,
-          "    sub rsp, %d      ; 32-byte shadow + 8-byte align pad\n",
-          conv_spec->shadow_space_size + 8);
-    }
-    code_generator_emit(generator, "    extern gc_alloc\n    call gc_alloc\n");
-    if (conv_spec && conv_spec->convention == CALLING_CONV_MS_X64) {
-      code_generator_emit(generator, "    add rsp, %d\n",
-                          conv_spec->shadow_space_size + 8);
-    }
+    code_generator_emit_calloc_call(generator, size_register);
 
     // Restore values
     code_generator_emit(generator, "    mov rcx, [rsp + 16] ; total_len\n");
@@ -638,6 +627,19 @@ void code_generator_load_variable(CodeGenerator *generator,
       if (!code_generator_emit_extern_symbol(generator, resolved_name)) {
         return;
       }
+    }
+
+    /* Indirect parameters: the home slot holds a POINTER to the struct, not
+     * the struct itself. "Loading the variable" yields its base address, the
+     * same way TYPE_ARRAY loads yield the array base. Downstream field-access
+     * and memcpy lowering operate on that address. */
+    if (symbol->kind == SYMBOL_PARAMETER &&
+        symbol->data.variable.is_indirect_param) {
+      code_generator_emit(
+          generator,
+          "    mov rax, qword [rbp - %d]  ; Indirect param '%s' base ptr\n",
+          symbol->data.variable.memory_offset, variable_name);
+      return;
     }
 
     if (symbol->type && symbol->type->kind == TYPE_ARRAY) {
@@ -1531,8 +1533,18 @@ static int code_generator_generate_lvalue_address(CodeGenerator *generator,
                           resolved_name);
     } else {
       int offset = symbol->data.variable.memory_offset;
-      if (symbol->kind == SYMBOL_PARAMETER && symbol->type &&
-          symbol->type->kind == TYPE_STRING) {
+      if (symbol->kind == SYMBOL_PARAMETER &&
+          symbol->data.variable.is_indirect_param) {
+        // Indirect param: the home slot holds the struct's address. The
+        // lvalue of the parameter IS that address (mutations via &p.x
+        // propagate back to the caller's temp copy, which is by design —
+        // the caller owns the temp and discards it after the call).
+        code_generator_emit(
+            generator,
+            "    mov rax, qword [rbp - %d]  ; Indirect param base ptr\n",
+            offset);
+      } else if (symbol->kind == SYMBOL_PARAMETER && symbol->type &&
+                 symbol->type->kind == TYPE_STRING) {
         // String parameters are homed as pointers to string records.
         code_generator_emit(
             generator,

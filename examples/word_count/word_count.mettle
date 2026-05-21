@@ -1,24 +1,22 @@
 // Mettle Word Count benchmark
 //
-// Parses an in-memory buffer character-by-character to count words
-// (sequences of non-whitespace). Exercises: malloc, buffer iteration,
-// character classification, branching.
+// Parses a raw byte buffer to count words (non-empty runs of non-whitespace).
+// Exercises: malloc, buffer iteration, byte classification, branching.
 //
 // Build: build.bat
 // Run: word_count.exe
 
 import "std/io";
 import "std/mem";
+import "std/bench";
 
-extern function GetTickCount64() -> uint64 = "GetTickCount64";
-
-// Count words in buf[0..len-1]. Word = non-empty sequence of non-space bytes.
+// Count words in buf[0..len-1]. Word = non-empty sequence of non-whitespace bytes.
 function word_count(buf: cstring, len: int64) -> int64 {
   var count: int64 = 0;
   var i: int64 = 0;
   var in_word: int32 = 0;
   while (i < len) {
-    var c: int32 = buf[i];
+    var c: uint8 = (uint8)buf[i];
     if (c == 32 || c == 9 || c == 10 || c == 13) {
       in_word = 0;
     } else {
@@ -34,16 +32,18 @@ function word_count(buf: cstring, len: int64) -> int64 {
 
 function main() -> int32 {
   var buf_size: int64 = 262144;
+  var template: string = "a b ";
+  var template_len: int64 = 4;
+
   var buf: cstring = malloc(buf_size);
   if (buf == 0) {
     println(cstr("malloc failed"));
     return 1;
   }
 
-  var template: string = "a b ";
   var pos: int64 = 0;
   while (pos < buf_size) {
-    var chunk: int64 = 4;
+    var chunk: int64 = template_len;
     if (pos + chunk > buf_size) {
       chunk = buf_size - pos;
     }
@@ -51,27 +51,27 @@ function main() -> int32 {
     pos = pos + chunk;
   }
 
-  var header: string = "Word count: 256 KB buffer (a b pattern)";
-  println(cstr(header));
-
   var wc: int64 = word_count(buf, buf_size);
-  var result_str: string = "Words = ";
-  print(cstr(result_str));
-  println_int(wc);
 
   var passes: int32 = 500;
-  var bench_header: string = "Benchmark: 500 passes (word_count)";
-  println(cstr(bench_header));
-
-  var t0: uint64 = GetTickCount64();
+  var t0: uint64 = bench_time_us();
   var total: int64 = 0;
   var p: int32 = 0;
   while (p < passes) {
     total = total + word_count(buf, buf_size);
     p = p + 1;
   }
-  var t1: uint64 = GetTickCount64();
-  var elapsed_ms: uint64 = t1 - t0;
+  var elapsed_us: uint64 = bench_time_us() - t0;
+
+  var header: string = "Word count: 256 KB buffer (a b pattern)";
+  println(cstr(header));
+
+  var result_str: string = "Words = ";
+  print(cstr(result_str));
+  println_int(wc);
+
+  var bench_header: string = "Benchmark: 500 passes (word_count)";
+  println(cstr(bench_header));
 
   var sum_str: string = "Total words = ";
   print(cstr(sum_str));
@@ -79,10 +79,10 @@ function main() -> int32 {
 
   var time_str: string = "Time: ";
   print(cstr(time_str));
-  print_int(elapsed_ms);
-  println(cstr(" ms"));
+  print_int(elapsed_us);
+  println(cstr(" us"));
 
-  var per_pass: uint64 = elapsed_ms * 1000 / passes;
+  var per_pass: uint64 = elapsed_us / passes;
   var us_str: string = "Per pass: ~";
   print(cstr(us_str));
   print_int(per_pass);

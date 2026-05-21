@@ -190,7 +190,7 @@ void code_generator_emit_runtime_debug_tables(CodeGenerator *generator) {
   }
 
   code_generator_emit_to_global_buffer(
-      generator, "\n; Embedded Meth runtime debug metadata\n");
+      generator, "\n; Embedded Mettle runtime debug metadata\n");
   code_generator_emit_to_global_buffer(generator, "align 8\n");
   char **function_name_labels = NULL;
   char **function_file_labels = NULL;

@@ -45,17 +45,35 @@ void code_generator_function_prologue(CodeGenerator *generator,
 
 #ifdef _WIN32
     if (aligned_stack_size > WINDOWS_STACK_PROBE_PAGE_SIZE) {
-      // Probe guard pages before large stack subtraction on Win64.
-      // Mirrors compiler-lowered pattern (___chkstk_ms + sub rsp, rax).
+      char *probe_label = code_generator_generate_label(generator, "stack_probe");
+      if (!probe_label) {
+        code_generator_set_error(generator,
+                                 "Out of memory while creating stack probe label");
+        return;
+      }
+
+      // Probe guard pages before large stack subtraction on Win64 without
+      // depending on libgcc's ___chkstk_ms symbol.
       code_generator_emit(generator, "    mov rax, %d\n", aligned_stack_size);
-      code_generator_emit(generator, "    extern ___chkstk_ms\n");
-      code_generator_emit(generator, "    sub rsp, 32\n");
-      code_generator_emit(generator, "    call ___chkstk_ms\n");
-      code_generator_emit(generator, "    add rsp, 32\n");
+      code_generator_emit(generator, "%s:\n", probe_label);
+      code_generator_emit(generator, "    cmp rax, %d\n",
+                          WINDOWS_STACK_PROBE_PAGE_SIZE);
+      code_generator_emit(generator, "    jbe %s_done\n", probe_label);
+      code_generator_emit(generator, "    sub rsp, %d\n",
+                          WINDOWS_STACK_PROBE_PAGE_SIZE);
+      code_generator_emit(generator, "    test byte [rsp], 0\n");
+      code_generator_emit(generator, "    sub rax, %d\n",
+                          WINDOWS_STACK_PROBE_PAGE_SIZE);
+      code_generator_emit(generator, "    jmp %s\n", probe_label);
+      code_generator_emit(generator, "%s_done:\n", probe_label);
       code_generator_emit(
           generator,
-          "    sub rsp, rax    ; Allocate %d bytes on stack (probed)\n",
+          "    sub rsp, rax    ; Allocate remaining stack bytes (probed)\n");
+      code_generator_emit(generator, "    test byte [rsp], 0\n");
+      code_generator_emit(generator,
+                          "    ; Allocated %d bytes on stack (probed)\n",
           aligned_stack_size);
+      free(probe_label);
     } else {
       code_generator_emit(
           generator,
@@ -77,12 +95,23 @@ void code_generator_function_prologue(CodeGenerator *generator,
   // registers before homing.
 }
 
-void code_generator_function_epilogue(CodeGenerator *generator) {
+void code_generator_function_epilogue(CodeGenerator *generator,
+                                      Type *return_type) {
   if (!generator) {
     return;
   }
 
   code_generator_emit(generator, "    ; Function epilogue\n");
+
+  if (return_type && code_generator_is_floating_point_type(return_type)) {
+    if (return_type->kind == TYPE_FLOAT32) {
+      code_generator_emit(
+          generator, "    movd xmm0, eax  ; Float return value in xmm0\n");
+    } else {
+      code_generator_emit(
+          generator, "    movq xmm0, rax  ; Float return value in xmm0\n");
+    }
+  }
 
   // Restore stack pointer to base pointer (cleans up local variables)
   code_generator_emit(generator, "    mov rsp, rbp  ; Restore stack pointer\n");

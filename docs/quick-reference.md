@@ -44,21 +44,6 @@ function main() -> int32 {
 }
 ```
 
-## With Async and Await
-
-By default (`--async-model pool` or omitted), `async` calls return `Future<T>` and `await` blocks until the payload is ready. Use `--async-model coroutine` for experimental stackless lowering (see [Async and Sync Execution](async.md)).
-
-```mettle
-async fn add_one(x: int32) -> int32 {
-  return x + 1;
-}
-
-function main() -> int32 {
-  var future: Future<int32> = add_one(41);
-  return await future;
-}
-```
-
 ## With Enum and Switch
 
 ```mettle
@@ -89,9 +74,9 @@ function main() -> int32 {
 }
 ```
 
-## With GC and Structs
+## With Heap Allocation and Structs
 
-Uses `new` for heap allocation. `mettle --build` links the bundled GC/runtime automatically on Windows. Async programs use the same bundled runtime flow. See [Garbage Collector](garbage-collector.md) and [Async and Sync Execution](async.md).
+Uses `new` for zero-initialized heap allocation. The emitted code calls `calloc(1, n)` directly; no Mettle runtime object is linked unless the program also uses `-d`/`-s` crash tracebacks or `std/thread` atomics. See [Heap Allocator Runtime](heap-allocation.md).
 
 ```mettle
 struct Point {

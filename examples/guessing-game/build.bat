@@ -25,9 +25,9 @@ if %ERRORLEVEL% EQU 0 (
         echo NASM assembly failed.
         exit /b 1
     )
-    gcc -c src\runtime\gc.c -o examples\guessing-game\gc.o -Isrc
+    gcc -c src\runtime\crash_handler.c -o examples\guessing-game\crash_handler.o -Isrc
     if %ERRORLEVEL% NEQ 0 exit /b 1
-    gcc -nostartfiles examples\guessing-game\guessing_game.o examples\guessing-game\gc.o -o examples\guessing-game\guessing_game.exe -lkernel32
+    gcc -nostartfiles examples\guessing-game\guessing_game.o examples\guessing-game\crash_handler.o -o examples\guessing-game\guessing_game.exe -lkernel32
 ) else (
     echo NASM required. Install from https://www.nasm.us/
     exit /b 1

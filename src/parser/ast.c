@@ -111,7 +111,6 @@ ASTNode *ast_clone_node(ASTNode *node) {
     dst->parameter_count = src->parameter_count;
     dst->is_exported = src->is_exported;
     dst->is_extern = src->is_extern;
-    dst->is_async = src->is_async;
     dst->link_name = ast_copy_string(src->link_name);
     dst->type_param_count = src->type_param_count;
     dst->type_params = ast_copy_string_array(src->type_params, src->type_param_count);
@@ -421,19 +420,6 @@ ASTNode *ast_clone_node(ASTNode *node) {
     dst->operand = src->operand ? ast_clone_node(src->operand) : NULL;
     if (dst->operand)
       ast_add_child(clone, dst->operand);
-    clone->data = dst;
-    break;
-  }
-  case AST_SPAWN_EXPRESSION: {
-    SpawnExpression *src = (SpawnExpression *)node->data;
-    SpawnExpression *dst = malloc(sizeof(SpawnExpression));
-    if (!dst) {
-      free(clone);
-      return NULL;
-    }
-    dst->call = src->call ? ast_clone_node(src->call) : NULL;
-    if (dst->call)
-      ast_add_child(clone, dst->call);
     clone->data = dst;
     break;
   }
@@ -940,13 +926,6 @@ void ast_destroy_node(ASTNode *node) {
     }
     break;
   }
-  case AST_SPAWN_EXPRESSION: {
-    SpawnExpression *spawn = (SpawnExpression *)node->data;
-    if (spawn) {
-      free(spawn);
-    }
-    break;
-  }
   case AST_FOR_STATEMENT: {
     ForStatement *for_stmt = (ForStatement *)node->data;
     if (for_stmt) {
@@ -1142,7 +1121,6 @@ ASTNode *ast_create_function_declaration(const char *name, char **param_names,
   func_decl->body = body;
   func_decl->is_exported = 0;
   func_decl->is_extern = 0;
-  func_decl->is_async = 0;
   func_decl->link_name = NULL;
   func_decl->type_params = NULL;
   func_decl->type_param_traits = NULL;
@@ -1268,9 +1246,9 @@ ASTNode *ast_create_enum_declaration(const char *name, EnumVariant *variants,
   return node;
 }
 
-ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
-                                    size_t arm_count,
-                                    SourceLocation location) {
+static ASTNode *ast_create_match_node(ASTNode *expression, MatchArm *arms,
+                                      size_t arm_count, int is_expression,
+                                      SourceLocation location) {
   ASTNode *node = ast_create_node(AST_MATCH_STATEMENT, location);
   if (!node)
     return NULL;
@@ -1281,6 +1259,7 @@ ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
     return NULL;
   }
 
+  match->is_expression = is_expression;
   match->expression = expression;
   if (expression)
     ast_add_child(node, expression);
@@ -1307,6 +1286,18 @@ ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
 
   node->data = match;
   return node;
+}
+
+ASTNode *ast_create_match_statement(ASTNode *expression, MatchArm *arms,
+                                    size_t arm_count,
+                                    SourceLocation location) {
+  return ast_create_match_node(expression, arms, arm_count, 0, location);
+}
+
+ASTNode *ast_create_match_expression(ASTNode *expression, MatchArm *arms,
+                                     size_t arm_count,
+                                     SourceLocation location) {
+  return ast_create_match_node(expression, arms, arm_count, 1, location);
 }
 
 ASTNode *ast_create_trait_declaration(const char *name,
@@ -1906,23 +1897,3 @@ ASTNode *ast_create_cast_expression(const char *type_name, ASTNode *operand,
   return node;
 }
 
-ASTNode *ast_create_spawn_expression(ASTNode *call, SourceLocation location) {
-  ASTNode *node = ast_create_node(AST_SPAWN_EXPRESSION, location);
-  if (!node)
-    return NULL;
-
-  SpawnExpression *spawn = malloc(sizeof(SpawnExpression));
-  if (!spawn) {
-    free(node);
-    return NULL;
-  }
-
-  spawn->call = call;
-  node->data = spawn;
-
-  if (call) {
-    ast_add_child(node, call);
-  }
-
-  return node;
-}

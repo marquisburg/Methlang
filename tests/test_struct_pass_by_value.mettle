@@ -1,0 +1,103 @@
+// Indirect-arg ABI: a struct larger than 8 bytes passed by value must reach
+// the callee with every field intact (not truncated to the first machine
+// word). Also exercises by-value semantics: mutations inside the callee on
+// its parameter copy must not leak back to the caller.
+//
+// Build:
+//   bin\mettle.exe --build --linker internal tests\test_struct_pass_by_value.mettle -o test_struct_pass_by_value.exe
+// Run:
+//   test_struct_pass_by_value.exe
+import "std/conv";
+import "std/io";
+
+struct ThreeI32 {
+  a: int32;
+  b: int32;
+  c: int32;
+}
+
+struct Mixed {
+  a: int32;
+  b: float64;
+  c: int32;
+}
+
+function write_s(s: cstring) {
+  if (s != 0) {
+    fputs(s, get_stdout());
+  }
+}
+
+function write_i64(v: int64) {
+  var buf: uint8[32];
+  int_to_dec((cstring)((int64)(&(buf[0]))), v);
+  write_s((cstring)((int64)(&(buf[0]))));
+}
+
+function line_i64(label: cstring, v: int64) {
+  write_s(label);
+  write_s(cstr(" "));
+  write_i64(v);
+  write_s(cstr("\n"));
+}
+
+function scaled(v: float64) -> int64 {
+  if (v < 0.0) {
+    return 0 - (int64)((0.0 - v) * 1000.0);
+  }
+  return (int64)(v * 1000.0);
+}
+
+// Reads every field. Pre-fix this would truncate to bytes 0..7 and miss .c.
+function sum_three(t: ThreeI32) -> int32 {
+  return t.a + t.b + t.c;
+}
+
+// Reads a non-prefix field. Pre-fix this would return garbage.
+function third(t: ThreeI32) -> int32 {
+  return t.c;
+}
+
+// Mutates the parameter. By-value semantics: caller must NOT see the change.
+function clobber(t: ThreeI32) {
+  t.a = 999;
+  t.b = 999;
+  t.c = 999;
+}
+
+// Returns m.b scaled in int64 so the result travels back via RAX (which is
+// reliable for integer returns) and we don't depend on the float-return
+// convention of a freshly-loaded field landing in XMM0.
+function mixed_b_scaled(m: Mixed) -> int64 {
+  return scaled(m.b);
+}
+
+function mixed_c(m: Mixed) -> int32 {
+  return m.c;
+}
+
+function main() -> int32 {
+  write_s(cstr("struct pass by value\n"));
+
+  var t: ThreeI32;
+  t.a = 11;
+  t.b = 22;
+  t.c = 33;
+
+  line_i64(cstr("sum_three"), (int64)sum_three(t));
+  line_i64(cstr("third"), (int64)third(t));
+
+  clobber(t);
+  line_i64(cstr("after_clobber_a"), (int64)t.a);
+  line_i64(cstr("after_clobber_b"), (int64)t.b);
+  line_i64(cstr("after_clobber_c"), (int64)t.c);
+
+  var m: Mixed;
+  m.a = 11;
+  m.b = -3.5;
+  m.c = 22;
+  line_i64(cstr("mixed_b_mm"), mixed_b_scaled(m));
+  line_i64(cstr("mixed_c"), (int64)mixed_c(m));
+
+  return 0;
+}

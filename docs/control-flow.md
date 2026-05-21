@@ -183,39 +183,6 @@ return;
 return value;
 ```
 
-## Async Waiting and Cancellation
-
-Async execution composes with ordinary control flow, but the current model is blocking and thread-backed rather than coroutine-based.
-
-```mettle
-async fn worker() -> int32 {
-  while (cancelled() == 0) {
-    // do work
-  }
-  return 0;
-}
-
-function main() -> int32 {
-  var future: Future<int32> = worker();
-
-  if (should_stop) {
-    cancel(future);
-  }
-
-  return await future;
-}
-```
-
-Important control-flow consequences:
-
-- `await` blocks the current thread until the awaited future completes.
-- In a synchronous function, that means the caller thread blocks.
-- In an asynchronous function, that means the async worker thread blocks.
-- `cancel(future)` requests cancellation but does not force an immediate exit.
-- A cancelable async loop must poll `cancelled()` explicitly.
-
-See [Async and Sync Execution](async.md) and [Expressions](expressions.md#sync-vs-async-calls) for the full runtime model.
-
 ## Short-Circuit Evaluation
 
 Logical operators `&&` and `||` support short-circuit evaluation. For pointer checks like `ptr != 0 && ptr->field > 0`, a single condition is safe:

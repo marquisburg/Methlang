@@ -7,8 +7,7 @@
 // Run: collatz.exe
 
 import "std/io";
-
-extern function GetTickCount64() -> uint64 = "GetTickCount64";
+import "std/bench";
 
 // Returns number of steps to reach 1 from n (n >= 1)
 function collatz_steps(n: int64) -> int64 {
@@ -44,7 +43,7 @@ function main() -> int32 {
   var bench_header: string = "Benchmark: 10 passes (sum steps 1..100000 each)";
   println(cstr(bench_header));
 
-  var t0: uint64 = GetTickCount64();
+  var t0: uint64 = bench_time_us();
   var p: int32 = 0;
   var bench_sum: int64 = 0;
   while (p < passes) {
@@ -55,8 +54,7 @@ function main() -> int32 {
     }
     p = p + 1;
   }
-  var t1: uint64 = GetTickCount64();
-  var elapsed_ms: uint64 = t1 - t0;
+  var elapsed_us: uint64 = bench_time_us() - t0;
 
   var sum_str: string = "Bench sum = ";
   print(cstr(sum_str));
@@ -64,10 +62,10 @@ function main() -> int32 {
 
   var time_str: string = "Time: ";
   print(cstr(time_str));
-  print_int(elapsed_ms);
-  println(cstr(" ms"));
+  print_int(elapsed_us);
+  println(cstr(" us"));
 
-  var per_pass: uint64 = elapsed_ms * 1000 / passes;
+  var per_pass: uint64 = elapsed_us / passes;
   var us_str: string = "Per pass: ~";
   print(cstr(us_str));
   print_int(per_pass);

@@ -12,12 +12,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#else
-#include <sys/time.h>
-#endif
+#include "../bench_time.h"
 
 /* Returns number of steps to reach 1 from n (n >= 1) */
 static int64_t collatz_steps(int64_t n) {
@@ -34,18 +29,6 @@ static int64_t collatz_steps(int64_t n) {
     return count;
 }
 
-#ifdef _WIN32
-static uint64_t get_time_ms(void) {
-    return (uint64_t)GetTickCount64();
-}
-#else
-static uint64_t get_time_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000;
-}
-#endif
-
 int main(void) {
     printf("Collatz: sum of steps for n=1..100000\n");
 
@@ -58,20 +41,19 @@ int main(void) {
     const int passes = 10;
     printf("Benchmark: 10 passes (sum steps 1..100000 each)\n");
 
-    uint64_t t0 = get_time_ms();
+    uint64_t t0 = bench_time_us();
     int64_t bench_sum = 0;
     for (int p = 0; p < passes; p++) {
         for (int64_t i = 1; i <= 100000; i++) {
             bench_sum += collatz_steps(i);
         }
     }
-    uint64_t t1 = get_time_ms();
-    uint64_t elapsed_ms = t1 - t0;
+    uint64_t elapsed_us = bench_time_us() - t0;
 
     printf("Bench sum = %" PRId64 "\n", bench_sum);
-    printf("Time: %" PRIu64 " ms\n", elapsed_ms);
+    printf("Time: %" PRIu64 " us\n", elapsed_us);
 
-    uint64_t per_pass_us = elapsed_ms * 1000 / passes;
+    uint64_t per_pass_us = elapsed_us / (uint64_t)passes;
     printf("Per pass: ~%" PRIu64 " us\n", per_pass_us);
 
     return 0;

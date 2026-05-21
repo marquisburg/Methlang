@@ -42,26 +42,24 @@ typedef enum {
   IR_OP_STORE,
   IR_OP_BINARY,
   IR_OP_UNARY,
+  /* Fibonacci-style rotate: dest=next, lhs=a, rhs=b => next=a+b; a=b; b=next */
+  IR_OP_ROTATE_ADD,
   IR_OP_CALL,
   IR_OP_CALL_INDIRECT,
   IR_OP_NEW,
   IR_OP_RETURN,
   IR_OP_INLINE_ASM,
   IR_OP_CAST,
-  // Threading opcodes
-  IR_OP_THREAD_SPAWN,   // dest = spawn fn(args...)  — lhs=fn name (text), args=arguments
-  IR_OP_THREAD_JOIN,    // dest = join(thread_handle) — lhs=handle operand
-  IR_OP_MUTEX_NEW,      // dest = Mutex.new()
-  IR_OP_MUTEX_LOCK,     // dest = mutex.lock()  — returns Guard, lhs=mutex operand
-  IR_OP_MUTEX_UNLOCK,   // mutex.unlock(guard) — lhs=guard operand
-  IR_OP_ATOMIC_LOAD,    // dest = atomic.load() — lhs=atomic operand
-  IR_OP_ATOMIC_STORE,   // atomic.store(val)    — lhs=atomic operand, rhs=value
-  IR_OP_ATOMIC_FETCH_ADD, // dest = atomic.fetch_add(val) — lhs=atomic, rhs=delta
-  IR_OP_ATOMIC_FETCH_SUB,
-  IR_OP_ATOMIC_CAS,     // dest=old, lhs=atomic, rhs=expected, arguments[0]=desired
-  IR_OP_CHAN_NEW,        // dest = channel(cap)  — lhs=capacity (INT, 0=unbounded)
-  IR_OP_CHAN_SEND,       // chan.send(val)        — lhs=chan operand, rhs=value
-  IR_OP_CHAN_RECV        // dest = chan.recv()    — lhs=chan operand
+  /* Vectorized idiom: count word starts in a byte buffer. Produced only by
+   * ir_vectorize_simple_loops_pass when it recognizes the exact
+   * "while (i<len){c=buf[i]; if(ws(c)) in_word=0; else {if(!in_word)count++;
+   * in_word=1;} i++}" shape. Semantics: dest receives the number of maximal
+   * non-whitespace runs in lhs[0..rhs-1] (whitespace = 0x20/0x09/0x0A/0x0D),
+   * added to dest's prior value (the scalar code initializes count=0, so the
+   * pass only matches when that holds). lhs = buffer base symbol, rhs = length
+   * symbol/operand, dest = count symbol. Codegen lowers this to an SSE2
+   * 16-bytes/iteration scan plus a scalar tail; see code_generator_ir.c. */
+  IR_OP_COUNT_WORD_STARTS
 } IROpcode;
 
 typedef struct {

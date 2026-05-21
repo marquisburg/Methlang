@@ -2,6 +2,7 @@
 
 #include <limits.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define BINARY_TEXT_SECTION_ALIGNMENT 16
@@ -92,6 +93,17 @@ typedef struct {
 } BinaryOffsetTable;
 
 typedef struct {
+  const char *name;
+  const char *target;
+} BinarySymbolAliasEntry;
+
+typedef struct {
+  BinarySymbolAliasEntry *items;
+  size_t count;
+  size_t capacity;
+} BinarySymbolAliasTable;
+
+typedef struct {
   BinaryCodeBuffer code;
   BinaryNamedSlotTable parameter_slots;
   BinaryNamedSlotTable local_slots;
@@ -99,6 +111,7 @@ typedef struct {
   BinaryNamedSlotTable float64_symbols;
   BinaryNamedSlotTable address_taken_symbols;
   BinaryNamedSlotTable register_symbols;
+  BinarySymbolAliasTable symbol_aliases;
   BinaryLabelTable labels;
   BinaryLabelFixupTable label_fixups;
   BinaryCallRelocationTable call_relocations;
@@ -111,6 +124,27 @@ typedef struct {
   int return_is_float64;
   /* IEEE-754 width of the function's float return (0/32/64). 0 = not float. */
   int return_float_bits;
+  /* Set when the function's return type classifies INDIRECT (struct >8B or
+   * non-pow2). The hidden out-pointer lives at [rbp - 8]; IR_OP_RETURN
+   * memcpys through it. */
+  int returns_indirect;
+  /* Byte count of the INDIRECT return struct (0 if not INDIRECT). */
+  size_t indirect_return_size;
+  /* FIFO of caller-side return-slot rbp offsets, one per IR_OP_CALL whose
+   * callee returns INDIRECT. Populated in the function pre-pass, consumed
+   * in instruction order by emit_call. */
+  int *indirect_return_slot_offsets;
+  size_t indirect_return_slot_count;
+  size_t indirect_return_slot_capacity;
+  size_t indirect_return_slot_cursor;
+  /* Side-table: which IR temps currently hold a POINTER to an indirect-
+   * returned struct, with the byte size of that struct. Same role as
+   * ir_indirect_temp_table in the text-asm path. Names are interned IR
+   * strings (borrowed). */
+  char **indirect_temp_names;
+  size_t *indirect_temp_sizes;
+  size_t indirect_temp_count;
+  size_t indirect_temp_capacity;
   FunctionDeclaration *function_data;
   const char *function_name;
 } BinaryFunctionContext;
@@ -119,6 +153,19 @@ static const BinaryGpRegister BINARY_WIN64_INT_PARAM_REGISTERS[] = {
     BINARY_GP_RCX, BINARY_GP_RDX, BINARY_GP_R8, BINARY_GP_R9};
 static const BinaryXmmRegister BINARY_WIN64_FLOAT_PARAM_REGISTERS[] = {
     BINARY_XMM0, BINARY_XMM1, BINARY_XMM2, BINARY_XMM3};
+
+typedef struct {
+  char *name;
+  uint64_t value;
+} BinaryGlobalConstEntry;
+
+typedef struct {
+  BinaryGlobalConstEntry *items;
+  size_t count;
+  size_t capacity;
+} BinaryGlobalConstTable;
+
+static BinaryGlobalConstTable g_binary_global_consts = {0};
 
 static char *binary_codegen_strdup(const char *value) {
   if (!value) {
@@ -133,6 +180,69 @@ static char *binary_codegen_strdup(const char *value) {
 
   memcpy(copy, value, length);
   return copy;
+}
+
+static void binary_global_const_table_reset(void) {
+  for (size_t i = 0; i < g_binary_global_consts.count; i++) {
+    free(g_binary_global_consts.items[i].name);
+  }
+  free(g_binary_global_consts.items);
+  g_binary_global_consts.items = NULL;
+  g_binary_global_consts.count = 0;
+  g_binary_global_consts.capacity = 0;
+}
+
+static int binary_global_const_table_add(const char *name, uint64_t value) {
+  if (!name) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < g_binary_global_consts.count; i++) {
+    if (g_binary_global_consts.items[i].name &&
+        strcmp(g_binary_global_consts.items[i].name, name) == 0) {
+      g_binary_global_consts.items[i].value = value;
+      return 1;
+    }
+  }
+
+  if (g_binary_global_consts.count >= g_binary_global_consts.capacity) {
+    size_t new_capacity =
+        g_binary_global_consts.capacity ? g_binary_global_consts.capacity * 2 : 16;
+    BinaryGlobalConstEntry *new_items =
+        realloc(g_binary_global_consts.items,
+                new_capacity * sizeof(BinaryGlobalConstEntry));
+    if (!new_items) {
+      return 0;
+    }
+    g_binary_global_consts.items = new_items;
+    g_binary_global_consts.capacity = new_capacity;
+  }
+
+  char *name_copy = binary_codegen_strdup(name);
+  if (!name_copy) {
+    return 0;
+  }
+
+  g_binary_global_consts.items[g_binary_global_consts.count].name = name_copy;
+  g_binary_global_consts.items[g_binary_global_consts.count].value = value;
+  g_binary_global_consts.count++;
+  return 1;
+}
+
+static int binary_global_const_table_get(const char *name, uint64_t *value_out) {
+  if (!name || !value_out) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < g_binary_global_consts.count; i++) {
+    if (g_binary_global_consts.items[i].name &&
+        strcmp(g_binary_global_consts.items[i].name, name) == 0) {
+      *value_out = g_binary_global_consts.items[i].value;
+      return 1;
+    }
+  }
+
+  return 0;
 }
 
 static int binary_align_up_int(int value, int alignment, int *result_out) {
@@ -293,6 +403,63 @@ static void binary_named_slot_table_destroy(BinaryNamedSlotTable *table) {
 
   for (size_t i = 0; i < table->count; i++) {
     free(table->items[i].name);
+  }
+  free(table->items);
+  table->items = NULL;
+  table->count = 0;
+  table->capacity = 0;
+}
+
+static const char *
+binary_symbol_alias_table_get(const BinarySymbolAliasTable *table,
+                              const char *name) {
+  if (!table || !name) {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < table->count; i++) {
+    if (table->items[i].name && strcmp(table->items[i].name, name) == 0) {
+      return table->items[i].target;
+    }
+  }
+
+  return NULL;
+}
+
+static int binary_symbol_alias_table_add(BinarySymbolAliasTable *table,
+                                         const char *name,
+                                         const char *target) {
+  const char *existing = NULL;
+  if (!table || !name || !target || name[0] == '\0' ||
+      target[0] == '\0') {
+    return 0;
+  }
+
+  existing = binary_symbol_alias_table_get(table, name);
+  if (existing) {
+    return strcmp(existing, target) == 0;
+  }
+
+  if (table->count >= table->capacity) {
+    size_t new_capacity = table->capacity == 0 ? 8 : table->capacity * 2;
+    BinarySymbolAliasEntry *grown =
+        realloc(table->items, new_capacity * sizeof(BinarySymbolAliasEntry));
+    if (!grown) {
+      return 0;
+    }
+    table->items = grown;
+    table->capacity = new_capacity;
+  }
+
+  table->items[table->count].name = name;
+  table->items[table->count].target = target;
+  table->count++;
+  return 1;
+}
+
+static void binary_symbol_alias_table_destroy(BinarySymbolAliasTable *table) {
+  if (!table) {
+    return;
   }
   free(table->items);
   table->items = NULL;
@@ -490,10 +657,14 @@ static void binary_function_context_destroy(BinaryFunctionContext *context) {
   binary_named_slot_table_destroy(&context->float64_symbols);
   binary_named_slot_table_destroy(&context->address_taken_symbols);
   binary_named_slot_table_destroy(&context->register_symbols);
+  binary_symbol_alias_table_destroy(&context->symbol_aliases);
   binary_label_table_destroy(&context->labels);
   binary_label_fixup_table_destroy(&context->label_fixups);
   binary_call_relocation_table_destroy(&context->call_relocations);
   binary_offset_table_destroy(&context->return_fixups);
+  free(context->indirect_return_slot_offsets);
+  free(context->indirect_temp_names);
+  free(context->indirect_temp_sizes);
 }
 
 static int binary_emit_rex(BinaryCodeBuffer *buffer, int w, int r, int x,
@@ -534,6 +705,9 @@ static int binary_emit_mov_reg_reg(BinaryCodeBuffer *buffer,
   if (!buffer) {
     return 0;
   }
+  if (destination == source) {
+    return 1;
+  }
 
   if (!binary_emit_rex(buffer, 1, destination >> 3, 0, source >> 3) ||
       !binary_code_buffer_append_u8(buffer, 0x8B) ||
@@ -546,11 +720,70 @@ static int binary_emit_mov_reg_reg(BinaryCodeBuffer *buffer,
   return 1;
 }
 
+static int binary_emit_mov_reg_imm32_zero_extend(BinaryCodeBuffer *buffer,
+                                                 BinaryGpRegister destination,
+                                                 uint32_t immediate) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_emit_rex(buffer, 0, 0, 0, destination >> 3) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xB8 + (destination & 7))) ||
+      !binary_code_buffer_append_u32(buffer, immediate)) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int binary_emit_xor_reg_reg32(BinaryCodeBuffer *buffer,
+                                     BinaryGpRegister reg) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_emit_rex(buffer, 0, reg >> 3, 0, reg >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x31) ||
+      !binary_code_buffer_append_u8(
+          buffer,
+          (unsigned char)(0xC0 | ((reg & 7) << 3) | (reg & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int binary_emit_test_reg_reg(BinaryCodeBuffer *buffer,
+                                    BinaryGpRegister reg);
+static int binary_emit_neg_reg(BinaryCodeBuffer *buffer, BinaryGpRegister reg);
+static int binary_emit_shift_reg_imm8(BinaryCodeBuffer *buffer,
+                                      unsigned char subopcode,
+                                      BinaryGpRegister reg,
+                                      unsigned char immediate);
+
 static int binary_emit_alu_rsp_imm32(BinaryCodeBuffer *buffer,
                                      unsigned char subopcode,
                                      uint32_t immediate) {
   if (!buffer) {
     return 0;
+  }
+  if (immediate == 0) {
+    return 1;
+  }
+
+  int32_t signed_immediate = (int32_t)immediate;
+  if (signed_immediate >= INT8_MIN && signed_immediate <= INT8_MAX) {
+    if (!binary_emit_rex(buffer, 1, 0, 0, 0) ||
+        !binary_code_buffer_append_u8(buffer, 0x83) ||
+        !binary_code_buffer_append_u8(
+            buffer, (unsigned char)(0xC0 | ((subopcode & 7) << 3) |
+                                    (BINARY_GP_RSP & 7))) ||
+        !binary_code_buffer_append_u8(buffer,
+                                      (unsigned char)(int8_t)signed_immediate)) {
+      return 0;
+    }
+    return 1;
   }
 
   if (!binary_emit_rex(buffer, 1, 0, 0, 0) ||
@@ -580,6 +813,28 @@ static int binary_emit_alu_reg_imm32(BinaryCodeBuffer *buffer,
                                      BinaryGpRegister reg, uint32_t immediate) {
   if (!buffer) {
     return 0;
+  }
+  if ((subopcode == 0 || subopcode == 1 || subopcode == 5 ||
+       subopcode == 6) &&
+      immediate == 0) {
+    return 1;
+  }
+  if (subopcode == 4 && immediate == UINT32_MAX) {
+    return 1;
+  }
+
+  int32_t signed_immediate = (int32_t)immediate;
+  if (signed_immediate >= INT8_MIN && signed_immediate <= INT8_MAX) {
+    if (!binary_emit_rex(buffer, 1, 0, 0, reg >> 3) ||
+        !binary_code_buffer_append_u8(buffer, 0x83) ||
+        !binary_code_buffer_append_u8(
+            buffer,
+            (unsigned char)(0xC0 | ((subopcode & 7) << 3) | (reg & 7))) ||
+        !binary_code_buffer_append_u8(buffer,
+                                      (unsigned char)(int8_t)signed_immediate)) {
+      return 0;
+    }
+    return 1;
   }
 
   if (!binary_emit_rex(buffer, 1, 0, 0, reg >> 3) ||
@@ -625,6 +880,9 @@ static int binary_emit_xor_reg_imm32(BinaryCodeBuffer *buffer,
 static int binary_emit_cmp_reg_imm32(BinaryCodeBuffer *buffer,
                                      BinaryGpRegister reg,
                                      uint32_t immediate) {
+  if (immediate == 0) {
+    return binary_emit_test_reg_reg(buffer, reg);
+  }
   return binary_emit_alu_reg_imm32(buffer, 7, reg, immediate);
 }
 
@@ -633,6 +891,24 @@ static int binary_emit_mov_reg_imm64(BinaryCodeBuffer *buffer,
                                      uint64_t immediate) {
   if (!buffer) {
     return 0;
+  }
+  if (immediate == 0) {
+    return binary_emit_xor_reg_reg32(buffer, destination);
+  }
+  if (immediate <= UINT32_MAX) {
+    return binary_emit_mov_reg_imm32_zero_extend(buffer, destination,
+                                                (uint32_t)immediate);
+  }
+  if (immediate >= UINT64_C(0xffffffff80000000)) {
+    int32_t signed_immediate = (int32_t)immediate;
+    if (!binary_emit_rex(buffer, 1, 0, 0, destination >> 3) ||
+        !binary_code_buffer_append_u8(buffer, 0xC7) ||
+        !binary_code_buffer_append_u8(
+            buffer, (unsigned char)(0xC0 | (destination & 7))) ||
+        !binary_code_buffer_append_u32(buffer, (uint32_t)signed_immediate)) {
+      return 0;
+    }
+    return 1;
   }
 
   if (!binary_emit_rex(buffer, 1, 0, 0, destination >> 3) ||
@@ -758,6 +1034,77 @@ static int binary_emit_lea_reg_mem(BinaryCodeBuffer *buffer,
                                    BinaryGpRegister base, int displacement) {
   return binary_emit_memory_access(buffer, 0x8D, destination, base,
                                    displacement);
+}
+
+static int binary_emit_lea_reg_base_index_scale_disp(
+    BinaryCodeBuffer *buffer, BinaryGpRegister destination,
+    BinaryGpRegister base, BinaryGpRegister index, int scale,
+    int displacement) {
+  if (!buffer || index == BINARY_GP_RSP) {
+    return 0;
+  }
+
+  unsigned char scale_bits = 0;
+  switch (scale) {
+  case 1:
+    scale_bits = 0;
+    break;
+  case 2:
+    scale_bits = 1;
+    break;
+  case 4:
+    scale_bits = 2;
+    break;
+  case 8:
+    scale_bits = 3;
+    break;
+  default:
+    return 0;
+  }
+
+  int use_disp8 = displacement >= -128 && displacement <= 127;
+  unsigned char mod = 0;
+  if (displacement == 0 &&
+      (base & 7) != (BINARY_GP_RBP & 7)) {
+    mod = 0;
+  } else {
+    mod = use_disp8 ? 1 : 2;
+  }
+
+  if (!binary_emit_rex(buffer, 1, destination >> 3, index >> 3, base >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x8D) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)((mod << 6) | ((destination & 7) << 3) | 4)) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)((scale_bits << 6) | ((index & 7) << 3) |
+                                  (base & 7)))) {
+    return 0;
+  }
+
+  if (mod == 1) {
+    return binary_code_buffer_append_u8(buffer,
+                                        (unsigned char)(int8_t)displacement);
+  }
+  if (mod == 2) {
+    return binary_code_buffer_append_u32(buffer,
+                                         (uint32_t)(int32_t)displacement);
+  }
+  return 1;
+}
+
+static int binary_emit_lea_reg_reg(BinaryCodeBuffer *buffer,
+                                   BinaryGpRegister destination,
+                                   BinaryGpRegister lhs,
+                                   BinaryGpRegister rhs) {
+  if (rhs != BINARY_GP_RSP) {
+    return binary_emit_lea_reg_base_index_scale_disp(buffer, destination, lhs,
+                                                    rhs, 1, 0);
+  }
+  if (lhs != BINARY_GP_RSP) {
+    return binary_emit_lea_reg_base_index_scale_disp(buffer, destination, rhs,
+                                                    lhs, 1, 0);
+  }
+  return 0;
 }
 
 static int binary_emit_lea_reg_rip_placeholder(BinaryCodeBuffer *buffer,
@@ -933,6 +1280,56 @@ static int binary_emit_imul_reg_reg(BinaryCodeBuffer *buffer,
   return 1;
 }
 
+static int binary_immediate_positive_power_of_two_i32(int32_t value,
+                                                      unsigned char *shift_out) {
+  if (!shift_out || value <= 0 || (value & (value - 1)) != 0) {
+    return 0;
+  }
+
+  unsigned char shift = 0;
+  uint32_t uvalue = (uint32_t)value;
+  while (uvalue > 1u) {
+    uvalue >>= 1u;
+    shift++;
+  }
+  *shift_out = shift;
+  return 1;
+}
+
+static int binary_emit_imul_reg_reg_small_imm(BinaryCodeBuffer *buffer,
+                                              BinaryGpRegister destination,
+                                              BinaryGpRegister source,
+                                              int32_t immediate) {
+  int negate = 0;
+  if (immediate < 0) {
+    if (immediate == INT32_MIN) {
+      return 0;
+    }
+    negate = 1;
+    immediate = -immediate;
+  }
+
+  int scale = 0;
+  if (immediate == 3) {
+    scale = 2;
+  } else if (immediate == 5) {
+    scale = 4;
+  } else if (immediate == 9) {
+    scale = 8;
+  } else {
+    return 0;
+  }
+
+  if (!binary_emit_lea_reg_base_index_scale_disp(buffer, destination, source,
+                                                 source, scale, 0)) {
+    return 0;
+  }
+  if (negate && !binary_emit_neg_reg(buffer, destination)) {
+    return 0;
+  }
+  return 1;
+}
+
 static int binary_emit_imul_reg_reg_imm32(BinaryCodeBuffer *buffer,
                                           BinaryGpRegister destination,
                                           BinaryGpRegister source,
@@ -940,13 +1337,49 @@ static int binary_emit_imul_reg_reg_imm32(BinaryCodeBuffer *buffer,
   if (!buffer) {
     return 0;
   }
+  int32_t signed_immediate = (int32_t)immediate;
+  if (signed_immediate == 0) {
+    return binary_emit_xor_reg_reg32(buffer, destination);
+  }
+  if (signed_immediate == 1) {
+    return binary_emit_mov_reg_reg(buffer, destination, source);
+  }
+  if (signed_immediate == -1) {
+    return binary_emit_mov_reg_reg(buffer, destination, source) &&
+           binary_emit_neg_reg(buffer, destination);
+  }
 
+  unsigned char shift = 0;
+  if (binary_immediate_positive_power_of_two_i32(signed_immediate,
+                                                 &shift)) {
+    return binary_emit_mov_reg_reg(buffer, destination, source) &&
+           binary_emit_shift_reg_imm8(buffer, 4, destination, shift);
+  }
+  if (signed_immediate != INT32_MIN &&
+      binary_immediate_positive_power_of_two_i32(-signed_immediate,
+                                                 &shift)) {
+    return binary_emit_mov_reg_reg(buffer, destination, source) &&
+           binary_emit_shift_reg_imm8(buffer, 4, destination, shift) &&
+           binary_emit_neg_reg(buffer, destination);
+  }
+  if (binary_emit_imul_reg_reg_small_imm(buffer, destination, source,
+                                         signed_immediate)) {
+    return 1;
+  }
+
+  unsigned char opcode = signed_immediate >= INT8_MIN &&
+                                 signed_immediate <= INT8_MAX
+                             ? 0x6B
+                             : 0x69;
   if (!binary_emit_rex(buffer, 1, destination >> 3, 0, source >> 3) ||
-      !binary_code_buffer_append_u8(buffer, 0x69) ||
+      !binary_code_buffer_append_u8(buffer, opcode) ||
       !binary_code_buffer_append_u8(
           buffer, (unsigned char)(0xC0 | ((destination & 7) << 3) |
                                   (source & 7))) ||
-      !binary_code_buffer_append_u32(buffer, immediate)) {
+      (opcode == 0x6B
+           ? !binary_code_buffer_append_u8(
+                 buffer, (unsigned char)(int8_t)signed_immediate)
+           : !binary_code_buffer_append_u32(buffer, immediate))) {
     return 0;
   }
 
@@ -1008,6 +1441,19 @@ static int binary_emit_shift_reg_imm8(BinaryCodeBuffer *buffer,
                                       unsigned char immediate) {
   if (!buffer) {
     return 0;
+  }
+  if (immediate == 0) {
+    return 1;
+  }
+  if (immediate == 1) {
+    if (!binary_emit_rex(buffer, 1, 0, 0, reg >> 3) ||
+        !binary_code_buffer_append_u8(buffer, 0xD1) ||
+        !binary_code_buffer_append_u8(
+            buffer,
+            (unsigned char)(0xC0 | ((subopcode & 7) << 3) | (reg & 7)))) {
+      return 0;
+    }
+    return 1;
   }
 
   if (!binary_emit_rex(buffer, 1, 0, 0, reg >> 3) ||
@@ -1108,6 +1554,44 @@ static int binary_emit_movsx_rax_ax(BinaryCodeBuffer *buffer) {
   return 1;
 }
 
+static int binary_emit_movsx_reg_reg8(BinaryCodeBuffer *buffer,
+                                      BinaryGpRegister destination,
+                                      BinaryGpRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_emit_rex(buffer, 1, destination >> 3, 0, source >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0xBE) ||
+      !binary_code_buffer_append_u8(
+          buffer,
+          (unsigned char)(0xC0 | ((destination & 7) << 3) | (source & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int binary_emit_movsx_reg_reg16(BinaryCodeBuffer *buffer,
+                                       BinaryGpRegister destination,
+                                       BinaryGpRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_emit_rex(buffer, 1, destination >> 3, 0, source >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x0F) ||
+      !binary_code_buffer_append_u8(buffer, 0xBF) ||
+      !binary_code_buffer_append_u8(
+          buffer,
+          (unsigned char)(0xC0 | ((destination & 7) << 3) | (source & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
 static int binary_emit_movsxd_rax_eax(BinaryCodeBuffer *buffer) {
   if (!buffer) {
     return 0;
@@ -1116,6 +1600,24 @@ static int binary_emit_movsxd_rax_eax(BinaryCodeBuffer *buffer) {
   if (!binary_emit_rex(buffer, 1, 0, 0, 0) ||
       !binary_code_buffer_append_u8(buffer, 0x63) ||
       !binary_code_buffer_append_u8(buffer, 0xC0)) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int binary_emit_movsxd_reg_reg32(BinaryCodeBuffer *buffer,
+                                        BinaryGpRegister destination,
+                                        BinaryGpRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_emit_rex(buffer, 1, destination >> 3, 0, source >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x63) ||
+      !binary_code_buffer_append_u8(
+          buffer,
+          (unsigned char)(0xC0 | ((destination & 7) << 3) | (source & 7)))) {
     return 0;
   }
 
@@ -1611,6 +2113,12 @@ static int code_generator_binary_resolved_type_is_stack_scalar(Type *type) {
   return type->kind == TYPE_FLOAT64 && type->size == 8;
 }
 
+static int code_generator_binary_type_is_direct_aggregate(Type *type) {
+  return type && code_generator_type_is_aggregate(type) &&
+         code_generator_abi_classify(type) == ABI_PASS_DIRECT &&
+         type->size > 0 && type->size <= 8;
+}
+
 static int code_generator_binary_resolved_type_is_float64(Type *type) {
   return type && type->kind == TYPE_FLOAT64 && type->size == 8;
 }
@@ -1637,6 +2145,13 @@ static int code_generator_binary_resolved_type_is_abi_supported(Type *type,
   }
 
   if (type->kind == TYPE_STRING) {
+    return 1;
+  }
+
+  /* Aggregates are supported through the ABI classifier: DIRECT aggregates
+   * are raw 1/2/4/8-byte register values; INDIRECT aggregates use hidden
+   * pointers. */
+  if (code_generator_type_is_aggregate(type)) {
     return 1;
   }
 
@@ -1730,6 +2245,18 @@ static int code_generator_binary_symbol_is_scalar_accessible(
 
   symbol = symbol_table_lookup(generator->symbol_table, name);
   if (!symbol || !symbol->type) {
+    return 1;
+  }
+
+  /* Indirect parameters: the home slot holds a struct POINTER (8 bytes),
+   * which is scalar-accessible even though the symbol's type is aggregate.
+   * Downstream consumers use that pointer as the struct's base address. */
+  if (symbol->kind == SYMBOL_PARAMETER &&
+      symbol->data.variable.is_indirect_param) {
+    return 1;
+  }
+
+  if (code_generator_binary_type_is_direct_aggregate(symbol->type)) {
     return 1;
   }
 
@@ -1877,14 +2404,198 @@ static int code_generator_binary_type_is_gp_promotable(Type *type) {
   return type->size > 0 && type->size <= 8;
 }
 
+static int code_generator_binary_instruction_writes_dest(IROpcode op) {
+  switch (op) {
+  case IR_OP_NOP:
+  case IR_OP_LABEL:
+  case IR_OP_JUMP:
+  case IR_OP_BRANCH_ZERO:
+  case IR_OP_BRANCH_EQ:
+  case IR_OP_DECLARE_LOCAL:
+    return 0;
+  default:
+    return 1;
+  }
+}
+
+static size_t code_generator_binary_symbol_write_count(
+    const IRFunction *function, const char *name) {
+  size_t count = 0;
+  if (!function || !name) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (!instruction ||
+        !code_generator_binary_instruction_writes_dest(instruction->op) ||
+        instruction->dest.kind != IR_OPERAND_SYMBOL ||
+        !instruction->dest.name) {
+      continue;
+    }
+    if (strcmp(instruction->dest.name, name) == 0) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+static int code_generator_binary_collect_symbol_aliases(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    IRFunction *ir_function) {
+  if (!generator || !context || !ir_function) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < ir_function->instruction_count; i++) {
+    const IRInstruction *instruction = &ir_function->instructions[i];
+    const char *name = NULL;
+    const char *target = NULL;
+    Symbol *symbol = NULL;
+    Symbol *target_symbol = NULL;
+
+    if (!instruction || instruction->op != IR_OP_ASSIGN ||
+        instruction->dest.kind != IR_OPERAND_SYMBOL ||
+        instruction->lhs.kind != IR_OPERAND_SYMBOL ||
+        !instruction->dest.name || !instruction->lhs.name) {
+      continue;
+    }
+
+    name = instruction->dest.name;
+    target = instruction->lhs.name;
+    if (strcmp(name, target) == 0 ||
+        code_generator_binary_get_local_offset(context, name) <= 0 ||
+        code_generator_binary_get_symbol_offset(context, target) <= 0 ||
+        code_generator_binary_symbol_write_count(ir_function, name) != 1 ||
+        binary_named_slot_table_get_offset(&context->address_taken_symbols,
+                                           name) >= 0 ||
+        binary_named_slot_table_get_offset(&context->address_taken_symbols,
+                                           target) >= 0 ||
+        binary_symbol_alias_table_get(&context->symbol_aliases, target)) {
+      continue;
+    }
+
+    symbol = generator->symbol_table
+                 ? symbol_table_lookup(generator->symbol_table, name)
+                 : NULL;
+    target_symbol = generator->symbol_table
+                        ? symbol_table_lookup(generator->symbol_table, target)
+                        : NULL;
+    if ((symbol && symbol->type &&
+         !code_generator_binary_type_is_gp_promotable(symbol->type)) ||
+        (target_symbol && target_symbol->type &&
+         !code_generator_binary_type_is_gp_promotable(target_symbol->type)) ||
+        code_generator_binary_marked_symbol_float_bits(context, name) ||
+        code_generator_binary_marked_symbol_float_bits(context, target) ||
+        !code_generator_binary_symbol_is_scalar_accessible(generator, name) ||
+        !code_generator_binary_symbol_is_scalar_accessible(generator, target)) {
+      continue;
+    }
+
+    if (!binary_symbol_alias_table_add(&context->symbol_aliases, name,
+                                       target)) {
+      code_generator_set_error(
+          generator,
+          "Failed to record local alias '%s' in direct object function '%s'",
+          name, context->function_name);
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
 static int code_generator_binary_operand_mentions_symbol(
     const IROperand *operand, const char *name) {
   return operand && operand->kind == IR_OPERAND_SYMBOL && operand->name &&
          name && strcmp(operand->name, name) == 0;
 }
 
+static int code_generator_binary_operand_mentions_symbol_or_alias(
+    const BinaryFunctionContext *context, const IROperand *operand,
+    const char *name) {
+  const char *alias_target = NULL;
+  if (code_generator_binary_operand_mentions_symbol(operand, name)) {
+    return 1;
+  }
+  if (!context || !operand || operand->kind != IR_OPERAND_SYMBOL ||
+      !operand->name || !name) {
+    return 0;
+  }
+  alias_target =
+      binary_symbol_alias_table_get(&context->symbol_aliases, operand->name);
+  return alias_target && strcmp(alias_target, name) == 0;
+}
+
+static int code_generator_binary_instruction_in_backward_loop(
+    const IRFunction *function, size_t instruction_index) {
+  if (!function || instruction_index >= function->instruction_count) {
+    return 0;
+  }
+
+  for (size_t jump_index = instruction_index + 1;
+       jump_index < function->instruction_count; jump_index++) {
+    const IRInstruction *jump = &function->instructions[jump_index];
+    if (!jump || jump->op != IR_OP_JUMP || !jump->text) {
+      continue;
+    }
+
+    for (size_t label_index = 0; label_index <= instruction_index;
+         label_index++) {
+      const IRInstruction *label = &function->instructions[label_index];
+      if (label && label->op == IR_OP_LABEL && label->text &&
+          strcmp(label->text, jump->text) == 0) {
+        return 1;
+      }
+    }
+  }
+
+  return 0;
+}
+
+static size_t *code_generator_binary_build_loop_weights(
+    const IRFunction *function) {
+  if (!function) {
+    return NULL;
+  }
+
+  size_t count = function->instruction_count;
+  size_t *weights = malloc((count ? count : 1) * sizeof(size_t));
+  if (!weights) {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    weights[i] = 1;
+  }
+
+  for (size_t jump_index = 0; jump_index < count; jump_index++) {
+    const IRInstruction *jump = &function->instructions[jump_index];
+    if (!jump || jump->op != IR_OP_JUMP || !jump->text) {
+      continue;
+    }
+
+    for (size_t label_index = 0; label_index < jump_index; label_index++) {
+      const IRInstruction *label = &function->instructions[label_index];
+      if (!label || label->op != IR_OP_LABEL || !label->text ||
+          strcmp(label->text, jump->text) != 0) {
+        continue;
+      }
+
+      for (size_t i = label_index; i <= jump_index; i++) {
+        weights[i] = 4;
+      }
+      break;
+    }
+  }
+
+  return weights;
+}
+
 static size_t code_generator_binary_function_symbol_score(
-    const IRFunction *function, const char *name) {
+    const BinaryFunctionContext *context, const IRFunction *function,
+    const char *name, const size_t *loop_weights) {
   size_t score = 0;
 
   if (!function || !name) {
@@ -1893,27 +2604,28 @@ static size_t code_generator_binary_function_symbol_score(
 
   for (size_t i = 0; i < function->instruction_count; i++) {
     const IRInstruction *instruction = &function->instructions[i];
+    size_t weight = loop_weights ? loop_weights[i] : 1;
     if (!instruction) {
       continue;
     }
 
-    if (code_generator_binary_operand_mentions_symbol(&instruction->dest,
-                                                      name)) {
-      score++;
+    if (code_generator_binary_operand_mentions_symbol_or_alias(
+            context, &instruction->dest, name)) {
+      score += weight;
     }
-    if (code_generator_binary_operand_mentions_symbol(&instruction->lhs,
-                                                      name)) {
-      score++;
+    if (code_generator_binary_operand_mentions_symbol_or_alias(
+            context, &instruction->lhs, name)) {
+      score += weight;
     }
-    if (code_generator_binary_operand_mentions_symbol(&instruction->rhs,
-                                                      name)) {
-      score++;
+    if (code_generator_binary_operand_mentions_symbol_or_alias(
+            context, &instruction->rhs, name)) {
+      score += weight;
     }
     for (size_t arg_index = 0; arg_index < instruction->argument_count;
          arg_index++) {
-      if (code_generator_binary_operand_mentions_symbol(
-              &instruction->arguments[arg_index], name)) {
-        score++;
+      if (code_generator_binary_operand_mentions_symbol_or_alias(
+              context, &instruction->arguments[arg_index], name)) {
+        score += weight;
       }
     }
   }
@@ -1981,19 +2693,153 @@ static int code_generator_binary_symbol_assigned_register(
   return 1;
 }
 
+static int code_generator_binary_function_has_calls(const IRFunction *function) {
+  if (!function) {
+    return 0;
+  }
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IROpcode op = function->instructions[i].op;
+    if (op == IR_OP_CALL || op == IR_OP_CALL_INDIRECT) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int code_generator_binary_function_can_promote_rsi_rdi(
+    CodeGenerator *generator, IRFunction *function, Type *return_type) {
+  if (!generator || !function) {
+    return 0;
+  }
+
+  if (code_generator_abi_classify(return_type) == ABI_PASS_INDIRECT) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (!instruction) {
+      continue;
+    }
+
+    if (instruction->ast_ref || instruction->op == IR_OP_CALL_INDIRECT ||
+        instruction->op == IR_OP_INLINE_ASM || instruction->op == IR_OP_NEW) {
+      return 0;
+    }
+
+    if (instruction->op != IR_OP_CALL || !instruction->text) {
+      continue;
+    }
+
+    Symbol *callee = generator->symbol_table
+                         ? symbol_table_lookup(generator->symbol_table,
+                                               instruction->text)
+                         : NULL;
+    Type *callee_return = NULL;
+    if (callee && callee->kind == SYMBOL_FUNCTION) {
+      callee_return = callee->data.function.return_type
+                          ? callee->data.function.return_type
+                          : callee->type;
+    }
+    if (code_generator_abi_classify(callee_return) == ABI_PASS_INDIRECT) {
+      return 0;
+    }
+
+    if (callee && callee->kind == SYMBOL_FUNCTION &&
+        callee->data.function.parameter_types) {
+      for (size_t arg_i = 0; arg_i < instruction->argument_count &&
+                             arg_i < callee->data.function.parameter_count;
+           arg_i++) {
+        Type *arg_type = callee->data.function.parameter_types[arg_i];
+        if (code_generator_abi_classify(arg_type) == ABI_PASS_INDIRECT) {
+          return 0;
+        }
+      }
+    }
+  }
+
+  return 1;
+}
+
 static int code_generator_binary_promote_hot_symbols(
     CodeGenerator *generator, BinaryFunctionContext *context,
     FunctionDeclaration *function_data, IRFunction *ir_function) {
   static const BinaryGpRegister promotion_registers[] = {
       BINARY_GP_R12, BINARY_GP_R13, BINARY_GP_R14, BINARY_GP_R15,
-      BINARY_GP_RBX};
+      BINARY_GP_RBX, BINARY_GP_RSI, BINARY_GP_RDI};
 
   if (!generator || !context || !function_data || !ir_function) {
     return 0;
   }
 
-  for (size_t reg_index = 0;
-       reg_index < sizeof(promotion_registers) / sizeof(promotion_registers[0]);
+  Type *return_type = code_generator_binary_get_resolved_type(
+      generator, function_data->return_type, 1);
+  size_t max_promoted =
+      sizeof(promotion_registers) / sizeof(promotion_registers[0]);
+  if (!code_generator_binary_function_can_promote_rsi_rdi(
+          generator, ir_function, return_type) &&
+      max_promoted >= 2) {
+    max_promoted -= 2;
+  }
+  size_t promoted_count = 0;
+  int function_has_no_calls =
+      !code_generator_binary_function_has_calls(ir_function);
+  size_t *loop_weights =
+      code_generator_binary_build_loop_weights(ir_function);
+  if (!loop_weights) {
+    code_generator_set_error(
+        generator,
+        "Failed to allocate loop-weight metadata for direct object function "
+        "'%s'",
+        function_data->name);
+    return 0;
+  }
+
+  if (function_has_no_calls) {
+    for (size_t insn_i = 0;
+         insn_i < ir_function->instruction_count && promoted_count < max_promoted;
+         insn_i++) {
+      const IRInstruction *insn = &ir_function->instructions[insn_i];
+      const IROperand *operands[3];
+      size_t op_i = 0;
+
+      if (insn->op != IR_OP_ROTATE_ADD) {
+        continue;
+      }
+
+      operands[0] = &insn->dest;
+      operands[1] = &insn->lhs;
+      operands[2] = &insn->rhs;
+      for (op_i = 0; op_i < 3 && promoted_count < max_promoted; op_i++) {
+        const char *name = operands[op_i]->name;
+        Type *type = NULL;
+        if (operands[op_i]->kind != IR_OPERAND_SYMBOL || !name ||
+            binary_symbol_alias_table_get(&context->symbol_aliases, name) ||
+            code_generator_binary_symbol_already_promoted(context, name) ||
+            binary_named_slot_table_get_offset(&context->address_taken_symbols,
+                                               name) >= 0) {
+          continue;
+        }
+
+        type = code_generator_binary_get_resolved_type(generator, "int64", 0);
+        if (!code_generator_binary_type_is_gp_promotable(type)) {
+          continue;
+        }
+
+        if (!binary_named_slot_table_add(
+                &context->register_symbols, name,
+                (int)promotion_registers[promoted_count]) ||
+            !code_generator_binary_context_add_saved_register(
+                context, promotion_registers[promoted_count])) {
+          return 0;
+        }
+        promoted_count++;
+      }
+    }
+  }
+
+  for (size_t reg_index = promoted_count;
+       reg_index < max_promoted;
        reg_index++) {
     const char *best_name = NULL;
     size_t best_score = 0;
@@ -2002,6 +2848,7 @@ static int code_generator_binary_promote_hot_symbols(
       const char *name = function_data->parameter_names[i];
       Type *type = NULL;
       if (!name || code_generator_binary_symbol_already_promoted(context, name) ||
+          binary_symbol_alias_table_get(&context->symbol_aliases, name) ||
           binary_named_slot_table_get_offset(&context->address_taken_symbols,
                                              name) >= 0) {
         continue;
@@ -2017,44 +2864,49 @@ static int code_generator_binary_promote_hot_symbols(
       }
 
       size_t score =
-          code_generator_binary_function_symbol_score(ir_function, name);
+          code_generator_binary_function_symbol_score(context, ir_function,
+                                                      name, loop_weights);
       if (score > best_score) {
         best_score = score;
         best_name = name;
       }
     }
 
-    for (size_t i = 0; i < ir_function->instruction_count; i++) {
-      const IRInstruction *instruction = &ir_function->instructions[i];
-      const char *name = NULL;
-      Type *type = NULL;
-      if (!instruction || instruction->op != IR_OP_DECLARE_LOCAL ||
-          instruction->dest.kind != IR_OPERAND_SYMBOL ||
-          !instruction->dest.name) {
-        continue;
-      }
+    if (!best_name || best_score < 3) {
+      for (size_t i = 0; i < ir_function->instruction_count; i++) {
+        const IRInstruction *instruction = &ir_function->instructions[i];
+        const char *name = NULL;
+        Type *type = NULL;
+        if (!instruction || instruction->op != IR_OP_DECLARE_LOCAL ||
+            instruction->dest.kind != IR_OPERAND_SYMBOL ||
+            !instruction->dest.name) {
+          continue;
+        }
 
-      name = instruction->dest.name;
-      if (code_generator_binary_symbol_already_promoted(context, name) ||
-          binary_named_slot_table_get_offset(&context->address_taken_symbols,
-                                             name) >= 0) {
-        continue;
-      }
+        name = instruction->dest.name;
+        if (code_generator_binary_symbol_already_promoted(context, name) ||
+            binary_symbol_alias_table_get(&context->symbol_aliases, name) ||
+            binary_named_slot_table_get_offset(&context->address_taken_symbols,
+                                               name) >= 0) {
+          continue;
+        }
 
-      type = code_generator_binary_get_resolved_type(
-          generator,
-          instruction->text && instruction->text[0] != '\0' ? instruction->text
-                                                            : "int64",
-          0);
-      if (!code_generator_binary_type_is_gp_promotable(type)) {
-        continue;
-      }
+        type = code_generator_binary_get_resolved_type(
+            generator,
+            instruction->text && instruction->text[0] != '\0' ? instruction->text
+                                                              : "int64",
+            0);
+        if (!code_generator_binary_type_is_gp_promotable(type)) {
+          continue;
+        }
 
-      size_t score =
-          code_generator_binary_function_symbol_score(ir_function, name);
-      if (score > best_score) {
-        best_score = score;
-        best_name = name;
+        size_t score =
+            code_generator_binary_function_symbol_score(context, ir_function,
+                                                        name, loop_weights);
+        if (score > best_score) {
+          best_score = score;
+          best_name = name;
+        }
       }
     }
 
@@ -2070,10 +2922,12 @@ static int code_generator_binary_promote_hot_symbols(
           generator,
           "Failed to promote hot symbol '%s' in direct object function '%s'",
           best_name, function_data->name);
+      free(loop_weights);
       return 0;
     }
   }
 
+  free(loop_weights);
   return 1;
 }
 
@@ -2098,8 +2952,7 @@ static int code_generator_binary_resolved_type_scalar_size(Type *type) {
     return 8;
   }
 
-  if (type->kind == TYPE_POINTER || type->kind == TYPE_FUNCTION_POINTER ||
-      type->kind == TYPE_FUTURE) {
+  if (type->kind == TYPE_POINTER || type->kind == TYPE_FUNCTION_POINTER) {
     return 8;
   }
 
@@ -2130,7 +2983,6 @@ static int code_generator_binary_resolved_type_is_supported(Type *type,
   case TYPE_POINTER:
   case TYPE_ENUM:
   case TYPE_FUNCTION_POINTER:
-  case TYPE_FUTURE:
     return type->size <= 8;
   case TYPE_VOID:
     return allow_void;
@@ -2142,10 +2994,6 @@ static int code_generator_binary_resolved_type_is_supported(Type *type,
 static int code_generator_binary_type_is_abi_supported(CodeGenerator *generator,
                                                        const char *type_name,
                                                        int allow_void) {
-  if (type_name && strncmp(type_name, "Future<", 7) == 0) {
-    return 1;
-  }
-
   if (!generator || !generator->type_checker) {
     return 1;
   }
@@ -2290,9 +3138,36 @@ static int code_generator_binary_prepare_function_context(
     }
   }
 
+  /* Does this function return INDIRECT? The Win64 ABI passes the hidden
+   * out-pointer as the first integer argument, consuming home slot 0 and
+   * shifting user-parameter homes up by one. */
+  Type *fn_return_type =
+      function_data->return_type
+          ? code_generator_binary_get_resolved_type(
+                generator, function_data->return_type, 1)
+          : NULL;
+  int has_hidden_return =
+      (code_generator_abi_classify(fn_return_type) == ABI_PASS_INDIRECT) ? 1 : 0;
+  if (has_hidden_return) {
+    /* Account for the extra home slot in parameter_home_size so the frame
+     * layout includes room for the hidden pointer. */
+    if (function_data->parameter_count >
+        (size_t)(INT_MAX / BINARY_FUNCTION_STACK_SLOT_SIZE - 1)) {
+      code_generator_set_error(generator,
+                               "Too many parameters in function '%s'",
+                               function_data->name);
+      return 0;
+    }
+    parameter_home_size += BINARY_FUNCTION_STACK_SLOT_SIZE;
+  }
+  context->returns_indirect = has_hidden_return;
+  context->indirect_return_size =
+      has_hidden_return ? code_generator_abi_type_size(fn_return_type) : 0;
+
   for (size_t i = 0; i < function_data->parameter_count; i++) {
     const char *parameter_name = function_data->parameter_names[i];
-    int offset = (int)((i + 1) * BINARY_FUNCTION_STACK_SLOT_SIZE);
+    int offset = (int)((i + 1 + (has_hidden_return ? 1 : 0)) *
+                       BINARY_FUNCTION_STACK_SLOT_SIZE);
     if (!parameter_name ||
         !binary_named_slot_table_add(&context->parameter_slots, parameter_name,
                                      offset)) {
@@ -2302,6 +3177,23 @@ static int code_generator_binary_prepare_function_context(
           function_data->name);
       binary_function_context_destroy(context);
       return 0;
+    }
+
+    /* Mark INDIRECT parameters on the symbol so load/lvalue paths know to
+     * deref the home slot (which holds a pointer, not the struct itself). */
+    {
+      Type *param_type =
+          function_data->parameter_types
+              ? code_generator_binary_get_resolved_type(
+                    generator, function_data->parameter_types[i], 0)
+              : NULL;
+      if (code_generator_abi_classify(param_type) == ABI_PASS_INDIRECT) {
+        Symbol *param_sym =
+            symbol_table_lookup(generator->symbol_table, parameter_name);
+        if (param_sym && param_sym->kind == SYMBOL_PARAMETER) {
+          param_sym->data.variable.is_indirect_param = 1;
+        }
+      }
     }
 
     {
@@ -2361,7 +3253,8 @@ static int code_generator_binary_prepare_function_context(
       return 0;
     }
 
-    scalar_local = code_generator_binary_resolved_type_is_stack_scalar(local_type);
+    scalar_local = code_generator_binary_resolved_type_is_stack_scalar(local_type) ||
+                   code_generator_binary_type_is_direct_aggregate(local_type);
     local_alignment = scalar_local ? BINARY_FUNCTION_STACK_SLOT_SIZE
                                    : (int)local_type->alignment;
     if (local_alignment <= 0) {
@@ -2504,6 +3397,12 @@ static int code_generator_binary_prepare_function_context(
     }
   }
 
+  if (!code_generator_binary_collect_symbol_aliases(generator, context,
+                                                    ir_function)) {
+    binary_function_context_destroy(context);
+    return 0;
+  }
+
   if (!code_generator_binary_promote_hot_symbols(generator, context,
                                                  function_data, ir_function)) {
     binary_function_context_destroy(context);
@@ -2566,16 +3465,62 @@ static int code_generator_binary_prepare_function_context(
     return 0;
   }
 
+  /* Reserve a function-level slot for each IR_OP_CALL whose return type is
+   * INDIRECT. Each slot's rbp offset goes into context->indirect_return_slot_offsets
+   * in instruction order and is consumed by emit_call. */
+  int indirect_return_total = 0;
+  for (size_t pp_i = 0; pp_i < ir_function->instruction_count; pp_i++) {
+    const IRInstruction *pp_insn = &ir_function->instructions[pp_i];
+    if (pp_insn->op != IR_OP_CALL || !pp_insn->text) continue;
+    Symbol *callee =
+        symbol_table_lookup(generator->symbol_table, pp_insn->text);
+    Type *ret_t = NULL;
+    if (callee && callee->kind == SYMBOL_FUNCTION) {
+      ret_t = callee->data.function.return_type
+                  ? callee->data.function.return_type
+                  : callee->type;
+    }
+    if (code_generator_abi_classify(ret_t) != ABI_PASS_INDIRECT) continue;
+    size_t sz = code_generator_abi_type_size(ret_t);
+    int slot_bytes = (int)((sz + 15u) & ~(size_t)15);
+    int slot_base_offset =
+        parameter_home_size + local_home_size + temp_home_size +
+        indirect_return_total + slot_bytes;
+    if (context->indirect_return_slot_count >=
+        context->indirect_return_slot_capacity) {
+      size_t new_cap = context->indirect_return_slot_capacity
+                           ? context->indirect_return_slot_capacity * 2
+                           : 8;
+      int *grown = realloc(context->indirect_return_slot_offsets,
+                           new_cap * sizeof(int));
+      if (!grown) {
+        code_generator_set_error(generator,
+                                 "Out of memory recording indirect-return "
+                                 "slot in function '%s'",
+                                 function_data->name);
+        binary_function_context_destroy(context);
+        return 0;
+      }
+      context->indirect_return_slot_offsets = grown;
+      context->indirect_return_slot_capacity = new_cap;
+    }
+    context->indirect_return_slot_offsets[context->indirect_return_slot_count++] =
+        slot_base_offset;
+    indirect_return_total += slot_bytes;
+  }
+
   int saved_register_home_size =
       (int)(context->saved_register_count * BINARY_FUNCTION_STACK_SLOT_SIZE);
   for (size_t i = 0; i < context->saved_register_count; i++) {
     context->saved_register_offsets[i] =
         parameter_home_size + local_home_size + temp_home_size +
+        indirect_return_total +
         (int)((i + 1) * BINARY_FUNCTION_STACK_SLOT_SIZE);
   }
 
   context->raw_frame_size = parameter_home_size + local_home_size +
-                            temp_home_size + saved_register_home_size;
+                            temp_home_size + indirect_return_total +
+                            saved_register_home_size;
   if (!binary_align_up_int(context->raw_frame_size, 16, &context->frame_size)) {
     code_generator_set_error(generator,
                              "Stack frame too large in function '%s'",
@@ -3012,6 +3957,226 @@ static int code_generator_binary_emit_store_to_address(
   }
 }
 
+/* Side-table helpers: which IR temps in the current binary function hold
+ * pointers to indirect-returned structs. */
+static int binary_indirect_temp_add(BinaryFunctionContext *context,
+                                    const char *name, size_t size) {
+  if (!context || !name) return 0;
+  if (context->indirect_temp_count >= context->indirect_temp_capacity) {
+    size_t new_cap =
+        context->indirect_temp_capacity ? context->indirect_temp_capacity * 2 : 8;
+    char **g_names = realloc(context->indirect_temp_names,
+                             new_cap * sizeof(char *));
+    if (!g_names) return 0;
+    context->indirect_temp_names = g_names;
+    size_t *g_sizes = realloc(context->indirect_temp_sizes,
+                              new_cap * sizeof(size_t));
+    if (!g_sizes) return 0;
+    context->indirect_temp_sizes = g_sizes;
+    context->indirect_temp_capacity = new_cap;
+  }
+  context->indirect_temp_names[context->indirect_temp_count] = (char *)name;
+  context->indirect_temp_sizes[context->indirect_temp_count] = size;
+  context->indirect_temp_count++;
+  return 1;
+}
+
+static size_t binary_indirect_temp_get(BinaryFunctionContext *context,
+                                       const char *name) {
+  if (!context || !name) return 0;
+  for (size_t i = 0; i < context->indirect_temp_count; i++) {
+    const char *n = context->indirect_temp_names[i];
+    if (n == name || (n && strcmp(n, name) == 0)) {
+      return context->indirect_temp_sizes[i];
+    }
+  }
+  return 0;
+}
+
+static int code_generator_binary_parameter_is_indirect(
+    CodeGenerator *generator, BinaryFunctionContext *context, const char *name) {
+  if (!context || !name) {
+    return 0;
+  }
+
+  Symbol *symbol = generator && generator->symbol_table
+                       ? symbol_table_lookup(generator->symbol_table, name)
+                       : NULL;
+  if (symbol && symbol->kind == SYMBOL_PARAMETER &&
+      symbol->data.variable.is_indirect_param) {
+    return 1;
+  }
+
+  FunctionDeclaration *function_data = context->function_data;
+  if (!function_data || !function_data->parameter_names ||
+      !function_data->parameter_types) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function_data->parameter_count; i++) {
+    const char *parameter_name = function_data->parameter_names[i];
+    if (parameter_name && strcmp(parameter_name, name) == 0) {
+      Type *parameter_type = code_generator_binary_get_resolved_type(
+          generator, function_data->parameter_types[i], 0);
+      return code_generator_abi_classify(parameter_type) == ABI_PASS_INDIRECT;
+    }
+  }
+
+  return 0;
+}
+
+static int code_generator_binary_emit_struct_destination_address(
+    CodeGenerator *generator, BinaryFunctionContext *context, const char *name,
+    BinaryGpRegister target_register) {
+  if (!generator || !context || !name || name[0] == '\0') {
+    return 0;
+  }
+
+  int param_offset = code_generator_binary_get_parameter_offset(context, name);
+  if (param_offset > 0) {
+    if (code_generator_binary_parameter_is_indirect(generator, context, name)) {
+      return binary_emit_mov_reg_mem(&context->code, target_register,
+                                     BINARY_GP_RBP, -param_offset);
+    }
+    return binary_emit_lea_reg_mem(&context->code, target_register,
+                                   BINARY_GP_RBP, -param_offset);
+  }
+
+  int local_offset = code_generator_binary_get_local_offset(context, name);
+  if (local_offset > 0) {
+    return binary_emit_lea_reg_mem(&context->code, target_register,
+                                   BINARY_GP_RBP, -local_offset);
+  }
+
+  Symbol *symbol = generator->symbol_table
+                       ? symbol_table_lookup(generator->symbol_table, name)
+                       : NULL;
+  if (symbol && symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
+    const char *resolved = code_generator_get_link_symbol_name(generator, name);
+    if (!resolved) {
+      code_generator_set_error(generator,
+                               "Invalid global symbol for struct destination");
+      return 0;
+    }
+    return code_generator_binary_emit_symbol_address(
+        generator, context, resolved, symbol->is_extern, target_register);
+  }
+
+  code_generator_set_error(
+      generator, "Cannot resolve address of struct destination '%s' in function '%s'",
+      name, context->function_name);
+  return 0;
+}
+
+/* Load the address of an INDIRECT struct operand (arg or return) into
+ * `target_register`. Mirrors `code_generator_emit_ir_indirect_arg_source_address`
+ * from the text-asm path. */
+static int code_generator_binary_emit_indirect_source_address(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand, BinaryGpRegister target_register) {
+  if (!generator || !context || !operand) {
+    return 0;
+  }
+  if (operand->kind == IR_OPERAND_SYMBOL) {
+    if (!operand->name) {
+      code_generator_set_error(generator,
+                               "Malformed IR symbol operand (indirect arg)");
+      return 0;
+    }
+    int param_offset =
+        code_generator_binary_get_parameter_offset(context, operand->name);
+    if (param_offset > 0) {
+      if (code_generator_binary_parameter_is_indirect(generator, context,
+                                                     operand->name)) {
+        return binary_emit_mov_reg_mem(&context->code, target_register,
+                                       BINARY_GP_RBP, -param_offset);
+      }
+      return binary_emit_lea_reg_mem(&context->code, target_register,
+                                     BINARY_GP_RBP, -param_offset);
+    }
+    int local_offset = code_generator_binary_get_local_offset(context,
+                                                              operand->name);
+    if (local_offset > 0) {
+      return binary_emit_lea_reg_mem(&context->code, target_register,
+                                     BINARY_GP_RBP, -local_offset);
+    }
+    Symbol *symbol = symbol_table_lookup(generator->symbol_table, operand->name);
+    if (!symbol) {
+      code_generator_set_error(generator,
+                               "Unknown symbol '%s' for indirect call arg",
+                               operand->name);
+      return 0;
+    }
+    if (symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
+      const char *resolved =
+          code_generator_get_link_symbol_name(generator, operand->name);
+      if (!resolved) {
+        code_generator_set_error(generator,
+                                 "Invalid global symbol for indirect arg");
+        return 0;
+      }
+      return code_generator_binary_emit_symbol_address(
+          generator, context, resolved, symbol->is_extern, target_register);
+    }
+    code_generator_set_error(
+        generator,
+        "Cannot resolve address of struct symbol '%s' in function '%s'",
+        operand->name, context->function_name);
+    return 0;
+  }
+  if (operand->kind == IR_OPERAND_TEMP) {
+    if (!operand->name) {
+      code_generator_set_error(generator,
+                               "Malformed IR temp operand (indirect arg)");
+      return 0;
+    }
+    /* If the temp is tagged as an indirect-return pointer, the temp's slot
+     * holds the value (a pointer); load it. Otherwise take its address. */
+    int offset =
+        code_generator_binary_get_temp_offset(context, operand->name);
+    if (offset <= 0) {
+      code_generator_set_error(generator,
+                               "Unknown IR temp '%s' for indirect arg",
+                               operand->name);
+      return 0;
+    }
+    if (binary_indirect_temp_get(context, operand->name) > 0) {
+      return binary_emit_mov_reg_mem(&context->code, target_register,
+                                     BINARY_GP_RBP, -offset);
+    }
+    return binary_emit_lea_reg_mem(&context->code, target_register,
+                                   BINARY_GP_RBP, -offset);
+  }
+  code_generator_set_error(
+      generator, "Indirect call argument must be a struct value (kind=%d)",
+      operand->kind);
+  return 0;
+}
+
+/* Emit `rep movsb` of `size` bytes from [src_addr_reg] to [dst_addr_reg].
+ * Does NOT preserve rsi/rdi/rcx — callers that need them must save manually.
+ * Used in call-arg memcpy and indirect-return paths where the surrounding
+ * code knows rsi/rdi are dead. */
+static int code_generator_binary_emit_rep_movsb(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    BinaryGpRegister src_addr_reg, BinaryGpRegister dst_addr_reg, size_t size) {
+  if (!generator || !context || size == 0) {
+    return 0;
+  }
+  if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_RSI, src_addr_reg) ||
+      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RDI, dst_addr_reg) ||
+      !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX,
+                                 (uint64_t)size) ||
+      /* cld (DF=0) — ensure forward direction. One byte 0xFC. */
+      !binary_code_buffer_append_u8(&context->code, 0xFC) ||
+      /* rep movsb: 0xF3 0xA4. */
+      !binary_code_buffer_append_u8(&context->code, 0xF3) ||
+      !binary_code_buffer_append_u8(&context->code, 0xA4)) {
+    return 0;
+  }
+  return 1;
+}
+
 static int code_generator_binary_emit_global_symbol_load(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const char *symbol_name, Type *type, int declare_external,
@@ -3031,28 +4196,34 @@ static int code_generator_binary_emit_global_symbol_load(
 
   switch (size) {
   case 1:
-    if ((!binary_emit_movzx_reg_rip_mem8(&context->code, BINARY_GP_RAX,
+    if ((!binary_emit_movzx_reg_rip_mem8(&context->code, target_register,
                                          &displacement_offset)) ||
-        (is_signed && !binary_emit_movsx_rax_al(&context->code))) {
+        (is_signed &&
+         !binary_emit_movsx_reg_reg8(&context->code, target_register,
+                                     target_register))) {
       return 0;
     }
     break;
   case 2:
-    if ((!binary_emit_movzx_reg_rip_mem16(&context->code, BINARY_GP_RAX,
+    if ((!binary_emit_movzx_reg_rip_mem16(&context->code, target_register,
                                           &displacement_offset)) ||
-        (is_signed && !binary_emit_movsx_rax_ax(&context->code))) {
+        (is_signed &&
+         !binary_emit_movsx_reg_reg16(&context->code, target_register,
+                                      target_register))) {
       return 0;
     }
     break;
   case 4:
-    if (!binary_emit_mov_reg32_rip_mem(&context->code, BINARY_GP_RAX,
+    if (!binary_emit_mov_reg32_rip_mem(&context->code, target_register,
                                        &displacement_offset) ||
-        (is_signed && !binary_emit_movsxd_rax_eax(&context->code))) {
+        (is_signed &&
+         !binary_emit_movsxd_reg_reg32(&context->code, target_register,
+                                       target_register))) {
       return 0;
     }
     break;
   case 8:
-    if (!binary_emit_mov_reg_rip_mem(&context->code, BINARY_GP_RAX,
+    if (!binary_emit_mov_reg_rip_mem(&context->code, target_register,
                                      &displacement_offset)) {
       return 0;
     }
@@ -3070,12 +4241,6 @@ static int code_generator_binary_emit_global_symbol_load(
                                         displacement_offset)) {
     code_generator_set_error(generator,
                              "Out of memory while emitting global load");
-    return 0;
-  }
-
-  if (target_register != BINARY_GP_RAX &&
-      !binary_emit_mov_reg_reg(&context->code, target_register,
-                               BINARY_GP_RAX)) {
     return 0;
   }
 
@@ -3541,12 +4706,21 @@ static int code_generator_binary_emit_operand_load(
   }
 
   case IR_OPERAND_SYMBOL: {
+    const char *alias_target =
+        binary_symbol_alias_table_get(&context->symbol_aliases, operand->name);
     Symbol *symbol = generator && generator->symbol_table
                          ? symbol_table_lookup(generator->symbol_table,
                                                operand->name)
                          : NULL;
     int offset = code_generator_binary_get_symbol_offset(context, operand->name);
     BinaryGpRegister assigned_register = BINARY_GP_RAX;
+    if (alias_target) {
+      IROperand aliased = *operand;
+      aliased.name = (char *)alias_target;
+      return code_generator_binary_emit_operand_load(generator, context,
+                                                     &aliased,
+                                                     target_register);
+    }
     if (symbol && symbol->type && symbol->type->kind == TYPE_STRING) {
       return code_generator_binary_emit_string_symbol_load(
           generator, context, operand->name, symbol, target_register);
@@ -3559,10 +4733,30 @@ static int code_generator_binary_emit_operand_load(
       return binary_emit_mov_reg_reg(&context->code, target_register,
                                      assigned_register);
     }
+    if (offset > 0 && symbol &&
+        code_generator_binary_type_is_direct_aggregate(symbol->type)) {
+      int size = (int)symbol->type->size;
+      if (!binary_emit_lea_reg_mem(&context->code, target_register,
+                                   BINARY_GP_RBP, -offset) ||
+          !code_generator_binary_emit_load_from_address(
+              generator, context, target_register, size, target_register)) {
+        if (!generator->has_error) {
+          code_generator_set_error(
+              generator,
+              "Out of memory while loading direct aggregate symbol '%s' in "
+              "function '%s'",
+              operand->name ? operand->name : "<unnamed>",
+              context->function_name);
+        }
+        return 0;
+      }
+      return 1;
+    }
     if (offset <= 0) {
       if (symbol && symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
         const char *link_name =
             code_generator_get_link_symbol_name(generator, operand->name);
+        uint64_t const_value = 0;
         if (!link_name || link_name[0] == '\0') {
           code_generator_set_error(generator,
                                    "Invalid global symbol '%s' in function '%s'",
@@ -3579,6 +4773,10 @@ static int code_generator_binary_emit_operand_load(
               operand->name ? operand->name : "<unnamed>",
               context->function_name);
           return 0;
+        }
+        if (binary_global_const_table_get(operand->name, &const_value)) {
+          return binary_emit_mov_reg_imm64(&context->code, target_register,
+                                           const_value);
         }
         if (!code_generator_binary_emit_global_symbol_load(
                 generator, context, link_name, symbol->type, symbol->is_extern,
@@ -3772,6 +4970,27 @@ static int code_generator_binary_emit_destination_store(
       return binary_emit_mov_reg_reg(&context->code, assigned_register,
                                      source_register);
     }
+    if (offset > 0 && symbol &&
+        code_generator_binary_type_is_direct_aggregate(symbol->type)) {
+      int size = (int)symbol->type->size;
+      BinaryGpRegister address_register =
+          source_register == BINARY_GP_R10 ? BINARY_GP_RAX : BINARY_GP_R10;
+      if (!binary_emit_lea_reg_mem(&context->code, address_register,
+                                   BINARY_GP_RBP, -offset) ||
+          !code_generator_binary_emit_store_to_address(
+              generator, context, address_register, size, source_register)) {
+        if (!generator->has_error) {
+          code_generator_set_error(
+              generator,
+              "Out of memory while storing direct aggregate symbol '%s' in "
+              "function '%s'",
+              destination->name ? destination->name : "<unnamed>",
+              context->function_name);
+        }
+        return 0;
+      }
+      return 1;
+    }
     if (offset <= 0) {
       if (symbol && symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
         const char *link_name =
@@ -3903,10 +5122,56 @@ static int code_generator_binary_emit_runtime_trap_call(
     const IRInstruction *instruction) {
   char *trap_pc_label = NULL;
   size_t displacement_offset = 0;
-  const char *trap_symbol = "meth_runtime_debug_trap";
+  const char *trap_symbol = "mettle_crash_trap";
 
   if (!generator || !context || !instruction || instruction->argument_count == 0) {
     return 0;
+  }
+
+  if (!generator->generate_stack_trace_support) {
+    const char *puts_symbol = "puts";
+    const char *exit_symbol = "exit";
+    if (!code_generator_binary_declare_external_symbol(generator, puts_symbol) ||
+        !code_generator_binary_declare_external_symbol(generator, exit_symbol)) {
+      return 0;
+    }
+    if (instruction->arguments[0].kind == IR_OPERAND_STRING) {
+      if (!code_generator_binary_emit_cstring_literal_address(
+              generator, context,
+              instruction->arguments[0].name ? instruction->arguments[0].name
+                                             : "",
+              BINARY_GP_RCX)) {
+        return 0;
+      }
+    } else if (!code_generator_binary_emit_operand_load(
+                   generator, context, &instruction->arguments[0],
+                   BINARY_GP_RCX)) {
+      return 0;
+    }
+    if (!binary_emit_sub_rsp_imm32(&context->code,
+                                   BINARY_WIN64_SHADOW_SPACE_SIZE) ||
+        !binary_emit_call_placeholder(&context->code, &displacement_offset) ||
+        !binary_call_relocation_table_add(&context->call_relocations,
+                                          puts_symbol, displacement_offset) ||
+        !binary_emit_add_rsp_imm32(&context->code,
+                                   BINARY_WIN64_SHADOW_SPACE_SIZE) ||
+        !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX, 1) ||
+        !binary_emit_sub_rsp_imm32(&context->code,
+                                   BINARY_WIN64_SHADOW_SPACE_SIZE) ||
+        !binary_emit_call_placeholder(&context->code, &displacement_offset) ||
+        !binary_call_relocation_table_add(&context->call_relocations,
+                                          exit_symbol, displacement_offset) ||
+        !binary_emit_add_rsp_imm32(&context->code,
+                                   BINARY_WIN64_SHADOW_SPACE_SIZE)) {
+      if (!generator->has_error) {
+        code_generator_set_error(generator,
+                                 "Out of memory while emitting runtime trap "
+                                 "call in function '%s'",
+                                 context->function_name);
+      }
+      return 0;
+    }
+    return 1;
   }
 
   trap_pc_label = code_generator_generate_label(generator, "methdbg_trap_pc");
@@ -4023,8 +5288,14 @@ static int code_generator_binary_emit_address_of(
     offset =
         code_generator_binary_get_symbol_offset(context, instruction->lhs.name);
     if (offset > 0) {
-      if (!binary_emit_lea_reg_mem(&context->code, BINARY_GP_RAX,
-                                   BINARY_GP_RBP, -offset)) {
+      int address_ok =
+          code_generator_binary_parameter_is_indirect(
+              generator, context, instruction->lhs.name)
+              ? binary_emit_mov_reg_mem(&context->code, BINARY_GP_RAX,
+                                        BINARY_GP_RBP, -offset)
+              : binary_emit_lea_reg_mem(&context->code, BINARY_GP_RAX,
+                                        BINARY_GP_RBP, -offset);
+      if (!address_ok) {
         code_generator_set_error(
             generator,
             "Out of memory while emitting local address in function '%s'",
@@ -4181,7 +5452,7 @@ static int code_generator_binary_emit_new(CodeGenerator *generator,
                                           BinaryFunctionContext *context,
                                           const IRInstruction *instruction) {
   size_t displacement_offset = 0;
-  const char *allocator_name = "gc_alloc";
+  const char *allocator_name = "calloc";
 
   if (!generator || !context || !instruction) {
     return 0;
@@ -4192,27 +5463,28 @@ static int code_generator_binary_emit_new(CodeGenerator *generator,
   }
 
   if (instruction->rhs.kind == IR_OPERAND_INT && instruction->rhs.int_value > 0) {
-    if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX,
+    if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RDX,
                                    (uint64_t)instruction->rhs.int_value)) {
       code_generator_set_error(generator,
-                               "Out of memory while emitting allocation size");
+                                "Out of memory while emitting allocation size");
       return 0;
     }
   } else if (instruction->rhs.kind == IR_OPERAND_NONE ||
              (instruction->rhs.kind == IR_OPERAND_INT &&
-              instruction->rhs.int_value <= 0)) {
-    if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX, 8)) {
+               instruction->rhs.int_value <= 0)) {
+    if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RDX, 8)) {
       code_generator_set_error(generator,
-                               "Out of memory while emitting allocation size");
+                                "Out of memory while emitting allocation size");
       return 0;
     }
   } else if (!code_generator_binary_emit_operand_load(
-                 generator, context, &instruction->rhs, BINARY_GP_RCX)) {
+                  generator, context, &instruction->rhs, BINARY_GP_RDX)) {
     return 0;
   }
 
-  if (!binary_emit_sub_rsp_imm32(&context->code,
-                                 BINARY_WIN64_SHADOW_SPACE_SIZE) ||
+  if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX, 1) ||
+      !binary_emit_sub_rsp_imm32(&context->code,
+                                  BINARY_WIN64_SHADOW_SPACE_SIZE) ||
       !binary_emit_call_placeholder(&context->code, &displacement_offset) ||
       !binary_call_relocation_table_add(&context->call_relocations,
                                         allocator_name, displacement_offset) ||
@@ -4258,8 +5530,7 @@ static int code_generator_binary_emit_cast(CodeGenerator *generator,
                          target_type->kind == TYPE_UINT64;
     target_size = (int)target_type->size;
     if (target_type->kind == TYPE_POINTER ||
-        target_type->kind == TYPE_FUNCTION_POINTER ||
-        target_type->kind == TYPE_FUTURE) {
+        target_type->kind == TYPE_FUNCTION_POINTER) {
       target_size = 8;
     }
   }
@@ -4435,7 +5706,7 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
     return 0;
   }
 
-  if (strcmp(instruction->text, "meth_runtime_debug_trap") == 0) {
+  if (strcmp(instruction->text, "mettle_crash_trap") == 0) {
     return code_generator_binary_emit_runtime_trap_call(generator, context,
                                                         instruction);
   }
@@ -4451,22 +5722,98 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
   target_ir_function =
       code_generator_find_ir_function_binary(generator, instruction->text);
 
+  /* Per-arg INDIRECT classification and per-call indirect-temp region. The
+   * region lives at [rsp + 0 .. indirect_temp_region) within the call's
+   * sub-rsp window, followed by shadow space and any stack arg slots. */
+  size_t argument_count = instruction->argument_count;
+  int *is_indirect_arg =
+      argument_count > 0 ? calloc(argument_count, sizeof(int)) : NULL;
+  int *indirect_arg_offset =
+      argument_count > 0 ? calloc(argument_count, sizeof(int)) : NULL;
+  size_t *indirect_arg_size =
+      argument_count > 0 ? calloc(argument_count, sizeof(size_t)) : NULL;
+  if (argument_count > 0 &&
+      (!is_indirect_arg || !indirect_arg_offset || !indirect_arg_size)) {
+    free(is_indirect_arg);
+    free(indirect_arg_offset);
+    free(indirect_arg_size);
+    code_generator_set_error(generator,
+                             "Out of memory planning indirect args");
+    return 0;
+  }
+  int indirect_temp_region = 0;
+  for (size_t i = 0; i < argument_count; i++) {
+    Type *param_t =
+        function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
+                function_symbol->data.function.parameter_types
+            ? function_symbol->data.function.parameter_types[i]
+            : NULL;
+    if (code_generator_abi_classify(param_t) == ABI_PASS_INDIRECT) {
+      is_indirect_arg[i] = 1;
+      size_t sz = code_generator_abi_type_size(param_t);
+      indirect_arg_size[i] = sz;
+      indirect_arg_offset[i] = indirect_temp_region;
+      indirect_temp_region += (int)((sz + 7u) & ~(size_t)7);
+    }
+  }
+  if (indirect_temp_region > 0) {
+    indirect_temp_region = (indirect_temp_region + 15) & ~15;
+  }
+
+  /* INDIRECT-return classification. The hidden out-pointer (Win64: rcx)
+   * occupies ABI slot 0 and shifts every user arg up by one. */
+  Type *call_return_type = NULL;
+  if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION) {
+    call_return_type = function_symbol->data.function.return_type
+                           ? function_symbol->data.function.return_type
+                           : function_symbol->type;
+  }
+  int return_is_indirect =
+      (code_generator_abi_classify(call_return_type) == ABI_PASS_INDIRECT) ? 1
+                                                                           : 0;
+  size_t hidden_arg_count = return_is_indirect ? 1 : 0;
+  int return_slot_rbp_offset = 0;
+  if (return_is_indirect) {
+    if (context->indirect_return_slot_cursor >=
+        context->indirect_return_slot_count) {
+      free(is_indirect_arg);
+      free(indirect_arg_offset);
+      free(indirect_arg_size);
+      code_generator_set_error(
+          generator,
+          "Indirect-return frame slot not assigned for call '%s'",
+          instruction->text);
+      return 0;
+    }
+    return_slot_rbp_offset = context->indirect_return_slot_offsets
+                                 [context->indirect_return_slot_cursor++];
+  }
+
+  /* Effective ABI argument count includes the hidden out-pointer. */
+  size_t effective_arg_count = argument_count + hidden_arg_count;
   size_t stack_argument_count =
-      instruction->argument_count > BINARY_WIN64_REGISTER_ARG_COUNT
-          ? instruction->argument_count - BINARY_WIN64_REGISTER_ARG_COUNT
+      effective_arg_count > BINARY_WIN64_REGISTER_ARG_COUNT
+          ? effective_arg_count - BINARY_WIN64_REGISTER_ARG_COUNT
           : 0;
   if (stack_argument_count >
       (size_t)(INT_MAX / BINARY_FUNCTION_STACK_SLOT_SIZE)) {
+    free(is_indirect_arg);
+    free(indirect_arg_offset);
+    free(indirect_arg_size);
     code_generator_set_error(generator,
                              "Too many call arguments in function '%s'",
                              context->function_name);
     return 0;
   }
 
-  int call_stack_total = BINARY_WIN64_SHADOW_SPACE_SIZE +
+  int call_stack_total = indirect_temp_region +
+                         BINARY_WIN64_SHADOW_SPACE_SIZE +
                          (int)(stack_argument_count *
                                BINARY_FUNCTION_STACK_SLOT_SIZE);
   if (!binary_align_up_int(call_stack_total, 16, &call_stack_total)) {
+    free(is_indirect_arg);
+    free(indirect_arg_offset);
+    free(indirect_arg_size);
     code_generator_set_error(generator,
                              "Call frame too large in function '%s'",
                              context->function_name);
@@ -4475,16 +5822,65 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
 
   if (call_stack_total > 0 &&
       !binary_emit_sub_rsp_imm32(&context->code, (uint32_t)call_stack_total)) {
+    free(is_indirect_arg);
+    free(indirect_arg_offset);
+    free(indirect_arg_size);
     code_generator_set_error(generator,
                              "Out of memory while emitting call frame");
     return 0;
   }
 
-  for (size_t i = BINARY_WIN64_REGISTER_ARG_COUNT;
-       i < instruction->argument_count; i++) {
-    int slot_offset = BINARY_WIN64_SHADOW_SPACE_SIZE +
-                      (int)((i - BINARY_WIN64_REGISTER_ARG_COUNT) *
+  /* Materialize INDIRECT args: memcpy each struct into its per-call temp. */
+  for (size_t i = 0; i < argument_count; i++) {
+    if (!is_indirect_arg[i]) continue;
+    /* src into rax */
+    if (!code_generator_binary_emit_indirect_source_address(
+            generator, context, &instruction->arguments[i], BINARY_GP_RAX)) {
+      free(is_indirect_arg);
+      free(indirect_arg_offset);
+      free(indirect_arg_size);
+      return 0;
+    }
+    /* dst = lea rdx, [rsp + offset] (offset within indirect_temp_region) */
+    if (!binary_emit_lea_reg_mem(&context->code, BINARY_GP_RDX,
+                                 BINARY_GP_RSP, indirect_arg_offset[i]) ||
+        !code_generator_binary_emit_rep_movsb(
+            generator, context, BINARY_GP_RAX, BINARY_GP_RDX,
+            indirect_arg_size[i])) {
+      free(is_indirect_arg);
+      free(indirect_arg_offset);
+      free(indirect_arg_size);
+      code_generator_set_error(generator,
+                               "Out of memory copying INDIRECT call arg");
+      return 0;
+    }
+  }
+
+  /* Stack args: skip slot 0 if hidden out-ptr is present (it's a register
+   * arg on Win64 anyway). For Win64 every arg has a stack slot above the
+   * shadow space if it doesn't fit in registers. The first 4 ABI slots are
+   * register; slots >= 4 are stack. */
+  for (size_t i = 0; i < argument_count; i++) {
+    size_t abi_slot = i + hidden_arg_count;
+    if (abi_slot < BINARY_WIN64_REGISTER_ARG_COUNT) continue;
+    int slot_offset = indirect_temp_region + BINARY_WIN64_SHADOW_SPACE_SIZE +
+                      (int)((abi_slot - BINARY_WIN64_REGISTER_ARG_COUNT) *
                             BINARY_FUNCTION_STACK_SLOT_SIZE);
+    if (is_indirect_arg[i]) {
+      /* Place &temp into the stack slot. */
+      if (!binary_emit_lea_reg_mem(&context->code, BINARY_GP_RAX,
+                                   BINARY_GP_RSP, indirect_arg_offset[i]) ||
+          !binary_emit_mov_mem_reg(&context->code, BINARY_GP_RSP, slot_offset,
+                                   BINARY_GP_RAX)) {
+        free(is_indirect_arg);
+        free(indirect_arg_offset);
+        free(indirect_arg_size);
+        code_generator_set_error(generator,
+                                 "Out of memory writing INDIRECT stack arg");
+        return 0;
+      }
+      continue;
+    }
     Type *parameter_type =
         function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
                 function_symbol->data.function.parameter_types
@@ -4495,6 +5891,9 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
             BINARY_GP_RAX) ||
         !binary_emit_mov_mem_reg(&context->code, BINARY_GP_RSP, slot_offset,
                                  BINARY_GP_RAX)) {
+      free(is_indirect_arg);
+      free(indirect_arg_offset);
+      free(indirect_arg_size);
       if (!generator->has_error) {
         code_generator_set_error(generator,
                                  "Out of memory while materializing call args");
@@ -4503,11 +5902,24 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
     }
   }
 
-  size_t register_argument_count = instruction->argument_count;
-  if (register_argument_count > BINARY_WIN64_REGISTER_ARG_COUNT) {
-    register_argument_count = BINARY_WIN64_REGISTER_ARG_COUNT;
-  }
-  for (size_t i = 0; i < register_argument_count; i++) {
+  /* Register args. ABI slot = i + hidden_arg_count. */
+  for (size_t i = 0; i < argument_count; i++) {
+    size_t abi_slot = i + hidden_arg_count;
+    if (abi_slot >= BINARY_WIN64_REGISTER_ARG_COUNT) continue;
+    if (is_indirect_arg[i]) {
+      /* lea reg, [rsp + offset] */
+      if (!binary_emit_lea_reg_mem(
+              &context->code, BINARY_WIN64_INT_PARAM_REGISTERS[abi_slot],
+              BINARY_GP_RSP, indirect_arg_offset[i])) {
+        free(is_indirect_arg);
+        free(indirect_arg_offset);
+        free(indirect_arg_size);
+        code_generator_set_error(generator,
+                                 "Out of memory loading INDIRECT arg ptr");
+        return 0;
+      }
+      continue;
+    }
     Type *parameter_type =
         function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
                 function_symbol->data.function.parameter_types
@@ -4518,14 +5930,36 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
     if ((param_fbits &&
          !code_generator_binary_emit_float_call_argument(
              generator, context, &instruction->arguments[i], parameter_type,
-             param_fbits, BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])) ||
+             param_fbits, BINARY_WIN64_FLOAT_PARAM_REGISTERS[abi_slot])) ||
         (!param_fbits &&
          !code_generator_binary_emit_call_argument_load(
              generator, context, &instruction->arguments[i], parameter_type,
-             BINARY_WIN64_INT_PARAM_REGISTERS[i]))) {
+             BINARY_WIN64_INT_PARAM_REGISTERS[abi_slot]))) {
+      free(is_indirect_arg);
+      free(indirect_arg_offset);
+      free(indirect_arg_size);
       return 0;
     }
   }
+
+  /* Hidden out-pointer for INDIRECT return: load &return_slot into rcx
+   * LAST, after any user-arg memcpy that may have clobbered rcx. The slot
+   * lives in the caller's function frame, so it survives the call's
+   * stack teardown. */
+  if (return_is_indirect) {
+    if (!binary_emit_lea_reg_mem(&context->code, BINARY_GP_RCX, BINARY_GP_RBP,
+                                 -return_slot_rbp_offset)) {
+      free(is_indirect_arg);
+      free(indirect_arg_offset);
+      free(indirect_arg_size);
+      code_generator_set_error(generator,
+                               "Out of memory loading hidden out-ptr");
+      return 0;
+    }
+  }
+  free(is_indirect_arg);
+  free(indirect_arg_offset);
+  free(indirect_arg_size);
 
   size_t displacement_offset = 0;
   const char *link_target =
@@ -4554,6 +5988,58 @@ static int code_generator_binary_emit_call(CodeGenerator *generator,
     code_generator_set_error(generator,
                              "Out of memory while restoring call frame");
     return 0;
+  }
+
+  /* INDIRECT return: rax should hold the slot address by ABI; re-materialize
+   * from our known frame slot for safety (some callees may not preserve
+   * exactly; the slot lives in our frame so the lea is always correct). */
+  if (return_is_indirect) {
+    if (!binary_emit_lea_reg_mem(&context->code, BINARY_GP_RAX, BINARY_GP_RBP,
+                                 -return_slot_rbp_offset)) {
+      code_generator_set_error(generator,
+                               "Out of memory materializing INDIRECT result");
+      return 0;
+    }
+    /* Caller-side disposition: if dest is a struct symbol, memcpy into its
+     * storage. If dest is a temp, register the temp in the side-table so
+     * downstream IR_OP_ASSIGN / indirect-arg consumption knows the temp
+     * carries a pointer-to-struct semantics. */
+    if (instruction->dest.kind == IR_OPERAND_SYMBOL && instruction->dest.name) {
+      Symbol *dest_sym =
+          symbol_table_lookup(generator->symbol_table, instruction->dest.name);
+      if (!dest_sym || !dest_sym->type ||
+          code_generator_type_is_aggregate(dest_sym->type)) {
+        if (!code_generator_binary_emit_struct_destination_address(
+                generator, context, instruction->dest.name, BINARY_GP_RDX)) {
+          return 0;
+        }
+        if (!code_generator_binary_emit_rep_movsb(
+                generator, context, BINARY_GP_RAX, BINARY_GP_RDX,
+                code_generator_abi_type_size(call_return_type))) {
+          code_generator_set_error(
+              generator, "Out of memory copying INDIRECT call result");
+          return 0;
+        }
+        return 1;
+      }
+    }
+    if (instruction->dest.kind == IR_OPERAND_TEMP && instruction->dest.name) {
+      if (!binary_indirect_temp_add(
+              context, instruction->dest.name,
+              code_generator_abi_type_size(call_return_type))) {
+        code_generator_set_error(generator,
+                                 "Out of memory tagging INDIRECT-return temp");
+        return 0;
+      }
+    }
+    /* Default store (8-byte spill of the pointer) keeps the pointer alive
+     * in the temp's slot for downstream consumers. */
+    if (!code_generator_binary_emit_destination_store(generator, context,
+                                                      &instruction->dest,
+                                                      BINARY_GP_RAX)) {
+      return 0;
+    }
+    return 1;
   }
 
   if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION) {
@@ -4729,6 +6215,104 @@ static int code_generator_binary_emit_call_indirect(
   return 1;
 }
 
+static int code_generator_binary_emit_rotate_add(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  BinaryGpRegister reg_next = BINARY_GP_RAX;
+  BinaryGpRegister reg_a = BINARY_GP_R10;
+  BinaryGpRegister reg_b = BINARY_GP_R11;
+  int has_next = 0;
+  int has_a = 0;
+  int has_b = 0;
+
+  if (!generator || !context || !instruction ||
+      instruction->dest.kind != IR_OPERAND_SYMBOL || !instruction->dest.name ||
+      instruction->lhs.kind != IR_OPERAND_SYMBOL || !instruction->lhs.name ||
+      instruction->rhs.kind != IR_OPERAND_SYMBOL || !instruction->rhs.name) {
+    code_generator_set_error(generator, "Malformed IR rotate_add in '%s'",
+                             context->function_name);
+    return 0;
+  }
+
+  has_next = code_generator_binary_symbol_assigned_register(
+      generator, context, instruction->dest.name, &reg_next);
+  has_a = code_generator_binary_symbol_assigned_register(
+      generator, context, instruction->lhs.name, &reg_a);
+  has_b = code_generator_binary_symbol_assigned_register(
+      generator, context, instruction->rhs.name, &reg_b);
+
+  if (has_next && has_a && has_b) {
+    if ((!binary_emit_lea_reg_reg(&context->code, reg_next, reg_a, reg_b) &&
+         (!binary_emit_mov_reg_reg(&context->code, reg_next, reg_a) ||
+          !binary_emit_alu_reg_reg(&context->code, 0x01, reg_next, reg_b))) ||
+        !binary_emit_mov_reg_reg(&context->code, reg_a, reg_b) ||
+        !binary_emit_mov_reg_reg(&context->code, reg_b, reg_next)) {
+      return 0;
+    }
+    return 1;
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->lhs,
+                                               BINARY_GP_RAX)) {
+    return 0;
+  }
+  if (has_b) {
+    if (!binary_emit_lea_reg_reg(&context->code, BINARY_GP_RAX,
+                                 BINARY_GP_RAX, reg_b) &&
+        !binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX, reg_b)) {
+      return 0;
+    }
+  } else if (!code_generator_binary_emit_operand_load(generator, context,
+                                                      &instruction->rhs,
+                                                      BINARY_GP_R10) ||
+             (!binary_emit_lea_reg_reg(&context->code, BINARY_GP_RAX,
+                                       BINARY_GP_RAX, BINARY_GP_R10) &&
+              !binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+                                       BINARY_GP_R10))) {
+    return 0;
+  }
+
+  if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_R11, BINARY_GP_RAX)) {
+    return 0;
+  }
+  if (!code_generator_binary_emit_destination_store(generator, context,
+                                                    &instruction->dest,
+                                                    BINARY_GP_R11)) {
+    return 0;
+  }
+
+  if (has_a && has_b) {
+    if (!binary_emit_mov_reg_reg(&context->code, reg_a, reg_b)) {
+      return 0;
+    }
+  } else if (has_a) {
+    if (!code_generator_binary_emit_operand_load(generator, context,
+                                                 &instruction->rhs,
+                                                 BINARY_GP_R10) ||
+        !binary_emit_mov_reg_reg(&context->code, reg_a, BINARY_GP_R10)) {
+      return 0;
+    }
+  } else if (!code_generator_binary_emit_operand_load(generator, context,
+                                                      &instruction->rhs,
+                                                      BINARY_GP_R10) ||
+             !code_generator_binary_emit_destination_store(
+                 generator, context, &instruction->lhs, BINARY_GP_R10)) {
+    return 0;
+  }
+
+  if (has_b) {
+    if (!binary_emit_mov_reg_reg(&context->code, reg_b, BINARY_GP_R11)) {
+      return 0;
+    }
+  } else if (!code_generator_binary_emit_destination_store(
+                 generator, context, &instruction->rhs, BINARY_GP_R11)) {
+    return 0;
+  }
+
+  return 1;
+}
+
 static int code_generator_binary_emit_binary(CodeGenerator *generator,
                                              BinaryFunctionContext *context,
                                              const IRInstruction *instruction) {
@@ -4747,7 +6331,7 @@ static int code_generator_binary_emit_binary(CodeGenerator *generator,
                                                            instruction->ast_ref)
                     : NULL;
   if (result_type && result_type->kind == TYPE_STRING && strcmp(op, "+") == 0) {
-    const char *allocator_name = "gc_alloc";
+    const char *allocator_name = "calloc";
     size_t displacement_offset = 0;
     size_t loop_fixup = 0;
     char *left_done_label = NULL;
@@ -4801,6 +6385,9 @@ static int code_generator_binary_emit_binary(CodeGenerator *generator,
         !binary_emit_mov_mem_reg(&context->code, BINARY_GP_RSP, 16,
                                  BINARY_GP_RCX) ||
         !binary_emit_add_reg_imm32(&context->code, BINARY_GP_RCX, 17) ||
+        !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RDX,
+                                 BINARY_GP_RCX) ||
+        !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX, 1) ||
         !binary_emit_sub_rsp_imm32(
             &context->code, BINARY_WIN64_SHADOW_SPACE_SIZE + 8) ||
         !binary_emit_call_placeholder(&context->code, &displacement_offset) ||
@@ -5228,7 +6815,9 @@ static int code_generator_binary_emit_binary(CodeGenerator *generator,
   }
 
   if (strcmp(op, "+") == 0) {
-    if (!binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+    if (!binary_emit_lea_reg_reg(&context->code, BINARY_GP_RAX, BINARY_GP_RAX,
+                                 BINARY_GP_R10) &&
+        !binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
                                  BINARY_GP_R10)) {
       goto emit_failure;
     }
@@ -5453,6 +7042,384 @@ emit_failure:
   return 0;
 }
 
+/* ---- SSE2 / scalar byte encoders local to the word-count vectorizer ----
+ * Kept self-contained so the (verified) instruction encodings live next to
+ * the algorithm that depends on them. xmm regs used are 0..6 and GPRs are
+ * rax/rcx/rdx + r8..r11, so REX.R/B handling is explicit where r8..r15 or the
+ * SSE high regs would need it (here they do not, but the helpers stay
+ * general). All return 1 on success, 0 on OOM. */
+
+/* 66 0F <op> /r  — SSE2 packed op, xmm dst, xmm src (regs 0..7). */
+static int wcs_sse_66(BinaryCodeBuffer *b, unsigned char op,
+                      int dst, int src) {
+  return binary_code_buffer_append_u8(b, 0x66) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, op) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src & 7)));
+}
+
+/* F3 0F 6F /r — movdqu xmm, [rcx]  (mod=00, rm=001=rcx, no disp). */
+static int wcs_movdqu_xmm_rcx(BinaryCodeBuffer *b, int xmm) {
+  return binary_code_buffer_append_u8(b, 0xF3) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0x6F) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0x00 | ((xmm & 7) << 3) | 0x01));
+}
+
+/* 66 0F 6E /r — movd xmm, r32 (here src is always a low GPR 0..2,8,9). */
+static int wcs_movd_xmm_reg(BinaryCodeBuffer *b, int xmm, int gpr) {
+  return binary_code_buffer_append_u8(b, 0x66) &&
+         binary_emit_rex(b, 0, xmm >> 3, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0x6E) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((xmm & 7) << 3) | (gpr & 7)));
+}
+
+/* 66 0F 70 /r ib — pshufd xmm, xmm, imm8. */
+static int wcs_pshufd(BinaryCodeBuffer *b, int dst, int src,
+                      unsigned char imm) {
+  return binary_code_buffer_append_u8(b, 0x66) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0x70) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src & 7))) &&
+         binary_code_buffer_append_u8(b, imm);
+}
+
+/* 66 0F D7 /r — pmovmskb r32, xmm. dst is a GPR (0..15), src xmm 0..7. */
+static int wcs_pmovmskb(BinaryCodeBuffer *b, int gpr, int xmm) {
+  return binary_code_buffer_append_u8(b, 0x66) &&
+         binary_emit_rex(b, 0, gpr >> 3, 0, xmm >> 3) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0xD7) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((gpr & 7) << 3) | (xmm & 7)));
+}
+
+/* F3 0F B8 /r — popcnt r32, r32. */
+static int wcs_popcnt(BinaryCodeBuffer *b, int dst, int src) {
+  return binary_code_buffer_append_u8(b, 0xF3) &&
+         binary_emit_rex(b, 0, dst >> 3, 0, src >> 3) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0xB8) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src & 7)));
+}
+
+/* 0F B6 /r — movzx r32, byte [rcx]. */
+static int wcs_movzx_reg_byte_rcx(BinaryCodeBuffer *b, int gpr) {
+  return binary_emit_rex(b, 0, gpr >> 3, 0, 0) &&
+         binary_code_buffer_append_u8(b, 0x0F) &&
+         binary_code_buffer_append_u8(b, 0xB6) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0x00 | ((gpr & 7) << 3) | 0x01));
+}
+
+/* C1 /4 ib (shl) or /5 ib (shr) — r32, imm8. */
+static int wcs_shift_reg_imm(BinaryCodeBuffer *b, int gpr, int is_shr,
+                             unsigned char imm) {
+  return binary_emit_rex(b, 0, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0xC1) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((is_shr ? 5 : 4) << 3) |
+                                (gpr & 7))) &&
+         binary_code_buffer_append_u8(b, imm);
+}
+
+/* 09 /r — or r32, r32  (dst |= src). */
+static int wcs_or_reg_reg(BinaryCodeBuffer *b, int dst, int src) {
+  return binary_emit_rex(b, 0, src >> 3, 0, dst >> 3) &&
+         binary_code_buffer_append_u8(b, 0x09) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((src & 7) << 3) | (dst & 7)));
+}
+
+/* F7 /2 — not r32. */
+static int wcs_not_reg(BinaryCodeBuffer *b, int gpr) {
+  return binary_emit_rex(b, 0, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0xF7) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | (2 << 3) | (gpr & 7)));
+}
+
+/* 23 /r — and r32, r32 (dst &= src). */
+static int wcs_and_reg_reg(BinaryCodeBuffer *b, int dst, int src) {
+  return binary_emit_rex(b, 0, dst >> 3, 0, src >> 3) &&
+         binary_code_buffer_append_u8(b, 0x23) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src & 7)));
+}
+
+/* 89 /r — mov r32, r32 (dst = src). */
+static int wcs_mov_reg_reg32(BinaryCodeBuffer *b, int dst, int src) {
+  return binary_emit_rex(b, 0, src >> 3, 0, dst >> 3) &&
+         binary_code_buffer_append_u8(b, 0x89) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((src & 7) << 3) | (dst & 7)));
+}
+
+/* B8+r id — mov r32, imm32. */
+static int wcs_mov_reg_imm32(BinaryCodeBuffer *b, int gpr, uint32_t imm) {
+  return binary_emit_rex(b, 0, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xB8 + (gpr & 7))) &&
+         binary_code_buffer_append_u32(b, imm);
+}
+
+/* 48 01 /r — add r64, r64 (dst += src). */
+static int wcs_add_reg_reg64(BinaryCodeBuffer *b, int dst, int src) {
+  return binary_emit_rex(b, 1, src >> 3, 0, dst >> 3) &&
+         binary_code_buffer_append_u8(b, 0x01) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((src & 7) << 3) | (dst & 7)));
+}
+
+/* 48 83 /0 ib — add r64, imm8 ; or /5 for sub. */
+static int wcs_addsub_reg_imm8(BinaryCodeBuffer *b, int gpr, int is_sub,
+                               unsigned char imm) {
+  return binary_emit_rex(b, 1, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x83) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((is_sub ? 5 : 0) << 3) |
+                                (gpr & 7))) &&
+         binary_code_buffer_append_u8(b, imm);
+}
+
+/* 48 83 /7 ib — cmp r64, imm8 (sign-extended). */
+static int wcs_cmp_reg_imm8(BinaryCodeBuffer *b, int gpr, unsigned char imm) {
+  return binary_emit_rex(b, 1, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x83) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | (7 << 3) | (gpr & 7))) &&
+         binary_code_buffer_append_u8(b, imm);
+}
+
+/* 81 /7 id — cmp r32, imm32 (used for the tail byte compares). */
+static int wcs_cmp_reg_imm32(BinaryCodeBuffer *b, int gpr, uint32_t imm) {
+  return binary_emit_rex(b, 0, 0, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x81) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | (7 << 3) | (gpr & 7))) &&
+         binary_code_buffer_append_u32(b, imm);
+}
+
+/* 85 /r — test r32, r32. */
+static int wcs_test_reg_reg32(BinaryCodeBuffer *b, int gpr) {
+  return binary_emit_rex(b, 0, gpr >> 3, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x85) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((gpr & 7) << 3) | (gpr & 7)));
+}
+
+/* 31 /r — xor r32, r32 (zero a reg via self-xor). */
+static int wcs_xor_self32(BinaryCodeBuffer *b, int gpr) {
+  return binary_emit_rex(b, 0, gpr >> 3, 0, gpr >> 3) &&
+         binary_code_buffer_append_u8(b, 0x31) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((gpr & 7) << 3) | (gpr & 7)));
+}
+
+/* Emit a near jcc/jmp with a 32-bit rel placeholder; record the offset of the
+ * displacement field so it can be patched once the target is known. cc==0
+ * means an unconditional jmp (E9), otherwise 0F 8x. */
+static int wcs_jcc(BinaryCodeBuffer *b, unsigned char cc, size_t *disp_off) {
+  if (cc == 0) {
+    if (!binary_code_buffer_append_u8(b, 0xE9)) return 0;
+  } else {
+    if (!binary_code_buffer_append_u8(b, 0x0F) ||
+        !binary_code_buffer_append_u8(b, cc))
+      return 0;
+  }
+  *disp_off = b->size;
+  return binary_code_buffer_append_u32(b, 0);
+}
+
+/* Patch a rel32 placeholder so it jumps to the current end of the buffer. */
+static int wcs_patch_here(BinaryCodeBuffer *b, size_t disp_off) {
+  long long delta =
+      (long long)b->size - (long long)(disp_off + 4);
+  if (delta < INT32_MIN || delta > INT32_MAX) return 0;
+  int32_t d = (int32_t)delta;
+  memcpy(b->data + disp_off, &d, 4);
+  return 1;
+}
+
+/* Patch a rel32 placeholder to jump backward to a recorded target offset. */
+static int wcs_patch_to(BinaryCodeBuffer *b, size_t disp_off,
+                        size_t target) {
+  long long delta = (long long)target - (long long)(disp_off + 4);
+  if (delta < INT32_MIN || delta > INT32_MAX) return 0;
+  int32_t d = (int32_t)delta;
+  memcpy(b->data + disp_off, &d, 4);
+  return 1;
+}
+
+/* Lower IR_OP_COUNT_WORD_STARTS: count maximal non-whitespace runs in
+ * buf[0..len-1] (whitespace = 0x20/0x09/0x0A/0x0D), 16 bytes/iter via SSE2,
+ * plus a scalar tail. Result is ADDED to count's prior value (the recognizer
+ * only fires when the source set count=0 before the loop). Same algorithm as
+ * the text backend's code_generator_emit_ir_count_word_starts. */
+static int code_generator_binary_emit_count_word_starts(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  if (!generator || !context || !instruction ||
+      instruction->dest.kind != IR_OPERAND_SYMBOL ||
+      instruction->lhs.kind != IR_OPERAND_SYMBOL ||
+      instruction->rhs.kind != IR_OPERAND_SYMBOL) {
+    code_generator_set_error(generator, "Malformed count_word_starts in '%s'",
+                             context ? context->function_name : "?");
+    return 0;
+  }
+
+  BinaryCodeBuffer *b = &context->code;
+
+  /* rcx <- buf ; rdx <- len ; rax <- count ; r8d <- 0 (carry). */
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->lhs,
+                                               BINARY_GP_RCX) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->rhs,
+                                               BINARY_GP_RDX) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->dest,
+                                               BINARY_GP_RAX)) {
+    return 0;
+  }
+  if (!wcs_xor_self32(b, BINARY_GP_R8)) return 0;
+
+  /* Broadcast 0x20/0x09/0x0A/0x0D into xmm1..xmm4 (via r9d + movd + pshufd). */
+  static const struct { unsigned int pat; int xmm; } CONSTS[4] = {
+      {0x20202020u, 1}, {0x09090909u, 2}, {0x0A0A0A0Au, 3}, {0x0D0D0D0Du, 4}};
+  for (int i = 0; i < 4; i++) {
+    if (!wcs_mov_reg_imm32(b, BINARY_GP_R9, CONSTS[i].pat) ||
+        !wcs_movd_xmm_reg(b, CONSTS[i].xmm, BINARY_GP_R9) ||
+        !wcs_pshufd(b, CONSTS[i].xmm, CONSTS[i].xmm, 0x00)) {
+      return 0;
+    }
+  }
+
+  /* ---- vector loop: while (rdx >= 16) ---- */
+  size_t loop_top = b->size;
+  /* cmp rdx, 16 ; jb tail */
+  if (!wcs_cmp_reg_imm8(b, BINARY_GP_RDX, 16)) return 0;
+  size_t j_to_tail;
+  if (!wcs_jcc(b, 0x82 /* jb */, &j_to_tail)) return 0;
+
+  /* xmm0 = chunk ; xmm5 = copy ; xmm0 = (==sp) | (==tab) | (==lf) | (==cr) */
+  if (!wcs_movdqu_xmm_rcx(b, 0) ||
+      !wcs_sse_66(b, 0x6F, 5, 0) ||           /* movdqa xmm5, xmm0 */
+      !wcs_sse_66(b, 0x74, 0, 1) ||           /* pcmpeqb xmm0, xmm1 */
+      !wcs_sse_66(b, 0x6F, 6, 5) ||           /* movdqa xmm6, xmm5 */
+      !wcs_sse_66(b, 0x74, 6, 2) ||           /* pcmpeqb xmm6, xmm2 */
+      !wcs_sse_66(b, 0xEB, 0, 6) ||           /* por xmm0, xmm6 */
+      !wcs_sse_66(b, 0x6F, 6, 5) ||
+      !wcs_sse_66(b, 0x74, 6, 3) ||           /* pcmpeqb xmm6, xmm3 */
+      !wcs_sse_66(b, 0xEB, 0, 6) ||
+      !wcs_sse_66(b, 0x6F, 6, 5) ||
+      !wcs_sse_66(b, 0x74, 6, 4) ||           /* pcmpeqb xmm6, xmm4 */
+      !wcs_sse_66(b, 0xEB, 0, 6)) {
+    return 0;
+  }
+  /* r9d = ws bitmask ; r10d = nw = ~ws & 0xFFFF */
+  if (!wcs_pmovmskb(b, BINARY_GP_R9, 0) ||
+      !wcs_mov_reg_reg32(b, BINARY_GP_R10, BINARY_GP_R9) ||
+      !wcs_not_reg(b, BINARY_GP_R10) ||
+      !binary_emit_and_reg_imm32(b, BINARY_GP_R10, 0xFFFF)) {
+    return 0;
+  }
+  /* r11d = prev = (nw<<1) | carry */
+  if (!wcs_mov_reg_reg32(b, BINARY_GP_R11, BINARY_GP_R10) ||
+      !wcs_shift_reg_imm(b, BINARY_GP_R11, 0, 1) ||
+      !wcs_or_reg_reg(b, BINARY_GP_R11, BINARY_GP_R8)) {
+    return 0;
+  }
+  /* new carry r8d = nw bit15 */
+  if (!wcs_mov_reg_reg32(b, BINARY_GP_R8, BINARY_GP_R10) ||
+      !wcs_shift_reg_imm(b, BINARY_GP_R8, 1, 15) ||
+      !binary_emit_and_reg_imm32(b, BINARY_GP_R8, 1)) {
+    return 0;
+  }
+  /* starts = nw & ~prev ; count += popcount(starts) */
+  if (!wcs_not_reg(b, BINARY_GP_R11) ||
+      !wcs_and_reg_reg(b, BINARY_GP_R11, BINARY_GP_R10) ||
+      !binary_emit_and_reg_imm32(b, BINARY_GP_R11, 0xFFFF) ||
+      !wcs_popcnt(b, BINARY_GP_R11, BINARY_GP_R11) ||
+      !wcs_add_reg_reg64(b, BINARY_GP_RAX, BINARY_GP_R11)) {
+    return 0;
+  }
+  /* rcx += 16 ; rdx -= 16 ; jmp loop_top */
+  if (!wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 16) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 1, 16)) {
+    return 0;
+  }
+  size_t j_back;
+  if (!wcs_jcc(b, 0, &j_back)) return 0;
+  if (!wcs_patch_to(b, j_back, loop_top)) {
+    code_generator_set_error(generator, "wcs back-jump out of range");
+    return 0;
+  }
+
+  /* ---- scalar tail ---- */
+  if (!wcs_patch_here(b, j_to_tail)) return 0; /* jb -> here */
+  /* if (rdx == 0) goto done */
+  if (!wcs_cmp_reg_imm8(b, BINARY_GP_RDX, 0)) return 0;
+  size_t j_done_early;
+  if (!wcs_jcc(b, 0x84 /* je */, &j_done_early)) return 0;
+
+  size_t tail_top = b->size;
+  /* r9d = (uint8)[rcx] */
+  if (!wcs_movzx_reg_byte_rcx(b, BINARY_GP_R9)) return 0;
+  /* four "is whitespace?" tests -> collect je placeholders */
+  size_t j_ws[4];
+  static const unsigned int WS[4] = {32u, 9u, 10u, 13u};
+  for (int i = 0; i < 4; i++) {
+    if (!wcs_cmp_reg_imm32(b, BINARY_GP_R9, WS[i]) ||
+        !wcs_jcc(b, 0x84 /* je */, &j_ws[i])) {
+      return 0;
+    }
+  }
+  /* non-whitespace: if (carry==0) count++ ; carry=1 */
+  if (!wcs_test_reg_reg32(b, BINARY_GP_R8)) return 0;
+  size_t j_skip_inc;
+  if (!wcs_jcc(b, 0x85 /* jne */, &j_skip_inc)) return 0;
+  if (!wcs_addsub_reg_imm8(b, BINARY_GP_RAX, 0, 1)) return 0; /* rax += 1 */
+  if (!wcs_patch_here(b, j_skip_inc)) return 0;
+  if (!wcs_mov_reg_imm32(b, BINARY_GP_R8, 1)) return 0; /* carry = 1 */
+  size_t j_after_class;
+  if (!wcs_jcc(b, 0, &j_after_class)) return 0;
+  /* whitespace target: carry = 0 */
+  for (int i = 0; i < 4; i++) {
+    if (!wcs_patch_here(b, j_ws[i])) return 0;
+  }
+  if (!wcs_xor_self32(b, BINARY_GP_R8)) return 0; /* carry = 0 */
+  if (!wcs_patch_here(b, j_after_class)) return 0;
+  /* rcx++ ; rdx-- ; if (rdx != 0) goto tail_top */
+  if (!wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 1) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 1, 1)) {
+    return 0;
+  }
+  if (!wcs_cmp_reg_imm8(b, BINARY_GP_RDX, 0)) return 0;
+  size_t j_tail_back;
+  if (!wcs_jcc(b, 0x85 /* jne */, &j_tail_back)) return 0;
+  if (!wcs_patch_to(b, j_tail_back, tail_top)) {
+    code_generator_set_error(generator, "wcs tail-jump out of range");
+    return 0;
+  }
+
+  if (!wcs_patch_here(b, j_done_early)) return 0;
+
+  /* count = rax */
+  if (!code_generator_binary_emit_destination_store(generator, context,
+                                                    &instruction->dest,
+                                                    BINARY_GP_RAX)) {
+    return 0;
+  }
+  return 1;
+}
+
 static int code_generator_binary_emit_instruction(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IRInstruction *instruction) {
@@ -5551,6 +7518,57 @@ static int code_generator_binary_emit_instruction(
   }
 
   case IR_OP_ASSIGN: {
+    const char *alias_target = NULL;
+    if (instruction->dest.kind == IR_OPERAND_SYMBOL &&
+        instruction->dest.name) {
+      alias_target = binary_symbol_alias_table_get(&context->symbol_aliases,
+                                                   instruction->dest.name);
+      if (alias_target && instruction->lhs.kind == IR_OPERAND_SYMBOL &&
+          instruction->lhs.name &&
+          strcmp(alias_target, instruction->lhs.name) == 0) {
+        return 1;
+      }
+    }
+    /* Indirect-return propagation: source is a temp tagged as holding a
+     * pointer to a struct returned from an INDIRECT-returning call; dest
+     * is a struct symbol. Memcpy from *src_ptr into &dest. */
+    if (instruction->lhs.kind == IR_OPERAND_TEMP && instruction->lhs.name &&
+        instruction->dest.kind == IR_OPERAND_SYMBOL &&
+        instruction->dest.name) {
+      size_t bytes = binary_indirect_temp_get(context, instruction->lhs.name);
+      if (bytes > 0) {
+        Symbol *dest_sym = symbol_table_lookup(generator->symbol_table,
+                                               instruction->dest.name);
+        if (!dest_sym || !dest_sym->type ||
+            code_generator_type_is_aggregate(dest_sym->type)) {
+          /* Load src pointer (the temp slot stores the pointer value). */
+          int src_offset =
+              code_generator_binary_get_temp_offset(context,
+                                                    instruction->lhs.name);
+          if (src_offset <= 0) {
+            code_generator_set_error(
+                generator,
+                "Cannot resolve temp '%s' for INDIRECT-return assign",
+                instruction->lhs.name);
+            return 0;
+          }
+          if (!binary_emit_mov_reg_mem(&context->code, BINARY_GP_RAX,
+                                       BINARY_GP_RBP, -src_offset) ||
+              !code_generator_binary_emit_struct_destination_address(
+                  generator, context, instruction->dest.name, BINARY_GP_RDX) ||
+              !code_generator_binary_emit_rep_movsb(generator, context,
+                                                    BINARY_GP_RAX,
+                                                    BINARY_GP_RDX, bytes)) {
+            if (!generator->has_error) {
+              code_generator_set_error(
+                  generator, "Out of memory copying INDIRECT-return assign");
+            }
+            return 0;
+          }
+          return 1;
+        }
+      }
+    }
     if (!code_generator_binary_emit_operand_load(generator, context,
                                                  &instruction->lhs,
                                                  BINARY_GP_RAX)) {
@@ -5601,6 +7619,10 @@ static int code_generator_binary_emit_instruction(
   case IR_OP_BINARY:
     return code_generator_binary_emit_binary(generator, context, instruction);
 
+  case IR_OP_ROTATE_ADD:
+    return code_generator_binary_emit_rotate_add(generator, context,
+                                                 instruction);
+
   case IR_OP_UNARY:
     return code_generator_binary_emit_unary(generator, context, instruction);
 
@@ -5617,65 +7639,37 @@ static int code_generator_binary_emit_instruction(
   case IR_OP_CAST:
     return code_generator_binary_emit_cast(generator, context, instruction);
 
-  // Threading opcodes that reach codegen are lowered as plain calls to
-  // the runtime. IR_OP_THREAD_SPAWN emits a call to __meth_thread_spawn
-  // passing a function pointer (address-of the named function) followed by
-  // the user-supplied arguments, then the arg count as the final argument.
-  // All other thread opcodes are already lowered to IR_OP_CALL by
-  // ir_emit_thread_runtime_call / ir_lower_thread_method_call.
-  case IR_OP_THREAD_SPAWN: {
-    // Synthesize: __meth_thread_spawn(fn_ptr, arg0..argN, arg_count)
-    // args layout: [symbol(fn_name), original_args..., int(arg_count)]
-    size_t orig_argc = instruction->argument_count;
-    size_t new_argc = 1 + orig_argc + 1;
-    IROperand *new_args = (IROperand *)calloc(new_argc, sizeof(IROperand));
-    if (!new_args) {
-      code_generator_set_error(generator, "OOM in IR_OP_THREAD_SPAWN lowering");
-      return 0;
-    }
-    new_args[0] = ir_operand_symbol(instruction->text); // fn ptr
-    for (size_t i = 0; i < orig_argc; i++)
-      new_args[1 + i] = instruction->arguments[i]; // shallow copy — names are interned
-    new_args[1 + orig_argc] = ir_operand_int((long long)orig_argc);
-
-    IRInstruction synth = *instruction;
-    synth.op = IR_OP_CALL;
-    synth.text = "__meth_thread_spawn";
-    synth.arguments = new_args;
-    synth.argument_count = new_argc;
-
-    int ok = code_generator_binary_emit_call(generator, context, &synth);
-
-    // Only free the wrapper array and the two operands we allocated;
-    // the shallow-copied slots share names with the original instruction.
-    ir_operand_destroy(&new_args[0]);
-    ir_operand_destroy(&new_args[1 + orig_argc]);
-    free(new_args);
-    return ok;
-  }
-
-  case IR_OP_CHAN_NEW:
-  case IR_OP_MUTEX_NEW:
-  case IR_OP_MUTEX_LOCK:
-  case IR_OP_MUTEX_UNLOCK:
-  case IR_OP_ATOMIC_LOAD:
-  case IR_OP_ATOMIC_STORE:
-  case IR_OP_ATOMIC_FETCH_ADD:
-  case IR_OP_ATOMIC_FETCH_SUB:
-  case IR_OP_ATOMIC_CAS:
-  case IR_OP_CHAN_SEND:
-  case IR_OP_CHAN_RECV:
-  case IR_OP_THREAD_JOIN: {
-    // These are emitted as IR_OP_CALL by the lowering pass. If they somehow
-    // arrive here directly (e.g. future optimization passes), synthesize a
-    // plain call using instruction->text as the runtime function name.
-    IRInstruction synth = *instruction;
-    synth.op = IR_OP_CALL;
-    return code_generator_binary_emit_call(generator, context, &synth);
-  }
-
   case IR_OP_RETURN: {
     size_t displacement_offset = 0;
+    /* INDIRECT return: memcpy the source struct through the hidden out-ptr
+     * stored at [rbp - 8], then put that pointer into rax. */
+    if (context->returns_indirect &&
+        instruction->lhs.kind != IR_OPERAND_NONE) {
+      if (!code_generator_binary_emit_indirect_source_address(
+              generator, context, &instruction->lhs, BINARY_GP_RAX)) {
+        return 0;
+      }
+      /* dst = qword [rbp - 8]; rep movsb. */
+      if (!binary_emit_mov_reg_mem(&context->code, BINARY_GP_RDX,
+                                   BINARY_GP_RBP, -8) ||
+          !code_generator_binary_emit_rep_movsb(generator, context,
+                                                BINARY_GP_RAX, BINARY_GP_RDX,
+                                                context->indirect_return_size) ||
+          !binary_emit_mov_reg_mem(&context->code, BINARY_GP_RAX,
+                                   BINARY_GP_RBP, -8)) {
+        code_generator_set_error(generator,
+                                 "Out of memory emitting indirect return");
+        return 0;
+      }
+      if (!binary_emit_jmp_placeholder(&context->code, &displacement_offset) ||
+          !binary_offset_table_add(&context->return_fixups,
+                                   displacement_offset)) {
+        code_generator_set_error(
+            generator, "Out of memory while emitting function return");
+        return 0;
+      }
+      return 1;
+    }
     if (instruction->lhs.kind != IR_OPERAND_NONE &&
         !code_generator_binary_emit_operand_load(generator, context,
                                                  &instruction->lhs,
@@ -5720,6 +7714,10 @@ static int code_generator_binary_emit_instruction(
     }
     return 1;
 
+  case IR_OP_COUNT_WORD_STARTS:
+    return code_generator_binary_emit_count_word_starts(generator, context,
+                                                        instruction);
+
   default:
     code_generator_set_error(
         generator,
@@ -5761,6 +7759,18 @@ static int code_generator_binary_emit_prologue(CodeGenerator *generator,
     }
   }
 
+  /* Hidden return out-pointer (Win64 rcx): stash it at the fixed home slot
+   * [rbp - 8] before homing user parameters. User-param homes start one slot
+   * higher when an INDIRECT return is in use. */
+  if (context->returns_indirect) {
+    if (!binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP, -8,
+                                 BINARY_GP_RCX)) {
+      code_generator_set_error(generator,
+                               "Out of memory homing hidden return ptr");
+      return 0;
+    }
+  }
+
   for (size_t i = 0; i < function_data->parameter_count; i++) {
     const char *parameter_name = function_data->parameter_names[i];
     int parameter_fbits = code_generator_binary_named_type_float_bits(
@@ -5781,16 +7791,20 @@ static int code_generator_binary_emit_prologue(CodeGenerator *generator,
       return 0;
     }
 
+    /* When the function returns INDIRECT, the hidden out-pointer occupies
+     * ABI slot 0, so user param i occupies ABI slot i+1. */
+    size_t abi_slot = i + (context->returns_indirect ? 1 : 0);
+
     if (parameter_in_register) {
       int home_ok = 1;
-      if (i < BINARY_WIN64_REGISTER_ARG_COUNT) {
+      if (abi_slot < BINARY_WIN64_REGISTER_ARG_COUNT) {
         home_ok = binary_emit_mov_reg_reg(
             &context->code, assigned_register,
-            BINARY_WIN64_INT_PARAM_REGISTERS[i]);
+            BINARY_WIN64_INT_PARAM_REGISTERS[abi_slot]);
       } else {
         int incoming_stack_offset =
             16 + BINARY_WIN64_SHADOW_SPACE_SIZE +
-            (int)((i - BINARY_WIN64_REGISTER_ARG_COUNT) *
+            (int)((abi_slot - BINARY_WIN64_REGISTER_ARG_COUNT) *
                   BINARY_FUNCTION_STACK_SLOT_SIZE);
         home_ok = binary_emit_mov_reg_mem(&context->code, assigned_register,
                                           BINARY_GP_RBP,
@@ -5804,7 +7818,7 @@ static int code_generator_binary_emit_prologue(CodeGenerator *generator,
       continue;
     }
 
-    if (i < BINARY_WIN64_REGISTER_ARG_COUNT) {
+    if (abi_slot < BINARY_WIN64_REGISTER_ARG_COUNT) {
       int home_ok = 1;
       if (parameter_fbits) {
         /* Float params arrive in XMM; copy the bits to GP at the param's
@@ -5813,16 +7827,16 @@ static int code_generator_binary_emit_prologue(CodeGenerator *generator,
             (parameter_fbits == 32
                  ? binary_emit_movd_reg_xmm(
                        &context->code, BINARY_GP_RAX,
-                       BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])
+                       BINARY_WIN64_FLOAT_PARAM_REGISTERS[abi_slot])
                  : binary_emit_movq_reg_xmm(
                        &context->code, BINARY_GP_RAX,
-                       BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])) &&
+                       BINARY_WIN64_FLOAT_PARAM_REGISTERS[abi_slot])) &&
             binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP,
                                     -home_offset, BINARY_GP_RAX);
       } else {
         home_ok = binary_emit_mov_mem_reg(
             &context->code, BINARY_GP_RBP, -home_offset,
-            BINARY_WIN64_INT_PARAM_REGISTERS[i]);
+            BINARY_WIN64_INT_PARAM_REGISTERS[abi_slot]);
       }
       if (!home_ok) {
         code_generator_set_error(generator,
@@ -5832,7 +7846,7 @@ static int code_generator_binary_emit_prologue(CodeGenerator *generator,
     } else {
       int incoming_stack_offset =
           16 + BINARY_WIN64_SHADOW_SPACE_SIZE +
-          (int)((i - BINARY_WIN64_REGISTER_ARG_COUNT) *
+          (int)((abi_slot - BINARY_WIN64_REGISTER_ARG_COUNT) *
                 BINARY_FUNCTION_STACK_SLOT_SIZE);
       if (!binary_emit_mov_reg_mem(&context->code, BINARY_GP_RAX, BINARY_GP_RBP,
                                    incoming_stack_offset) ||
@@ -5983,6 +7997,10 @@ static int code_generator_binary_emit_compare_false_branch(
     const IRInstruction *compare, const char *target_label) {
   unsigned char branch_opcode = 0;
   size_t displacement_offset = 0;
+  BinaryGpRegister lhs_register = BINARY_GP_RAX;
+  BinaryGpRegister rhs_register = BINARY_GP_R10;
+  int lhs_has_register = 0;
+  int rhs_has_register = 0;
 
   if (!generator || !context || !compare || !target_label ||
       target_label[0] == '\0' ||
@@ -5991,14 +8009,25 @@ static int code_generator_binary_emit_compare_false_branch(
     return 0;
   }
 
+  lhs_has_register =
+      compare->lhs.kind == IR_OPERAND_SYMBOL &&
+      code_generator_binary_symbol_assigned_register(
+          generator, context, compare->lhs.name, &lhs_register);
+  rhs_has_register =
+      compare->rhs.kind == IR_OPERAND_SYMBOL &&
+      code_generator_binary_symbol_assigned_register(
+          generator, context, compare->rhs.name, &rhs_register);
+
   if (compare->rhs.kind == IR_OPERAND_INT &&
       code_generator_binary_immediate_fits_signed_32(
           compare->rhs.int_value)) {
-    if (!code_generator_binary_emit_operand_load(generator, context,
-                                                 &compare->lhs,
-                                                 BINARY_GP_RAX) ||
-        !binary_emit_cmp_reg_imm32(&context->code, BINARY_GP_RAX,
-                                   (uint32_t)(int32_t)compare->rhs.int_value)) {
+    if ((!lhs_has_register &&
+         !code_generator_binary_emit_operand_load(generator, context,
+                                                  &compare->lhs,
+                                                  BINARY_GP_RAX)) ||
+        !binary_emit_cmp_reg_imm32(
+            &context->code, lhs_has_register ? lhs_register : BINARY_GP_RAX,
+            (uint32_t)(int32_t)compare->rhs.int_value)) {
       return 0;
     }
   } else if ((strcmp(compare->text, "==") == 0 ||
@@ -6006,22 +8035,33 @@ static int code_generator_binary_emit_compare_false_branch(
              compare->lhs.kind == IR_OPERAND_INT &&
              code_generator_binary_immediate_fits_signed_32(
                  compare->lhs.int_value)) {
-    if (!code_generator_binary_emit_operand_load(generator, context,
-                                                 &compare->rhs,
-                                                 BINARY_GP_RAX) ||
-        !binary_emit_cmp_reg_imm32(&context->code, BINARY_GP_RAX,
-                                   (uint32_t)(int32_t)compare->lhs.int_value)) {
+    if ((!rhs_has_register &&
+         !code_generator_binary_emit_operand_load(generator, context,
+                                                  &compare->rhs,
+                                                  BINARY_GP_RAX)) ||
+        !binary_emit_cmp_reg_imm32(
+            &context->code, rhs_has_register ? rhs_register : BINARY_GP_RAX,
+            (uint32_t)(int32_t)compare->lhs.int_value)) {
       return 0;
     }
-  } else if (!code_generator_binary_emit_operand_load(generator, context,
-                                                      &compare->rhs,
-                                                      BINARY_GP_R10) ||
-             !code_generator_binary_emit_operand_load(generator, context,
-                                                      &compare->lhs,
-                                                      BINARY_GP_RAX) ||
-             !binary_emit_cmp_reg_reg(&context->code, BINARY_GP_RAX,
-                                      BINARY_GP_R10)) {
-    return 0;
+  } else {
+    if (!rhs_has_register &&
+        !code_generator_binary_emit_operand_load(generator, context,
+                                                 &compare->rhs,
+                                                 BINARY_GP_R10)) {
+      return 0;
+    }
+    if (!lhs_has_register &&
+        !code_generator_binary_emit_operand_load(generator, context,
+                                                 &compare->lhs,
+                                                 BINARY_GP_RAX)) {
+      return 0;
+    }
+    if (!binary_emit_cmp_reg_reg(
+            &context->code, lhs_has_register ? lhs_register : BINARY_GP_RAX,
+            rhs_has_register ? rhs_register : BINARY_GP_R10)) {
+      return 0;
+    }
   }
 
   if (!binary_emit_jcc_placeholder(&context->code, branch_opcode,
@@ -6123,8 +8163,12 @@ static int code_generator_binary_emit_integer_binary_to_rax(
        strcmp(op, "*") == 0 || strcmp(op, "&") == 0 ||
        strcmp(op, "|") == 0 || strcmp(op, "^") == 0 ||
        ((strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) &&
-        instruction->rhs.int_value >= 0 && instruction->rhs.int_value < 64))) {
+         instruction->rhs.int_value >= 0 && instruction->rhs.int_value < 64))) {
     long long immediate = instruction->rhs.int_value;
+    if (immediate == 0 &&
+        (strcmp(op, "*") == 0 || strcmp(op, "&") == 0)) {
+      return binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RAX, 0);
+    }
     if (!code_generator_binary_emit_operand_load(generator, context,
                                                  &instruction->lhs,
                                                  BINARY_GP_RAX)) {
@@ -6168,6 +8212,10 @@ static int code_generator_binary_emit_integer_binary_to_rax(
        strcmp(op, "&") == 0 || strcmp(op, "|") == 0 ||
        strcmp(op, "^") == 0)) {
     long long immediate = instruction->lhs.int_value;
+    if (immediate == 0 &&
+        (strcmp(op, "*") == 0 || strcmp(op, "&") == 0)) {
+      return binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RAX, 0);
+    }
     if (!code_generator_binary_emit_operand_load(generator, context,
                                                  &instruction->rhs,
                                                  BINARY_GP_RAX)) {
@@ -6204,7 +8252,9 @@ static int code_generator_binary_emit_integer_binary_to_rax(
   }
 
   if (strcmp(op, "+") == 0) {
-    return binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+    return binary_emit_lea_reg_reg(&context->code, BINARY_GP_RAX,
+                                   BINARY_GP_RAX, BINARY_GP_R10) ||
+           binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
                                    BINARY_GP_R10);
   }
   if (strcmp(op, "-") == 0) {
@@ -6403,6 +8453,158 @@ static int code_generator_binary_try_emit_binary_compare_branch_chain(
   return 1;
 }
 
+static int code_generator_binary_try_emit_address_add_load(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRFunction *function, size_t instruction_index,
+    size_t *consumed_out) {
+  const IRInstruction *address = NULL;
+  const IRInstruction *load = NULL;
+  int size = 0;
+
+  if (consumed_out) {
+    *consumed_out = 0;
+  }
+  if (!generator || !context || !function || !consumed_out ||
+      instruction_index + 1 >= function->instruction_count) {
+    return 0;
+  }
+
+  address = &function->instructions[instruction_index];
+  load = &function->instructions[instruction_index + 1];
+  if (!address || address->op != IR_OP_BINARY || address->is_float ||
+      !address->text || strcmp(address->text, "+") != 0 ||
+      address->dest.kind != IR_OPERAND_TEMP || !address->dest.name ||
+      !load || load->op != IR_OP_LOAD ||
+      !code_generator_binary_operand_uses_temp(&load->lhs,
+                                               address->dest.name) ||
+      code_generator_binary_function_temp_use_count(function,
+                                                    address->dest.name) != 1) {
+    return 0;
+  }
+
+  size = code_generator_binary_get_access_size(generator, context, &load->rhs);
+  if (size <= 0) {
+    return 0;
+  }
+
+  if (address->rhs.kind == IR_OPERAND_INT &&
+      code_generator_binary_immediate_fits_signed_32(address->rhs.int_value)) {
+    if (!code_generator_binary_emit_operand_load(generator, context,
+                                                 &address->lhs,
+                                                 BINARY_GP_RAX) ||
+        !binary_emit_add_reg_imm32(
+            &context->code, BINARY_GP_RAX,
+            (uint32_t)(int32_t)address->rhs.int_value)) {
+      return 0;
+    }
+  } else if (address->lhs.kind == IR_OPERAND_INT &&
+             code_generator_binary_immediate_fits_signed_32(
+                 address->lhs.int_value)) {
+    if (!code_generator_binary_emit_operand_load(generator, context,
+                                                 &address->rhs,
+                                                 BINARY_GP_RAX) ||
+        !binary_emit_add_reg_imm32(
+            &context->code, BINARY_GP_RAX,
+            (uint32_t)(int32_t)address->lhs.int_value)) {
+      return 0;
+    }
+  } else if (!code_generator_binary_emit_operand_load(generator, context,
+                                                      &address->rhs,
+                                                      BINARY_GP_R10) ||
+             !code_generator_binary_emit_operand_load(generator, context,
+                                                      &address->lhs,
+                                                      BINARY_GP_RAX) ||
+             !(binary_emit_lea_reg_reg(&context->code, BINARY_GP_RAX,
+                                       BINARY_GP_RAX, BINARY_GP_R10) ||
+               binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+                                       BINARY_GP_R10))) {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_load_from_address(generator, context,
+                                                    BINARY_GP_RAX, size,
+                                                    BINARY_GP_RAX)) {
+    return 0;
+  }
+  if (size == 4 && !load->is_float &&
+      !binary_emit_movsxd_rax_eax(&context->code)) {
+    if (!generator->has_error) {
+      code_generator_set_error(
+          generator,
+          "Out of memory while emitting fused address load in function '%s'",
+          context->function_name);
+    }
+    return 0;
+  }
+  if (!code_generator_binary_emit_destination_store(generator, context,
+                                                    &load->dest,
+                                                    BINARY_GP_RAX)) {
+    return 0;
+  }
+
+  *consumed_out = 2;
+  return 1;
+}
+
+static int code_generator_binary_try_emit_binary_cast_chain(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRFunction *function, size_t instruction_index,
+    size_t *consumed_out) {
+  const IRInstruction *producer = NULL;
+  const IRInstruction *cast = NULL;
+  Type *target_type = NULL;
+
+  if (consumed_out) {
+    *consumed_out = 0;
+  }
+  if (!generator || !context || !function || !consumed_out ||
+      instruction_index + 1 >= function->instruction_count) {
+    return 0;
+  }
+
+  producer = &function->instructions[instruction_index];
+  cast = &function->instructions[instruction_index + 1];
+  if (!producer || producer->op != IR_OP_BINARY || producer->is_float ||
+      !code_generator_binary_chain_producer_supported(producer->text) ||
+      producer->dest.kind != IR_OPERAND_TEMP || !producer->dest.name ||
+      !cast || cast->op != IR_OP_CAST || cast->is_float || !cast->text ||
+      !code_generator_binary_operand_uses_temp(&cast->lhs,
+                                               producer->dest.name) ||
+      code_generator_binary_function_temp_use_count(function,
+                                                    producer->dest.name) != 1) {
+    return 0;
+  }
+
+  target_type = generator->type_checker
+                    ? type_checker_get_type_by_name(generator->type_checker,
+                                                    cast->text)
+                    : NULL;
+  if (target_type &&
+      (code_generator_is_floating_point_type(target_type) ||
+       (target_type->kind != TYPE_POINTER &&
+        target_type->kind != TYPE_FUNCTION_POINTER &&
+        target_type->size != 8))) {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_integer_binary_to_rax(generator, context,
+                                                        producer) ||
+      !code_generator_binary_emit_destination_store(generator, context,
+                                                    &cast->dest,
+                                                    BINARY_GP_RAX)) {
+    if (!generator->has_error) {
+      code_generator_set_error(
+          generator,
+          "Failed to emit chained integer cast in function '%s'",
+          context->function_name);
+    }
+    return 0;
+  }
+
+  *consumed_out = 2;
+  return 1;
+}
+
 static int code_generator_binary_operator_is_commutative(const char *op) {
   return op &&
          (strcmp(op, "+") == 0 || strcmp(op, "*") == 0 ||
@@ -6420,6 +8622,10 @@ static int code_generator_binary_emit_rax_binary_rhs(
   if (rhs->kind == IR_OPERAND_INT &&
       code_generator_binary_immediate_fits_signed_32(rhs->int_value)) {
     long long immediate = rhs->int_value;
+    if (immediate == 0 &&
+        (strcmp(op, "*") == 0 || strcmp(op, "&") == 0)) {
+      return binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RAX, 0);
+    }
     if (strcmp(op, "+") == 0) {
       return binary_emit_add_reg_imm32(&context->code, BINARY_GP_RAX,
                                        (uint32_t)(int32_t)immediate);
@@ -6459,7 +8665,9 @@ static int code_generator_binary_emit_rax_binary_rhs(
   }
 
   if (strcmp(op, "+") == 0) {
-    return binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+    return binary_emit_lea_reg_reg(&context->code, BINARY_GP_RAX,
+                                   BINARY_GP_RAX, BINARY_GP_R10) ||
+           binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
                                    BINARY_GP_R10);
   }
   if (strcmp(op, "-") == 0) {
@@ -6582,8 +8790,11 @@ static int code_generator_emit_binary_function(CodeGenerator *generator,
   }
 
   if (!code_generator_binary_validate_signature(generator, function_data,
-                                                ir_function) ||
-      !code_generator_binary_prepare_function_context(generator, function_data,
+                                                ir_function)) {
+    return 0;
+  }
+
+  if (!code_generator_binary_prepare_function_context(generator, function_data,
                                                       ir_function, &context)) {
     return 0;
   }
@@ -6596,6 +8807,18 @@ static int code_generator_emit_binary_function(CodeGenerator *generator,
   for (size_t i = 0; i < ir_function->instruction_count;) {
     size_t consumed = 0;
     if (code_generator_binary_try_emit_binary_compare_branch_chain(
+            generator, &context, ir_function, i, &consumed)) {
+      i += consumed;
+      continue;
+    }
+
+    if (code_generator_binary_try_emit_address_add_load(
+            generator, &context, ir_function, i, &consumed)) {
+      i += consumed;
+      continue;
+    }
+
+    if (code_generator_binary_try_emit_binary_cast_chain(
             generator, &context, ir_function, i, &consumed)) {
       i += consumed;
       continue;
@@ -6913,6 +9136,91 @@ static int code_generator_emit_binary_global_variable(CodeGenerator *generator,
   return 1;
 }
 
+static int code_generator_binary_global_is_written(IRProgram *ir_program,
+                                                   const char *name) {
+  if (!ir_program || !name) {
+    return 1;
+  }
+
+  for (size_t fn_i = 0; fn_i < ir_program->function_count; fn_i++) {
+    IRFunction *function = ir_program->functions[fn_i];
+    if (!function) {
+      continue;
+    }
+
+    for (size_t insn_i = 0; insn_i < function->instruction_count; insn_i++) {
+      IRInstruction *instruction = &function->instructions[insn_i];
+      if (!instruction) {
+        continue;
+      }
+
+      if (instruction->dest.kind == IR_OPERAND_SYMBOL &&
+          instruction->dest.name && strcmp(instruction->dest.name, name) == 0) {
+        return 1;
+      }
+      if (instruction->op == IR_OP_ADDRESS_OF &&
+          instruction->lhs.kind == IR_OPERAND_SYMBOL &&
+          instruction->lhs.name && strcmp(instruction->lhs.name, name) == 0) {
+        return 1;
+      }
+      if (instruction->op == IR_OP_STORE &&
+          instruction->dest.kind == IR_OPERAND_SYMBOL &&
+          instruction->dest.name && strcmp(instruction->dest.name, name) == 0) {
+        return 1;
+      }
+    }
+  }
+
+  return 0;
+}
+
+static int code_generator_binary_collect_global_constants(
+    CodeGenerator *generator, Program *program_data) {
+  if (!generator || !program_data) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < program_data->declaration_count; i++) {
+    ASTNode *declaration = program_data->declarations[i];
+    if (!declaration || declaration->type != AST_VAR_DECLARATION) {
+      continue;
+    }
+
+    VarDeclaration *var_data = (VarDeclaration *)declaration->data;
+    if (!var_data || !var_data->name || var_data->is_extern ||
+        !var_data->initializer ||
+        var_data->initializer->type != AST_NUMBER_LITERAL ||
+        code_generator_binary_global_is_written(generator->ir_program,
+                                                var_data->name)) {
+      continue;
+    }
+
+    Type *type = code_generator_binary_get_resolved_type(generator,
+                                                         var_data->type_name, 0);
+    if (!type || !code_generator_binary_resolved_type_is_supported(type, 0) ||
+        code_generator_binary_resolved_type_float_bits(type) != 0 ||
+        type->kind == TYPE_STRING || type->kind == TYPE_VOID ||
+        type->size == 0 || type->size > 8) {
+      continue;
+    }
+
+    NumberLiteral *literal = (NumberLiteral *)var_data->initializer->data;
+    if (!literal || literal->is_float) {
+      continue;
+    }
+
+    if (!binary_global_const_table_add(var_data->name,
+                                       (uint64_t)literal->int_value)) {
+      code_generator_set_error(
+          generator, "Out of memory while tracking constant global '%s'",
+          var_data->name);
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
 static int code_generator_declare_binary_externs(CodeGenerator *generator,
                                                  Program *program_data) {
   BinaryEmitter *emitter = NULL;
@@ -6996,6 +9304,11 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
     return 0;
   }
 
+  binary_global_const_table_reset();
+  if (!code_generator_binary_collect_global_constants(generator, program_data)) {
+    return 0;
+  }
+
   if (!code_generator_declare_binary_externs(generator, program_data)) {
     return 0;
   }
@@ -7067,5 +9380,7 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
     }
   }
 
-  return generator->has_error ? 0 : 1;
+  int ok = generator->has_error ? 0 : 1;
+  binary_global_const_table_reset();
+  return ok;
 }

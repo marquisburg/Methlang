@@ -1,8 +1,0 @@
-async fn add_one(x: int32): int32 {
-    return x + 1;
-}
-
-function main(): int32 {
-    var value: int32 = await add_one(41);
-    return value;
-}

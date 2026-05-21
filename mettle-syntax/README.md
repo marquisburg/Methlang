@@ -16,7 +16,7 @@ Mettle is a **typed, assembly-inspired language** that compiles to **x86-64** as
 | Files, visibility | [Modules](../docs/modules.md) |
 | `import`, search paths, `import_str` | [Imports](../docs/imports.md) |
 | `std/...` modules | [Standard library](../docs/standard-library.md) |
-| Heap, `new`, roots | [Garbage collector](../docs/garbage-collector.md) |
+| Heap, `new`, runtime linking | [Heap allocator runtime](../docs/heap-allocation.md) |
 | `extern`, C strings | [C interoperability](../docs/c-interop.md) |
 | `mettle` CLI, `-I`, `--stdlib`, `--build` | [Compilation](../docs/compilation.md) |
 | Cheat sheet | [Quick reference](../docs/quick-reference.md) |

@@ -12,12 +12,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#else
-#include <sys/time.h>
-#endif
+#include "../bench_time.h"
 
 static int64_t sum_squares(int64_t n) {
     int64_t sum = 0;
@@ -26,18 +21,6 @@ static int64_t sum_squares(int64_t n) {
     }
     return sum;
 }
-
-#ifdef _WIN32
-static uint64_t get_time_ms(void) {
-    return (uint64_t)GetTickCount64();
-}
-#else
-static uint64_t get_time_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000;
-}
-#endif
 
 int main(void) {
     printf("Sum of squares: 1²+2²+...+100000²\n");
@@ -48,18 +31,19 @@ int main(void) {
     const int passes = 500;
     printf("Benchmark: 500 passes (sum_squares 100000 each)\n");
 
-    uint64_t t0 = get_time_ms();
+    volatile int64_t bench_n = 100000;
+
+    uint64_t t0 = bench_time_us();
     int64_t bench_sum = 0;
     for (int p = 0; p < passes; p++) {
-        bench_sum += sum_squares(100000);
+        bench_sum += sum_squares(bench_n);
     }
-    uint64_t t1 = get_time_ms();
-    uint64_t elapsed_ms = t1 - t0;
+    uint64_t elapsed_us = bench_time_us() - t0;
 
     printf("Bench sum = %" PRId64 "\n", bench_sum);
-    printf("Time: %" PRIu64 " ms\n", elapsed_ms);
+    printf("Time: %" PRIu64 " us\n", elapsed_us);
 
-    uint64_t per_pass_us = elapsed_ms * 1000 / passes;
+    uint64_t per_pass_us = elapsed_us / (uint64_t)passes;
     printf("Per pass: ~%" PRIu64 " us\n", per_pass_us);
 
     return 0;

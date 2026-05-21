@@ -1,51 +1,117 @@
 # Known Limitations
 
-This document lists current limitations of the Mettle language and compiler.
+This document lists current limitations of the Mettle language, compiler, and runtime. For supported behavior, see the [language reference](LANGUAGE.md).
 
-No top-level constant expressions. Use functions that return constant values instead.
+## Table of Contents
 
-Traits and constrained generics support inline bounds, multiple bounds, trailing `where` clauses on functions and structs, explicit impls, and trait method declarations with concrete impl method bodies. Generic trait-method calls on named values are monomorphized to concrete impl functions.
+1. [Language & Types](#language--types)
+2. [Compiler & Optimizations](#compiler--optimizations)
+3. [Memory, Pointers & Safety](#memory-pointers--safety)
+4. [Control Flow & Error Handling](#control-flow--error-handling)
+5. [Modules & Platform](#modules--platform)
 
-`match` on tagged enums is implemented as a **statement** only. There is no `match` expression form that yields a value.
+---
 
-Tagged-enum constructors are currently function-like. Payload variants use `Some(x)`, and payloadless variants use empty call syntax such as `None()`.
+## Language & Types
 
-`switch` case values must be compile-time constant integer expressions. Range-style cases (e.g. `case 1..10`) are not supported.
+### Constants
 
-Optimization passes are limited. The `-O` flag enables some optimizations.
+- No top-level constant expressions. Use functions that return constant values instead.
 
-Struct-by-value passing to functions can have ABI quirks; prefer pointers for large structs.
+### Traits & Generics
 
-No pointer arithmetic with `ptr + n`. Use indexing `ptr[i]` instead, which scales by element size.
+Traits and constrained generics support inline bounds, multiple bounds, trailing `where` clauses on functions and structs, explicit impls, and trait method declarations with concrete impl method bodies. **Limitation:** generic trait-method calls on named values are monomorphized to concrete impl functions rather than resolved dynamically.
 
-Null pointer dereference is diagnosed for constant nulls such as `*0`. Runtime null checks are emitted for dynamic dereference and pointer-based indexing in normal builds, but are disabled in `--release`. Pointers originating from C or inline assembly can still be invalid in ways the compiler cannot prove.
+### Pattern Matching
 
-Fixed-size array indexing is checked at compile time for constant indices and guarded at runtime for dynamic indices in normal builds; those runtime guards are disabled in `--release`. Pointer indexing is still unchecked for bounds because the compiler does not know the pointee extent.
+- **`match` on tagged enums** supports both a statement form (arm bodies are `{ ... }` blocks) and an expression form that yields a value. In expression form, each arm body must be a single value-yielding expression (for example, `match (o) { case Some(v): v + 1, default: 0 }`). All arm types must unify, and the match must be exhaustive (`default:` or all variants covered) because it must always produce a value.
+- **Tagged-enum constructors** are function-like. Payload variants use `Some(x)`; payloadless variants use empty call syntax such as `None()`.
 
-Deferred calls capture variables by reference, not by value. In loops, copy the current value into a temporary first if the deferred call should see the declaration-time value.
+### Switch
 
-`errdefer` is function-only and convention-based. It is valid only inside functions, and any non-zero explicit return value is treated as an error.
+- `switch` case values must be compile-time constant integer expressions.
+- Range-style cases (for example, `case 1..10`) are not supported.
 
-`await` is blocking under the default `**pool`** async model (`--async-model pool` or omitted): it waits on an executor worker thread and does not suspend the current function as a stackless coroutine. The experimental `**coroutine**` model (`--async-model coroutine`) lowers to the stackless `meth_coro_*` runtime; it is not a complete language-level non-blocking I/O story yet.
+---
 
-`coroutine` lowering now uses a generic CFG-level async rewrite path and no longer depends on pattern-specific/fallback branches for internal `await` bodies. The coroutine path is still experimental and evolving, especially around optimization quality and diagnostics.
+## Compiler & Optimizations
 
-By default, async uses a bounded worker-pool executor, not a user-facing coroutine scheduler. Optional `**coroutine**` lowering targets stackless tasks on a **portable reactor** (IOCP on Windows, `poll(2)` + self-pipe on POSIX), with identical API and event semantics on both and runtime-level test coverage on each. The remaining gap is at the **language level**: there is not yet a complete, ergonomic non-blocking `await` story across all I/O kinds built on top of that reactor.
+- Optimization passes are limited. The `-O` flag enables some optimizations but does not cover the full space of possible improvements.
+- Unreachable-code analysis is block-local and conservative; some dead paths in complex control flow may not be diagnosed yet.
 
-Blocking `await` can still deadlock on cyclic wait patterns (for example, futures waiting on each other in a cycle). The runtime mitigates common nested-await starvation, but it is not a full deadlock-proof scheduler.
+---
 
-Cancellation is cooperative only. `cancel(future)` sets a flag; the async task must poll `cancelled()` and exit on its own.
+## Memory, Pointers & Safety
 
-Async runtime shutdown is explicit for embedders. Call `meth_async_runtime_shutdown(...)` before `gc_shutdown()`. If a task ignores cooperative cancellation forever, graceful drain/abort can time out instead of forcing unsafe thread termination.
+### Struct-by-Value Function Arguments
 
-Coroutine frame GC visibility currently comes from lifted frame locals stored as fields on the heap async context plus conservative scanning. A separate precise coroutine root-map format is not implemented yet.
+Structs work normally as **locals**: field access, whole-struct assignment, and `&s` all use the full laid-out size (assignment copies every byte, not just the first machine word).
 
-Unreachable code analysis is currently block-local and conservative; some dead paths in complex control-flow may not be diagnosed yet.
+**Struct-by-value parameters and returns** follow the Microsoft x64 ABI's aggregate rule on Windows. A struct whose size is exactly 1, 2, 4, or 8 bytes is passed directly in one integer register. Other aggregate sizes, including structs larger than 8 bytes and odd-sized small structs such as 3-byte values, are passed and returned by **hidden pointer**:
 
-String concatenation via `+` is now supported, but it allocates via the GC runtime (`gc_alloc`). Use `mettle --build` or otherwise link the bundled GC runtime before using `string + string`.
+- **Arguments:** the caller copies the source struct into a per-call stack temp and passes the temp's address in the normal argument register/slot. The callee dereferences the pointer to access fields. By-value semantics are preserved; mutations inside the callee affect only the temp copy, not the caller's original.
+- **Returns:** the caller allocates a slot in its own frame and passes its address as a hidden first integer argument (Win64: `rcx`). The callee writes the result through that pointer and returns the pointer in `rax`. The caller materializes the returned struct from that frame slot, so the value outlives the call's stack teardown.
 
-Managed pointers that cross into C remain a hazard. The compiler now warns when a managed struct pointer is passed to an `extern function` or stored in an `extern` variable, but C code that retains such pointers must still register the storage slot with `gc_register_root`.
+See [docs/struct-abi-design.md](struct-abi-design.md) for the full contract.
 
-No conditional imports. All `import` directives are unconditional; there is no platform or flag-based import.
+**Remaining limitations:**
 
-`std/net` and the web server example are Windows-only (Winsock2). Use POSIX socket externs for networking on Linux.
+| Scenario | Behavior |
+|----------|----------|
+| Parameter `fn(s: Big)` with `sizeof(Big) > 8` | Supported in text-asm and `--emit-obj` modes. |
+| Returning `-> Big` with `sizeof(Big) > 8` | Supported in text-asm and `--emit-obj` modes. Hidden out-pointer; result lives in the caller's frame. |
+| Chained pattern `f(g())` where both are struct-by-value | Supported. The returned struct survives passage into the next call. |
+| Mettle calling C functions with struct-by-value args/returns | Supported on Windows when the C object uses the Microsoft x64 ABI and the final link uses Mettle's internal linker. |
+| C calling exported Mettle functions with struct-by-value args/returns | Not yet covered by tests or documented as supported. |
+| Method call on a struct **value** (`v.m()`) | Ordinary method-call lowering is still incomplete. Use explicit receiver functions such as `Big_total(v)` for now. |
+| Float-typed return values from Mettle-to-Mettle calls | Supported in text-asm and `--emit-obj` modes. Callees return through `xmm0` per the Win64 ABI; the text IR path still mirrors the bits into `rax` after calls for its internal value pipeline. |
+
+**Practical guidance:**
+
+- Struct-by-value **arguments and returns** are safe in the text-asm backend and in `--emit-obj` mode.
+- For C interop, struct passing and returning matches the Microsoft x64 C ABI on Windows for the covered Mettle-calls-C direction. See [C Interoperability - Passing Structs to C](c-interop.md).
+- With `--linker internal`, raw COFF `.o` / `.obj` files can be supplied through `--link-arg`; the final executable link remains inside Mettle.
+
+Arrays follow the same rule as in [Types - Array Types](types.md#array-types): they are not passed by value; use `&arr[0]` or a `T*` parameter.
+
+### Pointer Operations
+
+- No pointer arithmetic with `ptr + n`. Use indexing `ptr[i]` instead, which scales by element size.
+
+### Null & Bounds Checks
+
+- **Null dereference:** constant nulls such as `*0` are diagnosed at compile time. Runtime null checks are emitted for dynamic dereference and pointer-based indexing in normal builds, but are disabled in `--release`. Pointers originating from C or inline assembly can still be invalid in ways the compiler cannot prove.
+- **Array indexing:** fixed-size array indexing is checked at compile time for constant indices and guarded at runtime for dynamic indices in normal builds; those runtime guards are disabled in `--release`. Pointer indexing remains unchecked for bounds because the compiler does not know the pointee extent.
+
+### Heap
+
+- There is no garbage collector and no heap manager. `new` and string concatenation emit direct `calloc(1, size)` calls; allocations are reclaimed by the OS at process exit unless user code manages them explicitly.
+- String concatenation via `+` allocates through the C runtime and does not require a Mettle heap runtime object.
+
+### C Interoperability
+
+- Pointers that cross into C remain an ownership hazard. C code that takes ownership of manually allocated buffers must follow the C library's allocation/free contract; `new` allocations are released only when the process exits.
+
+---
+
+## Control Flow & Error Handling
+
+### Deferred Calls
+
+- Deferred calls capture variables by reference, not by value. In loops, copy the current value into a temporary first if the deferred call should see the declaration-time value.
+
+### Error Defer
+
+- `errdefer` is function-only and convention-based. It is valid only inside functions, and any non-zero explicit return value is treated as an error.
+
+---
+
+## Modules & Platform
+
+### Imports
+
+- No conditional imports. All `import` directives are unconditional; there is no platform- or flag-based import.
+
+### Platform Support
+
+- `std/net` and the web server example are Windows-only (Winsock2). Use POSIX socket externs for networking on Linux.

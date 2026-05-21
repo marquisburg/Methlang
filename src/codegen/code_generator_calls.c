@@ -607,6 +607,50 @@ Type *code_generator_infer_expression_type(CodeGenerator *generator,
   }
 }
 
+/* True for struct-by-value and fixed-size array-by-value types.
+ * String, pointer, and pointer-like 8-byte scalars are NOT aggregates. */
+int code_generator_type_is_aggregate(const Type *type) {
+  if (!type) {
+    return 0;
+  }
+  return type->kind == TYPE_STRUCT || type->kind == TYPE_ARRAY;
+}
+
+size_t code_generator_abi_type_size(const Type *type) {
+  if (!type) {
+    return 0;
+  }
+  if (type->size > 0) {
+    return type->size;
+  }
+  /* Scalars without explicit size: fall back to pointer width. */
+  return 8;
+}
+
+/* Microsoft x64 ABI classification. See docs/struct-abi-design.md.
+ * Aggregates are INDIRECT when sizeof > 8, or when sizeof <= 8 but not a
+ * power of two. Scalars are always DIRECT. */
+AbiPassKind code_generator_abi_classify(const Type *type) {
+  if (!type) {
+    return ABI_PASS_DIRECT;
+  }
+  if (!code_generator_type_is_aggregate(type)) {
+    return ABI_PASS_DIRECT;
+  }
+  size_t s = code_generator_abi_type_size(type);
+  if (s == 0) {
+    /* Opaque/forward-declared aggregate: be conservative, pass indirectly. */
+    return ABI_PASS_INDIRECT;
+  }
+  if (s > 8) {
+    return ABI_PASS_INDIRECT;
+  }
+  if (s == 1 || s == 2 || s == 4 || s == 8) {
+    return ABI_PASS_DIRECT;
+  }
+  return ABI_PASS_INDIRECT;
+}
+
 // Helper function to check if a type is floating-point
 int code_generator_is_floating_point_type(Type *type) {
   if (!type || !type->name) {
