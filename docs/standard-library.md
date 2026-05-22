@@ -40,43 +40,76 @@ The internal PE linker probes common Win32 DLLs directly (`kernel32`, `user32`, 
 
 ## std/ui
 
-Windows-only native GUI library built on Win32 (`user32` + `gdi32`). Does not work on Linux. Import with `import "std/ui";` and build with the internal linker:
+Windows-only native GUI framework built on Win32 (`user32` + `gdi32`). Does not work on Linux. Import with `import "std/ui";` and build with the internal linker:
 
 ```bash
 mettle --build --linker internal app.mettle -o app.exe
 ```
 
-Core lifecycle:
+App and window lifecycle:
 
 - `ui_init()` registers the shared window class (safe to call multiple times)
 - `ui_window_create(title, x, y, width, height, window_proc) -> int64` creates a top-level window; pass `&your_proc` as the callback
+- `ui_window_create_centered(title, width, height, window_proc) -> int64` centers a top-level window on the primary display
+- `UiAppConfig` + `ui_app_run(config)` provide a tiny app shell for create/show/run
 - `ui_window_show(hwnd)` displays the window
+- `ui_window_hide`, `ui_window_close`, `ui_window_move`, `ui_window_set_pos`, `ui_window_set_title`
+- `ui_window_client_rect(hwnd) -> UiRect`, `ui_window_rect(hwnd) -> UiRect`, `ui_client_width`, `ui_client_height`
 - `ui_run_message_loop() -> int32` runs until `ui_quit(code)` or `WM_DESTROY`
 - `ui_shutdown()` unregisters the window class (optional)
 
 Window procedure helpers:
 
 - `ui_def_window_proc(hwnd, msg, wparam, lparam)` forwards to `DefWindowProcA`
-- Message constants such as `UI_WM_PAINT()`, `UI_WM_COMMAND()`, `UI_WM_DESTROY()`
+- Message constants such as `UI_WM_PAINT()`, `UI_WM_COMMAND()`, `UI_WM_TIMER()`, `UI_WM_SIZE()`, `UI_WM_KEYDOWN()`, mouse messages, and `UI_WM_DESTROY()`
 - `ui_command_id(wparam)` / `ui_command_notify(wparam)` decode `WM_COMMAND`
+- `ui_size_width(lparam)` / `ui_size_height(lparam)` decode `WM_SIZE`
 - `ui_mouse_x(lparam)` / `ui_mouse_y(lparam)` decode mouse coordinates
+- `ui_set_user_data(hwnd, value)` / `ui_get_user_data(hwnd)` expose `GWLP_USERDATA`
+- `ui_timer_start(hwnd, id, elapsed_ms)` / `ui_timer_stop(hwnd, id)` wrap Win32 timers
 
-Drawing (typically inside `UI_WM_PAINT`):
+Geometry, layout, and theme helpers:
+
+- `UiRect`, `UiPoint`, `UiSize`, `UiInsets`, `UiLayoutCursor`, `UiTheme`, `UiFontConfig`
+- `ui_rect_xywh`, `ui_make_rect`, `ui_rect_width`, `ui_rect_height`, `ui_rect_inset`, `ui_rect_offset`, `ui_rect_contains`
+- `ui_stack_vertical`, `ui_stack_horizontal`, `ui_stack_next`, `ui_stack_next_h`
+- `ui_row_rect(&parent, index, row_height, gap)` and `ui_column_rect(&parent, index, count, gap)`
+- `ui_default_theme()` returns a practical neutral/accent color set
+- `ui_rgb`, `ui_color_r`, `ui_color_g`, `ui_color_b`, `ui_scale`
+
+Drawing and fonts (typically inside `UI_WM_PAINT`):
 
 - `ui_begin_paint(hwnd, &ps) -> hdc`, `ui_end_paint(hwnd, &ps)`
-- `ui_fill_rect_color(hdc, left, top, right, bottom, color)`
-- `ui_draw_text(hdc, x, y, text)` and `ui_draw_text_color(...)`
+- `ui_fill_rect_color`, `ui_fill_rect_color_rect`, `ui_frame_rect_color`
+- `ui_draw_line`, `ui_draw_rect_outline`, `ui_draw_ellipse_outline`
+- `ui_draw_text`, `ui_draw_text_color`, `ui_draw_text_transparent`
+- `ui_draw_text_rect`, `ui_draw_text_rect_color` with `UI_DT_*` flags
+- `ui_create_font`, `ui_create_font_config`, `ui_control_set_font`, `ui_select_object`, `ui_delete_object`
 - `ui_rgb(r, g, b)` builds a `COLORREF`
 
 Common controls (child windows):
 
+- Generic creation: `UiControlConfig`, `ui_control_create`, `ui_control_create_raw`
 - `ui_button_create(parent, x, y, w, h, label, id)`
 - `ui_button_create_default(...)` for the default push button
+- `ui_checkbox_create`, `ui_checkbox_is_checked`, `ui_checkbox_set_checked`
+- `ui_radio_create`, `ui_groupbox_create`
 - `ui_label_create(parent, x, y, w, h, text, id)`
+- `ui_label_create_center(...)`
 - `ui_textbox_create(parent, x, y, w, h, id)`
+- `ui_textbox_create_multiline(...)`
+- `ui_listbox_create`, `ui_listbox_add`, `ui_listbox_clear`, `ui_listbox_selected`, `ui_listbox_select`
+- `ui_combobox_create`, `ui_combobox_add`, `ui_combobox_clear`, `ui_combobox_selected`, `ui_combobox_select`
 - `ui_control_set_text(control, text)` / `ui_control_get_text(control, buf, max_len)`
+- `ui_control_move`, `ui_control_move_rect`, `ui_control_show`, `ui_control_hide`, `ui_control_enable`, `ui_control_focus`
 
-See `examples/ui_demo/ui_demo.mettle` for a complete sample with custom painting, a button, label, and text field.
+Menus and dialogs:
+
+- `ui_menu_create`, `ui_menu_popup_create`, `ui_menu_append_item`, `ui_menu_append_separator`, `ui_menu_append_popup`
+- `ui_window_set_menu(hwnd, menu)`, `ui_menu_destroy(menu)`
+- `ui_alert(owner, title, text)` displays an informational message box
+
+See `examples/ui_demo/ui_demo.mettle` for a complete sample with custom painting, a menu, timer, fonts, layout helpers, and common controls.
 
 ## std/system
 

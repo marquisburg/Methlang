@@ -461,49 +461,6 @@ static int print_help_topic(const char *program_name, const char *argv0,
   return 1;
 }
 
-static int validate_lexical_phase(const char *source, ErrorReporter *reporter) {
-  if (!source) {
-    return 0;
-  }
-
-  Lexer *lexer = lexer_create(source);
-  if (!lexer) {
-    if (reporter) {
-      error_reporter_add_error(reporter, ERROR_INTERNAL,
-                               source_location_create(0, 0),
-                               "Failed to initialize lexer for lexical "
-                               "validation");
-    }
-    return 0;
-  }
-
-  int has_lexical_error = 0;
-
-  while (1) {
-    Token token = lexer_next_token(lexer);
-    if (token.type == TOKEN_ERROR) {
-      has_lexical_error = 1;
-      if (reporter) {
-        SourceLocation location =
-            source_location_create(token.line, token.column);
-        error_reporter_add_error(reporter, ERROR_LEXICAL, location,
-                                 token.value ? token.value
-                                             : "Unknown lexical error");
-      }
-    }
-
-    if (token.type == TOKEN_EOF) {
-      token_destroy(&token);
-      break;
-    }
-
-    token_destroy(&token);
-  }
-
-  lexer_destroy(lexer);
-  return !has_lexical_error;
-}
-
 static char *build_sidecar_filename(const char *base_filename,
                                     const char *suffix) {
   if (!base_filename || !suffix) {
@@ -2230,18 +2187,15 @@ int compile_file(const char *input_filename, const char *output_filename,
     return 1;
   }
 
+  /* Lexical errors are reported inline by the parser (parser_advance calls
+   * parser_report_lexer_token_error on any TOKEN_ERROR, into this same
+   * error_reporter, and the post-parse check below aborts before codegen).
+   * A separate pre-pass that re-tokenized the whole source just to find those
+   * same errors was pure duplicate work -- a full extra lexer pass over the
+   * input -- so it has been removed. The phase slot is kept (recorded as 0 ms)
+   * to preserve the --profile output layout. */
   phase_start = compiler_profile_begin(&profile);
-  if (!validate_lexical_phase(source, error_reporter)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_LEXICAL_VALIDATION,
-                         phase_start);
-    error_reporter_print_errors(error_reporter);
-    error_reporter_destroy(error_reporter);
-    free(source);
-    compiler_profile_print_compile(&profile, input_filename, 1);
-    return 1;
-  }
-  compiler_profile_add(&profile, PROFILE_PHASE_LEXICAL_VALIDATION,
-                       phase_start);
+  compiler_profile_add(&profile, PROFILE_PHASE_LEXICAL_VALIDATION, phase_start);
 
   // Initialize compiler components
   phase_start = compiler_profile_begin(&profile);
@@ -2495,7 +2449,7 @@ int compile_file(const char *input_filename, const char *output_filename,
 
   code_generator_set_ir_program(code_generator, ir_program);
 
-  if (options->debug_mode || (options->optimize && !options->release)) {
+  if (options->debug_mode) {
     phase_start = compiler_profile_begin(&profile);
     char *ir_output = build_sidecar_filename(output_filename, ".ir");
     if (!ir_output) {

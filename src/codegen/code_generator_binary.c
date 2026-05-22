@@ -263,14 +263,124 @@ static int binary_align_up_int(int value, int alignment, int *result_out) {
   return 1;
 }
 
+/* Name -> IRFunction index for the binary backend.
+ *
+ * code_generator_find_ir_function_binary used to linear-scan every IR function
+ * (strcmp each), and it is called once per emitted function plus once per call
+ * and addr-of instruction. That is O(functions^2) and dominated codegen on
+ * large programs. We cache an open-addressing hash table keyed on the current
+ * ir_program pointer + function_count, rebuilding only when those change. */
+typedef struct {
+  const char *name; /* borrowed from the IRFunction; not owned */
+  IRFunction *function;
+} BinaryIRFunctionSlot;
+
+typedef struct {
+  BinaryIRFunctionSlot *slots;
+  size_t slot_count; /* power of two */
+  const IRProgram *program;
+  size_t function_count;
+} BinaryIRFunctionIndex;
+
+static BinaryIRFunctionIndex g_binary_ir_function_index = {0};
+
+static void binary_ir_function_index_reset(void) {
+  free(g_binary_ir_function_index.slots);
+  g_binary_ir_function_index.slots = NULL;
+  g_binary_ir_function_index.slot_count = 0;
+  g_binary_ir_function_index.program = NULL;
+  g_binary_ir_function_index.function_count = 0;
+}
+
+static size_t binary_ir_function_hash(const char *name) {
+  /* FNV-1a */
+  size_t hash = (size_t)1469598103934665603ULL;
+  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+    hash ^= (size_t)*p;
+    hash *= (size_t)1099511628211ULL;
+  }
+  return hash;
+}
+
+static void binary_ir_function_index_insert(BinaryIRFunctionIndex *index,
+                                            IRFunction *function) {
+  size_t mask = index->slot_count - 1;
+  size_t i = binary_ir_function_hash(function->name) & mask;
+  while (index->slots[i].name) {
+    /* First definition of a given name wins, matching the old linear scan
+     * which returned the earliest matching function. */
+    if (strcmp(index->slots[i].name, function->name) == 0) {
+      return;
+    }
+    i = (i + 1) & mask;
+  }
+  index->slots[i].name = function->name;
+  index->slots[i].function = function;
+}
+
+/* Returns 1 on success (index ready to query), 0 on allocation failure (caller
+ * should fall back to a linear scan rather than miss real functions). */
+static int binary_ir_function_index_ensure(const IRProgram *program) {
+  if (g_binary_ir_function_index.program == program &&
+      g_binary_ir_function_index.function_count == program->function_count &&
+      g_binary_ir_function_index.slots) {
+    return 1;
+  }
+
+  binary_ir_function_index_reset();
+
+  /* Size to >=2x function count, power of two, min 16, to keep load factor
+   * under 0.5 and probe chains short. */
+  size_t slot_count = 16;
+  while (slot_count < program->function_count * 2) {
+    slot_count *= 2;
+  }
+
+  BinaryIRFunctionSlot *slots =
+      calloc(slot_count, sizeof(BinaryIRFunctionSlot));
+  if (!slots) {
+    return 0;
+  }
+
+  g_binary_ir_function_index.slots = slots;
+  g_binary_ir_function_index.slot_count = slot_count;
+  g_binary_ir_function_index.program = program;
+  g_binary_ir_function_index.function_count = program->function_count;
+
+  for (size_t i = 0; i < program->function_count; i++) {
+    IRFunction *function = program->functions[i];
+    if (function && function->name) {
+      binary_ir_function_index_insert(&g_binary_ir_function_index, function);
+    }
+  }
+
+  return 1;
+}
+
 static IRFunction *code_generator_find_ir_function_binary(CodeGenerator *generator,
                                                           const char *name) {
   if (!generator || !generator->ir_program || !name) {
     return NULL;
   }
 
-  for (size_t i = 0; i < generator->ir_program->function_count; i++) {
-    IRFunction *function = generator->ir_program->functions[i];
+  const IRProgram *program = generator->ir_program;
+
+  if (binary_ir_function_index_ensure(program)) {
+    const BinaryIRFunctionIndex *index = &g_binary_ir_function_index;
+    size_t mask = index->slot_count - 1;
+    size_t i = binary_ir_function_hash(name) & mask;
+    while (index->slots[i].name) {
+      if (strcmp(index->slots[i].name, name) == 0) {
+        return index->slots[i].function;
+      }
+      i = (i + 1) & mask;
+    }
+    return NULL;
+  }
+
+  /* Fallback: index allocation failed; behave as before. */
+  for (size_t i = 0; i < program->function_count; i++) {
+    IRFunction *function = program->functions[i];
     if (function && function->name && strcmp(function->name, name) == 0) {
       return function;
     }
@@ -7728,6 +7838,45 @@ static int code_generator_binary_emit_instruction(
   }
 }
 
+/* Windows reserves the stack lazily behind a single guard page: touching the
+ * guard page commits it and moves the guard down by one page. A prologue that
+ * lowers rsp by more than a page in one `sub` can step *over* the guard page
+ * without ever touching it, so the first write into the new frame faults --
+ * exactly the crash seen on functions with very large frames (e.g. main() with
+ * hundreds of call sites). Microsoft's ABI requires a stack probe for frames
+ * larger than a page: touch each page as rsp descends so the guard moves down
+ * one page at a time. We do an unrolled probe (no helper call): for each 4 KiB
+ * step, `sub rsp, 4096` then write to [rsp], then handle the remainder. RAX is
+ * scratch here (prologue runs before any value is live in it). */
+#define BINARY_STACK_PAGE_SIZE 4096
+
+static int binary_emit_frame_allocation(BinaryCodeBuffer *code, int frame_size) {
+  if (frame_size <= 0) {
+    return 1;
+  }
+
+  if (frame_size <= BINARY_STACK_PAGE_SIZE) {
+    return binary_emit_sub_rsp_imm32(code, (uint32_t)frame_size);
+  }
+
+  int remaining = frame_size;
+  while (remaining > BINARY_STACK_PAGE_SIZE) {
+    if (!binary_emit_sub_rsp_imm32(code, (uint32_t)BINARY_STACK_PAGE_SIZE)) {
+      return 0;
+    }
+    /* Touch the freshly-stepped page so the guard page is hit in order. */
+    if (!binary_emit_mov_mem_reg(code, BINARY_GP_RSP, 0, BINARY_GP_RAX)) {
+      return 0;
+    }
+    remaining -= BINARY_STACK_PAGE_SIZE;
+  }
+  /* Final (sub-page) remainder; touch it too to commit the last page. */
+  if (!binary_emit_sub_rsp_imm32(code, (uint32_t)remaining)) {
+    return 0;
+  }
+  return binary_emit_mov_mem_reg(code, BINARY_GP_RSP, 0, BINARY_GP_RAX);
+}
+
 static int code_generator_binary_emit_prologue(CodeGenerator *generator,
                                                BinaryFunctionContext *context,
                                                FunctionDeclaration *function_data) {
@@ -7742,8 +7891,7 @@ static int code_generator_binary_emit_prologue(CodeGenerator *generator,
     return 0;
   }
 
-  if (context->frame_size > 0 &&
-      !binary_emit_sub_rsp_imm32(&context->code, (uint32_t)context->frame_size)) {
+  if (!binary_emit_frame_allocation(&context->code, context->frame_size)) {
     code_generator_set_error(generator,
                              "Out of memory while allocating stack frame");
     return 0;
@@ -9305,6 +9453,7 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
   }
 
   binary_global_const_table_reset();
+  binary_ir_function_index_reset();
   if (!code_generator_binary_collect_global_constants(generator, program_data)) {
     return 0;
   }
@@ -9382,5 +9531,6 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
 
   int ok = generator->has_error ? 0 : 1;
   binary_global_const_table_reset();
+  binary_ir_function_index_reset();
   return ok;
 }

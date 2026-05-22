@@ -1,34 +1,202 @@
 // Mettle UI Demo
 //
-// A small native Windows GUI showing custom painting and common controls.
+// A native Windows showcase for std/ui: app shell, responsive layout, menus,
+// timers, custom painting, fonts, and common controls.
 //
 // Build:
 //   mettle --build --linker internal examples/ui_demo/ui_demo.mettle -o ui_demo.exe
-//
-// Run:
-//   ui_demo.exe
 
 import "std/ui";
 import "std/io";
 import "std/conv";
 
+function ID_UPDATE() -> int32 { return 1001; }
+function ID_STATUS() -> int32 { return 1002; }
+function ID_NAME() -> int32 { return 1003; }
+function ID_TIMER_CHECK() -> int32 { return 1004; }
+function ID_LIST() -> int32 { return 1005; }
+function ID_COMBO() -> int32 { return 1006; }
+function ID_RESET() -> int32 { return 4001; }
+function ID_ABOUT() -> int32 { return 4002; }
+function ID_EXIT() -> int32 { return 4003; }
+function ID_TIMER() -> uint32 { return 1; }
+
 var g_main_window: int64 = 0;
 var g_status_label: int64 = 0;
+var g_update_button: int64 = 0;
+var g_name_textbox: int64 = 0;
+var g_timer_check: int64 = 0;
+var g_combo: int64 = 0;
+var g_list: int64 = 0;
+var g_title_font: int64 = 0;
+var g_heading_font: int64 = 0;
+var g_body_font: int64 = 0;
 var g_click_count: int32 = 0;
+var g_tick_count: int32 = 0;
+var g_theme_index: int32 = 0;
+
+function accent_color() -> uint32 {
+  if (g_theme_index == 1) { return ui_rgb(14, 116, 144); }
+  if (g_theme_index == 2) { return ui_rgb(101, 84, 192); }
+  return ui_rgb(37, 99, 235);
+}
+
+function accent_dark() -> uint32 {
+  if (g_theme_index == 1) { return ui_rgb(21, 94, 117); }
+  if (g_theme_index == 2) { return ui_rgb(79, 70, 155); }
+  return ui_rgb(23, 75, 180);
+}
+
+function set_status(pattern: string, value: int64) {
+  var status: uint8[96];
+  format_i64(&status[0], 96, pattern, value);
+  ui_control_set_text(g_status_label, &status[0]);
+}
+
+function reset_state() {
+  g_click_count = 0;
+  g_tick_count = 0;
+  g_theme_index = 0;
+  ui_checkbox_set_checked(g_timer_check, 1);
+  ui_combobox_select(g_combo, 0);
+  ui_listbox_select(g_list, 0);
+  ui_control_set_text(g_name_textbox, cstr("Mettle developer"));
+  set_status("Clicks: %d", 0);
+  ui_window_invalidate(g_main_window);
+}
+
+function build_menu(hwnd: int64) {
+  var menu: int64 = ui_menu_create();
+  var app_menu: int64 = ui_menu_popup_create();
+
+  ui_menu_append_item(app_menu, ID_RESET(), cstr("Reset demo"));
+  ui_menu_append_item(app_menu, ID_ABOUT(), cstr("About"));
+  ui_menu_append_separator(app_menu);
+  ui_menu_append_item(app_menu, ID_EXIT(), cstr("Exit"));
+
+  ui_menu_append_popup(menu, app_menu, cstr("Demo"));
+  ui_window_set_menu(hwnd, menu);
+}
+
+function layout_controls(hwnd: int64) {
+  if (g_status_label == 0) { return; }
+
+  var client: UiRect = ui_window_client_rect(hwnd);
+  var content: UiRect = ui_rect_inset(client, ui_make_insets(28));
+  var controls_top: int32 = 164;
+  var left_w: int32 = 340;
+  var right_w: int32 = ui_rect_width(content) - left_w - 32;
+  if (right_w < 220) { right_w = 220; }
+
+  ui_control_move(g_status_label, content.left, controls_top - 36, ui_rect_width(content), 24);
+  ui_control_move(g_update_button, content.left, controls_top, 150, 34);
+  ui_control_move(g_name_textbox, content.left, controls_top + 50, left_w, 30);
+  ui_control_move(g_timer_check, content.left, controls_top + 96, left_w, 28);
+  ui_control_move(g_combo, content.left, controls_top + 140, 230, 160);
+  ui_control_move(g_list, content.left + left_w + 32, controls_top + 30, right_w, 158);
+}
+
+function build_controls(hwnd: int64) {
+  g_status_label = ui_label_create(hwnd, 0, 0, 100, 24, cstr("Clicks: 0"), ID_STATUS());
+  g_update_button = ui_button_create_default(hwnd, 0, 0, 120, 32, cstr("Update status"), ID_UPDATE());
+  g_name_textbox = ui_textbox_create(hwnd, 0, 0, 260, 30, ID_NAME());
+  g_timer_check = ui_checkbox_create(hwnd, 0, 0, 260, 28, cstr("Enable timer updates"), ID_TIMER_CHECK());
+  g_combo = ui_combobox_create(hwnd, 0, 0, 220, 140, ID_COMBO());
+  g_list = ui_listbox_create(hwnd, 0, 0, 220, 150, ID_LIST());
+
+  ui_control_set_font(g_status_label, g_body_font);
+  ui_control_set_font(g_update_button, g_body_font);
+  ui_control_set_font(g_name_textbox, g_body_font);
+  ui_control_set_font(g_timer_check, g_body_font);
+  ui_control_set_font(g_combo, g_body_font);
+  ui_control_set_font(g_list, g_body_font);
+
+  ui_control_set_text(g_name_textbox, cstr("Mettle developer"));
+  ui_checkbox_set_checked(g_timer_check, 1);
+
+  ui_combobox_add(g_combo, cstr("Blue accent"));
+  ui_combobox_add(g_combo, cstr("Cyan accent"));
+  ui_combobox_add(g_combo, cstr("Violet accent"));
+  ui_combobox_select(g_combo, 0);
+
+  ui_listbox_add(g_list, cstr("Window lifecycle"));
+  ui_listbox_add(g_list, cstr("Custom painting"));
+  ui_listbox_add(g_list, cstr("Responsive layout"));
+  ui_listbox_add(g_list, cstr("Common controls"));
+  ui_listbox_add(g_list, cstr("Timers and menus"));
+  ui_listbox_select(g_list, 0);
+
+  layout_controls(hwnd);
+}
+
+function draw_metric(hdc: int64, rect: UiRect, label: cstring, value: cstring, color: uint32) {
+  ui_fill_rect_color_rect(hdc, &rect, ui_rgb(255, 255, 255));
+  ui_frame_rect_color(hdc, &rect, ui_rgb(204, 213, 224));
+  var top: UiRect = ui_make_rect(rect.left + 14, rect.top + 12, rect.right - 14, rect.top + 34);
+  var bottom: UiRect = ui_make_rect(rect.left + 14, rect.top + 36, rect.right - 14, rect.bottom - 10);
+  ui_draw_text_rect_color(hdc, &top, label, ui_rgb(100, 116, 139), UI_DT_SINGLELINE());
+  ui_draw_text_rect_color(hdc, &bottom, value, color, UI_DT_SINGLELINE());
+}
 
 function on_paint(hwnd: int64) {
   var ps: UiPaintStruct;
   var hdc: int64 = ui_begin_paint(hwnd, &ps);
-  var width: int32 = ui_client_width(hwnd);
-  var height: int32 = ui_client_height(hwnd);
+  var theme: UiTheme = ui_default_theme();
+  var client: UiRect = ui_window_client_rect(hwnd);
+  var content: UiRect = ui_rect_inset(client, ui_make_insets(28));
+  var hero: UiRect = ui_make_rect(content.left, content.top, content.right, 130);
+  var accent: uint32 = accent_color();
 
-  ui_fill_rect_color(hdc, 0, 0, width, height, ui_rgb(245, 247, 250));
-  ui_fill_rect_color(hdc, 24, 24, width - 24, 120, ui_rgb(58, 123, 213));
-  ui_draw_text_color(hdc, 40, 48, cstr("Mettle UI"), ui_rgb(255, 255, 255), ui_rgb(58, 123, 213));
-  ui_draw_text_color(hdc, 40, 76, cstr("Native Win32 desktop widgets and drawing"), ui_rgb(230, 240, 255), ui_rgb(58, 123, 213));
+  ui_fill_rect_color_rect(hdc, &client, theme.background);
+  ui_fill_rect_color_rect(hdc, &hero, accent);
+  ui_frame_rect_color(hdc, &hero, accent_dark());
 
-  var hint: string = "Click the button to update the status label.";
-  ui_draw_text(hdc, 24, 140, cstr(hint));
+  var old_font: int64 = ui_select_object(hdc, g_title_font);
+  var title_rect: UiRect = ui_make_rect(hero.left + 22, hero.top + 18, hero.right - 22, hero.top + 54);
+  ui_draw_text_rect_color(hdc, &title_rect, cstr("Mettle UI Workbench"), theme.accent_text, UI_DT_LEFT() | UI_DT_SINGLELINE());
+  ui_select_object(hdc, old_font);
+
+  var subtitle: UiRect = ui_make_rect(hero.left + 24, hero.top + 62, hero.right - 260, hero.bottom - 18);
+  ui_draw_text_rect_color(hdc, &subtitle, cstr("A native desktop demo built entirely with std/ui: menus, timers, controls, layout, fonts, and immediate drawing."), ui_rgb(229, 241, 255), UI_DT_LEFT() | UI_DT_WORDBREAK());
+
+  var name_buf: uint8[96];
+  ui_control_get_text(g_name_textbox, &name_buf[0], 96);
+  var name_rect: UiRect = ui_make_rect(hero.right - 228, hero.top + 26, hero.right - 24, hero.top + 58);
+  ui_draw_text_rect_color(hdc, &name_rect, &name_buf[0], theme.accent_text, UI_DT_RIGHT() | UI_DT_SINGLELINE() | UI_DT_END_ELLIPSIS());
+
+  var metric_area: UiRect = ui_make_rect(content.left, content.bottom - 94, content.right, content.bottom);
+  var metric1: UiRect = ui_column_rect(&metric_area, 0, 3, 14);
+  var metric2: UiRect = ui_column_rect(&metric_area, 1, 3, 14);
+  var metric3: UiRect = ui_column_rect(&metric_area, 2, 3, 14);
+
+  var click_buf: uint8[32];
+  var tick_buf: uint8[32];
+  var theme_buf: uint8[32];
+  format_i64(&click_buf[0], 32, "%d", g_click_count);
+  format_i64(&tick_buf[0], 32, "%d", g_tick_count);
+  format_i64(&theme_buf[0], 32, "%d", g_theme_index + 1);
+
+  draw_metric(hdc, metric1, cstr("Clicks"), &click_buf[0], accent);
+  draw_metric(hdc, metric2, cstr("Timer ticks"), &tick_buf[0], accent);
+  draw_metric(hdc, metric3, cstr("Theme"), &theme_buf[0], accent);
+
+  var activity: UiRect = ui_make_rect(content.left + 374, 164, content.right, content.bottom - 116);
+  ui_fill_rect_color_rect(hdc, &activity, theme.surface);
+  ui_frame_rect_color(hdc, &activity, theme.border);
+
+  old_font = ui_select_object(hdc, g_heading_font);
+  var activity_title: UiRect = ui_make_rect(activity.left + 18, activity.top + 16, activity.right - 18, activity.top + 42);
+  ui_draw_text_rect_color(hdc, &activity_title, cstr("Painted Activity Panel"), theme.text, UI_DT_SINGLELINE());
+  ui_select_object(hdc, old_font);
+
+  var detail: UiRect = ui_make_rect(activity.left + 18, activity.top + 52, activity.right - 18, activity.top + 100);
+  ui_draw_text_rect_color(hdc, &detail, cstr("This area is custom drawn with GDI primitives while the controls around it are normal child windows."), theme.muted_text, UI_DT_WORDBREAK());
+
+  var bar: UiRect = ui_make_rect(activity.left + 18, activity.bottom - 42, activity.right - 18, activity.bottom - 24);
+  ui_fill_rect_color_rect(hdc, &bar, ui_rgb(226, 232, 240));
+  var progress: int32 = (g_tick_count % 10) + 1;
+  var fill: UiRect = ui_make_rect(bar.left, bar.top, bar.left + (ui_rect_width(bar) * progress) / 10, bar.bottom);
+  ui_fill_rect_color_rect(hdc, &fill, accent);
 
   ui_end_paint(hwnd, &ps);
 }
@@ -39,20 +207,69 @@ function window_proc(hwnd: int64, msg: uint32, wparam: int64, lparam: int64) -> 
     return 0;
   }
 
+  if (msg == UI_WM_SIZE()) {
+    layout_controls(hwnd);
+    ui_window_invalidate(hwnd);
+    return 0;
+  }
+
+  if (msg == UI_WM_TIMER()) {
+    if (ui_checkbox_is_checked(g_timer_check) != 0) {
+      g_tick_count = g_tick_count + 1;
+      set_status("Timer ticks: %d", g_tick_count);
+      ui_window_invalidate(hwnd);
+    }
+    return 0;
+  }
+
   if (msg == UI_WM_COMMAND()) {
-    if (ui_command_notify(wparam) == UI_BN_CLICKED()) {
-      if (ui_command_id(wparam) == 1001) {
+    var id: uint32 = ui_command_id(wparam);
+    var notify: uint32 = ui_command_notify(wparam);
+
+    if (id == (uint32)ID_EXIT()) {
+      ui_window_close(hwnd);
+      return 0;
+    }
+    if (id == (uint32)ID_RESET()) {
+      reset_state();
+      return 0;
+    }
+    if (id == (uint32)ID_ABOUT()) {
+      ui_alert(hwnd, cstr("Mettle UI"), cstr("Native desktop UI built with std/ui."));
+      return 0;
+    }
+
+    if (id == (uint32)ID_UPDATE()) {
+      if (notify == UI_BN_CLICKED()) {
         g_click_count = g_click_count + 1;
-        var status: uint8[64];
-        format_i64(&status[0], 64, "Clicks: %d", g_click_count);
-        ui_control_set_text(g_status_label, &status[0]);
-        ui_window_invalidate(g_main_window);
+        set_status("Clicks: %d", g_click_count);
+        ui_window_invalidate(hwnd);
+        return 0;
+      }
+    }
+
+    if (id == (uint32)ID_COMBO()) {
+      if (notify == UI_CBN_SELCHANGE()) {
+        g_theme_index = ui_combobox_selected(g_combo);
+        set_status("Theme: %d", g_theme_index + 1);
+        ui_window_invalidate(hwnd);
+        return 0;
+      }
+    }
+
+    if (id == (uint32)ID_LIST()) {
+      if (notify == UI_LBN_SELCHANGE()) {
+        set_status("Selected row: %d", ui_listbox_selected(g_list) + 1);
         return 0;
       }
     }
   }
 
   if (msg == UI_WM_DESTROY()) {
+    ui_timer_stop(hwnd, ID_TIMER());
+    if (g_title_font != 0) { ui_delete_object(g_title_font); }
+    if (g_heading_font != 0) { ui_delete_object(g_heading_font); }
+    if (g_body_font != 0) { ui_delete_object(g_body_font); }
     ui_quit(0);
     return 0;
   }
@@ -65,14 +282,18 @@ function main() -> int32 {
     return 1;
   }
 
-  g_main_window = ui_window_create(cstr("Mettle UI Demo"), 120, 120, 720, 480, &window_proc);
+  g_title_font = ui_create_font(30, cstr("Segoe UI"), UI_FW_BOLD());
+  g_heading_font = ui_create_font(18, cstr("Segoe UI"), UI_FW_SEMIBOLD());
+  g_body_font = ui_create_font(16, cstr("Segoe UI"), UI_FW_NORMAL());
+
+  g_main_window = ui_window_create_centered(cstr("Mettle UI Workbench"), 860, 560, &window_proc);
   if (g_main_window == 0) {
     return 2;
   }
 
-  g_status_label = ui_label_create(g_main_window, 24, 180, 640, 24, cstr("Clicks: 0"), 1002);
-  ui_button_create_default(g_main_window, 24, 220, 160, 36, cstr("Click me"), 1001);
-  ui_textbox_create(g_main_window, 24, 280, 320, 28, 1003);
+  build_menu(g_main_window);
+  build_controls(g_main_window);
+  ui_timer_start(g_main_window, ID_TIMER(), 1000);
 
   ui_window_show(g_main_window);
   return ui_run_message_loop();

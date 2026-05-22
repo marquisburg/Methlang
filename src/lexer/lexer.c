@@ -13,10 +13,18 @@ typedef struct StringInternEntry {
   struct StringInternEntry *ptr_next;
 } StringInternEntry;
 
-#define STRING_INTERN_BUCKET_COUNT 4096u
+#define STRING_INTERN_INITIAL_BUCKETS 4096u
 
+/* Both tables index the same entries: g_string_intern_buckets chains by content
+ * hash (via entry->next) for interning lookups, g_string_intern_ptr_buckets
+ * chains by pointer hash (via entry->ptr_next) for string_is_interned. They
+ * share one bucket count and grow together so chains stay short -- with a fixed
+ * 4096 buckets, a program with ~200k distinct identifiers gave ~50-long chains,
+ * making both interning (parse) and string_is_interned (teardown) O(n^2). */
 static StringInternEntry **g_string_intern_buckets = NULL;
 static StringInternEntry **g_string_intern_ptr_buckets = NULL;
+static size_t g_string_intern_bucket_count = 0;
+static size_t g_string_intern_entry_count = 0;
 
 static void token_set_lexeme(Token *token, const char *data, size_t length) {
   if (!token) {
@@ -26,15 +34,47 @@ static void token_set_lexeme(Token *token, const char *data, size_t length) {
   token->lexeme.length = length;
 }
 
+/* Assign a fixed operator/punctuation spelling without heap allocation. The
+ * value points at a string literal with static lifetime, so it is flagged
+ * interned: token_destroy will not free it and token_clone will not deep-copy
+ * it. This avoids a malloc+free per operator token, which dominated lexing of
+ * punctuation-heavy source. */
+static void token_set_static_value(Token *token, const char *literal) {
+  if (!token) {
+    return;
+  }
+  token->value = (char *)literal;
+  token->is_interned = 1;
+}
+
+/* Static, nul-terminated one-character strings for every byte value, so a
+ * single-character operator token can borrow a stable spelling instead of
+ * allocating a 2-byte buffer per token. Index by (unsigned char)c. */
+static const char g_single_char_strings[256][2] = {
+#define SCS1(n) {(char)(n), '\0'}
+#define SCS4(n) SCS1(n), SCS1((n) + 1), SCS1((n) + 2), SCS1((n) + 3)
+#define SCS16(n) SCS4(n), SCS4((n) + 4), SCS4((n) + 8), SCS4((n) + 12)
+#define SCS64(n) SCS16(n), SCS16((n) + 16), SCS16((n) + 32), SCS16((n) + 48)
+    SCS64(0), SCS64(64), SCS64(128), SCS64(192)
+#undef SCS64
+#undef SCS16
+#undef SCS4
+#undef SCS1
+};
+
+static void token_set_single_char_value(Token *token, char c) {
+  token_set_static_value(token, g_single_char_strings[(unsigned char)c]);
+}
+
 static int string_intern_init(void) {
   if (g_string_intern_buckets && g_string_intern_ptr_buckets) {
     return 1;
   }
 
   g_string_intern_buckets =
-      calloc(STRING_INTERN_BUCKET_COUNT, sizeof(StringInternEntry *));
+      calloc(STRING_INTERN_INITIAL_BUCKETS, sizeof(StringInternEntry *));
   g_string_intern_ptr_buckets =
-      calloc(STRING_INTERN_BUCKET_COUNT, sizeof(StringInternEntry *));
+      calloc(STRING_INTERN_INITIAL_BUCKETS, sizeof(StringInternEntry *));
   if (!g_string_intern_buckets || !g_string_intern_ptr_buckets) {
     free(g_string_intern_buckets);
     free(g_string_intern_ptr_buckets);
@@ -42,6 +82,8 @@ static int string_intern_init(void) {
     g_string_intern_ptr_buckets = NULL;
     return 0;
   }
+  g_string_intern_bucket_count = STRING_INTERN_INITIAL_BUCKETS;
+  g_string_intern_entry_count = 0;
 
   return 1;
 }
@@ -63,6 +105,52 @@ static size_t string_intern_hash_ptr(const void *ptr) {
   return (size_t)value;
 }
 
+/* Double both bucket arrays and rehash every entry into the new buckets. Keeps
+ * average chain length ~constant as the number of interned strings grows. On
+ * allocation failure the existing (smaller) tables are left intact and lookups
+ * remain correct, just slower. */
+static void string_intern_maybe_grow(void) {
+  if (g_string_intern_entry_count <= (g_string_intern_bucket_count * 3) / 4) {
+    return;
+  }
+
+  size_t new_count = g_string_intern_bucket_count * 2;
+  StringInternEntry **new_content =
+      calloc(new_count, sizeof(StringInternEntry *));
+  StringInternEntry **new_ptr = calloc(new_count, sizeof(StringInternEntry *));
+  if (!new_content || !new_ptr) {
+    free(new_content);
+    free(new_ptr);
+    return; /* keep the old tables; correctness is unaffected */
+  }
+
+  /* Rehash via the content-bucket chains, which reach every entry exactly
+   * once, fixing up both the content (next) and pointer (ptr_next) links. */
+  for (size_t i = 0; i < g_string_intern_bucket_count; i++) {
+    StringInternEntry *entry = g_string_intern_buckets[i];
+    while (entry) {
+      StringInternEntry *next = entry->next;
+
+      size_t cb =
+          string_intern_hash_bytes(entry->value, entry->length) % new_count;
+      entry->next = new_content[cb];
+      new_content[cb] = entry;
+
+      size_t pb = string_intern_hash_ptr(entry->value) % new_count;
+      entry->ptr_next = new_ptr[pb];
+      new_ptr[pb] = entry;
+
+      entry = next;
+    }
+  }
+
+  free(g_string_intern_buckets);
+  free(g_string_intern_ptr_buckets);
+  g_string_intern_buckets = new_content;
+  g_string_intern_ptr_buckets = new_ptr;
+  g_string_intern_bucket_count = new_count;
+}
+
 const char *string_intern_n(const char *value, size_t length) {
   if (!value) {
     return NULL;
@@ -73,7 +161,7 @@ const char *string_intern_n(const char *value, size_t length) {
   }
 
   size_t hash = string_intern_hash_bytes(value, length);
-  size_t bucket = hash % STRING_INTERN_BUCKET_COUNT;
+  size_t bucket = hash % g_string_intern_bucket_count;
   StringInternEntry *entry = g_string_intern_buckets[bucket];
   while (entry) {
     if (entry->length == length && memcmp(entry->value, value, length) == 0) {
@@ -101,11 +189,14 @@ const char *string_intern_n(const char *value, size_t length) {
   g_string_intern_buckets[bucket] = entry;
 
   size_t ptr_bucket =
-      string_intern_hash_ptr(copy) % STRING_INTERN_BUCKET_COUNT;
+      string_intern_hash_ptr(copy) % g_string_intern_bucket_count;
   entry->ptr_next = g_string_intern_ptr_buckets[ptr_bucket];
   g_string_intern_ptr_buckets[ptr_bucket] = entry;
 
-  return entry->value;
+  g_string_intern_entry_count++;
+  string_intern_maybe_grow();
+
+  return copy;
 }
 
 const char *string_intern(const char *value) {
@@ -121,7 +212,7 @@ int string_is_interned(const char *value) {
   }
 
   size_t ptr_bucket =
-      string_intern_hash_ptr(value) % STRING_INTERN_BUCKET_COUNT;
+      string_intern_hash_ptr(value) % g_string_intern_bucket_count;
   StringInternEntry *entry = g_string_intern_ptr_buckets[ptr_bucket];
   while (entry) {
     if (entry->value == value) {
@@ -138,7 +229,7 @@ void string_intern_clear(void) {
     return;
   }
 
-  for (size_t i = 0; i < STRING_INTERN_BUCKET_COUNT; i++) {
+  for (size_t i = 0; i < g_string_intern_bucket_count; i++) {
     StringInternEntry *entry = g_string_intern_buckets[i];
     while (entry) {
       StringInternEntry *next = entry->next;
@@ -153,6 +244,8 @@ void string_intern_clear(void) {
   free(g_string_intern_ptr_buckets);
   g_string_intern_buckets = NULL;
   g_string_intern_ptr_buckets = NULL;
+  g_string_intern_bucket_count = 0;
+  g_string_intern_entry_count = 0;
 }
 
 Lexer *lexer_create(const char *source) {
@@ -287,7 +380,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_EQUALS_EQUALS;
-      token.value = strdup("==");
+      token_set_static_value(&token, "==");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -299,7 +392,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_NOT_EQUALS;
-      token.value = strdup("!=");
+      token_set_static_value(&token, "!=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -311,7 +404,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length) {
       if (lexer->source[lexer->position + 1] == '=') {
         token.type = TOKEN_LESS_EQUALS;
-        token.value = strdup("<=");
+        token_set_static_value(&token, "<=");
         token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
@@ -320,14 +413,14 @@ Token lexer_next_token(Lexer *lexer) {
         if (lexer->position + 2 < lexer->length &&
             lexer->source[lexer->position + 2] == '=') {
           token.type = TOKEN_LSHIFT_EQUALS;
-          token.value = strdup("<<=");
+          token_set_static_value(&token, "<<=");
           token_set_lexeme(&token, &lexer->source[lexer->position], 3);
           lexer->position += 3;
           lexer->column += 3;
           return token;
         }
         token.type = TOKEN_LSHIFT;
-        token.value = strdup("<<");
+        token_set_static_value(&token, "<<");
         token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
@@ -340,7 +433,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length) {
       if (lexer->source[lexer->position + 1] == '=') {
         token.type = TOKEN_GREATER_EQUALS;
-        token.value = strdup(">=");
+        token_set_static_value(&token, ">=");
         token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
@@ -349,14 +442,14 @@ Token lexer_next_token(Lexer *lexer) {
         if (lexer->position + 2 < lexer->length &&
             lexer->source[lexer->position + 2] == '=') {
           token.type = TOKEN_RSHIFT_EQUALS;
-          token.value = strdup(">>=");
+          token_set_static_value(&token, ">>=");
           token_set_lexeme(&token, &lexer->source[lexer->position], 3);
           lexer->position += 3;
           lexer->column += 3;
           return token;
         }
         token.type = TOKEN_RSHIFT;
-        token.value = strdup(">>");
+        token_set_static_value(&token, ">>");
         token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
@@ -393,7 +486,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_PLUS_EQUALS;
-      token.value = strdup("+=");
+      token_set_static_value(&token, "+=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -405,7 +498,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_STAR_EQUALS;
-      token.value = strdup("*=");
+      token_set_static_value(&token, "*=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -417,7 +510,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '&') {
       token.type = TOKEN_AND_AND;
-      token.value = strdup("&&");
+      token_set_static_value(&token, "&&");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -426,7 +519,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_AMP_EQUALS;
-      token.value = strdup("&=");
+      token_set_static_value(&token, "&=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -438,7 +531,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '|') {
       token.type = TOKEN_OR_OR;
-      token.value = strdup("||");
+      token_set_static_value(&token, "||");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -447,7 +540,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_PIPE_EQUALS;
-      token.value = strdup("|=");
+      token_set_static_value(&token, "|=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -459,7 +552,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_CARET_EQUALS;
-      token.value = strdup("^=");
+      token_set_static_value(&token, "^=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -475,7 +568,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_SLASH_EQUALS;
-      token.value = strdup("/=");
+      token_set_static_value(&token, "/=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -487,7 +580,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_PERCENT_EQUALS;
-      token.value = strdup("%=");
+      token_set_static_value(&token, "%=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -503,9 +596,7 @@ Token lexer_next_token(Lexer *lexer) {
   }
 
   if (token.type != TOKEN_ERROR) {
-    token.value = malloc(2);
-    token.value[0] = current;
-    token.value[1] = '\0';
+    token_set_single_char_value(&token, current);
     token_set_lexeme(&token, &lexer->source[lexer->position], 1);
     lexer->position++;
     lexer->column++;
@@ -516,8 +607,7 @@ Token lexer_next_token(Lexer *lexer) {
   if (current == '-' && lexer->position + 1 < lexer->length &&
       lexer->source[lexer->position + 1] == '>') {
     token.type = TOKEN_ARROW;
-    token.value = malloc(3);
-    strcpy(token.value, "->");
+    token_set_static_value(&token, "->");
     token_set_lexeme(&token, &lexer->source[lexer->position], 2);
     lexer->position += 2;
     lexer->column += 2;
@@ -528,7 +618,7 @@ Token lexer_next_token(Lexer *lexer) {
   if (current == '-' && lexer->position + 1 < lexer->length &&
       lexer->source[lexer->position + 1] == '=') {
     token.type = TOKEN_MINUS_EQUALS;
-    token.value = strdup("-=");
+    token_set_static_value(&token, "-=");
     token_set_lexeme(&token, &lexer->source[lexer->position], 2);
     lexer->position += 2;
     lexer->column += 2;
@@ -537,9 +627,7 @@ Token lexer_next_token(Lexer *lexer) {
 
   if (current == '-') {
     token.type = TOKEN_MINUS;
-    token.value = malloc(2);
-    token.value[0] = current;
-    token.value[1] = '\0';
+    token_set_single_char_value(&token, current);
     token_set_lexeme(&token, &lexer->source[lexer->position], 1);
     lexer->position++;
     lexer->column++;

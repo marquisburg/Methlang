@@ -47,6 +47,11 @@ typedef struct {
   IRTempUseEntry *items;
   size_t count;
   size_t capacity;
+  /* Open-addressing hash of name -> (index+1) into items, so find() is O(1)
+   * instead of a linear scan. 0 means empty slot. Sized to a power of two with
+   * load factor < 0.5; rebuilt when items grows. */
+  size_t *hash;
+  size_t hash_count;
 } IRTempUseMap;
 
 typedef struct {
@@ -107,6 +112,16 @@ static char *ir_opt_strdup(const char *text) {
 
   memcpy(copy, text, length);
   return copy;
+}
+
+static size_t ir_opt_name_hash(const char *name) {
+  /* FNV-1a */
+  size_t hash = (size_t)1469598103934665603ULL;
+  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+    hash ^= (size_t)*p;
+    hash *= (size_t)1099511628211ULL;
+  }
+  return hash;
 }
 
 static int ir_operand_clone(const IROperand *source, IROperand *out) {
@@ -1233,20 +1248,59 @@ static int ir_temp_use_map_init(IRTempUseMap *map) {
   map->items = NULL;
   map->count = 0;
   map->capacity = 0;
+  map->hash = NULL;
+  map->hash_count = 0;
+  return 1;
+}
+
+/* Insert items[index] into the hash table (hash table must have room). */
+static void ir_temp_use_map_hash_put(IRTempUseMap *map, size_t index) {
+  size_t mask = map->hash_count - 1;
+  size_t h = ir_opt_name_hash(map->items[index].name) & mask;
+  while (map->hash[h] != 0) {
+    h = (h + 1) & mask;
+  }
+  map->hash[h] = index + 1; /* store index+1; 0 == empty */
+}
+
+/* Grow/allocate the hash table so it can hold map->count entries at <0.5 load,
+ * rehashing all existing items. Returns 0 on allocation failure. */
+static int ir_temp_use_map_hash_reserve(IRTempUseMap *map, size_t needed) {
+  size_t target = 16;
+  while (target < needed * 2) {
+    target *= 2;
+  }
+  if (map->hash && map->hash_count >= target) {
+    return 1;
+  }
+
+  size_t *new_hash = calloc(target, sizeof(size_t));
+  if (!new_hash) {
+    return 0;
+  }
+  free(map->hash);
+  map->hash = new_hash;
+  map->hash_count = target;
+  for (size_t i = 0; i < map->count; i++) {
+    ir_temp_use_map_hash_put(map, i);
+  }
   return 1;
 }
 
 static int ir_temp_use_map_find(const IRTempUseMap *map, const char *name) {
-  if (!map || !name) {
+  if (!map || !name || !map->hash) {
     return -1;
   }
 
-  for (size_t i = 0; i < map->count; i++) {
-    if (map->items[i].name && strcmp(map->items[i].name, name) == 0) {
-      return (int)i;
+  size_t mask = map->hash_count - 1;
+  size_t h = ir_opt_name_hash(name) & mask;
+  while (map->hash[h] != 0) {
+    size_t idx = map->hash[h] - 1;
+    if (map->items[idx].name && strcmp(map->items[idx].name, name) == 0) {
+      return (int)idx;
     }
+    h = (h + 1) & mask;
   }
-
   return -1;
 }
 
@@ -1272,6 +1326,11 @@ static int ir_temp_use_map_add(IRTempUseMap *map, const char *name) {
     map->capacity = new_capacity;
   }
 
+  /* Ensure the hash can hold one more entry (rehashes existing items if so). */
+  if (!ir_temp_use_map_hash_reserve(map, map->count + 1)) {
+    return 0;
+  }
+
   char *name_copy = ir_opt_strdup(name);
   if (!name_copy) {
     return 0;
@@ -1279,6 +1338,7 @@ static int ir_temp_use_map_add(IRTempUseMap *map, const char *name) {
 
   map->items[map->count].name = name_copy;
   map->items[map->count].use_count = 1;
+  ir_temp_use_map_hash_put(map, map->count);
   map->count++;
   return 1;
 }
@@ -1296,6 +1356,24 @@ static size_t ir_temp_use_map_get(const IRTempUseMap *map, const char *name) {
   return map->items[index].use_count;
 }
 
+/* Reset the map for reuse without releasing its buffers: frees the interned
+ * names but keeps the items and hash allocations (just zeroes them). Lets a
+ * caller that rebuilds the map every iteration avoid repeated malloc/free of
+ * the backing arrays. */
+static void ir_temp_use_map_clear(IRTempUseMap *map) {
+  if (!map) {
+    return;
+  }
+  for (size_t i = 0; i < map->count; i++) {
+    free(map->items[i].name);
+    map->items[i].name = NULL;
+  }
+  map->count = 0;
+  if (map->hash) {
+    memset(map->hash, 0, map->hash_count * sizeof(size_t));
+  }
+}
+
 static void ir_temp_use_map_destroy(IRTempUseMap *map) {
   if (!map) {
     return;
@@ -1305,9 +1383,12 @@ static void ir_temp_use_map_destroy(IRTempUseMap *map) {
     free(map->items[i].name);
   }
   free(map->items);
+  free(map->hash);
   map->items = NULL;
   map->count = 0;
   map->capacity = 0;
+  map->hash = NULL;
+  map->hash_count = 0;
 }
 
 static int ir_collect_operand_temp_use(IRTempUseMap *uses,
@@ -1374,11 +1455,13 @@ static int ir_eliminate_dead_temp_writes_pass(IRFunction *function,
     return 0;
   }
 
+  IRTempUseMap uses;
+  if (!ir_temp_use_map_init(&uses)) {
+    return 0;
+  }
+
   for (int iteration = 0; iteration < 8; iteration++) {
-    IRTempUseMap uses;
-    if (!ir_temp_use_map_init(&uses)) {
-      return 0;
-    }
+    ir_temp_use_map_clear(&uses);
 
     for (size_t i = 0; i < function->instruction_count; i++) {
       if (!ir_collect_instruction_temp_uses(&uses, &function->instructions[i])) {
@@ -1405,10 +1488,100 @@ static int ir_eliminate_dead_temp_writes_pass(IRFunction *function,
       }
     }
 
-    ir_temp_use_map_destroy(&uses);
-
     if (!local_changed) {
       break;
+    }
+  }
+
+  ir_temp_use_map_destroy(&uses);
+  return 1;
+}
+
+/* Name -> IRFunction index for the optimizer.
+ *
+ * ir_program_find_function used to linear-scan every function (strcmp each) and
+ * is called once per CALL instruction during inlining, across every function,
+ * for several rounds -- O(calls * functions). That dominated IR optimization on
+ * large programs. We cache an open-addressing hash table keyed on the program
+ * pointer + function_count; inlining mutates bodies but never adds or removes
+ * functions, so the cache stays valid for the whole optimization run. */
+typedef struct {
+  const char *name; /* borrowed from the IRFunction; not owned */
+  IRFunction *function;
+} IRFunctionIndexSlot;
+
+typedef struct {
+  IRFunctionIndexSlot *slots;
+  size_t slot_count; /* power of two */
+  const IRProgram *program;
+  size_t function_count;
+} IRFunctionIndex;
+
+static IRFunctionIndex g_ir_function_index = {0};
+
+static void ir_function_index_reset(void) {
+  free(g_ir_function_index.slots);
+  g_ir_function_index.slots = NULL;
+  g_ir_function_index.slot_count = 0;
+  g_ir_function_index.program = NULL;
+  g_ir_function_index.function_count = 0;
+}
+
+static size_t ir_function_index_hash(const char *name) {
+  /* FNV-1a */
+  size_t hash = (size_t)1469598103934665603ULL;
+  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+    hash ^= (size_t)*p;
+    hash *= (size_t)1099511628211ULL;
+  }
+  return hash;
+}
+
+static void ir_function_index_insert(IRFunctionIndex *index,
+                                     IRFunction *function) {
+  size_t mask = index->slot_count - 1;
+  size_t i = ir_function_index_hash(function->name) & mask;
+  while (index->slots[i].name) {
+    /* First definition of a given name wins, matching the old linear scan. */
+    if (strcmp(index->slots[i].name, function->name) == 0) {
+      return;
+    }
+    i = (i + 1) & mask;
+  }
+  index->slots[i].name = function->name;
+  index->slots[i].function = function;
+}
+
+/* Returns 1 if the index is ready to query, 0 on allocation failure (caller
+ * falls back to a linear scan). */
+static int ir_function_index_ensure(const IRProgram *program) {
+  if (g_ir_function_index.program == program &&
+      g_ir_function_index.function_count == program->function_count &&
+      g_ir_function_index.slots) {
+    return 1;
+  }
+
+  ir_function_index_reset();
+
+  size_t slot_count = 16;
+  while (slot_count < program->function_count * 2) {
+    slot_count *= 2;
+  }
+
+  IRFunctionIndexSlot *slots = calloc(slot_count, sizeof(IRFunctionIndexSlot));
+  if (!slots) {
+    return 0;
+  }
+
+  g_ir_function_index.slots = slots;
+  g_ir_function_index.slot_count = slot_count;
+  g_ir_function_index.program = program;
+  g_ir_function_index.function_count = program->function_count;
+
+  for (size_t i = 0; i < program->function_count; i++) {
+    IRFunction *function = program->functions[i];
+    if (function && function->name) {
+      ir_function_index_insert(&g_ir_function_index, function);
     }
   }
 
@@ -1421,6 +1594,20 @@ static IRFunction *ir_program_find_function(IRProgram *program,
     return NULL;
   }
 
+  if (ir_function_index_ensure(program)) {
+    const IRFunctionIndex *index = &g_ir_function_index;
+    size_t mask = index->slot_count - 1;
+    size_t i = ir_function_index_hash(name) & mask;
+    while (index->slots[i].name) {
+      if (strcmp(index->slots[i].name, name) == 0) {
+        return index->slots[i].function;
+      }
+      i = (i + 1) & mask;
+    }
+    return NULL;
+  }
+
+  /* Fallback: index allocation failed; behave as before. */
   for (size_t i = 0; i < program->function_count; i++) {
     IRFunction *function = program->functions[i];
     if (function && function->name && strcmp(function->name, name) == 0) {
@@ -5643,6 +5830,36 @@ static int ir_null_check_licm_pass(IRFunction *function, int *changed) {
   return 1;
 }
 
+#define IR_OPT_PASS_COUNT 19
+
+/* Fixpoint pass driver with redundant-run skipping.
+ *
+ * The IR is treated as having a monotonically increasing "version" that bumps
+ * whenever any pass changes it. Each pass records the version at which it last
+ * ran and reported no change (clean_version[idx]). When its turn comes again,
+ * if the version is unchanged since then, the instruction array is identical to
+ * what that pass already inspected, so it provably cannot change anything --
+ * skip it. This elides the no-op work of the final confirmation iteration
+ * without altering the result (a skipped pass would have reported no change).
+ *
+ * On a real change we bump `version` and deliberately do NOT mark the pass
+ * clean, so it runs again next iteration on its own output (a pass is not
+ * assumed to reach its own fixpoint in a single call). */
+#define DRIVE_PASS(idx, fn)                                                    \
+  do {                                                                         \
+    if (clean_version[idx] != version) {                                       \
+      int _c = 0;                                                              \
+      if (!fn(function, &_c))                                                   \
+        return 0;                                                              \
+      if (_c) {                                                                \
+        changed = 1;                                                           \
+        version++;                                                             \
+      } else {                                                                 \
+        clean_version[idx] = version;                                          \
+      }                                                                        \
+    }                                                                          \
+  } while (0)
+
 static int ir_optimize_function(IRFunction *function) {
   if (!function) {
     return 0;
@@ -5655,30 +5872,35 @@ static int ir_optimize_function(IRFunction *function) {
     }
   }
 
+  /* clean_version starts below `version` so every pass runs at least once. */
+  unsigned long long version = 1;
+  unsigned long long clean_version[IR_OPT_PASS_COUNT];
+  for (int i = 0; i < IR_OPT_PASS_COUNT; i++) {
+    clean_version[i] = 0;
+  }
+
   for (int iteration = 0; iteration < 8; iteration++) {
     int changed = 0;
 
-    if (!ir_reduction_unroll_pass(function, &changed) ||
-        !ir_copy_and_constant_propagation_pass(function, &changed) ||
-        !ir_fuse_rotate_add_pass(function, &changed) ||
-        !ir_strength_reduce_rotate_loops_pass(function, &changed) ||
-        !ir_unroll_small_const_bound_loops_pass(function, &changed) ||
-        !ir_positive_loop_div2_to_shift_pass(function, &changed) ||
-        !ir_coalesce_single_use_temp_assign_pass(function, &changed) ||
-        !ir_common_subexpression_elimination_pass(function, &changed) ||
-        !ir_constant_and_branch_simplify_pass(function, &changed) ||
-        !ir_count_word_starts_pass(function, &changed) ||
-        !ir_eliminate_dead_temp_writes_pass(function, &changed) ||
-        !ir_thread_jump_targets_pass(function, &changed) ||
-        !ir_null_check_licm_pass(function, &changed) ||
-        !ir_remove_empty_conditional_diamonds_pass(function, &changed) ||
-        !ir_remove_redundant_fallthrough_branches_pass(function, &changed) ||
-        !ir_remove_redundant_jumps_pass(function, &changed) ||
-        !ir_eliminate_unreachable_straightline_pass(function, &changed) ||
-        !ir_eliminate_unreachable_blocks_pass(function, &changed) ||
-        !ir_remove_unused_labels_pass(function, &changed)) {
-      return 0;
-    }
+    DRIVE_PASS(0, ir_reduction_unroll_pass);
+    DRIVE_PASS(1, ir_copy_and_constant_propagation_pass);
+    DRIVE_PASS(2, ir_fuse_rotate_add_pass);
+    DRIVE_PASS(3, ir_strength_reduce_rotate_loops_pass);
+    DRIVE_PASS(4, ir_unroll_small_const_bound_loops_pass);
+    DRIVE_PASS(5, ir_positive_loop_div2_to_shift_pass);
+    DRIVE_PASS(6, ir_coalesce_single_use_temp_assign_pass);
+    DRIVE_PASS(7, ir_common_subexpression_elimination_pass);
+    DRIVE_PASS(8, ir_constant_and_branch_simplify_pass);
+    DRIVE_PASS(9, ir_count_word_starts_pass);
+    DRIVE_PASS(10, ir_eliminate_dead_temp_writes_pass);
+    DRIVE_PASS(11, ir_thread_jump_targets_pass);
+    DRIVE_PASS(12, ir_null_check_licm_pass);
+    DRIVE_PASS(13, ir_remove_empty_conditional_diamonds_pass);
+    DRIVE_PASS(14, ir_remove_redundant_fallthrough_branches_pass);
+    DRIVE_PASS(15, ir_remove_redundant_jumps_pass);
+    DRIVE_PASS(16, ir_eliminate_unreachable_straightline_pass);
+    DRIVE_PASS(17, ir_eliminate_unreachable_blocks_pass);
+    DRIVE_PASS(18, ir_remove_unused_labels_pass);
 
     if (!changed) {
       break;
@@ -5693,18 +5915,23 @@ int ir_optimize_program(IRProgram *program) {
     return 0;
   }
 
+  ir_function_index_reset();
+
   {
     int inlining_changed = 0;
     if (!ir_inline_small_functions_pass(program, &inlining_changed)) {
+      ir_function_index_reset();
       return 0;
     }
   }
 
   for (size_t i = 0; i < program->function_count; i++) {
     if (!ir_optimize_function(program->functions[i])) {
+      ir_function_index_reset();
       return 0;
     }
   }
 
+  ir_function_index_reset();
   return 1;
 }
