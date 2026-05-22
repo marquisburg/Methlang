@@ -5656,10 +5656,10 @@ static int code_generator_binary_load_needs_sign_extend(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IROperand *destination, int load_size) {
   Symbol *symbol = NULL;
-  Type *type = NULL;
+  (void)context;
 
-  if (!generator || load_size != 4 || !destination) {
-    return load_size == 4;
+  if (load_size != 4 || !destination) {
+    return 0;
   }
 
   if (destination->kind == IR_OPERAND_SYMBOL && destination->name &&
@@ -5667,15 +5667,12 @@ static int code_generator_binary_load_needs_sign_extend(
     symbol = symbol_table_lookup(generator->symbol_table, destination->name);
     if (symbol && symbol->type &&
         code_generator_binary_resolved_type_scalar_size(symbol->type) == 4) {
-      return 0;
+      return code_generator_binary_resolved_type_is_signed_integer(symbol->type);
     }
   }
 
-  if (destination->kind == IR_OPERAND_TEMP && destination->name && context) {
-    type = code_generator_binary_get_resolved_type(generator, "int32", 0);
-    if (type && code_generator_binary_resolved_type_scalar_size(type) == 4) {
-      return 0;
-    }
+  if (destination->kind == IR_OPERAND_TEMP && destination->name) {
+    return 1;
   }
 
   return 1;
@@ -9587,6 +9584,8 @@ static int code_generator_binary_try_emit_scaled_address_load(
     return 0;
   }
   if (size == 4 && !load->is_float &&
+      code_generator_binary_load_needs_sign_extend(generator, context,
+                                                   &load->dest, size) &&
       !binary_emit_movsxd_rax_eax(&context->code)) {
     if (!generator->has_error) {
       code_generator_set_error(

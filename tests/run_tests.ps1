@@ -2370,18 +2370,20 @@ catch {
   Write-CaseResult -Name "direct_object_scalar_casts" -Passed $false -Reason $_.Exception.Message
 }
 
-# Direct object backend float/scalar coverage: Win64 float ABI plus float/int casts
-$directObjectFloatCases = @(
+# Direct object backend float/scalar coverage: Win64 float ABI, casts, and
+# narrow integer load canonicalization.
+$directObjectScalarCases = @(
   @{ Name = "direct_object_abi_float_return"; Path = "tests/test_abi_float_return.mettle"; ExitCode = 1; Label = "float-return" },
   @{ Name = "direct_object_abi_float_args"; Path = "tests/test_abi_float_args.mettle"; ExitCode = 1; Label = "float-args" },
   @{ Name = "direct_object_abi_mixed_args"; Path = "tests/test_abi_mixed_args.mettle"; ExitCode = 1; Label = "mixed-args" },
   @{ Name = "direct_object_abi_float_symbol_args"; Path = "tests/test_abi_float_symbol_args.mettle"; ExitCode = 1; Label = "float-symbol-args" },
   @{ Name = "direct_object_abi_float4_args"; Path = "tests/test_abi_float4_args.mettle"; ExitCode = 1; Label = "float4-args" },
   @{ Name = "direct_object_abi_float_stack"; Path = "tests/test_abi_float_stack.mettle"; ExitCode = 1; Label = "float-stack" },
-  @{ Name = "direct_object_cast_expression"; Path = "tests/test_cast_expression.mettle"; ExitCode = 0; Label = "cast-expression" }
+  @{ Name = "direct_object_cast_expression"; Path = "tests/test_cast_expression.mettle"; ExitCode = 0; Label = "cast-expression" },
+  @{ Name = "direct_object_int32_load_sign_ext"; Path = "tests/test_direct_object_int32_load_sign_ext.mettle"; ExitCode = 0; Label = "int32-load-sign-ext" }
 )
 
-foreach ($case in $directObjectFloatCases) {
+foreach ($case in $directObjectScalarCases) {
   $total++
   try {
     $objPath = Join-Path $tmpDir ($case.Name + ".obj")
