@@ -383,6 +383,7 @@ static const char *ir_opcode_name(IROpcode op) {
   case IR_OP_MEMCPY_INLINE: return "memcpy_inline";
   case IR_OP_SIMD_SUM_I32: return "simd_sum_i32";
   case IR_OP_SIMD_MATMUL_N32: return "simd_matmul_n32";
+  case IR_OP_SIMD_INSERTION_SORT_I32: return "simd_insertion_sort_i32";
   default:
     return "unknown";
   }
@@ -544,6 +545,10 @@ int ir_program_dump(IRProgram *program, FILE *output) {
       case IR_OP_SIMD_MATMUL_N32:
         fprintf(output, "%s c=%s a=%s b=%s\n",
                 ir_opcode_name(instruction->op), dest, lhs, rhs);
+        break;
+      case IR_OP_SIMD_INSERTION_SORT_I32:
+        fprintf(output, "%s base=%s len=%s\n",
+                ir_opcode_name(instruction->op), dest, rhs);
         break;
       case IR_OP_NOP:
       default:

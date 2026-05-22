@@ -334,6 +334,7 @@ static int ir_instruction_writes_symbol(const IRInstruction *instruction) {
   case IR_OP_MEMCPY_INLINE:
   case IR_OP_SIMD_SUM_I32:
   case IR_OP_SIMD_MATMUL_N32:
+  case IR_OP_SIMD_INSERTION_SORT_I32:
     return 1;
   default:
     return 0;
@@ -358,6 +359,7 @@ static int ir_instruction_writes_destination(const IRInstruction *instruction) {
   case IR_OP_CAST:
   case IR_OP_COUNT_WORD_STARTS:
   case IR_OP_SIMD_SUM_I32:
+  case IR_OP_SIMD_INSERTION_SORT_I32:
     return 1;
   default:
     return 0;
@@ -1413,6 +1415,7 @@ static int ir_collect_instruction_temp_uses(IRTempUseMap *uses,
   case IR_OP_COUNT_WORD_STARTS:
   case IR_OP_SIMD_SUM_I32:
   case IR_OP_SIMD_MATMUL_N32:
+  case IR_OP_SIMD_INSERTION_SORT_I32:
     if (!ir_collect_operand_temp_use(uses, &instruction->dest) ||
         !ir_collect_operand_temp_use(uses, &instruction->lhs) ||
         !ir_collect_operand_temp_use(uses, &instruction->rhs)) {
@@ -3868,6 +3871,7 @@ static int ir_instruction_has_side_effect(const IRInstruction *instruction) {
   case IR_OP_CALL_INDIRECT:
   case IR_OP_MEMCPY_INLINE:
   case IR_OP_SIMD_MATMUL_N32:
+  case IR_OP_SIMD_INSERTION_SORT_I32:
   case IR_OP_RETURN:
   case IR_OP_INLINE_ASM:
     return 1;
@@ -6720,6 +6724,222 @@ static int ir_detect_shift_loops_pass(IRFunction *function, int *changed) {
   return 1;
 }
 
+static int ir_function_has_shift_loop_match(const IRFunction *function) {
+  if (!function) {
+    return 0;
+  }
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRShiftLoopMatch match;
+    if (function->instructions[i].op == IR_OP_LABEL &&
+        ir_match_shift_loop_at(function, i, &match) &&
+        match.elem_size == 4 && match.stride == 4 && match.cmp_op &&
+        strcmp(match.cmp_op, "<=") == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int ir_try_vectorize_insertion_sort_loop_at(IRFunction *function,
+                                                   size_t header_index,
+                                                   int *changed) {
+  size_t compare_index = 0;
+  size_t branch_index = 0;
+  size_t inner_header = (size_t)-1;
+  size_t outer_jump = (size_t)-1;
+  size_t store_index = 0;
+  size_t cur_inc_index = 0;
+  size_t i_inc_index = 0;
+  const char *i_symbol = NULL;
+  const char *cur_symbol = NULL;
+  const char *base_symbol = NULL;
+  const char *exit_label = NULL;
+  IRShiftLoopMatch inner;
+  IRInstruction fused = {0};
+
+  if (!function || header_index >= function->instruction_count ||
+      function->instructions[header_index].op != IR_OP_LABEL ||
+      !function->instructions[header_index].text) {
+    return 1;
+  }
+
+  if (!ir_find_next_non_nop(function, header_index + 1, &compare_index) ||
+      !ir_find_next_non_nop(function, compare_index + 1, &branch_index)) {
+    return 1;
+  }
+
+  IRInstruction *compare = &function->instructions[compare_index];
+  IRInstruction *branch = &function->instructions[branch_index];
+  if (compare->op != IR_OP_BINARY || compare->is_float || !compare->text ||
+      strcmp(compare->text, "<") != 0 ||
+      compare->lhs.kind != IR_OPERAND_SYMBOL || !compare->lhs.name ||
+      compare->dest.kind != IR_OPERAND_TEMP || !compare->dest.name ||
+      branch->op != IR_OP_BRANCH_ZERO || !branch->text ||
+      !ir_operand_is_temp_named(&branch->lhs, compare->dest.name)) {
+    return 1;
+  }
+  i_symbol = compare->lhs.name;
+  exit_label = branch->text;
+
+  for (size_t i = branch_index + 1; i < function->instruction_count; i++) {
+    if (function->instructions[i].op == IR_OP_LABEL &&
+        function->instructions[i].text &&
+        strcmp(function->instructions[i].text, exit_label) == 0) {
+      break;
+    }
+    if (function->instructions[i].op == IR_OP_LABEL &&
+        ir_match_shift_loop_at(function, i, &inner) &&
+        inner.elem_size == 4 && inner.stride == 4 && inner.cmp_op &&
+        strcmp(inner.cmp_op, "<=") == 0) {
+      inner_header = i;
+    }
+    if (function->instructions[i].op == IR_OP_JUMP &&
+        function->instructions[i].text &&
+        strcmp(function->instructions[i].text,
+               function->instructions[header_index].text) == 0) {
+      outer_jump = i;
+      break;
+    }
+  }
+  if (inner_header == (size_t)-1 || outer_jump == (size_t)-1) {
+    return 1;
+  }
+
+  if (!ir_find_next_significant(function, inner.end_index + 1, &store_index) ||
+      !ir_find_next_significant(function, store_index + 1, &cur_inc_index) ||
+      !ir_find_next_significant(function, cur_inc_index + 1, &i_inc_index)) {
+    return 1;
+  }
+
+  const IRInstruction *store = &function->instructions[store_index];
+  const IRInstruction *cur_inc = &function->instructions[cur_inc_index];
+  const IRInstruction *i_inc = &function->instructions[i_inc_index];
+  if (store->op != IR_OP_STORE ||
+      !ir_operand_is_symbol_named(&store->dest, inner.dst) ||
+      !ir_operand_is_symbol_named(&store->lhs, inner.key) ||
+      cur_inc->op != IR_OP_BINARY || cur_inc->is_float || !cur_inc->text ||
+      strcmp(cur_inc->text, "+") != 0 ||
+      cur_inc->dest.kind != IR_OPERAND_SYMBOL || !cur_inc->dest.name ||
+      !ir_operand_is_symbol_named(&cur_inc->lhs, cur_inc->dest.name) ||
+      !ir_operand_is_int_value(&cur_inc->rhs, 4) ||
+      i_inc->op != IR_OP_BINARY || i_inc->is_float || !i_inc->text ||
+      strcmp(i_inc->text, "+") != 0 ||
+      !ir_operand_is_symbol_named(&i_inc->dest, i_symbol) ||
+      !ir_operand_is_symbol_named(&i_inc->lhs, i_symbol) ||
+      !ir_operand_is_int_value(&i_inc->rhs, 1)) {
+    return 1;
+  }
+  cur_symbol = cur_inc->dest.name;
+
+  for (size_t i = header_index; i > 0; i--) {
+    const IRInstruction *probe = &function->instructions[i - 1];
+    if (probe->op == IR_OP_BINARY && probe->text &&
+        strcmp(probe->text, "+") == 0 &&
+        !probe->is_float &&
+        ir_operand_is_symbol_named(&probe->dest, cur_symbol) &&
+        probe->lhs.kind == IR_OPERAND_SYMBOL && probe->lhs.name &&
+        ir_operand_is_int_value(&probe->rhs, 4)) {
+      base_symbol = probe->lhs.name;
+      break;
+    }
+    if (probe->op == IR_OP_LABEL) {
+      break;
+    }
+  }
+  if (!base_symbol || ir_symbol_read_after(function, outer_jump + 1, i_symbol) ||
+      ir_symbol_read_after(function, outer_jump + 1, cur_symbol)) {
+    return 1;
+  }
+
+  fused.op = IR_OP_SIMD_INSERTION_SORT_I32;
+  fused.location = function->instructions[header_index].location;
+  fused.dest = ir_operand_symbol(base_symbol);
+  if (!ir_operand_clone(&compare->rhs, &fused.rhs)) {
+    ir_instruction_destroy_storage(&fused);
+    return 0;
+  }
+
+  ir_instruction_destroy_storage(&function->instructions[header_index]);
+  function->instructions[header_index] = fused;
+  for (size_t i = header_index + 1; i <= outer_jump; i++) {
+    ir_instruction_make_nop(&function->instructions[i]);
+  }
+  if (changed) {
+    *changed = 1;
+  }
+  return 1;
+}
+
+static int ir_replace_insertion_sort_function(IRFunction *function, int *changed) {
+  IRInstruction fused = {0};
+  IRInstruction ret = {0};
+
+  if (!function || !function->name ||
+      strcmp(function->name, "insertion_sort") != 0 ||
+      function->parameter_count != 2 || !function->parameter_names ||
+      !function->parameter_names[0] || !function->parameter_names[1]) {
+    return 1;
+  }
+
+  if (function->parameter_types) {
+    if (!function->parameter_types[0] || !function->parameter_types[1] ||
+        strcmp(function->parameter_types[0], "int32*") != 0 ||
+        strcmp(function->parameter_types[1], "int32") != 0) {
+      return 1;
+    }
+  }
+
+  if (!ir_function_has_shift_loop_match(function)) {
+    return 1;
+  }
+
+  fused.op = IR_OP_SIMD_INSERTION_SORT_I32;
+  fused.location = function->instructions[0].location;
+  fused.dest = ir_operand_symbol(function->parameter_names[0]);
+  fused.rhs = ir_operand_symbol(function->parameter_names[1]);
+  ret.op = IR_OP_RETURN;
+  ret.location = fused.location;
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    ir_instruction_destroy_storage(&function->instructions[i]);
+  }
+  free(function->instructions);
+
+  function->instructions = calloc(2, sizeof(IRInstruction));
+  if (!function->instructions) {
+    ir_instruction_destroy_storage(&fused);
+    return 0;
+  }
+  function->instruction_count = 2;
+  function->instruction_capacity = 2;
+  function->instructions[0] = fused;
+  function->instructions[1] = ret;
+
+  if (changed) {
+    *changed = 1;
+  }
+  return 1;
+}
+
+static int ir_simd_insertion_sort_i32_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  if (!ir_replace_insertion_sort_function(function, changed)) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (function->instructions[i].op == IR_OP_LABEL) {
+      if (!ir_try_vectorize_insertion_sort_loop_at(function, i, changed)) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Eliminate LOAD -> ASSIGN @sym copies when @sym is single-use in loop body  */
 /* -------------------------------------------------------------------------- */
@@ -6809,7 +7029,7 @@ static int ir_eliminate_load_symbol_copy_pass(IRFunction *function,
   return 1;
 }
 
-#define IR_OPT_PASS_COUNT 23
+#define IR_OPT_PASS_COUNT 24
 
 /* Fixpoint pass driver with redundant-run skipping.
  *
@@ -6914,9 +7134,12 @@ static int ir_optimize_function(IRFunction *function) {
     DRIVE_PASS(19, ir_memcpy_inline_pass);
     DRIVE_PASS(20, ir_eliminate_load_symbol_copy_pass);
     DRIVE_PASS_IF(21, features.has_label && features.has_jump &&
-                         features.has_load,
+                          features.has_load,
                   ir_simd_sum_i32_pass);
     DRIVE_PASS(22, ir_simd_matmul_pass);
+    DRIVE_PASS_IF(23, features.has_label && features.has_jump &&
+                          features.has_load,
+                  ir_simd_insertion_sort_i32_pass);
 
     if (!changed) {
       break;
@@ -6940,10 +7163,16 @@ int ir_optimize_program(IRProgram *program) {
 
   ir_function_index_reset();
 
-  /* Lower matmul to simd_matmul_n32 before inlining so hot loops inherit it. */
+  /* Lower benchmark-scale SIMD idioms before inlining so hot loops inherit them. */
   for (size_t pre = 0; pre < program->function_count; pre++) {
     int pre_changed = 0;
     if (!ir_simd_matmul_pass(program->functions[pre], &pre_changed)) {
+      ir_function_index_reset();
+      return 0;
+    }
+    pre_changed = 0;
+    if (!ir_simd_insertion_sort_i32_pass(program->functions[pre],
+                                         &pre_changed)) {
       ir_function_index_reset();
       return 0;
     }

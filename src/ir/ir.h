@@ -67,7 +67,9 @@ typedef enum {
    * (added to prior value), lhs = base pointer, rhs = element count. */
   IR_OP_SIMD_SUM_I32,
   /* Fixed 32x32 int32 matrix multiply. dest = c, lhs = a, rhs = b (pointers). */
-  IR_OP_SIMD_MATMUL_N32
+  IR_OP_SIMD_MATMUL_N32,
+  /* In-place signed int32 insertion sort. dest = base pointer, rhs = len. */
+  IR_OP_SIMD_INSERTION_SORT_I32
 } IROpcode;
 
 typedef struct {

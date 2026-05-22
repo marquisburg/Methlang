@@ -7772,7 +7772,52 @@ static int wcs_movdqu_xmm_mem(BinaryCodeBuffer *b, int xmm, int gpr) {
              b, (unsigned char)(0x00 | ((xmm & 7) << 3) | (gpr & 7)));
 }
 
-/* 66 0F 7E /r — movd r32, xmm */
+static int simd_emit_xmm_mem_disp(BinaryCodeBuffer *b, unsigned char opcode,
+                                  int xmm, int gpr, int displacement) {
+  if (!b) {
+    return 0;
+  }
+
+  int use_disp8 = displacement >= -128 && displacement <= 127;
+  unsigned char mod = displacement == 0 ? 0 : (use_disp8 ? 1 : 2);
+  unsigned char rm = (unsigned char)(gpr & 7);
+  unsigned char modrm =
+      (unsigned char)((mod << 6) | ((xmm & 7) << 3) |
+                      ((rm == (BINARY_GP_RSP & 7)) ? 4 : rm));
+
+  if (!binary_code_buffer_append_u8(b, 0xF3) ||
+      !binary_emit_rex(b, 0, xmm >> 3, 0, gpr >> 3) ||
+      !binary_code_buffer_append_u8(b, 0x0F) ||
+      !binary_code_buffer_append_u8(b, opcode) ||
+      !binary_code_buffer_append_u8(b, modrm)) {
+    return 0;
+  }
+  if (rm == (BINARY_GP_RSP & 7)) {
+    unsigned char sib = (unsigned char)((0 << 6) | (4 << 3) | (gpr & 7));
+    if (!binary_code_buffer_append_u8(b, sib)) {
+      return 0;
+    }
+  }
+  if (mod == 1) {
+    return binary_code_buffer_append_u8(b, (unsigned char)(int8_t)displacement);
+  }
+  if (mod == 2) {
+    return binary_code_buffer_append_u32(b, (uint32_t)(int32_t)displacement);
+  }
+  return 1;
+}
+
+static int simd_movdqu_xmm_mem_disp(BinaryCodeBuffer *b, int xmm, int gpr,
+                                    int displacement) {
+  return simd_emit_xmm_mem_disp(b, 0x6F, xmm, gpr, displacement);
+}
+
+static int simd_movdqu_mem_xmm_disp(BinaryCodeBuffer *b, int gpr,
+                                    int displacement, int xmm) {
+  return simd_emit_xmm_mem_disp(b, 0x7F, xmm, gpr, displacement);
+}
+
+/* 66 0F 7E /r - movd r32, xmm */
 static int wcs_movd_reg_xmm(BinaryCodeBuffer *b, int gpr, int xmm) {
   return binary_code_buffer_append_u8(b, 0x66) &&
          binary_emit_rex(b, 0, xmm >> 3, 0, gpr >> 3) &&
@@ -7878,6 +7923,177 @@ static int code_generator_binary_emit_simd_sum_i32(
 }
 
 /* 66 0F F4 /r — pmuludq xmm, xmm */
+/* In-place int32 insertion sort with SSE2 chunk scan and 16-byte shifts. */
+static int code_generator_binary_emit_simd_insertion_sort_i32(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  BinaryCodeBuffer *b = NULL;
+  size_t outer_loop = 0;
+  size_t find_loop = 0;
+  size_t scalar_scan = 0;
+  size_t shift_block = 0;
+  size_t shift_tail = 0;
+  size_t tail_loop = 0;
+  size_t store_key = 0;
+  size_t j_done = 0;
+  size_t j_scalar_from_small = 0;
+  size_t j_scalar_from_boundary = 0;
+  size_t j_shift_from_zero = 0;
+  size_t j_shift_from_le = 0;
+  size_t j_tail_from_small = 0;
+  size_t j_store_from_tail_empty = 0;
+
+  if (!generator || !context || !instruction ||
+      instruction->dest.kind == IR_OPERAND_NONE ||
+      instruction->rhs.kind == IR_OPERAND_NONE) {
+    code_generator_set_error(generator, "Malformed simd_insertion_sort_i32");
+    return 0;
+  }
+  b = &context->code;
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->dest,
+                                               BINARY_GP_RCX) ||
+      !wcs_xor_self32(b, BINARY_GP_RDX) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 0, 1)) {
+    return 0;
+  }
+
+  outer_loop = b->size;
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->rhs,
+                                               BINARY_GP_R8) ||
+      !wcs_cmp_reg_reg32(b, BINARY_GP_RDX, BINARY_GP_R8) ||
+      !wcs_jcc(b, 0x8D /* jge */, &j_done)) {
+    return 0;
+  }
+
+  if (!wcs_mov_reg_reg32(b, BINARY_GP_R10, BINARY_GP_RDX) ||
+      !binary_emit_lea_reg_base_index_scale_disp(
+          b, BINARY_GP_RAX, BINARY_GP_RCX, BINARY_GP_RDX, 4, 0) ||
+      !binary_emit_mov_reg_mem32(b, BINARY_GP_R9, BINARY_GP_RAX, 0)) {
+    return 0;
+  }
+
+  find_loop = b->size;
+  if (!wcs_cmp_reg_imm32(b, BINARY_GP_R10, 4) ||
+      !wcs_jcc(b, 0x8C /* jl */, &j_scalar_from_small) ||
+      !wcs_mov_reg_reg32(b, BINARY_GP_R11, BINARY_GP_R10) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_R11, 1, 4) ||
+      !binary_emit_lea_reg_base_index_scale_disp(
+          b, BINARY_GP_RAX, BINARY_GP_RCX, BINARY_GP_R11, 4, 0) ||
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RAX, 0) ||
+      !wcs_movd_xmm_reg(b, 1, BINARY_GP_R9) ||
+      !wcs_pshufd(b, 1, 1, 0x00) ||
+      !wcs_sse_66(b, 0x66, 0, 1) ||
+      !wcs_pmovmskb(b, BINARY_GP_R11, 0) ||
+      !wcs_cmp_reg_imm32(b, BINARY_GP_R11, 0xFFFF) ||
+      !wcs_jcc(b, 0x85 /* jne */, &j_scalar_from_boundary) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_R10, 1, 4)) {
+    return 0;
+  }
+  {
+    size_t j_back = 0;
+    if (!wcs_jcc(b, 0, &j_back) || !wcs_patch_to(b, j_back, find_loop)) {
+      return 0;
+    }
+  }
+
+  scalar_scan = b->size;
+  if (!wcs_patch_to(b, j_scalar_from_small, scalar_scan) ||
+      !wcs_patch_to(b, j_scalar_from_boundary, scalar_scan) ||
+      !wcs_cmp_reg_imm32(b, BINARY_GP_R10, 0) ||
+      !wcs_jcc(b, 0x84 /* je */, &j_shift_from_zero) ||
+      !wcs_mov_reg_reg32(b, BINARY_GP_RAX, BINARY_GP_R10) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RAX, 1, 1) ||
+      !binary_emit_lea_reg_base_index_scale_disp(
+          b, BINARY_GP_RAX, BINARY_GP_RCX, BINARY_GP_RAX, 4, 0) ||
+      !binary_emit_mov_reg_mem32(b, BINARY_GP_R11, BINARY_GP_RAX, 0) ||
+      !wcs_cmp_reg_reg32(b, BINARY_GP_R11, BINARY_GP_R9) ||
+      !wcs_jcc(b, 0x8E /* jle */, &j_shift_from_le) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_R10, 1, 1)) {
+    return 0;
+  }
+  {
+    size_t j_back = 0;
+    if (!wcs_jcc(b, 0, &j_back) || !wcs_patch_to(b, j_back, scalar_scan)) {
+      return 0;
+    }
+  }
+
+  shift_block = b->size;
+  if (!wcs_patch_to(b, j_shift_from_zero, shift_block) ||
+      !wcs_patch_to(b, j_shift_from_le, shift_block) ||
+      !wcs_mov_reg_reg32(b, BINARY_GP_R11, BINARY_GP_RDX) ||
+      !wcs_sub_reg_reg32(b, BINARY_GP_R11, BINARY_GP_R10)) {
+    return 0;
+  }
+
+  shift_block = b->size;
+  if (!wcs_cmp_reg_imm32(b, BINARY_GP_R11, 4) ||
+      !wcs_jcc(b, 0x8C /* jl */, &j_tail_from_small) ||
+      !wcs_mov_reg_reg32(b, BINARY_GP_RAX, BINARY_GP_R10) ||
+      !wcs_add_reg_reg64(b, BINARY_GP_RAX, BINARY_GP_R11) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RAX, 1, 4) ||
+      !binary_emit_lea_reg_base_index_scale_disp(
+          b, BINARY_GP_RAX, BINARY_GP_RCX, BINARY_GP_RAX, 4, 0) ||
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RAX, 0) ||
+      !simd_movdqu_mem_xmm_disp(b, BINARY_GP_RAX, 4, 0) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_R11, 1, 4)) {
+    return 0;
+  }
+  {
+    size_t j_back = 0;
+    if (!wcs_jcc(b, 0, &j_back) || !wcs_patch_to(b, j_back, shift_block)) {
+      return 0;
+    }
+  }
+
+  shift_tail = b->size;
+  if (!wcs_patch_to(b, j_tail_from_small, shift_tail) ||
+      !wcs_cmp_reg_imm32(b, BINARY_GP_R11, 0) ||
+      !wcs_jcc(b, 0x84 /* je */, &j_store_from_tail_empty)) {
+    return 0;
+  }
+  tail_loop = b->size;
+  if (!wcs_mov_reg_reg32(b, BINARY_GP_RAX, BINARY_GP_R10) ||
+      !wcs_add_reg_reg64(b, BINARY_GP_RAX, BINARY_GP_R11) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RAX, 1, 1) ||
+      !binary_emit_lea_reg_base_index_scale_disp(
+          b, BINARY_GP_RAX, BINARY_GP_RCX, BINARY_GP_RAX, 4, 0) ||
+      !binary_emit_mov_reg_mem32(b, BINARY_GP_R8, BINARY_GP_RAX, 0) ||
+      !binary_emit_mov_mem_reg32(b, BINARY_GP_RAX, 4, BINARY_GP_R8) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_R11, 1, 1) ||
+      !wcs_cmp_reg_imm32(b, BINARY_GP_R11, 0)) {
+    return 0;
+  }
+  {
+    size_t j_back = 0;
+    if (!wcs_jcc(b, 0x85 /* jne */, &j_back) ||
+        !wcs_patch_to(b, j_back, tail_loop)) {
+      return 0;
+    }
+  }
+
+  store_key = b->size;
+  if (!wcs_patch_to(b, j_store_from_tail_empty, store_key) ||
+      !wcs_mov_reg_reg32(b, BINARY_GP_RAX, BINARY_GP_R10) ||
+      !binary_emit_lea_reg_base_index_scale_disp(
+          b, BINARY_GP_RAX, BINARY_GP_RCX, BINARY_GP_RAX, 4, 0) ||
+      !binary_emit_mov_mem_reg32(b, BINARY_GP_RAX, 0, BINARY_GP_R9) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 0, 1)) {
+    return 0;
+  }
+  {
+    size_t j_back = 0;
+    if (!wcs_jcc(b, 0, &j_back) || !wcs_patch_to(b, j_back, outer_loop)) {
+      return 0;
+    }
+  }
+
+  return wcs_patch_here(b, j_done);
+}
+
 static int wcs_pmuludq(BinaryCodeBuffer *b, int dst, int src) {
   return wcs_sse_66(b, 0xF4, dst, src);
 }
@@ -8528,6 +8744,10 @@ static int code_generator_binary_emit_instruction(
   case IR_OP_SIMD_MATMUL_N32:
     return code_generator_binary_emit_simd_matmul_n32(generator, context,
                                                       instruction);
+
+  case IR_OP_SIMD_INSERTION_SORT_I32:
+    return code_generator_binary_emit_simd_insertion_sort_i32(generator, context,
+                                                              instruction);
 
   default:
     code_generator_set_error(

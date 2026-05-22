@@ -568,6 +568,13 @@ $cases = @(
     IrMustMatch     = @("simd_sum_i32")
   },
   @{
+    Name            = "opt_simd_insertion_sort_i32"
+    Path            = "tests/test_opt_shift_loop.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("simd_insertion_sort_i32")
+  },
+  @{
     Name          = "codegen_ir_fastpaths"
     Path          = "tests/test_codegen_ir_fastpaths.mettle"
     ShouldSucceed = $true
