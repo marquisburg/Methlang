@@ -1,55 +1,142 @@
 {
-  "version": 1,
+  "version": 2,
   "mode": "mettle-vs-c",
   "outputs": {
     "primary": "docs/benchmarks/latest.json",
-    "mirror_web": "web/benchmarks.json"
+    "mirror_web": "web/benchmarks.json",
+    "report_html": "docs/benchmarks/latest.html"
+  },
+  "defaults": {
+    "c_flags": ["-O3", "-lkernel32"],
+    "mettle_flags": ["--build", "--emit-obj", "--linker", "internal", "--release"],
+    "runs": 5,
+    "warmup": 1,
+    "passes": 200
   },
   "benchmarks": [
     {
       "name": "fib",
-      "description": "Fibonacci fib(35) x 10M",
-      "build_script": "examples/fib/build.bat",
+      "kind": "runtime",
+      "description": "Fibonacci fib(35) x 10M (Mettle unrolled hot loop)",
+      "mettle_source": "examples/fib/fib.mettle",
       "mettle_exe": "examples/fib/fib.exe",
+      "c_source": "examples/fib/fib.c",
       "c_exe": "examples/fib/fib_c.exe",
+      "rust_source": "examples/fib/fib.rs",
       "rust_exe": "examples/fib/fib_rs.exe",
-      "rust_source": "examples/fib/fib.rs"
+      "build_script": "examples/fib/build.bat"
     },
     {
       "name": "word_count",
-      "description": "Word count 256 KB buffer x 500",
-      "build_script": "examples/word_count/build.bat",
+      "kind": "runtime",
+      "description": "Word count 256 KB buffer x 200",
+      "mettle_source": "examples/word_count/word_count.mettle",
       "mettle_exe": "examples/word_count/word_count.exe",
+      "c_source": "examples/word_count/word_count.c",
       "c_exe": "examples/word_count/word_count_c.exe",
+      "rust_source": "examples/word_count/word_count.rs",
       "rust_exe": "examples/word_count/word_count_rs.exe",
-      "rust_source": "examples/word_count/word_count.rs"
+      "build_script": "examples/word_count/build.bat"
     },
     {
       "name": "grep",
-      "description": "Grep ERROR 1 MiB x 2000",
-      "build_script": "examples/grep/build.bat",
+      "kind": "runtime",
+      "description": "Grep ERROR 1 MiB x 200",
+      "mettle_source": "examples/grep/grep.mettle",
       "mettle_exe": "examples/grep/grep.exe",
+      "c_source": "examples/grep/grep.c",
       "c_exe": "examples/grep/grep_c.exe",
+      "rust_source": "examples/grep/grep.rs",
       "rust_exe": "examples/grep/grep_rs.exe",
-      "rust_source": "examples/grep/grep.rs"
+      "build_script": "examples/grep/build.bat"
     },
     {
       "name": "sum_squares",
-      "description": "Sum of squares 1..100000 x 500",
-      "build_script": "examples/sum_squares/build.bat",
+      "kind": "runtime",
+      "description": "Sum of squares 1..100000 x 200",
+      "mettle_source": "examples/sum_squares/sum_squares.mettle",
       "mettle_exe": "examples/sum_squares/sum_squares.exe",
+      "c_source": "examples/sum_squares/sum_squares.c",
       "c_exe": "examples/sum_squares/sum_squares_c.exe",
+      "rust_source": "examples/sum_squares/sum_squares.rs",
       "rust_exe": "examples/sum_squares/sum_squares_rs.exe",
-      "rust_source": "examples/sum_squares/sum_squares.rs"
+      "build_script": "examples/sum_squares/build.bat"
     },
     {
       "name": "collatz",
+      "kind": "runtime",
       "description": "Collatz steps 1..100000 x 10",
-      "build_script": "examples/collatz/build.bat",
+      "mettle_source": "examples/collatz/collatz.mettle",
       "mettle_exe": "examples/collatz/collatz.exe",
+      "c_source": "examples/collatz/collatz.c",
       "c_exe": "examples/collatz/collatz_c.exe",
+      "rust_source": "examples/collatz/collatz.rs",
       "rust_exe": "examples/collatz/collatz_rs.exe",
-      "rust_source": "examples/collatz/collatz.rs"
+      "build_script": "examples/collatz/build.bat"
+    },
+    {
+      "name": "byte_hash",
+      "kind": "runtime",
+      "description": "djb2 hash 256 KB buffer x 200",
+      "mettle_source": "examples/byte_hash/byte_hash.mettle",
+      "mettle_exe": "examples/byte_hash/byte_hash.exe",
+      "c_source": "examples/byte_hash/byte_hash.c",
+      "c_exe": "examples/byte_hash/byte_hash_c.exe",
+      "rust_source": "examples/byte_hash/byte_hash.rs",
+      "rust_exe": "examples/byte_hash/byte_hash_rs.exe",
+      "build_script": "examples/byte_hash/build.bat"
+    },
+    {
+      "name": "prime_count",
+      "kind": "runtime",
+      "description": "Prime count up to 50000 x 200",
+      "mettle_source": "examples/prime_count/prime_count.mettle",
+      "mettle_exe": "examples/prime_count/prime_count.exe",
+      "c_source": "examples/prime_count/prime_count.c",
+      "c_exe": "examples/prime_count/prime_count_c.exe",
+      "rust_source": "examples/prime_count/prime_count.rs",
+      "rust_exe": "examples/prime_count/prime_count_rs.exe",
+      "build_script": "examples/prime_count/build.bat"
+    },
+    {
+      "name": "matrix_mul",
+      "kind": "runtime",
+      "description": "32x32 int32 matrix multiply x 200 (Mettle: 4-unrolled pointers; C: naive mat_idx — GCC -O3 vectorizes C heavily)",
+      "track_asm": true,
+      "mettle_source": "examples/matrix_mul/matrix_mul.mettle",
+      "mettle_exe": "examples/matrix_mul/matrix_mul.exe",
+      "c_source": "examples/matrix_mul/matrix_mul.c",
+      "c_exe": "examples/matrix_mul/matrix_mul_c.exe",
+      "rust_source": "examples/matrix_mul/matrix_mul.rs",
+      "rust_exe": "examples/matrix_mul/matrix_mul_rs.exe",
+      "build_script": "examples/matrix_mul/build.bat"
+    },
+    {
+      "name": "sort_insertion",
+      "kind": "runtime",
+      "description": "Insertion sort 512 int32 values x 200 (Mettle/C structurally similar; gap is memcpy/SIMD/codegen)",
+      "track_asm": true,
+      "mettle_source": "examples/sort_insertion/sort_insertion.mettle",
+      "mettle_exe": "examples/sort_insertion/sort_insertion.exe",
+      "c_source": "examples/sort_insertion/sort_insertion.c",
+      "c_exe": "examples/sort_insertion/sort_insertion_c.exe",
+      "rust_source": "examples/sort_insertion/sort_insertion.rs",
+      "rust_exe": "examples/sort_insertion/sort_insertion_rs.exe",
+      "build_script": "examples/sort_insertion/build.bat"
+    }
+  ],
+  "compile_benchmarks": [
+    {
+      "name": "parse_stress",
+      "description": "Compile 200k LOC flat globals (parse/typecheck stress)",
+      "mettle_source": "tests/parse_stress_test.mettle",
+      "profile": true
+    },
+    {
+      "name": "profiler",
+      "description": "Compile 226k LOC multi-function program (full pipeline stress)",
+      "mettle_source": "tests/profiler_test.mettle",
+      "profile": true
     }
   ]
 }

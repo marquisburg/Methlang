@@ -1,0 +1,14 @@
+// Constant-size memcpy should lower to inline rep movs (no libc call).
+import "std/mem";
+
+function main() -> int32 {
+  var dst: int32[512];
+  var src: int32[512];
+  var i: int32 = 0;
+  while (i < 512) {
+    src[i] = i;
+    i = i + 1;
+  }
+  memcpy((cstring)((int64)&dst[0]), (cstring)((int64)&src[0]), 2048);
+  return dst[511];
+}

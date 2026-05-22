@@ -1,0 +1,107 @@
+// Mettle insertion-sort benchmark
+//
+// Sorts 512 int32 values (deterministic pseudo-random fill). 200 passes.
+//
+// Build: build.bat
+// Run: sort_insertion.exe
+
+import "std/io";
+import "std/mem";
+import "std/bench";
+
+var DATA_LEN: int32 = 512;
+
+function fill_data(data: int32*, seed: int32) {
+  var i: int32 = 0;
+  while (i < DATA_LEN) {
+    var v: int32 = (i * 1103515245 + seed + 12345) % 1024;
+    data[i] = v;
+    i = i + 1;
+  }
+}
+
+function insertion_sort(data: int32*, len: int32) {
+  var i: int32 = 1;
+  var cur: int32* = data + 4;
+  while (i < len) {
+    var key: int32 = *cur;
+    var scan: int32* = cur;
+    var j: int32 = i - 1;
+    while (j >= 0) {
+      var prev: int32* = scan - 4;
+      var current: int32 = *prev;
+      if (current <= key) {
+        break;
+      }
+      *scan = current;
+      scan = prev;
+      j = j - 1;
+    }
+    *scan = key;
+    cur = cur + 4;
+    i = i + 1;
+  }
+}
+
+function sum_array(data: int32*, len: int32) -> int64 {
+  var sum: int64 = 0;
+  var i: int32 = 0;
+  while (i < len) {
+    sum = sum + (int64)data[i];
+    i = i + 1;
+  }
+  return sum;
+}
+
+function copy_array(dst: int32*, src: int32*, len: int32) {
+  memcpy((cstring)((int64)dst), (cstring)((int64)src), (int64)len * 4);
+}
+
+function main() -> int32 {
+  var passes: int32 = 200;
+  var data: int32[512];
+  var scratch: int32[512];
+
+  fill_data(&data[0], 42);
+
+  var header: string = "Insertion sort: 512 int32 values";
+  println(cstr(header));
+
+  copy_array(&scratch[0], &data[0], DATA_LEN);
+  insertion_sort(&scratch[0], DATA_LEN);
+  var check: int64 = sum_array(&scratch[0], DATA_LEN);
+  var result_str: string = "Sorted sum = ";
+  print(cstr(result_str));
+  println_int(check);
+
+  var bench_header: string = "Benchmark: 200 passes (insertion_sort)";
+  println(cstr(bench_header));
+
+  var t0: uint64 = bench_time_us();
+  var bench_sum: int64 = 0;
+  var p: int32 = 0;
+  while (p < passes) {
+    copy_array(&scratch[0], &data[0], DATA_LEN);
+    insertion_sort(&scratch[0], DATA_LEN);
+    bench_sum = bench_sum + sum_array(&scratch[0], DATA_LEN);
+    p = p + 1;
+  }
+  var elapsed_us: uint64 = bench_time_us() - t0;
+
+  var sum_str: string = "Bench sum = ";
+  print(cstr(sum_str));
+  println_int(bench_sum);
+
+  var time_str: string = "Time: ";
+  print(cstr(time_str));
+  print_int(elapsed_us);
+  println(cstr(" us"));
+
+  var per_pass: uint64 = elapsed_us / passes;
+  var us_str: string = "Per pass: ~";
+  print(cstr(us_str));
+  print_int(per_pass);
+  println(cstr(" us"));
+
+  return 0;
+}

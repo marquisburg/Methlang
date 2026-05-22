@@ -81,6 +81,43 @@ function Test-AssemblyOutput {
   return @{ Passed = $true; Reason = "" }
 }
 
+function Test-DisassemblyOutput {
+  param(
+    [string]$BinaryPath,
+    [string[]]$RequiredPatterns = @(),
+    [string[]]$ForbiddenPatterns = @()
+  )
+
+  if (-not (Test-Path $BinaryPath)) {
+    return @{ Passed = $false; Reason = "Output file not produced" }
+  }
+
+  $disasm = & objdump -d $BinaryPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    return @{ Passed = $false; Reason = "objdump failed on '$BinaryPath'" }
+  }
+
+  foreach ($pattern in $RequiredPatterns) {
+    if ([string]::IsNullOrWhiteSpace($pattern)) {
+      continue
+    }
+    if ($disasm -notmatch $pattern) {
+      return @{ Passed = $false; Reason = "Disassembly missing required pattern '$pattern'" }
+    }
+  }
+
+  foreach ($pattern in $ForbiddenPatterns) {
+    if ([string]::IsNullOrWhiteSpace($pattern)) {
+      continue
+    }
+    if ($disasm -match $pattern) {
+      return @{ Passed = $false; Reason = "Disassembly matched forbidden pattern '$pattern'" }
+    }
+  }
+
+  return @{ Passed = $true; Reason = "" }
+}
+
 if ($BuildCompiler) {
   Write-Host "Building compiler..."
   & .\build.bat
@@ -502,6 +539,35 @@ $cases = @(
     AsmMustNotMatch = @("1000")
   },
   @{
+    Name            = "opt_memcpy_const"
+    Path            = "tests/test_opt_memcpy_const.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release")
+    AsmMustNotMatch = @("\bcall memcpy\b")
+    AsmMustMatch    = @("\brep movs")
+  },
+  @{
+    Name            = "opt_inline_loop_fn"
+    Path            = "tests/test_opt_inline_loop_fn.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--release")
+    AsmMustNotMatch = @("\bcall sum_small\b")
+  },
+  @{
+    Name            = "opt_no_inline_fib_guard"
+    Path            = "tests/test_opt_no_inline_fib_guard.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--release")
+    AsmMustMatch    = @("\bcall fib\b")
+  },
+  @{
+    Name            = "opt_sum_i32"
+    Path            = "tests/test_opt_sum_i32.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("simd_sum_i32")
+  },
+  @{
     Name          = "codegen_ir_fastpaths"
     Path          = "tests/test_codegen_ir_fastpaths.mettle"
     ShouldSucceed = $true
@@ -779,14 +845,25 @@ foreach ($case in $cases) {
           $forbiddenIrPatterns = @($case.IrMustNotMatch)
         }
 
-        $asmCheck = Test-AssemblyOutput -AsmPath $outFile `
-          -RequiredPatterns $requiredAsmPatterns `
-          -ForbiddenPatterns $forbiddenAsmPatterns
-        if (-not $asmCheck.Passed) {
-          $passed = $false
-          $reason = $asmCheck.Reason
+        $usesEmitObj = $caseArgs -contains "--emit-obj"
+        $hasAsmPatterns = ($requiredAsmPatterns.Count -gt 0) -or ($forbiddenAsmPatterns.Count -gt 0)
+        if ($hasAsmPatterns) {
+          if ($usesEmitObj) {
+            $asmCheck = Test-DisassemblyOutput -BinaryPath $outFile `
+              -RequiredPatterns $requiredAsmPatterns `
+              -ForbiddenPatterns $forbiddenAsmPatterns
+          }
+          else {
+            $asmCheck = Test-AssemblyOutput -AsmPath $outFile `
+              -RequiredPatterns $requiredAsmPatterns `
+              -ForbiddenPatterns $forbiddenAsmPatterns
+          }
+          if (-not $asmCheck.Passed) {
+            $passed = $false
+            $reason = $asmCheck.Reason
+          }
         }
-        else {
+        if ($passed) {
           foreach ($pattern in $requiredOutputPatterns) {
             if ([string]::IsNullOrWhiteSpace($pattern)) {
               continue
@@ -812,6 +889,12 @@ foreach ($case in $cases) {
         }
         if ($passed -and (($requiredIrPatterns.Count -gt 0) -or ($forbiddenIrPatterns.Count -gt 0))) {
           $irFile = "$outFile.ir"
+          if ($usesEmitObj) {
+            $objIrFile = ([System.IO.Path]::ChangeExtension($outFile, ".obj")) + ".ir"
+            if (Test-Path $objIrFile) {
+              $irFile = $objIrFile
+            }
+          }
           if (-not (Test-Path $irFile)) {
             $passed = $false
             $reason = "IR output file not produced"
@@ -1164,6 +1247,44 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "direct_object_call_return" -Passed $false -Reason $_.Exception.Message
+}
+
+# Closed-form reduction equivalence: the constant-bound loop unroller must not
+# miscompile counted polynomial sums (regression for the stale-counter bug in
+# ir_build_symbol_int_map_before). Built both with and without --release because
+# the miscompile only surfaced once the reduction-unroll + const-bound unroll
+# passes ran. The test program self-checks and returns nonzero on any mismatch.
+foreach ($relFlag in @($true, $false)) {
+  $total++
+  $variant = if ($relFlag) { "release" } else { "debug" }
+  try {
+    $exePath = Join-Path $tmpDir "test_opt_closed_form_sum_$variant.exe"
+    $buildArgs = @("--build", "--emit-obj", "--linker", "internal")
+    if ($relFlag) { $buildArgs += "--release" }
+    $buildArgs += @("tests\test_opt_closed_form_sum.mettle", "-o", $exePath)
+
+    $buildOut = & $CompilerPath @buildArgs 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "closed-form build ($variant) failed: $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "closed-form build ($variant) did not produce an executable"
+    }
+
+    $runOut = & $exePath 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "closed-form ($variant) reported a mismatch (exit $LASTEXITCODE): $runOut"
+    }
+    if ($runOut -notmatch "closed_form_sum OK") {
+      throw "closed-form ($variant) did not print OK: $runOut"
+    }
+
+    Write-CaseResult -Name "opt_closed_form_sum_$variant" -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "opt_closed_form_sum_$variant" -Passed $false -Reason $_.Exception.Message
+  }
 }
 
 # COFF reader test: parse Mettle and GCC-produced COFF objects

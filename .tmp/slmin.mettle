@@ -1,0 +1,30 @@
+import "std/io";
+function insertion_sort(data: int32*, len: int32) {
+  var i: int32 = 1;
+  var cur: int32* = data + 4;
+  while (i < len) {
+    var key: int32 = *cur;
+    var scan: int32* = cur;
+    var j: int32 = i - 1;
+    while (j >= 0) {
+      var prev: int32* = scan - 4;
+      var current: int32 = *prev;
+      if (current <= key) { break; }
+      *scan = current;
+      scan = prev;
+      j = j - 1;
+    }
+    *scan = key;
+    cur = cur + 4;
+    i = i + 1;
+  }
+}
+function main() -> int32 {
+  var d: int32[8];
+  d[0]=5; d[1]=3; d[2]=8; d[3]=1; d[4]=9; d[5]=2; d[6]=7; d[7]=4;
+  insertion_sort(&d[0], 8);
+  var i: int32 = 0;
+  while (i < 8) { print_int((int64)d[i]); print(cstr(" ")); i = i + 1; }
+  println(cstr(""));
+  return 0;
+}

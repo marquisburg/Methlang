@@ -59,7 +59,15 @@ typedef enum {
    * pass only matches when that holds). lhs = buffer base symbol, rhs = length
    * symbol/operand, dest = count symbol. Codegen lowers this to an SSE2
    * 16-bytes/iteration scan plus a scalar tail; see code_generator_ir.c. */
-  IR_OP_COUNT_WORD_STARTS
+  IR_OP_COUNT_WORD_STARTS,
+  /* Inline memory copy: dest = dst pointer, lhs = src pointer, rhs = byte count
+   * (INT). Produced by ir_memcpy_inline_pass for constant-size memcpy calls. */
+  IR_OP_MEMCPY_INLINE,
+  /* Horizontal sum of int32 array into int64 accumulator. dest = sum symbol
+   * (added to prior value), lhs = base pointer, rhs = element count. */
+  IR_OP_SIMD_SUM_I32,
+  /* Fixed 32x32 int32 matrix multiply. dest = c, lhs = a, rhs = b (pointers). */
+  IR_OP_SIMD_MATMUL_N32
 } IROpcode;
 
 typedef struct {

@@ -15,7 +15,7 @@ fn sum_squares(n: i64) -> i64 {
 }
 
 fn main() {
-    const PASSES: i32 = 500;
+    const PASSES: i32 = 200;
 
     println!("Sum of squares: 1²+2²+...+100000²");
 

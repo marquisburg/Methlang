@@ -1,0 +1,330 @@
+Compiling lexer...
+Compiling parser...
+Compiling semantic analysis...
+src\semantic\symbol_table.c:80:13: warning: 'scope_name_index_insert' defined but not used [-Wunused-function]
+   80 | static void scope_name_index_insert(Scope *scope, size_t symbol_index) {
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+Compiling IR...
+  ir.c
+  ir_lowering.c
+src\ir\ir_lowering.c:1858:12: warning: 'ir_type_is_float64' defined but not used [-Wunused-function]
+ 1858 | static int ir_type_is_float64(Type *type) {
+      |            ^~~~~~~~~~~~~~~~~~
+  ir_optimize.c
+src\ir\ir_optimize.c:5976:12: warning: 'ir_try_resolve_int_operand' defined but not used [-Wunused-function]
+ 5976 | static int ir_try_resolve_int_operand(const IRFunction *function,
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+Compiling code generator modules...
+  binary_emitter.c
+  code_generator.c
+  code_generator_binary.c
+src\\codegen\\code_generator_binary.c:4901:12: warning: 'code_generator_binary_emit_float_operand_to_xmm' defined but not used [-Wunused-function]
+ 4901 | static int code_generator_binary_emit_float_operand_to_xmm(
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src\\codegen\\code_generator_binary.c:2777:12: warning: 'code_generator_binary_instruction_in_backward_loop' defined but not used [-Wunused-function]
+ 2777 | static int code_generator_binary_instruction_in_backward_loop(
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src\\codegen\\code_generator_binary.c:2479:12: warning: 'code_generator_binary_mark_float64_symbol' defined but not used [-Wunused-function]
+ 2479 | static int code_generator_binary_mark_float64_symbol(
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  code_generator_calls.c
+  code_generator_flow.c
+src\\codegen\\code_generator_flow.c: In function 'code_generator_generate_expression':
+src\\codegen\\code_generator_flow.c:1519:16: warning: dereferencing type-punned pointer will break strict-aliasing rules [-Wstrict-aliasing]
+ 1519 |               *(long long *)&num_data->float_value, num_data->float_value);
+      |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  code_generator_inline_debug.c
+  code_generator_ir.c
+src\\codegen\\code_generator_ir.c: In function 'code_generator_emit_ir_rotate_add':
+src\\codegen\\code_generator_ir.c:3616:59: warning: unused parameter 'temp_table' [-Wunused-parameter]
+ 3616 |                                              IRTempTable *temp_table) {
+      |                                              ~~~~~~~~~~~~~^~~~~~~~~~
+src\\codegen\\code_generator_ir.c: At top level:
+src\\codegen\\code_generator_ir.c:2859:13: warning: 'ir_indirect_temp_table_destroy' defined but not used [-Wunused-function]
+ 2859 | static void ir_indirect_temp_table_destroy(void) {
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src\\codegen\\code_generator_ir.c:308:12: warning: 'ir_symbol_stats_map_add_use' defined but not used [-Wunused-function]
+  308 | static int ir_symbol_stats_map_add_use(IRSymbolStatsMap *map,
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+  code_generator_ops.c
+  code_generator_stack.c
+  code_generator_variables.c
+src\\codegen\\code_generator_variables.c: In function 'code_generator_generate_global_variable':
+src\\codegen\\code_generator_variables.c:63:36: warning: dereferencing type-punned pointer will break strict-aliasing rules [-Wstrict-aliasing]
+   63 |                                   *(int *)&float32_val, float32_val);
+      |                                    ^~~~~~~~~~~~~~~~~~~
+src\\codegen\\code_generator_variables.c:68:18: warning: dereferencing type-punned pointer will break strict-aliasing rules [-Wstrict-aliasing]
+   68 |                 *(long long *)&num->float_value, num->float_value);
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Compiling linker modules...
+  coff_reader.c
+  import_lib.c
+  pe_emitter.c
+  relocation.c
+  symbol_resolve.c
+Compiling debug info...
+Compiling crash-handler runtime (opt-in: -d / -s / -g / IR trap)...
+Compiling atomics helpers (opt-in: std/thread)...
+Compiling error reporter...
+Compiling main...
+Linking...
+Bundling standard library into bin\stdlib...
+Bundling runtime into bin\runtime...
+Build successful! Executable created at bin\mettle.exe
+
+Running tests...
+[PASS] ok_global_int
+[PASS] only_struct
+[PASS] array_index
+[PASS] control_flow
+[PASS] nested_switch_loop
+[PASS] elseif_chaining
+[PASS] switch_const_expr
+[PASS] switch_continue_loop
+[PASS] block_comment
+[PASS] compound_assign
+[PASS] compound_assign_for
+[PASS] labeled_break
+[PASS] labeled_continue
+[PASS] labeled_while
+[PASS] forward_decl
+[PASS] forward_decl_pointer
+[PASS] extern_function_link_name
+[PASS] extern_global_link_name
+[PASS] cstring_alias_type
+[PASS] nested_function_pointer_type_annotation
+[PASS] new_calloc
+[PASS] new_calloc_fixed
+[PASS] pointers
+[PASS] pointer_null
+[PASS] runtime_null_deref_check
+[PASS] runtime_array_bounds_check
+[PASS] stack_trace_support
+[PASS] pointer_param_address
+[PASS] call_many_args
+[PASS] import_relative_no_ext
+[PASS] import_circular
+[PASS] import_include_path
+[PASS] import_std_core
+[PASS] std_io
+[PASS] std_win32
+[PASS] std_ui
+[PASS] enum
+[PASS] prelude
+[PASS] string_escape_codegen
+[PASS] char_literals
+[PASS] logical_ops
+[PASS] multiline_continuation
+[PASS] sizeof_static_assert
+[PASS] strncmp_slice
+[PASS] narrowing_conversions
+[PASS] signed_negation
+[PASS] signed_division
+[PASS] signed_comparison
+[PASS] float_negative_comparison
+[PASS] signed_wraparound
+[PASS] signed_arithmetic
+[PASS] sign_extension
+[PASS] unsigned_zero_ext
+[PASS] unsigned_division
+[PASS] mixed_signed_unsigned
+[PASS] narrowing_reverify
+[PASS] integer_literal_wide
+[PASS] stack_mixed_locals
+[PASS] stack_large_struct
+[PASS] stack_array_scalar
+[PASS] stack_array_struct_stride
+[PASS] int64_truncate
+[PASS] string_length
+[PASS] struct_new_zeroed
+[PASS] struct_field_offset
+[PASS] import_exported
+[PASS] import_namespaced
+[PASS] traits_generic_bound
+[PASS] traits_multiple_where_bounds
+[PASS] trait_methods_generic_dispatch
+[PASS] import_trait_bound
+[PASS] import_enum_switch
+[PASS] tagged_enum_match
+[PASS] extern_signed_param
+[PASS] extern_signed_return
+[PASS] extern_cstring
+[PASS] extern_string_auto_cstring
+[PASS] std_conv_format_i64
+[PASS] abi_int4_regs
+[PASS] abi_int_stack
+[PASS] abi_return_int
+[PASS] abi_return_int64
+[PASS] abi_float_args
+[PASS] abi_float_return
+[PASS] abi_float_symbol_args
+[PASS] abi_mixed_args
+[PASS] abi_shadow_space
+[PASS] abi_prologue
+[PASS] abi_pointer_arg
+[PASS] abi_extern_calling_convention
+[PASS] abi_callee_saved
+[PASS] abi_stack_alignment
+[PASS] abi_float4_args
+[PASS] abi_float_stack
+[PASS] abi_void_return
+[PASS] abi_small_int_args
+[PASS] abi_nested_calls
+[PASS] abi_indirect_call
+[PASS] stress_integrated
+[PASS] bitwise
+[PASS] modulo
+[PASS] logical_not
+[PASS] optimize_ir_passes
+[PASS] opt_dead_temp
+[PASS] opt_symbol_temp_forwarding
+[PASS] opt_strength_cse
+[PASS] opt_loop_unroll
+[PASS] opt_mod_even_check
+[PASS] opt_branch_notzero_forward
+[PASS] opt_branch_eq_chain
+[PASS] opt_cfg_cleanup
+[PASS] opt_memcpy_const
+[PASS] opt_inline_loop_fn
+[PASS] opt_no_inline_fib_guard
+[PASS] opt_sum_i32
+[PASS] codegen_ir_fastpaths
+[PASS] release_size_mode
+[PASS] string_concat
+[PASS] defer_single
+[PASS] defer_lifo
+[PASS] defer_nested
+[PASS] defer_early_return
+[PASS] defer_block_exit
+[PASS] defer_if_else_branch_exit
+[PASS] defer_loop_iteration
+[PASS] errdefer_runs_on_error
+[PASS] errdefer_skipped_on_success
+[PASS] errdefer_multiple_returns
+[PASS] test_cast_expression
+[PASS] errdefer_interleaved_with_defer
+[PASS] errdefer_block_exit
+[PASS] errdefer_nested_if_else
+[PASS] errdefer_loop_with_break_continue
+[PASS] errdefer_top_level
+[PASS] defer_block_statement
+[PASS] errdefer_assignment_statement
+[PASS] errdefer_implicit_fallthrough
+[PASS] defer_complex_interleaving
+[PASS] warn_recv_buffer_extent
+[PASS] no_warn_recv_within_extent
+[PASS] warn_memcpy_src_extent
+[PASS] warn_memcpy_dst_extent
+[PASS] no_warn_memcpy_within_extent
+[PASS] warn_memmove_src_extent
+[PASS] warn_memmove_dst_extent_offset
+[PASS] no_warn_memmove_within_extent_offset
+[PASS] warn_cast_alignment_violation
+[PASS] no_warn_cast_alignment_ok
+[PASS] err_unknown_char
+[PASS] err_unknown_fnptr_return_type
+[PASS] err_invalid_hex
+[PASS] err_invalid_bin
+[PASS] err_missing_brace
+[PASS] err_undefined_var
+[PASS] err_undefined_var_typo
+[PASS] err_top_level_return
+[PASS] err_break_outside_loop
+[PASS] err_break_unknown_label
+[PASS] err_continue_in_switch
+[PASS] err_switch_duplicate_case
+[PASS] err_switch_nonconst_case
+[PASS] err_forward_decl_mismatch
+[PASS] err_forward_decl_pointer_mismatch
+[PASS] err_extern_var_initializer
+[PASS] err_extern_var_missing_type
+[PASS] err_nonextern_link_name
+[PASS] err_extern_link_name_conflict
+[PASS] err_deref_non_pointer
+[PASS] err_address_of_non_lvalue
+[PASS] err_pointer_type_mismatch
+[PASS] err_use_before_init
+[PASS] err_array_index_oob_const
+[PASS] err_array_index_oob_const_negative
+[PASS] err_null_deref_const
+[PASS] err_codegen_member_expr
+[PASS] err_function_arg_count
+[PASS] err_function_arg_type
+[PASS] err_match_non_exhaustive
+[PASS] err_trait_bound_missing_impl
+[PASS] err_trait_bound_missing_second_impl
+[PASS] err_trait_method_missing_impl
+[PASS] err_member_on_non_struct
+[PASS] err_switch_multiple_default
+[PASS] err_return_type_mismatch
+[PASS] err_static_assert_sizeof
+[PASS] err_defer_top_level
+[PASS] err_import_private
+[PASS] err_import_bad_syntax_location
+[PASS] err_import_bad_semantic_location
+[PASS] err_import_chain
+[PASS] bundled_stdlib_outside_project
+[PASS] meth_deps_package_resolution
+[PASS] function_pointer
+[PASS] struct_new_runtime
+[PASS] direct_object_return_const
+[PASS] direct_object_call_return
+[PASS] coff_reader
+[PASS] symbol_resolve
+[PASS] relocation
+[PASS] pe_emitter
+[PASS] internal_link_basic
+[PASS] internal_link_float_negative_comparison
+[PASS] internal_link_abi_float_return
+[PASS] internal_link_struct_copy_asm
+[PASS] internal_link_struct_copy_emitobj
+[PASS] internal_link_struct_pass_by_value_asm
+[PASS] internal_link_struct_pass_by_value_emitobj
+[PASS] internal_link_struct_return_by_value_asm
+[PASS] internal_link_struct_return_by_value_emitobj
+[PASS] internal_link_struct_abi_matrix_asm
+[PASS] internal_link_struct_abi_matrix_emitobj
+[PASS] internal_link_struct_abi_extern_c_asm
+[PASS] internal_link_struct_abi_extern_c_emitobj
+[PASS] internal_link_struct_float_asm
+[PASS] internal_link_struct_float_emitobj
+[PASS] direct_object_emit_obj_gcc_link
+[PASS] internal_link_ws2_32
+[PASS] internal_link_win32_user32
+[PASS] internal_link_ui
+[PASS] internal_link_std_io
+[PASS] internal_link_thread_atomics
+[PASS] auto_link_internal_only_path
+[PASS] auto_link_fallback_static_lib
+[PASS] direct_object_params
+[PASS] direct_object_control_flow
+[PASS] direct_object_abi_return_int
+[PASS] direct_object_signed_arithmetic
+[PASS] direct_object_structured_control_flow
+[PASS] direct_object_integer_matrix
+[PASS] direct_object_codegen_fastpaths
+[PASS] direct_object_scalar_casts
+[PASS] direct_object_abi_float_return
+[PASS] direct_object_abi_float_args
+[PASS] direct_object_abi_mixed_args
+[PASS] direct_object_abi_float_symbol_args
+[PASS] direct_object_abi_float4_args
+[PASS] direct_object_abi_float_stack
+[PASS] direct_object_cast_expression
+[PASS] direct_object_ok_global_int
+[PASS] direct_object_global_string
+[PASS] direct_object_extern_global_link_name
+[PASS] direct_object_pointer_param_address
+[PASS] direct_object_pointer_memory
+[PASS] direct_object_struct_field_offset
+[PASS] direct_object_array_struct_stride
+[PASS] direct_object_function_pointer
+[PASS] direct_object_runtime_null_deref
+[PASS] main_argc_argv
+[PASS] runtime_null_trace
+[PASS] runtime_access_violation_trace
+[PASS] crash_handler
+[PASS] opt_reduction_unroll
+
+Test summary: 252/252 passed
+All tests passed.

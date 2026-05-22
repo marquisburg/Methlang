@@ -1,0 +1,14 @@
+import "std/io";
+function f(n: int64) -> int64 {
+  var s: int64 = 0; var i: int64 = 1;
+  while (i <= n) { s = s + i * i * i; i = i + 1; }
+  return s;
+}
+function main() -> int32 {
+  println_int(f(1));   // 1
+  println_int(f(2));   // 1+8=9
+  println_int(f(3));   // 1+8+27=36
+  println_int(f(4));   // +64=100
+  println_int(f(5));   // +125=225
+  return 0;
+}

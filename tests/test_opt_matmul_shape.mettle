@@ -1,0 +1,43 @@
+// matmul() should lower to simd_matmul_n32 without a call under --release.
+function matmul(a: int32*, b: int32*, c: int32*) {
+  var row: int32 = 0;
+  var row_base: int64 = 0;
+  while (row < 4) {
+    var col: int32 = 0;
+    while (col < 4) {
+      var sum0: int32 = 0;
+      var sum1: int32 = 0;
+      var sum2: int32 = 0;
+      var sum3: int32 = 0;
+      var a_idx: int64 = row_base;
+      var b_idx: int64 = (int64)col;
+      var k: int32 = 0;
+      while (k < 4) {
+        var av: int32 = a[a_idx];
+        sum0 = sum0 + av * b[b_idx];
+        sum1 = sum1 + av * b[b_idx + 1];
+        sum2 = sum2 + av * b[b_idx + 2];
+        sum3 = sum3 + av * b[b_idx + 3];
+        a_idx = a_idx + 1;
+        b_idx = b_idx + 4;
+        k = k + 1;
+      }
+      var c_idx: int64 = row_base + (int64)col;
+      c[c_idx] = sum0;
+      c[c_idx + 1] = sum1;
+      c[c_idx + 2] = sum2;
+      c[c_idx + 3] = sum3;
+      col = col + 4;
+    }
+    row_base = row_base + 4;
+    row = row + 1;
+  }
+}
+
+function main() -> int32 {
+  var a: int32[16];
+  var b: int32[16];
+  var c: int32[16];
+  matmul(&a[0], &b[0], &c[0]);
+  return c[0];
+}

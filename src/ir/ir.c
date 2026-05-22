@@ -380,6 +380,9 @@ static const char *ir_opcode_name(IROpcode op) {
   case IR_OP_CAST:
     return "cast";
   case IR_OP_COUNT_WORD_STARTS: return "count_word_starts";
+  case IR_OP_MEMCPY_INLINE: return "memcpy_inline";
+  case IR_OP_SIMD_SUM_I32: return "simd_sum_i32";
+  case IR_OP_SIMD_MATMUL_N32: return "simd_matmul_n32";
   default:
     return "unknown";
   }
@@ -528,6 +531,18 @@ int ir_program_dump(IRProgram *program, FILE *output) {
         break;
       case IR_OP_COUNT_WORD_STARTS:
         fprintf(output, "%s %s = count_word_starts(buf=%s, len=%s)\n",
+                ir_opcode_name(instruction->op), dest, lhs, rhs);
+        break;
+      case IR_OP_MEMCPY_INLINE:
+        fprintf(output, "%s dst=%s src=%s size=%s\n",
+                ir_opcode_name(instruction->op), dest, lhs, rhs);
+        break;
+      case IR_OP_SIMD_SUM_I32:
+        fprintf(output, "%s %s += simd_sum_i32(base=%s, len=%s)\n",
+                ir_opcode_name(instruction->op), dest, lhs, rhs);
+        break;
+      case IR_OP_SIMD_MATMUL_N32:
+        fprintf(output, "%s c=%s a=%s b=%s\n",
                 ir_opcode_name(instruction->op), dest, lhs, rhs);
         break;
       case IR_OP_NOP:

@@ -1,0 +1,511 @@
+# DWARF Debug Information
+# Generated for examples\matrix_mul\matrix_mul.mettle -> .tmp\matrix_mul.s
+
+.section .debug_info
+.long .Ldebug_info_end - .Ldebug_info_start
+.Ldebug_info_start:
+.short 4  # DWARF version
+.long .debug_abbrev  # Abbreviation table offset
+.byte 8  # Address size
+
+# Symbol: g_bench_qpc_freq
+.uleb128 1  # DW_TAG_variable
+.string "g_bench_qpc_freq"  # DW_AT_name
+.long 3  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: N
+.uleb128 1  # DW_TAG_variable
+.string "N"  # DW_AT_name
+.long 11  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: N2
+.uleb128 1  # DW_TAG_variable
+.string "N2"  # DW_AT_name
+.long 12  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: cstr
+.uleb128 1  # DW_TAG_variable
+.string "cstr"  # DW_AT_name
+.long 29  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: print
+.uleb128 1  # DW_TAG_variable
+.string "print"  # DW_AT_name
+.long 35  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: println
+.uleb128 1  # DW_TAG_variable
+.string "println"  # DW_AT_name
+.long 40  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: newline
+.uleb128 1  # DW_TAG_variable
+.string "newline"  # DW_AT_name
+.long 45  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: print_int
+.uleb128 1  # DW_TAG_variable
+.string "print_int"  # DW_AT_name
+.long 51  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: buf
+.uleb128 1  # DW_TAG_variable
+.string "buf"  # DW_AT_name
+.long 52  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -54  # Stack offset
+
+# Symbol: println_int
+.uleb128 1  # DW_TAG_variable
+.string "println_int"  # DW_AT_name
+.long 79  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: get_stdin
+.uleb128 1  # DW_TAG_variable
+.string "get_stdin"  # DW_AT_name
+.long 99  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: get_stdout
+.uleb128 1  # DW_TAG_variable
+.string "get_stdout"  # DW_AT_name
+.long 100  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: get_stderr
+.uleb128 1  # DW_TAG_variable
+.string "get_stderr"  # DW_AT_name
+.long 101  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: print_err
+.uleb128 1  # DW_TAG_variable
+.string "print_err"  # DW_AT_name
+.long 104  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: println_err
+.uleb128 1  # DW_TAG_variable
+.string "println_err"  # DW_AT_name
+.long 109  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: __inl_cstr_5_param_s
+.uleb128 1  # DW_TAG_variable
+.string "__inl_cstr_5_param_s"  # DW_AT_name
+.long 111  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -24  # Stack offset
+
+# Symbol: bench_time_us
+.uleb128 1  # DW_TAG_variable
+.string "bench_time_us"  # DW_AT_name
+.long 8  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: counter
+.uleb128 1  # DW_TAG_variable
+.string "counter"  # DW_AT_name
+.long 12  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -8  # Stack offset
+
+# Symbol: mat_idx
+.uleb128 1  # DW_TAG_variable
+.string "mat_idx"  # DW_AT_name
+.long 14  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: fill_matrix
+.uleb128 1  # DW_TAG_variable
+.string "fill_matrix"  # DW_AT_name
+.long 18  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: matmul
+.uleb128 1  # DW_TAG_variable
+.string "matmul"  # DW_AT_name
+.long 31  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: row
+.uleb128 1  # DW_TAG_variable
+.string "row"  # DW_AT_name
+.long 32  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -84  # Stack offset
+
+# Symbol: __inl_mat_idx_10_param_row
+.uleb128 1  # DW_TAG_variable
+.string "__inl_mat_idx_10_param_row"  # DW_AT_name
+.long 42  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -88  # Stack offset
+
+# Symbol: __inl_mat_idx_10_param_col
+.uleb128 1  # DW_TAG_variable
+.string "__inl_mat_idx_10_param_col"  # DW_AT_name
+.long 42  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -92  # Stack offset
+
+# Symbol: trace_matrix
+.uleb128 1  # DW_TAG_variable
+.string "trace_matrix"  # DW_AT_name
+.long 49  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: main
+.uleb128 1  # DW_TAG_variable
+.string "main"  # DW_AT_name
+.long 59  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 0  # Stack offset
+
+# Symbol: a
+.uleb128 1  # DW_TAG_variable
+.string "a"  # DW_AT_name
+.long 61  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -4152  # Stack offset
+
+# Symbol: b
+.uleb128 1  # DW_TAG_variable
+.string "b"  # DW_AT_name
+.long 62  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -8248  # Stack offset
+
+# Symbol: c
+.uleb128 1  # DW_TAG_variable
+.string "c"  # DW_AT_name
+.long 63  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12344  # Stack offset
+
+# Symbol: header
+.uleb128 1  # DW_TAG_variable
+.string "header"  # DW_AT_name
+.long 68  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12360  # Stack offset
+
+# Symbol: __inl_cstr_12_param_s
+.uleb128 1  # DW_TAG_variable
+.string "__inl_cstr_12_param_s"  # DW_AT_name
+.long 69  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12376  # Stack offset
+
+# Symbol: __inl_println_13_param_msg
+.uleb128 1  # DW_TAG_variable
+.string "__inl_println_13_param_msg"  # DW_AT_name
+.long 69  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12384  # Stack offset
+
+# Symbol: result_str
+.uleb128 1  # DW_TAG_variable
+.string "result_str"  # DW_AT_name
+.long 73  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12400  # Stack offset
+
+# Symbol: __inl_cstr_14_param_s
+.uleb128 1  # DW_TAG_variable
+.string "__inl_cstr_14_param_s"  # DW_AT_name
+.long 74  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12416  # Stack offset
+
+# Symbol: __inl_println_int_16_param_n
+.uleb128 1  # DW_TAG_variable
+.string "__inl_println_int_16_param_n"  # DW_AT_name
+.long 75  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12424  # Stack offset
+
+# Symbol: bench_header
+.uleb128 1  # DW_TAG_variable
+.string "bench_header"  # DW_AT_name
+.long 77  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12440  # Stack offset
+
+# Symbol: __inl_cstr_17_param_s
+.uleb128 1  # DW_TAG_variable
+.string "__inl_cstr_17_param_s"  # DW_AT_name
+.long 78  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12456  # Stack offset
+
+# Symbol: __inl_println_18_param_msg
+.uleb128 1  # DW_TAG_variable
+.string "__inl_println_18_param_msg"  # DW_AT_name
+.long 78  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12464  # Stack offset
+
+# Symbol: __inl_bench_time_us_19_local_counter
+.uleb128 1  # DW_TAG_variable
+.string "__inl_bench_time_us_19_local_counter"  # DW_AT_name
+.long 12  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12472  # Stack offset
+
+# Symbol: __inl_bench_time_us_20_local_counter
+.uleb128 1  # DW_TAG_variable
+.string "__inl_bench_time_us_20_local_counter"  # DW_AT_name
+.long 12  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12480  # Stack offset
+
+# Symbol: sum_str
+.uleb128 1  # DW_TAG_variable
+.string "sum_str"  # DW_AT_name
+.long 90  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12496  # Stack offset
+
+# Symbol: __inl_cstr_21_param_s
+.uleb128 1  # DW_TAG_variable
+.string "__inl_cstr_21_param_s"  # DW_AT_name
+.long 91  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12512  # Stack offset
+
+# Symbol: __inl_print_22_param_msg
+.uleb128 1  # DW_TAG_variable
+.string "__inl_print_22_param_msg"  # DW_AT_name
+.long 91  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12520  # Stack offset
+
+# Symbol: __inl_println_int_23_param_n
+.uleb128 1  # DW_TAG_variable
+.string "__inl_println_int_23_param_n"  # DW_AT_name
+.long 92  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12528  # Stack offset
+
+# Symbol: time_str
+.uleb128 1  # DW_TAG_variable
+.string "time_str"  # DW_AT_name
+.long 94  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12544  # Stack offset
+
+# Symbol: __inl_cstr_24_param_s
+.uleb128 1  # DW_TAG_variable
+.string "__inl_cstr_24_param_s"  # DW_AT_name
+.long 95  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12560  # Stack offset
+
+# Symbol: __inl_print_25_param_msg
+.uleb128 1  # DW_TAG_variable
+.string "__inl_print_25_param_msg"  # DW_AT_name
+.long 95  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12568  # Stack offset
+
+# Symbol: __inl_cstr_26_param_s
+.uleb128 1  # DW_TAG_variable
+.string "__inl_cstr_26_param_s"  # DW_AT_name
+.long 97  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12584  # Stack offset
+
+# Symbol: __inl_println_27_param_msg
+.uleb128 1  # DW_TAG_variable
+.string "__inl_println_27_param_msg"  # DW_AT_name
+.long 97  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12592  # Stack offset
+
+# Symbol: per_pass
+.uleb128 1  # DW_TAG_variable
+.string "per_pass"  # DW_AT_name
+.long 99  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12600  # Stack offset
+
+# Symbol: us_str
+.uleb128 1  # DW_TAG_variable
+.string "us_str"  # DW_AT_name
+.long 100  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12616  # Stack offset
+
+# Symbol: __inl_cstr_28_param_s
+.uleb128 1  # DW_TAG_variable
+.string "__inl_cstr_28_param_s"  # DW_AT_name
+.long 101  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12632  # Stack offset
+
+# Symbol: __inl_print_29_param_msg
+.uleb128 1  # DW_TAG_variable
+.string "__inl_print_29_param_msg"  # DW_AT_name
+.long 101  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12640  # Stack offset
+
+# Symbol: __inl_cstr_30_param_s
+.uleb128 1  # DW_TAG_variable
+.string "__inl_cstr_30_param_s"  # DW_AT_name
+.long 103  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12656  # Stack offset
+
+# Symbol: __inl_println_31_param_msg
+.uleb128 1  # DW_TAG_variable
+.string "__inl_println_31_param_msg"  # DW_AT_name
+.long 103  # DW_AT_decl_line
+.byte 0x91  # DW_OP_fbreg
+.sleb128 -12664  # Stack offset
+
+.byte 0  # End of compilation unit
+.Ldebug_info_end:
+
+.section .debug_line
+.long .Ldebug_line_end - .Ldebug_line_start
+.Ldebug_line_start:
+.short 4  # DWARF version
+.long .Ldebug_line_header_end - .Ldebug_line_header_start
+.Ldebug_line_header_start:
+.byte 1  # Minimum instruction length
+.byte 1  # Default is_stmt
+.byte -5  # Line base
+.byte 14  # Line range
+.byte 13  # Opcode base
+.byte 0
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.byte 1
+.Ldebug_line_header_end:
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L48  # Assembly line 48
+.byte 34  # Advance line to 29
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L73  # Assembly line 73
+.byte 40  # Advance line to 35
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L119  # Assembly line 119
+.byte 45  # Advance line to 40
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L149  # Assembly line 149
+.byte 50  # Advance line to 45
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L176  # Assembly line 176
+.byte 56  # Advance line to 51
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L463  # Assembly line 463
+.byte 84  # Advance line to 79
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L506  # Assembly line 506
+.byte 104  # Advance line to 99
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L533  # Assembly line 533
+.byte 105  # Advance line to 100
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L560  # Assembly line 560
+.byte 106  # Advance line to 101
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L587  # Assembly line 587
+.byte 109  # Advance line to 104
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L631  # Assembly line 631
+.byte 114  # Advance line to 109
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L717  # Assembly line 717
+.byte 13  # Advance line to 8
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L801  # Assembly line 801
+.byte 19  # Advance line to 14
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L844  # Assembly line 844
+.byte 23  # Advance line to 18
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L1017  # Assembly line 1017
+.byte 36  # Advance line to 31
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L1306  # Assembly line 1306
+.byte 54  # Advance line to 49
+.byte 0  # Extended opcode
+.uleb128 9  # Length
+.byte 2  # DW_LNE_set_address
+.quad .L1431  # Assembly line 1431
+.byte 64  # Advance line to 59
+.byte 0  # Extended opcode
+.uleb128 1  # Length
+.byte 1  # DW_LNE_end_sequence
+.Ldebug_line_end:

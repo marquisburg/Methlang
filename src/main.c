@@ -1979,6 +1979,8 @@ int main(int argc, char *argv[]) {
       options.generate_debug_symbols = 1;
       options.generate_line_mapping = 1;
       options.generate_stack_trace_support = 1;
+    } else if (strcmp(argv[i], "--dump-ir") == 0) {
+      options.dump_ir = 1;
     } else if (strcmp(argv[i], "-g") == 0 ||
                strcmp(argv[i], "--debug-symbols") == 0) {
       options.generate_debug_symbols = 1;
@@ -2449,7 +2451,7 @@ int compile_file(const char *input_filename, const char *output_filename,
 
   code_generator_set_ir_program(code_generator, ir_program);
 
-  if (options->debug_mode) {
+  if (options->debug_mode || options->dump_ir) {
     phase_start = compiler_profile_begin(&profile);
     char *ir_output = build_sidecar_filename(output_filename, ".ir");
     if (!ir_output) {
@@ -2630,6 +2632,7 @@ void print_usage(const char *program_name) {
   printf("  --link-arg <arg>    Pass an extra linker argument (repeatable; "
          "use with --build)\n");
   printf("  -d, --debug         Enable debug output and symbols\n");
+  printf("  --dump-ir           Write optimized IR sidecar (.ir) without debug metadata\n");
   printf("  -g, --debug-symbols Generate debug symbols\n");
   printf("  -l, --line-mapping  Generate source line mapping\n");
   printf("  -s, --stack-trace   Embed runtime crash traceback support\n");

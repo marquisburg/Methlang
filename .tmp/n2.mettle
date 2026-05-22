@@ -1,0 +1,11 @@
+import "std/io";
+function fill(data: int32*, len: int32, seed: int32) {
+  var i: int32 = 0; var st: int32 = seed;
+  while (i < len) { st = st * 1103515245 + 12345; data[i] = st % 200 - 100; i = i + 1; }
+}
+function main() -> int32 {
+  var d: int32[4];
+  fill(&d[0], 2, 8);
+  print(cstr("filled: ")); print_int((int64)d[0]); print(cstr(" ")); print_int((int64)d[1]); println(cstr(""));
+  return 0;
+}

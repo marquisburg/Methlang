@@ -1,7 +1,7 @@
 /*
  * C Grep benchmark - counterpart to grep.mettle
  *
- * Counts lines containing "ERROR" in a 1 MiB log buffer, 2000 passes.
+ * Counts lines containing "ERROR" in a 1 MiB log buffer, 200 passes.
  * Uses the same uint64 load + 5-byte mask compare as grep.mettle (memcmp tail only).
  *
  * Build: build.bat (or: gcc -O2 -o grep_c.exe grep.c -lkernel32)

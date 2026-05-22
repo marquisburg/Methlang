@@ -53,7 +53,7 @@ function main() -> int32 {
 
   var wc: int64 = word_count(buf, buf_size);
 
-  var passes: int32 = 500;
+  var passes: int32 = 200;
   var t0: uint64 = bench_time_us();
   var total: int64 = 0;
   var p: int32 = 0;
@@ -70,7 +70,7 @@ function main() -> int32 {
   print(cstr(result_str));
   println_int(wc);
 
-  var bench_header: string = "Benchmark: 500 passes (word_count)";
+  var bench_header: string = "Benchmark: 200 passes (word_count)";
   println(cstr(bench_header));
 
   var sum_str: string = "Total words = ";

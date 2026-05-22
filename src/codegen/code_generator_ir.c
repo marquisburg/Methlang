@@ -4443,6 +4443,15 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
   case IR_OP_COUNT_WORD_STARTS:
     return code_generator_emit_ir_count_word_starts(generator, instruction);
 
+  case IR_OP_MEMCPY_INLINE:
+  case IR_OP_SIMD_SUM_I32:
+  case IR_OP_SIMD_MATMUL_N32:
+    code_generator_set_error(
+        generator,
+        "IR opcode %d requires the direct object (--emit-obj) backend",
+        (int)instruction->op);
+    return 0;
+
   default:
     code_generator_set_error(generator, "Unhandled IR opcode: %d",
                              instruction->op);

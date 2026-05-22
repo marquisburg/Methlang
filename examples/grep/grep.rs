@@ -11,7 +11,7 @@ const PATTERN_LEN: i64 = 5;
 const PATTERN_U64: u64 = 0x524F_5252_45;
 const PATTERN_MASK: u64 = 0xFFFF_FFFF_FF;
 const GREP_BUF_SIZE: i64 = 1_048_576;
-const GREP_PASSES: i32 = 2000;
+const GREP_PASSES: i32 = 200;
 
 fn pattern_matches(buf: &[u8], i: i64, len: i64) -> bool {
     if i + PATTERN_LEN > len {

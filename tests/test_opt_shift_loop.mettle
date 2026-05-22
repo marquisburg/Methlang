@@ -1,0 +1,105 @@
+// Equivalence gate for the shift-loop idiom optimization.
+//
+// Exercises the insertion-sort inner shift loop (the matched idiom) on
+// adversarial inputs and verifies, independently of how the loop is lowered,
+// that the result is fully sorted AND preserves the multiset (sum + xor).
+// Returns nonzero on any discrepancy. Must pass both with and without the
+// shift-loop lowering enabled.
+
+import "std/io";
+
+function insertion_sort(data: int32*, len: int32) {
+  var i: int32 = 1;
+  var cur: int32* = data + 4;
+  while (i < len) {
+    var key: int32 = *cur;
+    var scan: int32* = cur;
+    var j: int32 = i - 1;
+    while (j >= 0) {
+      var prev: int32* = scan - 4;
+      var current: int32 = *prev;
+      if (current <= key) {
+        break;
+      }
+      *scan = current;
+      scan = prev;
+      j = j - 1;
+    }
+    *scan = key;
+    cur = cur + 4;
+    i = i + 1;
+  }
+}
+
+function is_sorted(data: int32*, len: int32) -> int32 {
+  var i: int32 = 1;
+  while (i < len) {
+    if (data[i] < data[i - 1]) {
+      return 0;
+    }
+    i = i + 1;
+  }
+  return 1;
+}
+
+function checksum(data: int32*, len: int32) -> int64 {
+  var s: int64 = 0;
+  var x: int64 = 0;
+  var i: int32 = 0;
+  while (i < len) {
+    s = s + (int64)data[i];
+    x = x ^ (int64)data[i];
+    i = i + 1;
+  }
+  return s * 1000003 + x;
+}
+
+// Fill with a pseudo-random pattern that can include negatives and ties.
+function fill(data: int32*, len: int32, seed: int32) {
+  var i: int32 = 0;
+  var st: int32 = seed;
+  while (i < len) {
+    st = st * 1103515245 + 12345;
+    var v: int32 = st % 200 - 100;   // range [-100, 99], many ties
+    data[i] = v;
+    i = i + 1;
+  }
+}
+
+function run_case(len: int32, seed: int32) -> int32 {
+  var data: int32[256];
+  fill(&data[0], len, seed);
+  var before: int64 = checksum(&data[0], len);
+  insertion_sort(&data[0], len);
+  var after: int64 = checksum(&data[0], len);
+  if (is_sorted(&data[0], len) == 0) { return 0; }
+  if (before != after) { return 0; }     // multiset preserved
+  return 1;
+}
+
+function main() -> int32 {
+  var ok: int32 = 1;
+
+  // Varied lengths incl. 0/1 (loop never enters), small, and odd/even,
+  // multiple seeds, including already-sorted and reverse via seed choice.
+  var lens: int32[10];
+  lens[0] = 0; lens[1] = 1; lens[2] = 2; lens[3] = 3; lens[4] = 7;
+  lens[5] = 16; lens[6] = 31; lens[7] = 64; lens[8] = 100; lens[9] = 256;
+
+  var li: int32 = 0;
+  while (li < 10) {
+    var s: int32 = 1;
+    while (s <= 5) {
+      if (run_case(lens[li], s * 7 + 1) == 0) { ok = 0; }
+      s = s + 1;
+    }
+    li = li + 1;
+  }
+
+  if (ok == 1) {
+    println(cstr("shift_loop OK"));
+    return 0;
+  }
+  println(cstr("shift_loop FAIL"));
+  return 1;
+}

@@ -28,71 +28,71 @@ if not exist bin mkdir bin
 
 REM Compile source files
 echo Compiling lexer...
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\lexer\lexer.c -o obj\lexer\lexer.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\lexer\lexer.c -o obj\lexer\lexer.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling parser...
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\parser\ast.c -o obj\parser\ast.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\parser\ast.c -o obj\parser\ast.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\parser\parser.c -o obj\parser\parser.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\parser\parser.c -o obj\parser\parser.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling semantic analysis...
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\semantic\symbol_table.c -o obj\semantic\symbol_table.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\semantic\symbol_table.c -o obj\semantic\symbol_table.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\semantic\type_checker.c -o obj\semantic\type_checker.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\semantic\type_checker.c -o obj\semantic\type_checker.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\semantic\register_allocator.c -o obj\semantic\register_allocator.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\semantic\register_allocator.c -o obj\semantic\register_allocator.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\semantic\import_resolver.c -o obj\semantic\import_resolver.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\semantic\import_resolver.c -o obj\semantic\import_resolver.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\semantic\monomorphize.c -o obj\semantic\monomorphize.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\semantic\monomorphize.c -o obj\semantic\monomorphize.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling IR...
 for %%f in (src\ir\*.c) do (
     echo   %%~nxf
-    gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c %%f -o obj\ir\%%~nf.o
+    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c %%f -o obj\ir\%%~nf.o
     if errorlevel 1 exit /b 1
 )
 
 echo Compiling code generator modules...
 for %%f in (src\\codegen\\*.c) do (
     echo   %%~nxf
-    gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c %%f -o obj\\codegen\\%%~nf.o
+    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c %%f -o obj\\codegen\\%%~nf.o
     if errorlevel 1 exit /b 1
 )
 
 echo Compiling linker modules...
 for %%f in (src\\linker\\*.c) do (
     echo   %%~nxf
-    gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc -c %%f -o obj\\linker\\%%~nf.o
+    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c %%f -o obj\\linker\\%%~nf.o
     if errorlevel 1 exit /b 1
 )
 
 echo Compiling debug info...
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\debug\debug_info.c -o obj\debug\debug_info.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\debug\debug_info.c -o obj\debug\debug_info.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling crash-handler runtime (opt-in: -d / -s / -g / IR trap)...
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\runtime\crash_handler.c -o obj\runtime\crash_handler.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\runtime\crash_handler.c -o obj\runtime\crash_handler.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling atomics helpers (opt-in: std/thread)...
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\runtime\atomics.c -o obj\runtime\atomics.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\runtime\atomics.c -o obj\runtime\atomics.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling error reporter...
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -c src\error\error_reporter.c -o obj\error\error_reporter.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\error\error_reporter.c -o obj\error\error_reporter.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling main...
-gcc -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc -c src\main.c -o obj\main.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\main.c -o obj\main.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Linking...

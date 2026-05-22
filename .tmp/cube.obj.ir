@@ -1,0 +1,775 @@
+function cstr {
+     0: nop
+     1: nop
+     2: load %t1 <- *@s [8]
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: return %t1
+}
+
+function print {
+     0: nop
+     1: nop
+     2: call %__inl_get_stdout_0_tmp_t54 = __acrt_iob_func(1)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: call %t3 = fputs(@msg, %__inl_get_stdout_0_tmp_t54)
+    12: nop
+    13: nop
+    14: nop
+    15: nop
+    16: nop
+    17: return _
+}
+
+function println {
+     0: nop
+     1: call %t6 = puts(@msg)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return _
+}
+
+function newline {
+     0: nop
+     1: call %t8 = putchar(10)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return _
+}
+
+function print_int {
+     0: nop
+     1: local @buf : uint8[22]
+     2: local @pos : int32
+     3: assign @pos <- 21
+     4: local @neg : int32
+     5: assign @neg <- 0
+     6: addr_of %t10 <- &@buf
+     7: nop
+     8: binary %t12 = %t10 + 21
+     9: store *%t12 <- 0 [1]
+    10: binary %t13 = @n < 0
+    11: branch_zero %t13 -> ir_if_next_14
+    12: assign @neg <- 1
+    13: binary @n = 0 - @n
+    14: nop
+    15: jump ir_if_end_13
+    16: label ir_if_next_14
+    17: label ir_if_end_13
+    18: binary %t15 = @n == 0
+    19: branch_zero %t15 -> ir_if_next_16
+    20: addr_of %t16 <- &@buf
+    21: nop
+    22: nop
+    23: store *%t16 <- 48 [1]
+    24: addr_of %t19 <- &@buf
+    25: nop
+    26: binary %t21 = %t19 + 1
+    27: store *%t21 <- 0 [1]
+    28: addr_of %t23 <- &@buf
+    29: nop
+    30: nop
+    31: nop
+    32: call %__inl_get_stdout_1_tmp_t54 = __acrt_iob_func(1)
+    33: nop
+    34: nop
+    35: nop
+    36: nop
+    37: nop
+    38: nop
+    39: nop
+    40: nop
+    41: call %t22 = fputs(%t23, %__inl_get_stdout_1_tmp_t54)
+    42: nop
+    43: nop
+    44: nop
+    45: nop
+    46: nop
+    47: return _
+    48: nop
+    49: label ir_if_next_16
+    50: nop
+    51: label ir_while_19
+    52: binary %t28 = @n > 0
+    53: branch_zero %t28 -> ir_while_end_20
+    54: binary @pos = @pos - 1
+    55: nop
+    56: binary %t30 = 48 + @n
+    57: binary %t31 = @n / 10
+    58: binary %t32 = %t31 * 10
+    59: binary %t33 = %t30 - %t32
+    60: addr_of %t34 <- &@buf
+    61: nop
+    62: binary %t36 = %t34 + @pos
+    63: store *%t36 <- %t33 [1]
+    64: binary @n = @n / 10
+    65: nop
+    66: jump ir_while_19
+    67: label ir_while_end_20
+    68: nop
+    69: branch_zero @neg -> ir_if_next_22
+    70: binary @pos = @pos - 1
+    71: nop
+    72: addr_of %t40 <- &@buf
+    73: nop
+    74: binary %t42 = %t40 + @pos
+    75: store *%t42 <- 45 [1]
+    76: jump ir_if_end_21
+    77: label ir_if_next_22
+    78: label ir_if_end_21
+    79: addr_of %t44 <- &@buf
+    80: nop
+    81: binary %t46 = %t44 + @pos
+    82: nop
+    83: call %__inl_get_stdout_2_tmp_t54 = __acrt_iob_func(1)
+    84: nop
+    85: nop
+    86: nop
+    87: nop
+    88: nop
+    89: nop
+    90: nop
+    91: nop
+    92: call %t43 = fputs(%t46, %__inl_get_stdout_2_tmp_t54)
+    93: nop
+    94: nop
+    95: nop
+    96: nop
+    97: nop
+    98: return _
+}
+
+function println_int {
+     0: nop
+     1: call %t49 = print_int(@n)
+     2: call %t50 = putchar(10)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: return _
+}
+
+function get_stdin {
+     0: nop
+     1: call %t52 = __acrt_iob_func(0)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t52
+}
+
+function get_stdout {
+     0: nop
+     1: call %t54 = __acrt_iob_func(1)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t54
+}
+
+function get_stderr {
+     0: nop
+     1: call %t56 = __acrt_iob_func(2)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t56
+}
+
+function print_err {
+     0: nop
+     1: nop
+     2: call %__inl_get_stderr_3_tmp_t56 = __acrt_iob_func(2)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: call %t58 = fputs(@msg, %__inl_get_stderr_3_tmp_t56)
+    12: nop
+    13: nop
+    14: nop
+    15: nop
+    16: nop
+    17: return _
+}
+
+function println_err {
+     0: nop
+     1: nop
+     2: call %__inl_get_stderr_4_tmp_t56 = __acrt_iob_func(2)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: call %t61 = fputs(@msg, %__inl_get_stderr_4_tmp_t56)
+    12: local @__inl_cstr_5_param_s : string
+    13: assign @__inl_cstr_5_param_s <- "
+"
+    14: nop
+    15: nop
+    16: load %__inl_cstr_5_tmp_t1 <- *"
+" [8]
+    17: nop
+    18: nop
+    19: nop
+    20: nop
+    21: nop
+    22: nop
+    23: nop
+    24: nop
+    25: nop
+    26: call %__inl_get_stderr_6_tmp_t56 = __acrt_iob_func(2)
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: nop
+    33: nop
+    34: nop
+    35: call %t63 = fputs(%__inl_cstr_5_tmp_t1, %__inl_get_stderr_6_tmp_t56)
+    36: nop
+    37: nop
+    38: nop
+    39: nop
+    40: nop
+    41: return _
+}
+
+function f {
+     0: nop
+     1: local @s : int64
+     2: assign @s <- 0
+     3: local @i : int64
+     4: assign @i <- 1
+     5: local @s__a1 : int64
+     6: assign @s__a1 <- 0
+     7: local @s__a2 : int64
+     8: assign @s__a2 <- 0
+     9: local @s__a3 : int64
+    10: assign @s__a3 <- 0
+    11: label vu5_main
+    12: binary %vu5_ub = @i + 3
+    13: binary %vu5_gu = %vu5_ub <= @n
+    14: branch_zero %vu5_gu -> vu5_tail
+    15: binary %t68__l0 = @i * @i
+    16: binary %t69__l0 = %t68__l0 * @i
+    17: binary @s = @s + %t69__l0
+    18: nop
+    19: binary %vu5_ti1 = @i + 1
+    20: binary %t68__l1 = %vu5_ti1 * %vu5_ti1
+    21: binary %t69__l1 = %t68__l1 * %vu5_ti1
+    22: binary @s__a1 = @s__a1 + %t69__l1
+    23: nop
+    24: binary %vu5_ti2 = @i + 2
+    25: binary %t68__l2 = %vu5_ti2 * %vu5_ti2
+    26: binary %t69__l2 = %t68__l2 * %vu5_ti2
+    27: binary @s__a2 = @s__a2 + %t69__l2
+    28: nop
+    29: binary %vu5_ti3 = @i + 3
+    30: binary %t68__l3 = %vu5_ti3 * %vu5_ti3
+    31: binary %t69__l3 = %t68__l3 * %vu5_ti3
+    32: binary @s__a3 = @s__a3 + %t69__l3
+    33: nop
+    34: binary @i = @i + 4
+    35: nop
+    36: jump vu5_main
+    37: label vu5_tail
+    38: label vu5_sh
+    39: binary %t67 = @i <= @n
+    40: branch_zero %t67 -> vu5_comb
+    41: binary %t68 = @i * @i
+    42: binary %t69 = %t68 * @i
+    43: binary @s = @s + %t69
+    44: nop
+    45: binary @i = @i + 1
+    46: nop
+    47: jump vu5_sh
+    48: label vu5_comb
+    49: binary @s = @s + @s__a1
+    50: nop
+    51: binary @s = @s + @s__a2
+    52: nop
+    53: binary @s = @s + @s__a3
+    54: nop
+    55: nop
+    56: nop
+    57: nop
+    58: nop
+    59: nop
+    60: nop
+    61: return @s
+}
+
+function main {
+     0: nop
+     1: local @__inl_f_7_param_n : int64
+     2: assign @__inl_f_7_param_n <- 1
+     3: nop
+     4: local @__inl_f_7_local_s : int64
+     5: assign @__inl_f_7_local_s <- 0
+     6: local @__inl_f_7_local_i : int64
+     7: assign @__inl_f_7_local_i <- 1
+     8: local @__inl_f_7_local_s__a1 : int64
+     9: assign @__inl_f_7_local_s__a1 <- 0
+    10: local @__inl_f_7_local_s__a2 : int64
+    11: assign @__inl_f_7_local_s__a2 <- 0
+    12: local @__inl_f_7_local_s__a3 : int64
+    13: assign @__inl_f_7_local_s__a3 <- 0
+    14: label vu8_main
+    15: binary %vu8_ub = @__inl_f_7_local_i + 3
+    16: binary %vu8_gu = %vu8_ub <= @__inl_f_7_param_n
+    17: branch_zero %vu8_gu -> vu8_tail
+    18: binary %__inl_f_7_tmp_t68__l0 = @__inl_f_7_local_i * @__inl_f_7_local_i
+    19: binary %__inl_f_7_tmp_t69__l0 = %__inl_f_7_tmp_t68__l0 * @__inl_f_7_local_i
+    20: binary @__inl_f_7_local_s = @__inl_f_7_local_s + %__inl_f_7_tmp_t69__l0
+    21: nop
+    22: binary %vu8_ti1 = @__inl_f_7_local_i + 1
+    23: binary %__inl_f_7_tmp_t68__l1 = %vu8_ti1 * %vu8_ti1
+    24: binary %__inl_f_7_tmp_t69__l1 = %__inl_f_7_tmp_t68__l1 * %vu8_ti1
+    25: binary @__inl_f_7_local_s__a1 = @__inl_f_7_local_s__a1 + %__inl_f_7_tmp_t69__l1
+    26: nop
+    27: binary %vu8_ti2 = @__inl_f_7_local_i + 2
+    28: binary %__inl_f_7_tmp_t68__l2 = %vu8_ti2 * %vu8_ti2
+    29: binary %__inl_f_7_tmp_t69__l2 = %__inl_f_7_tmp_t68__l2 * %vu8_ti2
+    30: binary @__inl_f_7_local_s__a2 = @__inl_f_7_local_s__a2 + %__inl_f_7_tmp_t69__l2
+    31: nop
+    32: binary %vu8_ti3 = @__inl_f_7_local_i + 3
+    33: binary %__inl_f_7_tmp_t68__l3 = %vu8_ti3 * %vu8_ti3
+    34: binary %__inl_f_7_tmp_t69__l3 = %__inl_f_7_tmp_t68__l3 * %vu8_ti3
+    35: binary @__inl_f_7_local_s__a3 = @__inl_f_7_local_s__a3 + %__inl_f_7_tmp_t69__l3
+    36: nop
+    37: binary @__inl_f_7_local_i = @__inl_f_7_local_i + 4
+    38: nop
+    39: jump vu8_main
+    40: label vu8_tail
+    41: binary %__inl_f_7_tmp_t68 = @__inl_f_7_local_i * @__inl_f_7_local_i
+    42: binary %__inl_f_7_tmp_t69 = %__inl_f_7_tmp_t68 * @__inl_f_7_local_i
+    43: binary @__inl_f_7_local_s = @__inl_f_7_local_s + %__inl_f_7_tmp_t69
+    44: nop
+    45: binary @__inl_f_7_local_i = @__inl_f_7_local_i + 1
+    46: nop
+    47: nop
+    48: binary @__inl_f_7_local_s = @__inl_f_7_local_s + @__inl_f_7_local_s__a1
+    49: nop
+    50: binary @__inl_f_7_local_s = @__inl_f_7_local_s + @__inl_f_7_local_s__a2
+    51: nop
+    52: binary @__inl_f_7_local_s = @__inl_f_7_local_s + @__inl_f_7_local_s__a3
+    53: nop
+    54: nop
+    55: nop
+    56: nop
+    57: nop
+    58: nop
+    59: nop
+    60: nop
+    61: nop
+    62: nop
+    63: local @__inl_println_int_8_param_n : int64
+    64: assign @__inl_println_int_8_param_n <- @__inl_f_7_local_s
+    65: nop
+    66: call %__inl_println_int_8_tmp_t49 = print_int(@__inl_f_7_local_s)
+    67: call %__inl_println_int_8_tmp_t50 = putchar(10)
+    68: nop
+    69: nop
+    70: nop
+    71: nop
+    72: nop
+    73: nop
+    74: nop
+    75: local @__inl_f_9_param_n : int64
+    76: assign @__inl_f_9_param_n <- 2
+    77: nop
+    78: local @__inl_f_9_local_s : int64
+    79: assign @__inl_f_9_local_s <- 0
+    80: local @__inl_f_9_local_i : int64
+    81: assign @__inl_f_9_local_i <- 1
+    82: local @__inl_f_9_local_s__a1 : int64
+    83: assign @__inl_f_9_local_s__a1 <- 0
+    84: local @__inl_f_9_local_s__a2 : int64
+    85: assign @__inl_f_9_local_s__a2 <- 0
+    86: local @__inl_f_9_local_s__a3 : int64
+    87: assign @__inl_f_9_local_s__a3 <- 0
+    88: label vu86_main
+    89: binary %vu86_ub = @__inl_f_9_local_i + 3
+    90: binary %vu86_gu = %vu86_ub <= @__inl_f_9_param_n
+    91: branch_zero %vu86_gu -> vu86_tail
+    92: binary %__inl_f_9_tmp_t68__l0 = @__inl_f_9_local_i * @__inl_f_9_local_i
+    93: binary %__inl_f_9_tmp_t69__l0 = %__inl_f_9_tmp_t68__l0 * @__inl_f_9_local_i
+    94: binary @__inl_f_9_local_s = @__inl_f_9_local_s + %__inl_f_9_tmp_t69__l0
+    95: nop
+    96: binary %vu86_ti1 = @__inl_f_9_local_i + 1
+    97: binary %__inl_f_9_tmp_t68__l1 = %vu86_ti1 * %vu86_ti1
+    98: binary %__inl_f_9_tmp_t69__l1 = %__inl_f_9_tmp_t68__l1 * %vu86_ti1
+    99: binary @__inl_f_9_local_s__a1 = @__inl_f_9_local_s__a1 + %__inl_f_9_tmp_t69__l1
+   100: nop
+   101: binary %vu86_ti2 = @__inl_f_9_local_i + 2
+   102: binary %__inl_f_9_tmp_t68__l2 = %vu86_ti2 * %vu86_ti2
+   103: binary %__inl_f_9_tmp_t69__l2 = %__inl_f_9_tmp_t68__l2 * %vu86_ti2
+   104: binary @__inl_f_9_local_s__a2 = @__inl_f_9_local_s__a2 + %__inl_f_9_tmp_t69__l2
+   105: nop
+   106: binary %vu86_ti3 = @__inl_f_9_local_i + 3
+   107: binary %__inl_f_9_tmp_t68__l3 = %vu86_ti3 * %vu86_ti3
+   108: binary %__inl_f_9_tmp_t69__l3 = %__inl_f_9_tmp_t68__l3 * %vu86_ti3
+   109: binary @__inl_f_9_local_s__a3 = @__inl_f_9_local_s__a3 + %__inl_f_9_tmp_t69__l3
+   110: nop
+   111: binary @__inl_f_9_local_i = @__inl_f_9_local_i + 4
+   112: nop
+   113: jump vu86_main
+   114: label vu86_tail
+   115: binary %__inl_f_9_tmp_t68 = @__inl_f_9_local_i * @__inl_f_9_local_i
+   116: binary %__inl_f_9_tmp_t69 = %__inl_f_9_tmp_t68 * @__inl_f_9_local_i
+   117: binary @__inl_f_9_local_s = @__inl_f_9_local_s + %__inl_f_9_tmp_t69
+   118: nop
+   119: binary @__inl_f_9_local_i = @__inl_f_9_local_i + 1
+   120: nop
+   121: binary %__inl_f_9_tmp_t68 = @__inl_f_9_local_i * @__inl_f_9_local_i
+   122: binary %__inl_f_9_tmp_t69 = %__inl_f_9_tmp_t68 * @__inl_f_9_local_i
+   123: binary @__inl_f_9_local_s = @__inl_f_9_local_s + %__inl_f_9_tmp_t69
+   124: nop
+   125: binary @__inl_f_9_local_i = @__inl_f_9_local_i + 1
+   126: nop
+   127: nop
+   128: binary @__inl_f_9_local_s = @__inl_f_9_local_s + @__inl_f_9_local_s__a1
+   129: nop
+   130: binary @__inl_f_9_local_s = @__inl_f_9_local_s + @__inl_f_9_local_s__a2
+   131: nop
+   132: binary @__inl_f_9_local_s = @__inl_f_9_local_s + @__inl_f_9_local_s__a3
+   133: nop
+   134: nop
+   135: nop
+   136: nop
+   137: nop
+   138: nop
+   139: nop
+   140: nop
+   141: nop
+   142: nop
+   143: local @__inl_println_int_10_param_n : int64
+   144: assign @__inl_println_int_10_param_n <- @__inl_f_9_local_s
+   145: nop
+   146: call %__inl_println_int_10_tmp_t49 = print_int(@__inl_f_9_local_s)
+   147: call %__inl_println_int_10_tmp_t50 = putchar(10)
+   148: nop
+   149: nop
+   150: nop
+   151: nop
+   152: nop
+   153: nop
+   154: nop
+   155: local @__inl_f_11_param_n : int64
+   156: assign @__inl_f_11_param_n <- 3
+   157: nop
+   158: local @__inl_f_11_local_s : int64
+   159: assign @__inl_f_11_local_s <- 0
+   160: local @__inl_f_11_local_i : int64
+   161: assign @__inl_f_11_local_i <- 1
+   162: local @__inl_f_11_local_s__a1 : int64
+   163: assign @__inl_f_11_local_s__a1 <- 0
+   164: local @__inl_f_11_local_s__a2 : int64
+   165: assign @__inl_f_11_local_s__a2 <- 0
+   166: local @__inl_f_11_local_s__a3 : int64
+   167: assign @__inl_f_11_local_s__a3 <- 0
+   168: label vu164_main
+   169: binary %vu164_ub = @__inl_f_11_local_i + 3
+   170: binary %vu164_gu = %vu164_ub <= @__inl_f_11_param_n
+   171: branch_zero %vu164_gu -> vu164_tail
+   172: binary %__inl_f_11_tmp_t68__l0 = @__inl_f_11_local_i * @__inl_f_11_local_i
+   173: binary %__inl_f_11_tmp_t69__l0 = %__inl_f_11_tmp_t68__l0 * @__inl_f_11_local_i
+   174: binary @__inl_f_11_local_s = @__inl_f_11_local_s + %__inl_f_11_tmp_t69__l0
+   175: nop
+   176: binary %vu164_ti1 = @__inl_f_11_local_i + 1
+   177: binary %__inl_f_11_tmp_t68__l1 = %vu164_ti1 * %vu164_ti1
+   178: binary %__inl_f_11_tmp_t69__l1 = %__inl_f_11_tmp_t68__l1 * %vu164_ti1
+   179: binary @__inl_f_11_local_s__a1 = @__inl_f_11_local_s__a1 + %__inl_f_11_tmp_t69__l1
+   180: nop
+   181: binary %vu164_ti2 = @__inl_f_11_local_i + 2
+   182: binary %__inl_f_11_tmp_t68__l2 = %vu164_ti2 * %vu164_ti2
+   183: binary %__inl_f_11_tmp_t69__l2 = %__inl_f_11_tmp_t68__l2 * %vu164_ti2
+   184: binary @__inl_f_11_local_s__a2 = @__inl_f_11_local_s__a2 + %__inl_f_11_tmp_t69__l2
+   185: nop
+   186: binary %vu164_ti3 = @__inl_f_11_local_i + 3
+   187: binary %__inl_f_11_tmp_t68__l3 = %vu164_ti3 * %vu164_ti3
+   188: binary %__inl_f_11_tmp_t69__l3 = %__inl_f_11_tmp_t68__l3 * %vu164_ti3
+   189: binary @__inl_f_11_local_s__a3 = @__inl_f_11_local_s__a3 + %__inl_f_11_tmp_t69__l3
+   190: nop
+   191: binary @__inl_f_11_local_i = @__inl_f_11_local_i + 4
+   192: nop
+   193: jump vu164_main
+   194: label vu164_tail
+   195: binary %__inl_f_11_tmp_t68 = @__inl_f_11_local_i * @__inl_f_11_local_i
+   196: binary %__inl_f_11_tmp_t69 = %__inl_f_11_tmp_t68 * @__inl_f_11_local_i
+   197: binary @__inl_f_11_local_s = @__inl_f_11_local_s + %__inl_f_11_tmp_t69
+   198: nop
+   199: binary @__inl_f_11_local_i = @__inl_f_11_local_i + 1
+   200: nop
+   201: binary %__inl_f_11_tmp_t68 = @__inl_f_11_local_i * @__inl_f_11_local_i
+   202: binary %__inl_f_11_tmp_t69 = %__inl_f_11_tmp_t68 * @__inl_f_11_local_i
+   203: binary @__inl_f_11_local_s = @__inl_f_11_local_s + %__inl_f_11_tmp_t69
+   204: nop
+   205: binary @__inl_f_11_local_i = @__inl_f_11_local_i + 1
+   206: nop
+   207: binary %__inl_f_11_tmp_t68 = @__inl_f_11_local_i * @__inl_f_11_local_i
+   208: binary %__inl_f_11_tmp_t69 = %__inl_f_11_tmp_t68 * @__inl_f_11_local_i
+   209: binary @__inl_f_11_local_s = @__inl_f_11_local_s + %__inl_f_11_tmp_t69
+   210: nop
+   211: binary @__inl_f_11_local_i = @__inl_f_11_local_i + 1
+   212: nop
+   213: nop
+   214: binary @__inl_f_11_local_s = @__inl_f_11_local_s + @__inl_f_11_local_s__a1
+   215: nop
+   216: binary @__inl_f_11_local_s = @__inl_f_11_local_s + @__inl_f_11_local_s__a2
+   217: nop
+   218: binary @__inl_f_11_local_s = @__inl_f_11_local_s + @__inl_f_11_local_s__a3
+   219: nop
+   220: nop
+   221: nop
+   222: nop
+   223: nop
+   224: nop
+   225: nop
+   226: nop
+   227: nop
+   228: nop
+   229: local @__inl_println_int_12_param_n : int64
+   230: assign @__inl_println_int_12_param_n <- @__inl_f_11_local_s
+   231: nop
+   232: call %__inl_println_int_12_tmp_t49 = print_int(@__inl_f_11_local_s)
+   233: call %__inl_println_int_12_tmp_t50 = putchar(10)
+   234: nop
+   235: nop
+   236: nop
+   237: nop
+   238: nop
+   239: nop
+   240: nop
+   241: local @__inl_f_13_param_n : int64
+   242: assign @__inl_f_13_param_n <- 4
+   243: nop
+   244: local @__inl_f_13_local_s : int64
+   245: assign @__inl_f_13_local_s <- 0
+   246: local @__inl_f_13_local_i : int64
+   247: assign @__inl_f_13_local_i <- 1
+   248: local @__inl_f_13_local_s__a1 : int64
+   249: assign @__inl_f_13_local_s__a1 <- 0
+   250: local @__inl_f_13_local_s__a2 : int64
+   251: assign @__inl_f_13_local_s__a2 <- 0
+   252: local @__inl_f_13_local_s__a3 : int64
+   253: assign @__inl_f_13_local_s__a3 <- 0
+   254: label vu242_main
+   255: binary %vu242_ub = @__inl_f_13_local_i + 3
+   256: binary %vu242_gu = %vu242_ub <= @__inl_f_13_param_n
+   257: branch_zero %vu242_gu -> vu242_tail
+   258: binary %__inl_f_13_tmp_t68__l0 = @__inl_f_13_local_i * @__inl_f_13_local_i
+   259: binary %__inl_f_13_tmp_t69__l0 = %__inl_f_13_tmp_t68__l0 * @__inl_f_13_local_i
+   260: binary @__inl_f_13_local_s = @__inl_f_13_local_s + %__inl_f_13_tmp_t69__l0
+   261: nop
+   262: binary %vu242_ti1 = @__inl_f_13_local_i + 1
+   263: binary %__inl_f_13_tmp_t68__l1 = %vu242_ti1 * %vu242_ti1
+   264: binary %__inl_f_13_tmp_t69__l1 = %__inl_f_13_tmp_t68__l1 * %vu242_ti1
+   265: binary @__inl_f_13_local_s__a1 = @__inl_f_13_local_s__a1 + %__inl_f_13_tmp_t69__l1
+   266: nop
+   267: binary %vu242_ti2 = @__inl_f_13_local_i + 2
+   268: binary %__inl_f_13_tmp_t68__l2 = %vu242_ti2 * %vu242_ti2
+   269: binary %__inl_f_13_tmp_t69__l2 = %__inl_f_13_tmp_t68__l2 * %vu242_ti2
+   270: binary @__inl_f_13_local_s__a2 = @__inl_f_13_local_s__a2 + %__inl_f_13_tmp_t69__l2
+   271: nop
+   272: binary %vu242_ti3 = @__inl_f_13_local_i + 3
+   273: binary %__inl_f_13_tmp_t68__l3 = %vu242_ti3 * %vu242_ti3
+   274: binary %__inl_f_13_tmp_t69__l3 = %__inl_f_13_tmp_t68__l3 * %vu242_ti3
+   275: binary @__inl_f_13_local_s__a3 = @__inl_f_13_local_s__a3 + %__inl_f_13_tmp_t69__l3
+   276: nop
+   277: binary @__inl_f_13_local_i = @__inl_f_13_local_i + 4
+   278: nop
+   279: jump vu242_main
+   280: label vu242_tail
+   281: binary %__inl_f_13_tmp_t68 = @__inl_f_13_local_i * @__inl_f_13_local_i
+   282: binary %__inl_f_13_tmp_t69 = %__inl_f_13_tmp_t68 * @__inl_f_13_local_i
+   283: binary @__inl_f_13_local_s = @__inl_f_13_local_s + %__inl_f_13_tmp_t69
+   284: nop
+   285: binary @__inl_f_13_local_i = @__inl_f_13_local_i + 1
+   286: nop
+   287: binary %__inl_f_13_tmp_t68 = @__inl_f_13_local_i * @__inl_f_13_local_i
+   288: binary %__inl_f_13_tmp_t69 = %__inl_f_13_tmp_t68 * @__inl_f_13_local_i
+   289: binary @__inl_f_13_local_s = @__inl_f_13_local_s + %__inl_f_13_tmp_t69
+   290: nop
+   291: binary @__inl_f_13_local_i = @__inl_f_13_local_i + 1
+   292: nop
+   293: binary %__inl_f_13_tmp_t68 = @__inl_f_13_local_i * @__inl_f_13_local_i
+   294: binary %__inl_f_13_tmp_t69 = %__inl_f_13_tmp_t68 * @__inl_f_13_local_i
+   295: binary @__inl_f_13_local_s = @__inl_f_13_local_s + %__inl_f_13_tmp_t69
+   296: nop
+   297: binary @__inl_f_13_local_i = @__inl_f_13_local_i + 1
+   298: nop
+   299: binary %__inl_f_13_tmp_t68 = @__inl_f_13_local_i * @__inl_f_13_local_i
+   300: binary %__inl_f_13_tmp_t69 = %__inl_f_13_tmp_t68 * @__inl_f_13_local_i
+   301: binary @__inl_f_13_local_s = @__inl_f_13_local_s + %__inl_f_13_tmp_t69
+   302: nop
+   303: binary @__inl_f_13_local_i = @__inl_f_13_local_i + 1
+   304: nop
+   305: nop
+   306: binary @__inl_f_13_local_s = @__inl_f_13_local_s + @__inl_f_13_local_s__a1
+   307: nop
+   308: binary @__inl_f_13_local_s = @__inl_f_13_local_s + @__inl_f_13_local_s__a2
+   309: nop
+   310: binary @__inl_f_13_local_s = @__inl_f_13_local_s + @__inl_f_13_local_s__a3
+   311: nop
+   312: nop
+   313: nop
+   314: nop
+   315: nop
+   316: nop
+   317: nop
+   318: nop
+   319: nop
+   320: nop
+   321: local @__inl_println_int_14_param_n : int64
+   322: assign @__inl_println_int_14_param_n <- @__inl_f_13_local_s
+   323: nop
+   324: call %__inl_println_int_14_tmp_t49 = print_int(@__inl_f_13_local_s)
+   325: call %__inl_println_int_14_tmp_t50 = putchar(10)
+   326: nop
+   327: nop
+   328: nop
+   329: nop
+   330: nop
+   331: nop
+   332: nop
+   333: local @__inl_f_15_param_n : int64
+   334: assign @__inl_f_15_param_n <- 5
+   335: nop
+   336: local @__inl_f_15_local_s : int64
+   337: assign @__inl_f_15_local_s <- 0
+   338: local @__inl_f_15_local_i : int64
+   339: assign @__inl_f_15_local_i <- 1
+   340: local @__inl_f_15_local_s__a1 : int64
+   341: assign @__inl_f_15_local_s__a1 <- 0
+   342: local @__inl_f_15_local_s__a2 : int64
+   343: assign @__inl_f_15_local_s__a2 <- 0
+   344: local @__inl_f_15_local_s__a3 : int64
+   345: assign @__inl_f_15_local_s__a3 <- 0
+   346: label vu320_main
+   347: binary %vu320_ub = @__inl_f_15_local_i + 3
+   348: binary %vu320_gu = %vu320_ub <= @__inl_f_15_param_n
+   349: branch_zero %vu320_gu -> vu320_tail
+   350: binary %__inl_f_15_tmp_t68__l0 = @__inl_f_15_local_i * @__inl_f_15_local_i
+   351: binary %__inl_f_15_tmp_t69__l0 = %__inl_f_15_tmp_t68__l0 * @__inl_f_15_local_i
+   352: binary @__inl_f_15_local_s = @__inl_f_15_local_s + %__inl_f_15_tmp_t69__l0
+   353: nop
+   354: binary %vu320_ti1 = @__inl_f_15_local_i + 1
+   355: binary %__inl_f_15_tmp_t68__l1 = %vu320_ti1 * %vu320_ti1
+   356: binary %__inl_f_15_tmp_t69__l1 = %__inl_f_15_tmp_t68__l1 * %vu320_ti1
+   357: binary @__inl_f_15_local_s__a1 = @__inl_f_15_local_s__a1 + %__inl_f_15_tmp_t69__l1
+   358: nop
+   359: binary %vu320_ti2 = @__inl_f_15_local_i + 2
+   360: binary %__inl_f_15_tmp_t68__l2 = %vu320_ti2 * %vu320_ti2
+   361: binary %__inl_f_15_tmp_t69__l2 = %__inl_f_15_tmp_t68__l2 * %vu320_ti2
+   362: binary @__inl_f_15_local_s__a2 = @__inl_f_15_local_s__a2 + %__inl_f_15_tmp_t69__l2
+   363: nop
+   364: binary %vu320_ti3 = @__inl_f_15_local_i + 3
+   365: binary %__inl_f_15_tmp_t68__l3 = %vu320_ti3 * %vu320_ti3
+   366: binary %__inl_f_15_tmp_t69__l3 = %__inl_f_15_tmp_t68__l3 * %vu320_ti3
+   367: binary @__inl_f_15_local_s__a3 = @__inl_f_15_local_s__a3 + %__inl_f_15_tmp_t69__l3
+   368: nop
+   369: binary @__inl_f_15_local_i = @__inl_f_15_local_i + 4
+   370: nop
+   371: jump vu320_main
+   372: label vu320_tail
+   373: binary %__inl_f_15_tmp_t68 = @__inl_f_15_local_i * @__inl_f_15_local_i
+   374: binary %__inl_f_15_tmp_t69 = %__inl_f_15_tmp_t68 * @__inl_f_15_local_i
+   375: binary @__inl_f_15_local_s = @__inl_f_15_local_s + %__inl_f_15_tmp_t69
+   376: nop
+   377: binary @__inl_f_15_local_i = @__inl_f_15_local_i + 1
+   378: nop
+   379: binary %__inl_f_15_tmp_t68 = @__inl_f_15_local_i * @__inl_f_15_local_i
+   380: binary %__inl_f_15_tmp_t69 = %__inl_f_15_tmp_t68 * @__inl_f_15_local_i
+   381: binary @__inl_f_15_local_s = @__inl_f_15_local_s + %__inl_f_15_tmp_t69
+   382: nop
+   383: binary @__inl_f_15_local_i = @__inl_f_15_local_i + 1
+   384: nop
+   385: binary %__inl_f_15_tmp_t68 = @__inl_f_15_local_i * @__inl_f_15_local_i
+   386: binary %__inl_f_15_tmp_t69 = %__inl_f_15_tmp_t68 * @__inl_f_15_local_i
+   387: binary @__inl_f_15_local_s = @__inl_f_15_local_s + %__inl_f_15_tmp_t69
+   388: nop
+   389: binary @__inl_f_15_local_i = @__inl_f_15_local_i + 1
+   390: nop
+   391: binary %__inl_f_15_tmp_t68 = @__inl_f_15_local_i * @__inl_f_15_local_i
+   392: binary %__inl_f_15_tmp_t69 = %__inl_f_15_tmp_t68 * @__inl_f_15_local_i
+   393: binary @__inl_f_15_local_s = @__inl_f_15_local_s + %__inl_f_15_tmp_t69
+   394: nop
+   395: binary @__inl_f_15_local_i = @__inl_f_15_local_i + 1
+   396: nop
+   397: binary %__inl_f_15_tmp_t68 = @__inl_f_15_local_i * @__inl_f_15_local_i
+   398: binary %__inl_f_15_tmp_t69 = %__inl_f_15_tmp_t68 * @__inl_f_15_local_i
+   399: binary @__inl_f_15_local_s = @__inl_f_15_local_s + %__inl_f_15_tmp_t69
+   400: nop
+   401: binary @__inl_f_15_local_i = @__inl_f_15_local_i + 1
+   402: nop
+   403: nop
+   404: binary @__inl_f_15_local_s = @__inl_f_15_local_s + @__inl_f_15_local_s__a1
+   405: nop
+   406: binary @__inl_f_15_local_s = @__inl_f_15_local_s + @__inl_f_15_local_s__a2
+   407: nop
+   408: binary @__inl_f_15_local_s = @__inl_f_15_local_s + @__inl_f_15_local_s__a3
+   409: nop
+   410: nop
+   411: nop
+   412: nop
+   413: nop
+   414: nop
+   415: nop
+   416: nop
+   417: nop
+   418: nop
+   419: local @__inl_println_int_16_param_n : int64
+   420: assign @__inl_println_int_16_param_n <- @__inl_f_15_local_s
+   421: nop
+   422: call %__inl_println_int_16_tmp_t49 = print_int(@__inl_f_15_local_s)
+   423: call %__inl_println_int_16_tmp_t50 = putchar(10)
+   424: nop
+   425: nop
+   426: nop
+   427: nop
+   428: nop
+   429: nop
+   430: nop
+   431: nop
+   432: nop
+   433: nop
+   434: nop
+   435: nop
+   436: return 0
+}
+

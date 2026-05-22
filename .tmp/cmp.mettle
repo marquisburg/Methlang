@@ -1,0 +1,9 @@
+import "std/io";
+function lt(a: int32, b: int32) -> int32 { if (a < b) { return 1; } return 0; }
+function main() -> int32 {
+  print_int((int64)lt(-266, -246)); println(cstr(""));  // -266 < -246 => 1
+  print_int((int64)lt(-246, -266)); println(cstr(""));  // => 0
+  print_int((int64)lt(-5, 3)); println(cstr(""));        // => 1
+  print_int((int64)lt(3, -5)); println(cstr(""));        // => 0
+  return 0;
+}

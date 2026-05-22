@@ -23,6 +23,7 @@ typedef struct {
   const char *input_filename;
   const char *output_filename;
   int debug_mode;
+  int dump_ir;
   int optimize;
   int release;
   int strip_asm_comments;
