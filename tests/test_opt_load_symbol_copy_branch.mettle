@@ -1,0 +1,28 @@
+function minmax_sum(arr: int32*, n: int64) -> int64 {
+  var minv: int32 = arr[0];
+  var maxv: int32 = arr[0];
+  var i: int64 = 1;
+  while (i < n) {
+    var v: int32 = arr[i];
+    if (v < minv) {
+      minv = v;
+    }
+    if (v > maxv) {
+      maxv = v;
+    }
+    i = i + 1;
+  }
+  return (int64)minv + (int64)maxv;
+}
+
+function main() -> int32 {
+  var arr: int32[4];
+  arr[0] = 7;
+  arr[1] = 3;
+  arr[2] = 11;
+  arr[3] = 5;
+  if (minmax_sum(&arr[0], 4) == 14) {
+    return 0;
+  }
+  return 1;
+}

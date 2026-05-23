@@ -20,9 +20,11 @@ if not exist obj\parser mkdir obj\parser
 if not exist obj\semantic mkdir obj\semantic
 if not exist obj\ir mkdir obj\ir
 if not exist obj\codegen mkdir obj\codegen
+if not exist obj\codegen\binary mkdir obj\codegen\binary
 if not exist obj\linker mkdir obj\linker
 if not exist obj\debug mkdir obj\debug
 if not exist obj\error mkdir obj\error
+if not exist obj\compiler mkdir obj\compiler
 if not exist obj\runtime mkdir obj\runtime
 if not exist bin mkdir bin
 
@@ -39,32 +41,39 @@ gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\parser\parser.c -o obj\pa
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling semantic analysis...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\semantic\symbol_table.c -o obj\semantic\symbol_table.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\semantic\symbol_table.c -o obj\semantic\symbol_table.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\semantic\type_checker.c -o obj\semantic\type_checker.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\semantic\type_checker.c -o obj\semantic\type_checker.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\semantic\register_allocator.c -o obj\semantic\register_allocator.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\semantic\register_allocator.c -o obj\semantic\register_allocator.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\semantic\import_resolver.c -o obj\semantic\import_resolver.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\semantic\import_resolver.c -o obj\semantic\import_resolver.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\semantic\monomorphize.c -o obj\semantic\monomorphize.o
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\semantic\monomorphize.c -o obj\semantic\monomorphize.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling IR...
 for %%f in (src\ir\*.c) do (
     echo   %%~nxf
-    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c %%f -o obj\ir\%%~nf.o
+    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c %%f -o obj\ir\%%~nf.o
     if errorlevel 1 exit /b 1
 )
 
 echo Compiling code generator modules...
 for %%f in (src\\codegen\\*.c) do (
     echo   %%~nxf
-    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c %%f -o obj\\codegen\\%%~nf.o
+    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c %%f -o obj\\codegen\\%%~nf.o
+    if errorlevel 1 exit /b 1
+)
+
+echo Compiling binary object backend...
+for %%f in (src\\codegen\\binary\\*.c) do (
+    echo   binary\\%%~nxf
+    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c %%f -o obj\\codegen\\binary\\%%~nf.o
     if errorlevel 1 exit /b 1
 )
 
@@ -87,8 +96,18 @@ echo Compiling atomics helpers (opt-in: std/thread)...
 gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\runtime\atomics.c -o obj\runtime\atomics.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
+echo Compiling profile runtime (opt-in: --profile-runtime)...
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\runtime\profile.c -o obj\runtime\profile.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+
 echo Compiling error reporter...
 gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\error\error_reporter.c -o obj\error\error_reporter.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+
+echo Compiling compiler diagnostics...
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\compiler\compiler_context.c -o obj\compiler\compiler_context.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\compiler\compiler_crash.c -o obj\compiler\compiler_crash.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling main...
@@ -96,7 +115,7 @@ gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\main.c -o obj\main.
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Linking...
-gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\error\error_reporter.o obj\main.o -o bin\mettle.exe
+gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\\codegen\\binary\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\error\error_reporter.o obj\compiler\compiler_context.o obj\compiler\compiler_crash.o obj\main.o -o bin\mettle.exe -ldbghelp
 
 if %ERRORLEVEL% NEQ 0 (
     echo Build failed!
@@ -114,6 +133,8 @@ copy /Y obj\runtime\crash_handler.o bin\runtime\crash_handler.o >nul
 copy /Y obj\runtime\crash_handler.o bin\runtime\crash_handler.obj >nul
 copy /Y obj\runtime\atomics.o bin\runtime\atomics.o >nul
 copy /Y obj\runtime\atomics.o bin\runtime\atomics.obj >nul
+copy /Y obj\runtime\profile.o bin\runtime\profile.o >nul
+copy /Y obj\runtime\profile.o bin\runtime\profile.obj >nul
 
 if exist installer\mettle-build.bat copy /Y installer\mettle-build.bat bin\mettle-build.bat >nul
 

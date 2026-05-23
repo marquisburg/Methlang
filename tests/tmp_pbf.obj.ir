@@ -1,0 +1,440 @@
+function cstr {
+     0: call _ = mettle_profile_enter(0)
+     1: nop
+     2: nop
+     3: load %t1 <- *@s [8]
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: call _ = mettle_profile_exit()
+    10: return %t1
+}
+
+function print {
+     0: call _ = mettle_profile_enter(1)
+     1: nop
+     2: call %t4 = get_stdout()
+     3: call %t3 = fputs(@msg, %t4)
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: call _ = mettle_profile_exit()
+    10: return _
+}
+
+function println {
+     0: call _ = mettle_profile_enter(2)
+     1: nop
+     2: call %t6 = puts(@msg)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: call _ = mettle_profile_exit()
+     9: return _
+}
+
+function newline {
+     0: call _ = mettle_profile_enter(3)
+     1: nop
+     2: call %t8 = putchar(10)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: call _ = mettle_profile_exit()
+     9: return _
+}
+
+function print_int {
+     0: call _ = mettle_profile_enter(4)
+     1: nop
+     2: local @buf : uint8[22]
+     3: local @pos : int32
+     4: assign @pos <- 21
+     5: local @neg : int32
+     6: assign @neg <- 0
+     7: addr_of %t10 <- &@buf
+     8: nop
+     9: binary %t12 = %t10 + 21
+    10: store *%t12 <- 0 [1]
+    11: binary %t13 = @n < 0
+    12: branch_zero %t13 -> ir_if_next_14
+    13: assign @neg <- 1
+    14: binary @n = 0 - @n
+    15: nop
+    16: jump ir_if_end_13
+    17: label ir_if_next_14
+    18: label ir_if_end_13
+    19: binary %t15 = @n == 0
+    20: branch_zero %t15 -> ir_if_next_16
+    21: addr_of %t16 <- &@buf
+    22: nop
+    23: nop
+    24: store *%t16 <- 48 [1]
+    25: addr_of %t19 <- &@buf
+    26: nop
+    27: binary %t21 = %t19 + 1
+    28: store *%t21 <- 0 [1]
+    29: addr_of %t23 <- &@buf
+    30: nop
+    31: nop
+    32: call %t26 = get_stdout()
+    33: call %t22 = fputs(%t23, %t26)
+    34: nop
+    35: nop
+    36: nop
+    37: nop
+    38: nop
+    39: call _ = mettle_profile_exit()
+    40: return _
+    41: nop
+    42: label ir_if_next_16
+    43: nop
+    44: label ir_while_19
+    45: binary %t28 = @n > 0
+    46: branch_zero %t28 -> ir_while_end_20
+    47: binary @pos = @pos - 1
+    48: nop
+    49: binary %t30 = 48 + @n
+    50: binary %t31 = @n / 10
+    51: binary %t32 = %t31 * 10
+    52: binary %t33 = %t30 - %t32
+    53: addr_of %t34 <- &@buf
+    54: nop
+    55: binary %t36 = %t34 + @pos
+    56: store *%t36 <- %t33 [1]
+    57: binary @n = @n / 10
+    58: nop
+    59: jump ir_while_19
+    60: label ir_while_end_20
+    61: nop
+    62: branch_zero @neg -> ir_if_next_22
+    63: binary @pos = @pos - 1
+    64: nop
+    65: addr_of %t40 <- &@buf
+    66: nop
+    67: binary %t42 = %t40 + @pos
+    68: store *%t42 <- 45 [1]
+    69: jump ir_if_end_21
+    70: label ir_if_next_22
+    71: label ir_if_end_21
+    72: addr_of %t44 <- &@buf
+    73: nop
+    74: binary %t46 = %t44 + @pos
+    75: call %t47 = get_stdout()
+    76: call %t43 = fputs(%t46, %t47)
+    77: nop
+    78: nop
+    79: nop
+    80: nop
+    81: nop
+    82: call _ = mettle_profile_exit()
+    83: return _
+}
+
+function println_int {
+     0: call _ = mettle_profile_enter(5)
+     1: nop
+     2: call %t49 = print_int(@n)
+     3: call %t50 = putchar(10)
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: call _ = mettle_profile_exit()
+    10: return _
+}
+
+function get_stdin {
+     0: call _ = mettle_profile_enter(6)
+     1: nop
+     2: call %t52 = __acrt_iob_func(0)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: call _ = mettle_profile_exit()
+     9: return %t52
+}
+
+function get_stdout {
+     0: call _ = mettle_profile_enter(7)
+     1: nop
+     2: call %t54 = __acrt_iob_func(1)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: call _ = mettle_profile_exit()
+     9: return %t54
+}
+
+function get_stderr {
+     0: call _ = mettle_profile_enter(8)
+     1: nop
+     2: call %t56 = __acrt_iob_func(2)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: call _ = mettle_profile_exit()
+     9: return %t56
+}
+
+function print_err {
+     0: call _ = mettle_profile_enter(9)
+     1: nop
+     2: call %t59 = get_stderr()
+     3: call %t58 = fputs(@msg, %t59)
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: call _ = mettle_profile_exit()
+    10: return _
+}
+
+function println_err {
+     0: call _ = mettle_profile_enter(10)
+     1: nop
+     2: call %t62 = get_stderr()
+     3: call %t61 = fputs(@msg, %t62)
+     4: call %t64 = cstr("
+")
+     5: call %t65 = get_stderr()
+     6: call %t63 = fputs(%t64, %t65)
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: nop
+    12: call _ = mettle_profile_exit()
+    13: return _
+}
+
+function alloc_zeroed {
+     0: call _ = mettle_profile_enter(11)
+     1: nop
+     2: call %t67 = calloc(1, @n)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: call _ = mettle_profile_exit()
+     9: return %t67
+}
+
+function buf_dup {
+     0: call _ = mettle_profile_enter(12)
+     1: nop
+     2: binary %t69 = @len <= 0
+     3: branch_zero %t69 -> ir_if_next_48
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: call _ = mettle_profile_exit()
+    10: return 0
+    11: nop
+    12: label ir_if_next_48
+    13: nop
+    14: local @dst : cstring
+    15: call @dst = malloc(@len)
+    16: nop
+    17: binary %t72 = @dst == 0
+    18: branch_zero %t72 -> ir_if_next_52
+    19: nop
+    20: nop
+    21: nop
+    22: nop
+    23: nop
+    24: call _ = mettle_profile_exit()
+    25: return 0
+    26: nop
+    27: label ir_if_next_52
+    28: nop
+    29: call %t74 = memcpy(@dst, @src, @len)
+    30: nop
+    31: nop
+    32: nop
+    33: nop
+    34: nop
+    35: call _ = mettle_profile_exit()
+    36: return @dst
+}
+
+function popcount_byte {
+     0: call _ = mettle_profile_enter(13)
+     1: nop
+     2: local @count : int32
+     3: assign @count <- 0
+     4: local @v : uint8
+     5: assign @v <- @b
+     6: branch_zero @v -> ir_while_end_59
+     7: binary %pc6_b0 = @v & 1
+     8: cast %pc6_c0 = ((int32))%pc6_b0
+     9: binary @count = @count + %pc6_c0
+    10: binary %pc6_s0 = @v >> 1
+    11: cast @v = ((uint8))%pc6_s0
+    12: branch_zero @v -> ir_while_end_59
+    13: binary %pc6_b1 = @v & 1
+    14: cast %pc6_c1 = ((int32))%pc6_b1
+    15: binary @count = @count + %pc6_c1
+    16: binary %pc6_s1 = @v >> 1
+    17: cast @v = ((uint8))%pc6_s1
+    18: branch_zero @v -> ir_while_end_59
+    19: binary %pc6_b2 = @v & 1
+    20: cast %pc6_c2 = ((int32))%pc6_b2
+    21: binary @count = @count + %pc6_c2
+    22: binary %pc6_s2 = @v >> 1
+    23: cast @v = ((uint8))%pc6_s2
+    24: branch_zero @v -> ir_while_end_59
+    25: binary %pc6_b3 = @v & 1
+    26: cast %pc6_c3 = ((int32))%pc6_b3
+    27: binary @count = @count + %pc6_c3
+    28: binary %pc6_s3 = @v >> 1
+    29: cast @v = ((uint8))%pc6_s3
+    30: branch_zero @v -> ir_while_end_59
+    31: binary %pc6_b4 = @v & 1
+    32: cast %pc6_c4 = ((int32))%pc6_b4
+    33: binary @count = @count + %pc6_c4
+    34: binary %pc6_s4 = @v >> 1
+    35: cast @v = ((uint8))%pc6_s4
+    36: branch_zero @v -> ir_while_end_59
+    37: binary %pc6_b5 = @v & 1
+    38: cast %pc6_c5 = ((int32))%pc6_b5
+    39: binary @count = @count + %pc6_c5
+    40: binary %pc6_s5 = @v >> 1
+    41: cast @v = ((uint8))%pc6_s5
+    42: branch_zero @v -> ir_while_end_59
+    43: binary %pc6_b6 = @v & 1
+    44: cast %pc6_c6 = ((int32))%pc6_b6
+    45: binary @count = @count + %pc6_c6
+    46: binary %pc6_s6 = @v >> 1
+    47: cast @v = ((uint8))%pc6_s6
+    48: branch_zero @v -> ir_while_end_59
+    49: binary %pc6_b7 = @v & 1
+    50: cast %pc6_c7 = ((int32))%pc6_b7
+    51: binary @count = @count + %pc6_c7
+    52: binary %pc6_s7 = @v >> 1
+    53: cast @v = ((uint8))%pc6_s7
+    54: label ir_while_end_59
+    55: nop
+    56: nop
+    57: nop
+    58: nop
+    59: nop
+    60: call _ = mettle_profile_exit()
+    61: return @count
+}
+
+function popcount_buffer {
+     0: call _ = mettle_profile_enter(14)
+     1: nop
+     2: local @total : int64
+     3: assign @total <- 0
+     4: local @i : int64
+     5: assign @i <- 0
+     6: local @__ptr_6_buf_p : int32*
+     7: local @__ptr_6_buf_end : int32*
+     8: assign @__ptr_6_buf_p <- @buf
+     9: assign @__ptr_6_buf_end <- @buf
+    10: binary @__ptr_6_buf_end = @__ptr_6_buf_end + @len
+    11: label ir_while_63
+    12: binary %t83 = @__ptr_6_buf_p < @__ptr_6_buf_end
+    13: branch_zero %t83 -> ir_while_end_64
+    14: load %pbf11_raw <- *@__ptr_6_buf_p [1]
+    15: cast %pbf11_v = ((uint8))%pbf11_raw
+    16: branch_zero %pbf11_v -> pbf11_done
+    17: binary %pbf11_b0 = %pbf11_v & 1
+    18: cast %pbf11_i0 = ((int64))%pbf11_b0
+    19: binary @total = @total + %pbf11_i0
+    20: binary %pbf11_s0 = %pbf11_v >> 1
+    21: cast %pbf11_v = ((uint8))%pbf11_s0
+    22: branch_zero %pbf11_v -> pbf11_done
+    23: binary %pbf11_b1 = %pbf11_v & 1
+    24: cast %pbf11_i1 = ((int64))%pbf11_b1
+    25: binary @total = @total + %pbf11_i1
+    26: binary %pbf11_s1 = %pbf11_v >> 1
+    27: cast %pbf11_v = ((uint8))%pbf11_s1
+    28: branch_zero %pbf11_v -> pbf11_done
+    29: binary %pbf11_b2 = %pbf11_v & 1
+    30: cast %pbf11_i2 = ((int64))%pbf11_b2
+    31: binary @total = @total + %pbf11_i2
+    32: binary %pbf11_s2 = %pbf11_v >> 1
+    33: cast %pbf11_v = ((uint8))%pbf11_s2
+    34: branch_zero %pbf11_v -> pbf11_done
+    35: binary %pbf11_b3 = %pbf11_v & 1
+    36: cast %pbf11_i3 = ((int64))%pbf11_b3
+    37: binary @total = @total + %pbf11_i3
+    38: binary %pbf11_s3 = %pbf11_v >> 1
+    39: cast %pbf11_v = ((uint8))%pbf11_s3
+    40: branch_zero %pbf11_v -> pbf11_done
+    41: binary %pbf11_b4 = %pbf11_v & 1
+    42: cast %pbf11_i4 = ((int64))%pbf11_b4
+    43: binary @total = @total + %pbf11_i4
+    44: binary %pbf11_s4 = %pbf11_v >> 1
+    45: cast %pbf11_v = ((uint8))%pbf11_s4
+    46: branch_zero %pbf11_v -> pbf11_done
+    47: binary %pbf11_b5 = %pbf11_v & 1
+    48: cast %pbf11_i5 = ((int64))%pbf11_b5
+    49: binary @total = @total + %pbf11_i5
+    50: binary %pbf11_s5 = %pbf11_v >> 1
+    51: cast %pbf11_v = ((uint8))%pbf11_s5
+    52: branch_zero %pbf11_v -> pbf11_done
+    53: binary %pbf11_b6 = %pbf11_v & 1
+    54: cast %pbf11_i6 = ((int64))%pbf11_b6
+    55: binary @total = @total + %pbf11_i6
+    56: binary %pbf11_s6 = %pbf11_v >> 1
+    57: cast %pbf11_v = ((uint8))%pbf11_s6
+    58: branch_zero %pbf11_v -> pbf11_done
+    59: binary %pbf11_b7 = %pbf11_v & 1
+    60: cast %pbf11_i7 = ((int64))%pbf11_b7
+    61: binary @total = @total + %pbf11_i7
+    62: binary %pbf11_s7 = %pbf11_v >> 1
+    63: cast %pbf11_v = ((uint8))%pbf11_s7
+    64: label pbf11_done
+    65: binary @__ptr_6_buf_p = @__ptr_6_buf_p + 1
+    66: nop
+    67: jump ir_while_63
+    68: label ir_while_end_64
+    69: nop
+    70: nop
+    71: nop
+    72: nop
+    73: nop
+    74: call _ = mettle_profile_exit()
+    75: return @total
+}
+
+function main {
+     0: call _ = mettle_profile_enter(15)
+     1: nop
+     2: local @data : cstring
+     3: call %t93 = cstr("0123456789abcdef")
+     4: assign @data <- %t93
+     5: call %t94 = popcount_buffer(%t93, 16)
+     6: cast %t95 = (int32)%t94
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: nop
+    12: call _ = mettle_profile_exit()
+    13: return %t95
+}
+

@@ -5,7 +5,10 @@
 #include "../semantic/symbol_table.h"
 #include "../semantic/type_checker.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
+
+#define IR_PROFILE_ID_NONE UINT32_MAX
 
 typedef enum {
   IR_OPERAND_NONE,
@@ -69,7 +72,28 @@ typedef enum {
   /* Fixed 32x32 int32 matrix multiply. dest = c, lhs = a, rhs = b (pointers). */
   IR_OP_SIMD_MATMUL_N32,
   /* In-place signed int32 insertion sort. dest = base pointer, rhs = len. */
-  IR_OP_SIMD_INSERTION_SORT_I32
+  IR_OP_SIMD_INSERTION_SORT_I32,
+  /* Signed int32 dot product into int64. dest = sum/result, lhs = a, rhs = b,
+   * arguments[0] = element count. */
+  IR_OP_SIMD_DOT_I32,
+  /* dst[i] = src[i]*mul+add; dest += sum of outputs. lhs=src, rhs=dst,
+   * arguments[0]=len, [1]=mul, [2]=add (int32). */
+  IR_OP_SIMD_SCALE_I32,
+  /* dst[i] = clamp(src[i], lo, hi); dest += sum of outputs. lhs=src, rhs=dst,
+   * arguments[0]=len, [1]=lo, [2]=hi (int32). */
+  IR_OP_SIMD_CLAMP_I32,
+  /* dst[i] = src[n-1-i]; dest += sum of outputs. lhs=src, rhs=dst,
+   * arguments[0]=len. */
+  IR_OP_SIMD_REVERSE_COPY_I32,
+  /* Lower-bound index search over sorted int32 array:
+   * dest=lo index result, lhs=arr, rhs=n, arguments[0]=key(int32). */
+  IR_OP_LOWER_BOUND_I32,
+  /* Inclusive int32 prefix sum: dst[i]=sum(src[0..i]) in int32, dest holds
+   * int64 running sum. lhs=src, rhs=dst, arguments[0]=len. */
+  IR_OP_PREFIX_SUM_I32,
+  /* Min/max scan over arr[1..n-1] updating dest=minv and arguments[0]=maxv;
+   * caller initializes both from arr[0]. lhs=arr, rhs=n. */
+  IR_OP_SIMD_MINMAX_I32
 } IROpcode;
 
 typedef struct {
@@ -91,6 +115,7 @@ typedef struct {
 
 typedef struct {
   char *name;
+  uint32_t profile_id;
   char **parameter_names;
   char **parameter_types;
   size_t parameter_count;
@@ -100,9 +125,18 @@ typedef struct {
 } IRFunction;
 
 typedef struct {
+  char *name;
+  char *filename;
+  uint64_t line;
+} IRProfileEntry;
+
+typedef struct {
   IRFunction **functions;
   size_t function_count;
   size_t function_capacity;
+  IRProfileEntry *profile_entries;
+  size_t profile_entry_count;
+  size_t profile_entry_capacity;
 } IRProgram;
 
 IROperand ir_operand_none(void);
@@ -125,6 +159,8 @@ int ir_function_set_parameters(IRFunction *function, const char **parameter_name
 void ir_function_destroy(IRFunction *function);
 int ir_function_append_instruction(IRFunction *function,
                                    const IRInstruction *instruction);
+int ir_function_insert_instruction(IRFunction *function, size_t index,
+                                   const IRInstruction *instruction);
 
 IRProgram *ir_program_create(void);
 void ir_program_destroy(IRProgram *program);
@@ -134,5 +170,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
                             SymbolTable *symbol_table, char **error_message,
                             int emit_runtime_checks);
 int ir_program_dump(IRProgram *program, FILE *output);
+int ir_instruction_dump(const IRInstruction *instruction, size_t index,
+                        char *buffer, size_t capacity);
 
 #endif // IR_H

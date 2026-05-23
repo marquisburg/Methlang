@@ -1,0 +1,11 @@
+import "std/mem";
+function both3(b: cstring, i: int64) -> int64 {
+  b[i] = (uint8)1;
+  return (int64)(uint8)b[i];
+}
+function main() -> int32 {
+  var b: cstring = malloc(16);
+  both3(b, 1);
+  free(b);
+  return 0;
+}

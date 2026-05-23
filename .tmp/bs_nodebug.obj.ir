@@ -1,0 +1,507 @@
+function cstr {
+     0: label ir_entry_0
+     1: binary %t0 = @s + 0
+     2: load %t1 <- *%t0 [8]
+     3: assign %t2 <- %t1
+     4: branch_zero %t2 -> ir_errdefer_ok_1
+     5: jump ir_errdefer_end_2
+     6: label ir_errdefer_ok_1
+     7: label ir_errdefer_end_2
+     8: return %t1
+}
+
+function print {
+     0: label ir_entry_3
+     1: call %t4 = get_stdout()
+     2: call %t3 = fputs(@msg, %t4)
+     3: assign %t5 <- 0
+     4: branch_zero %t5 -> ir_errdefer_ok_4
+     5: jump ir_errdefer_end_5
+     6: label ir_errdefer_ok_4
+     7: label ir_errdefer_end_5
+     8: return _
+}
+
+function println {
+     0: label ir_entry_6
+     1: call %t6 = puts(@msg)
+     2: assign %t7 <- 0
+     3: branch_zero %t7 -> ir_errdefer_ok_7
+     4: jump ir_errdefer_end_8
+     5: label ir_errdefer_ok_7
+     6: label ir_errdefer_end_8
+     7: return _
+}
+
+function newline {
+     0: label ir_entry_9
+     1: call %t8 = putchar(10)
+     2: assign %t9 <- 0
+     3: branch_zero %t9 -> ir_errdefer_ok_10
+     4: jump ir_errdefer_end_11
+     5: label ir_errdefer_ok_10
+     6: label ir_errdefer_end_11
+     7: return _
+}
+
+function print_int {
+     0: label ir_entry_12
+     1: local @buf : uint8[22]
+     2: local @pos : int32
+     3: assign @pos <- 21
+     4: local @neg : int32
+     5: assign @neg <- 0
+     6: addr_of %t10 <- &@buf
+     7: binary %t11 = 21 < 22
+     8: branch_zero %t11 -> ir_trap_bounds_13
+     9: jump ir_in_bounds_14
+    10: label ir_trap_bounds_13
+    11: call _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    12: label ir_in_bounds_14
+    13: binary %t12 = 21 * 1
+    14: binary %t13 = %t10 + %t12
+    15: store *%t13 <- 0 [1]
+    16: binary %t14 = @n < 0
+    17: branch_zero %t14 -> ir_if_next_16
+    18: assign @neg <- 1
+    19: binary %t15 = 0 - @n
+    20: assign @n <- %t15
+    21: jump ir_if_end_15
+    22: label ir_if_next_16
+    23: label ir_if_end_15
+    24: binary %t16 = @n == 0
+    25: branch_zero %t16 -> ir_if_next_18
+    26: addr_of %t17 <- &@buf
+    27: binary %t18 = 0 < 22
+    28: branch_zero %t18 -> ir_trap_bounds_19
+    29: jump ir_in_bounds_20
+    30: label ir_trap_bounds_19
+    31: call _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    32: label ir_in_bounds_20
+    33: binary %t19 = 0 * 1
+    34: binary %t20 = %t17 + %t19
+    35: store *%t20 <- 48 [1]
+    36: addr_of %t21 <- &@buf
+    37: binary %t22 = 1 < 22
+    38: branch_zero %t22 -> ir_trap_bounds_21
+    39: jump ir_in_bounds_22
+    40: label ir_trap_bounds_21
+    41: call _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    42: label ir_in_bounds_22
+    43: binary %t23 = 1 * 1
+    44: binary %t24 = %t21 + %t23
+    45: store *%t24 <- 0 [1]
+    46: addr_of %t26 <- &@buf
+    47: binary %t27 = 0 < 22
+    48: branch_zero %t27 -> ir_trap_bounds_23
+    49: jump ir_in_bounds_24
+    50: label ir_trap_bounds_23
+    51: call _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    52: label ir_in_bounds_24
+    53: binary %t28 = 0 * 1
+    54: binary %t29 = %t26 + %t28
+    55: call %t30 = get_stdout()
+    56: call %t25 = fputs(%t29, %t30)
+    57: assign %t31 <- 0
+    58: branch_zero %t31 -> ir_errdefer_ok_25
+    59: jump ir_errdefer_end_26
+    60: label ir_errdefer_ok_25
+    61: label ir_errdefer_end_26
+    62: return _
+    63: jump ir_if_end_17
+    64: label ir_if_next_18
+    65: label ir_if_end_17
+    66: label ir_while_27
+    67: binary %t32 = @n > 0
+    68: branch_zero %t32 -> ir_while_end_28
+    69: binary %t33 = @pos - 1
+    70: assign @pos <- %t33
+    71: binary %t34 = 48 + @n
+    72: binary %t35 = @n / 10
+    73: binary %t36 = %t35 * 10
+    74: binary %t37 = %t34 - %t36
+    75: addr_of %t38 <- &@buf
+    76: binary %t39 = @pos < 22
+    77: branch_zero %t39 -> ir_trap_bounds_29
+    78: jump ir_in_bounds_30
+    79: label ir_trap_bounds_29
+    80: call _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    81: label ir_in_bounds_30
+    82: binary %t40 = @pos * 1
+    83: binary %t41 = %t38 + %t40
+    84: store *%t41 <- %t37 [1]
+    85: binary %t42 = @n / 10
+    86: assign @n <- %t42
+    87: jump ir_while_27
+    88: label ir_while_end_28
+    89: binary %t43 = @neg != 0
+    90: branch_zero %t43 -> ir_if_next_32
+    91: binary %t44 = @pos - 1
+    92: assign @pos <- %t44
+    93: addr_of %t45 <- &@buf
+    94: binary %t46 = @pos < 22
+    95: branch_zero %t46 -> ir_trap_bounds_33
+    96: jump ir_in_bounds_34
+    97: label ir_trap_bounds_33
+    98: call _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    99: label ir_in_bounds_34
+   100: binary %t47 = @pos * 1
+   101: binary %t48 = %t45 + %t47
+   102: store *%t48 <- 45 [1]
+   103: jump ir_if_end_31
+   104: label ir_if_next_32
+   105: label ir_if_end_31
+   106: addr_of %t50 <- &@buf
+   107: binary %t51 = @pos < 22
+   108: branch_zero %t51 -> ir_trap_bounds_35
+   109: jump ir_in_bounds_36
+   110: label ir_trap_bounds_35
+   111: call _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+   112: label ir_in_bounds_36
+   113: binary %t52 = @pos * 1
+   114: binary %t53 = %t50 + %t52
+   115: call %t54 = get_stdout()
+   116: call %t49 = fputs(%t53, %t54)
+   117: assign %t55 <- 0
+   118: branch_zero %t55 -> ir_errdefer_ok_37
+   119: jump ir_errdefer_end_38
+   120: label ir_errdefer_ok_37
+   121: label ir_errdefer_end_38
+   122: return _
+}
+
+function println_int {
+     0: label ir_entry_39
+     1: call %t56 = print_int(@n)
+     2: call %t57 = putchar(10)
+     3: assign %t58 <- 0
+     4: branch_zero %t58 -> ir_errdefer_ok_40
+     5: jump ir_errdefer_end_41
+     6: label ir_errdefer_ok_40
+     7: label ir_errdefer_end_41
+     8: return _
+}
+
+function get_stdin {
+     0: label ir_entry_42
+     1: call %t59 = __acrt_iob_func(0)
+     2: assign %t60 <- %t59
+     3: branch_zero %t60 -> ir_errdefer_ok_43
+     4: jump ir_errdefer_end_44
+     5: label ir_errdefer_ok_43
+     6: label ir_errdefer_end_44
+     7: return %t59
+}
+
+function get_stdout {
+     0: label ir_entry_45
+     1: call %t61 = __acrt_iob_func(1)
+     2: assign %t62 <- %t61
+     3: branch_zero %t62 -> ir_errdefer_ok_46
+     4: jump ir_errdefer_end_47
+     5: label ir_errdefer_ok_46
+     6: label ir_errdefer_end_47
+     7: return %t61
+}
+
+function get_stderr {
+     0: label ir_entry_48
+     1: call %t63 = __acrt_iob_func(2)
+     2: assign %t64 <- %t63
+     3: branch_zero %t64 -> ir_errdefer_ok_49
+     4: jump ir_errdefer_end_50
+     5: label ir_errdefer_ok_49
+     6: label ir_errdefer_end_50
+     7: return %t63
+}
+
+function print_err {
+     0: label ir_entry_51
+     1: call %t66 = get_stderr()
+     2: call %t65 = fputs(@msg, %t66)
+     3: assign %t67 <- 0
+     4: branch_zero %t67 -> ir_errdefer_ok_52
+     5: jump ir_errdefer_end_53
+     6: label ir_errdefer_ok_52
+     7: label ir_errdefer_end_53
+     8: return _
+}
+
+function println_err {
+     0: label ir_entry_54
+     1: call %t69 = get_stderr()
+     2: call %t68 = fputs(@msg, %t69)
+     3: call %t71 = cstr("
+")
+     4: call %t72 = get_stderr()
+     5: call %t70 = fputs(%t71, %t72)
+     6: assign %t73 <- 0
+     7: branch_zero %t73 -> ir_errdefer_ok_55
+     8: jump ir_errdefer_end_56
+     9: label ir_errdefer_ok_55
+    10: label ir_errdefer_end_56
+    11: return _
+}
+
+function alloc_zeroed {
+     0: label ir_entry_57
+     1: call %t74 = calloc(1, @n)
+     2: assign %t75 <- %t74
+     3: branch_zero %t75 -> ir_errdefer_ok_58
+     4: jump ir_errdefer_end_59
+     5: label ir_errdefer_ok_58
+     6: label ir_errdefer_end_59
+     7: return %t74
+}
+
+function buf_dup {
+     0: label ir_entry_60
+     1: binary %t76 = @len <= 0
+     2: branch_zero %t76 -> ir_if_next_62
+     3: assign %t77 <- 0
+     4: branch_zero %t77 -> ir_errdefer_ok_63
+     5: jump ir_errdefer_end_64
+     6: label ir_errdefer_ok_63
+     7: label ir_errdefer_end_64
+     8: return 0
+     9: jump ir_if_end_61
+    10: label ir_if_next_62
+    11: label ir_if_end_61
+    12: local @dst : cstring
+    13: call %t78 = malloc(@len)
+    14: assign @dst <- %t78
+    15: binary %t79 = @dst == 0
+    16: branch_zero %t79 -> ir_if_next_66
+    17: assign %t80 <- 0
+    18: branch_zero %t80 -> ir_errdefer_ok_67
+    19: jump ir_errdefer_end_68
+    20: label ir_errdefer_ok_67
+    21: label ir_errdefer_end_68
+    22: return 0
+    23: jump ir_if_end_65
+    24: label ir_if_next_66
+    25: label ir_if_end_65
+    26: call %t81 = memcpy(@dst, @src, @len)
+    27: assign %t82 <- @dst
+    28: branch_zero %t82 -> ir_errdefer_ok_69
+    29: jump ir_errdefer_end_70
+    30: label ir_errdefer_ok_69
+    31: label ir_errdefer_end_70
+    32: return @dst
+}
+
+function bench_time_us {
+     0: label ir_entry_71
+     1: binary %t83 = @g_bench_qpc_freq == 0
+     2: branch_zero %t83 -> ir_if_next_73
+     3: addr_of %t85 <- &@g_bench_qpc_freq
+     4: call %t84 = QueryPerformanceFrequency(%t85)
+     5: jump ir_if_end_72
+     6: label ir_if_next_73
+     7: label ir_if_end_72
+     8: local @counter : int64
+     9: assign @counter <- 0
+    10: addr_of %t87 <- &@counter
+    11: call %t86 = QueryPerformanceCounter(%t87)
+    12: binary %t88 = @g_bench_qpc_freq == 0
+    13: branch_zero %t88 -> ir_if_next_75
+    14: assign %t89 <- 0
+    15: branch_zero %t89 -> ir_errdefer_ok_76
+    16: jump ir_errdefer_end_77
+    17: label ir_errdefer_ok_76
+    18: label ir_errdefer_end_77
+    19: return 0
+    20: jump ir_if_end_74
+    21: label ir_if_next_75
+    22: label ir_if_end_74
+    23: binary %t90 = @counter * 1000000
+    24: binary %t91 = %t90 / @g_bench_qpc_freq
+    25: cast %t92 = (uint64)%t91
+    26: assign %t93 <- %t92
+    27: branch_zero %t93 -> ir_errdefer_ok_78
+    28: jump ir_errdefer_end_79
+    29: label ir_errdefer_ok_78
+    30: label ir_errdefer_end_79
+    31: return %t92
+}
+
+function lower_bound {
+     0: label ir_entry_80
+     1: local @lo : int64
+     2: assign @lo <- 0
+     3: local @hi : int64
+     4: assign @hi <- @n
+     5: label ir_while_81
+     6: binary %t94 = @lo < @hi
+     7: branch_zero %t94 -> ir_while_end_82
+     8: local @mid : int64
+     9: binary %t95 = @hi - @lo
+    10: binary %t96 = %t95 / 2
+    11: binary %t97 = @lo + %t96
+    12: assign @mid <- %t97
+    13: branch_zero @arr -> ir_trap_null_85
+    14: jump ir_nonnull_86
+    15: label ir_trap_null_85
+    16: call _ = mettle_crash_trap("Fatal error: Null pointer dereference")
+    17: label ir_nonnull_86
+    18: binary %t98 = @mid * 4
+    19: binary %t99 = @arr + %t98
+    20: load %t100 <- *%t99 [4]
+    21: binary %t101 = %t100 < @key
+    22: branch_zero %t101 -> ir_if_next_84
+    23: binary %t102 = @mid + 1
+    24: assign @lo <- %t102
+    25: jump ir_if_end_83
+    26: label ir_if_next_84
+    27: assign @hi <- @mid
+    28: label ir_if_end_83
+    29: jump ir_while_81
+    30: label ir_while_end_82
+    31: binary %t103 = @lo < @n
+    32: branch_zero %t103 -> ir_if_next_88
+    33: branch_zero @arr -> ir_trap_null_89
+    34: jump ir_nonnull_90
+    35: label ir_trap_null_89
+    36: call _ = mettle_crash_trap("Fatal error: Null pointer dereference")
+    37: label ir_nonnull_90
+    38: binary %t104 = @lo * 4
+    39: binary %t105 = @arr + %t104
+    40: load %t106 <- *%t105 [4]
+    41: assign %t107 <- %t106
+    42: branch_zero %t107 -> ir_errdefer_ok_91
+    43: jump ir_errdefer_end_92
+    44: label ir_errdefer_ok_91
+    45: label ir_errdefer_end_92
+    46: return %t106
+    47: jump ir_if_end_87
+    48: label ir_if_next_88
+    49: label ir_if_end_87
+    50: unary %t108 = -1
+    51: assign %t109 <- %t108
+    52: branch_zero %t109 -> ir_errdefer_ok_93
+    53: jump ir_errdefer_end_94
+    54: label ir_errdefer_ok_93
+    55: label ir_errdefer_end_94
+    56: return %t108
+}
+
+function search_many {
+     0: label ir_entry_95
+     1: local @sum : int64
+     2: assign @sum <- 0
+     3: local @q : int64
+     4: assign @q <- 0
+     5: label ir_while_96
+     6: binary %t110 = @q < @queries
+     7: branch_zero %t110 -> ir_while_end_97
+     8: local @key : int32
+     9: binary %t111 = @q * 1103515245
+    10: binary %t112 = %t111 + 12345
+    11: binary %t113 = %t112 % @n
+    12: binary %t114 = %t113 * 4
+    13: binary %t115 = %t114 + 1
+    14: cast %t116 = (int32)%t115
+    15: assign @key <- %t116
+    16: call %t117 = lower_bound(@arr, @n, @key)
+    17: cast %t118 = (int64)%t117
+    18: binary %t119 = @sum + %t118
+    19: assign @sum <- %t119
+    20: binary %t120 = @q + 1
+    21: assign @q <- %t120
+    22: jump ir_while_96
+    23: label ir_while_end_97
+    24: assign %t121 <- @sum
+    25: branch_zero %t121 -> ir_errdefer_ok_98
+    26: jump ir_errdefer_end_99
+    27: label ir_errdefer_ok_98
+    28: label ir_errdefer_end_99
+    29: return @sum
+}
+
+function main {
+     0: label ir_entry_100
+     1: local @n : int64
+     2: assign @n <- 65536
+     3: local @queries : int64
+     4: assign @queries <- 50000
+     5: local @passes : int32
+     6: assign @passes <- 200
+     7: local @arr : int32*
+     8: binary %t123 = @n * 4
+     9: call %t122 = malloc(%t123)
+    10: cast %t124 = (int32*)%t122
+    11: assign @arr <- %t124
+    12: binary %t125 = @arr == 0
+    13: branch_zero %t125 -> ir_if_next_102
+    14: call %t127 = cstr("malloc failed")
+    15: call %t126 = println(%t127)
+    16: assign %t128 <- 1
+    17: branch_zero %t128 -> ir_errdefer_ok_103
+    18: jump ir_errdefer_end_104
+    19: label ir_errdefer_ok_103
+    20: label ir_errdefer_end_104
+    21: return 1
+    22: jump ir_if_end_101
+    23: label ir_if_next_102
+    24: label ir_if_end_101
+    25: local @i : int64
+    26: assign @i <- 0
+    27: label ir_while_105
+    28: binary %t129 = @i < @n
+    29: branch_zero %t129 -> ir_while_end_106
+    30: binary %t130 = @i * 4
+    31: binary %t131 = %t130 + 1
+    32: cast %t132 = (int32)%t131
+    33: branch_zero @arr -> ir_trap_null_107
+    34: jump ir_nonnull_108
+    35: label ir_trap_null_107
+    36: call _ = mettle_crash_trap("Fatal error: Null pointer dereference")
+    37: label ir_nonnull_108
+    38: binary %t133 = @i * 4
+    39: binary %t134 = @arr + %t133
+    40: store *%t134 <- %t132 [4]
+    41: binary %t135 = @i + 1
+    42: assign @i <- %t135
+    43: jump ir_while_105
+    44: label ir_while_end_106
+    45: call %t137 = cstr("Binary search: 65536 elements, 50000 queries x 200 passes")
+    46: call %t136 = println(%t137)
+    47: local @t0 : uint64
+    48: call %t138 = bench_time_us()
+    49: assign @t0 <- %t138
+    50: local @bench_sum : int64
+    51: assign @bench_sum <- 0
+    52: local @p : int32
+    53: assign @p <- 0
+    54: label ir_while_109
+    55: binary %t139 = @p < @passes
+    56: branch_zero %t139 -> ir_while_end_110
+    57: call %t140 = search_many(@arr, @n, @queries)
+    58: binary %t141 = @bench_sum + %t140
+    59: assign @bench_sum <- %t141
+    60: binary %t142 = @p + 1
+    61: assign @p <- %t142
+    62: jump ir_while_109
+    63: label ir_while_end_110
+    64: local @elapsed_us : uint64
+    65: call %t143 = bench_time_us()
+    66: binary %t144 = %t143 - @t0
+    67: assign @elapsed_us <- %t144
+    68: call %t146 = cstr("Bench sum = ")
+    69: call %t145 = print(%t146)
+    70: call %t147 = println_int(@bench_sum)
+    71: call %t149 = cstr("Time: ")
+    72: call %t148 = print(%t149)
+    73: call %t150 = print_int(@elapsed_us)
+    74: call %t152 = cstr(" us")
+    75: call %t151 = println(%t152)
+    76: cast %t154 = (cstring)@arr
+    77: call %t153 = free(%t154)
+    78: assign %t155 <- 0
+    79: branch_zero %t155 -> ir_errdefer_ok_111
+    80: jump ir_errdefer_end_112
+    81: label ir_errdefer_ok_111
+    82: label ir_errdefer_end_112
+    83: return 0
+}
+

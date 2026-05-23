@@ -4447,6 +4447,13 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
   case IR_OP_SIMD_SUM_I32:
   case IR_OP_SIMD_MATMUL_N32:
   case IR_OP_SIMD_INSERTION_SORT_I32:
+  case IR_OP_SIMD_DOT_I32:
+  case IR_OP_SIMD_SCALE_I32:
+  case IR_OP_SIMD_CLAMP_I32:
+  case IR_OP_SIMD_REVERSE_COPY_I32:
+  case IR_OP_LOWER_BOUND_I32:
+  case IR_OP_PREFIX_SUM_I32:
+  case IR_OP_SIMD_MINMAX_I32:
     code_generator_set_error(
         generator,
         "IR opcode %d requires the direct object (--emit-obj) backend",

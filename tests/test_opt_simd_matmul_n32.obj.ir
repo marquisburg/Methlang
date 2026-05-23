@@ -1,0 +1,254 @@
+function fill_matrix {
+     0: nop
+     1: local @row : int32
+     2: assign @row <- 0
+     3: local @row_base : int64
+     4: assign @row_base <- 0
+     5: label ir_while_1
+     6: binary %t0 = @row < @N
+     7: branch_zero %t0 -> ir_errdefer_ok_5
+     8: local @col : int32
+     9: assign @col <- 0
+    10: local @idx : int64
+    11: assign @idx <- @row_base
+    12: label ir_while_3
+    13: binary %t1 = @col < @N
+    14: branch_zero %t1 -> ir_while_end_4
+    15: binary %t2 = @row * 131
+    16: binary %t3 = @col * 17
+    17: binary %t4 = %t2 + %t3
+    18: binary %t5 = %t4 + @seed
+    19: binary %t6 = %t5 % 251
+    20: binary %t7 = @idx << 2
+    21: binary %t8 = @m + %t7
+    22: store *%t8 <- %t6 [4]
+    23: binary @idx = @idx + 1
+    24: nop
+    25: binary @col = @col + 1
+    26: nop
+    27: jump ir_while_3
+    28: label ir_while_end_4
+    29: cast %t11 = (int64)@N
+    30: binary @row_base = @row_base + %t11
+    31: nop
+    32: binary @row = @row + 1
+    33: nop
+    34: jump ir_while_1
+    35: nop
+    36: nop
+    37: nop
+    38: nop
+    39: label ir_errdefer_ok_5
+    40: nop
+    41: return _
+}
+
+function matmul {
+     0: simd_matmul_n32 c=@c a=@a b=@b
+     1: return _
+}
+
+function trace_matrix {
+     0: nop
+     1: local @sum : int64
+     2: assign @sum <- 0
+     3: local @i : int32
+     4: assign @i <- 0
+     5: local @idx : int64
+     6: assign @idx <- 0
+     7: label ir_while_17
+     8: binary %t67 = @i < @N
+     9: branch_zero %t67 -> ir_while_end_18
+    10: binary %t68 = @idx << 2
+    11: binary %t69 = @m + %t68
+    12: load %t70 <- *%t69 [4]
+    13: cast %t71 = (int64)%t70
+    14: binary @sum = @sum + %t71
+    15: nop
+    16: cast %t73 = (int64)@N
+    17: binary %t74 = @idx + %t73
+    18: binary @idx = %t74 + 1
+    19: nop
+    20: binary @i = @i + 1
+    21: nop
+    22: jump ir_while_17
+    23: label ir_while_end_18
+    24: nop
+    25: nop
+    26: nop
+    27: nop
+    28: nop
+    29: return @sum
+}
+
+function main {
+     0: nop
+     1: local @a : int32[1024]
+     2: local @b : int32[1024]
+     3: local @c : int32[1024]
+     4: addr_of %t79 <- &@a
+     5: nop
+     6: nop
+     7: local @__inl_fill_matrix_0_param_m : int32*
+     8: assign @__inl_fill_matrix_0_param_m <- %t79
+     9: local @__inl_fill_matrix_0_param_seed : int32
+    10: assign @__inl_fill_matrix_0_param_seed <- 3
+    11: nop
+    12: local @__inl_fill_matrix_0_local_row : int32
+    13: assign @__inl_fill_matrix_0_local_row <- 0
+    14: local @__inl_fill_matrix_0_local_row_base : int64
+    15: assign @__inl_fill_matrix_0_local_row_base <- 0
+    16: label __inl_fill_matrix_0_lbl_ir_while_1
+    17: binary %__inl_fill_matrix_0_tmp_t0 = @__inl_fill_matrix_0_local_row < @N
+    18: branch_zero %__inl_fill_matrix_0_tmp_t0 -> __inl_fill_matrix_0_lbl_ir_errdefer_ok_5
+    19: local @__inl_fill_matrix_0_local_col : int32
+    20: assign @__inl_fill_matrix_0_local_col <- 0
+    21: local @__inl_fill_matrix_0_local_idx : int64
+    22: assign @__inl_fill_matrix_0_local_idx <- @__inl_fill_matrix_0_local_row_base
+    23: label __inl_fill_matrix_0_lbl_ir_while_3
+    24: binary %__inl_fill_matrix_0_tmp_t1 = @__inl_fill_matrix_0_local_col < @N
+    25: branch_zero %__inl_fill_matrix_0_tmp_t1 -> __inl_fill_matrix_0_lbl_ir_while_end_4
+    26: binary %__inl_fill_matrix_0_tmp_t2 = @__inl_fill_matrix_0_local_row * 131
+    27: binary %__inl_fill_matrix_0_tmp_t3 = @__inl_fill_matrix_0_local_col * 17
+    28: binary %__inl_fill_matrix_0_tmp_t4 = %__inl_fill_matrix_0_tmp_t2 + %__inl_fill_matrix_0_tmp_t3
+    29: binary %__inl_fill_matrix_0_tmp_t5 = %__inl_fill_matrix_0_tmp_t4 + @__inl_fill_matrix_0_param_seed
+    30: binary %__inl_fill_matrix_0_tmp_t6 = %__inl_fill_matrix_0_tmp_t5 % 251
+    31: binary %__inl_fill_matrix_0_tmp_t7 = @__inl_fill_matrix_0_local_idx << 2
+    32: binary %__inl_fill_matrix_0_tmp_t8 = @__inl_fill_matrix_0_param_m + %__inl_fill_matrix_0_tmp_t7
+    33: store *%__inl_fill_matrix_0_tmp_t8 <- %__inl_fill_matrix_0_tmp_t6 [4]
+    34: binary @__inl_fill_matrix_0_local_idx = @__inl_fill_matrix_0_local_idx + 1
+    35: nop
+    36: binary @__inl_fill_matrix_0_local_col = @__inl_fill_matrix_0_local_col + 1
+    37: nop
+    38: jump __inl_fill_matrix_0_lbl_ir_while_3
+    39: label __inl_fill_matrix_0_lbl_ir_while_end_4
+    40: cast %__inl_fill_matrix_0_tmp_t11 = (int64)@N
+    41: binary @__inl_fill_matrix_0_local_row_base = @__inl_fill_matrix_0_local_row_base + %__inl_fill_matrix_0_tmp_t11
+    42: nop
+    43: binary @__inl_fill_matrix_0_local_row = @__inl_fill_matrix_0_local_row + 1
+    44: nop
+    45: jump __inl_fill_matrix_0_lbl_ir_while_1
+    46: nop
+    47: nop
+    48: nop
+    49: nop
+    50: label __inl_fill_matrix_0_lbl_ir_errdefer_ok_5
+    51: nop
+    52: nop
+    53: nop
+    54: addr_of %t83 <- &@b
+    55: nop
+    56: nop
+    57: local @__inl_fill_matrix_1_param_m : int32*
+    58: assign @__inl_fill_matrix_1_param_m <- %t83
+    59: local @__inl_fill_matrix_1_param_seed : int32
+    60: assign @__inl_fill_matrix_1_param_seed <- 7
+    61: nop
+    62: local @__inl_fill_matrix_1_local_row : int32
+    63: assign @__inl_fill_matrix_1_local_row <- 0
+    64: local @__inl_fill_matrix_1_local_row_base : int64
+    65: assign @__inl_fill_matrix_1_local_row_base <- 0
+    66: label __inl_fill_matrix_1_lbl_ir_while_1
+    67: binary %__inl_fill_matrix_1_tmp_t0 = @__inl_fill_matrix_1_local_row < @N
+    68: branch_zero %__inl_fill_matrix_1_tmp_t0 -> __inl_fill_matrix_1_lbl_ir_errdefer_ok_5
+    69: local @__inl_fill_matrix_1_local_col : int32
+    70: assign @__inl_fill_matrix_1_local_col <- 0
+    71: local @__inl_fill_matrix_1_local_idx : int64
+    72: assign @__inl_fill_matrix_1_local_idx <- @__inl_fill_matrix_1_local_row_base
+    73: label __inl_fill_matrix_1_lbl_ir_while_3
+    74: binary %__inl_fill_matrix_1_tmp_t1 = @__inl_fill_matrix_1_local_col < @N
+    75: branch_zero %__inl_fill_matrix_1_tmp_t1 -> __inl_fill_matrix_1_lbl_ir_while_end_4
+    76: binary %__inl_fill_matrix_1_tmp_t2 = @__inl_fill_matrix_1_local_row * 131
+    77: binary %__inl_fill_matrix_1_tmp_t3 = @__inl_fill_matrix_1_local_col * 17
+    78: binary %__inl_fill_matrix_1_tmp_t4 = %__inl_fill_matrix_1_tmp_t2 + %__inl_fill_matrix_1_tmp_t3
+    79: binary %__inl_fill_matrix_1_tmp_t5 = %__inl_fill_matrix_1_tmp_t4 + @__inl_fill_matrix_1_param_seed
+    80: binary %__inl_fill_matrix_1_tmp_t6 = %__inl_fill_matrix_1_tmp_t5 % 251
+    81: binary %__inl_fill_matrix_1_tmp_t7 = @__inl_fill_matrix_1_local_idx << 2
+    82: binary %__inl_fill_matrix_1_tmp_t8 = @__inl_fill_matrix_1_param_m + %__inl_fill_matrix_1_tmp_t7
+    83: store *%__inl_fill_matrix_1_tmp_t8 <- %__inl_fill_matrix_1_tmp_t6 [4]
+    84: binary @__inl_fill_matrix_1_local_idx = @__inl_fill_matrix_1_local_idx + 1
+    85: nop
+    86: binary @__inl_fill_matrix_1_local_col = @__inl_fill_matrix_1_local_col + 1
+    87: nop
+    88: jump __inl_fill_matrix_1_lbl_ir_while_3
+    89: label __inl_fill_matrix_1_lbl_ir_while_end_4
+    90: cast %__inl_fill_matrix_1_tmp_t11 = (int64)@N
+    91: binary @__inl_fill_matrix_1_local_row_base = @__inl_fill_matrix_1_local_row_base + %__inl_fill_matrix_1_tmp_t11
+    92: nop
+    93: binary @__inl_fill_matrix_1_local_row = @__inl_fill_matrix_1_local_row + 1
+    94: nop
+    95: jump __inl_fill_matrix_1_lbl_ir_while_1
+    96: nop
+    97: nop
+    98: nop
+    99: nop
+   100: label __inl_fill_matrix_1_lbl_ir_errdefer_ok_5
+   101: nop
+   102: nop
+   103: nop
+   104: addr_of %t87 <- &@a
+   105: nop
+   106: nop
+   107: addr_of %t90 <- &@b
+   108: nop
+   109: nop
+   110: addr_of %t93 <- &@c
+   111: nop
+   112: nop
+   113: call %t86 = matmul(%t87, %t90, %t93)
+   114: addr_of %t97 <- &@c
+   115: nop
+   116: nop
+   117: local @__inl_trace_matrix_2_param_m : int32*
+   118: assign @__inl_trace_matrix_2_param_m <- %t97
+   119: nop
+   120: local @__inl_trace_matrix_2_local_sum : int64
+   121: assign @__inl_trace_matrix_2_local_sum <- 0
+   122: local @__inl_trace_matrix_2_local_i : int32
+   123: assign @__inl_trace_matrix_2_local_i <- 0
+   124: local @__inl_trace_matrix_2_local_idx : int64
+   125: assign @__inl_trace_matrix_2_local_idx <- 0
+   126: label __inl_trace_matrix_2_lbl_ir_while_17
+   127: binary %__inl_trace_matrix_2_tmp_t67 = @__inl_trace_matrix_2_local_i < @N
+   128: branch_zero %__inl_trace_matrix_2_tmp_t67 -> __inl_trace_matrix_2_lbl_ir_while_end_18
+   129: binary %__inl_trace_matrix_2_tmp_t68 = @__inl_trace_matrix_2_local_idx << 2
+   130: binary %__inl_trace_matrix_2_tmp_t69 = @__inl_trace_matrix_2_param_m + %__inl_trace_matrix_2_tmp_t68
+   131: load %__inl_trace_matrix_2_tmp_t70 <- *%__inl_trace_matrix_2_tmp_t69 [4]
+   132: cast %__inl_trace_matrix_2_tmp_t71 = (int64)%__inl_trace_matrix_2_tmp_t70
+   133: binary @__inl_trace_matrix_2_local_sum = @__inl_trace_matrix_2_local_sum + %__inl_trace_matrix_2_tmp_t71
+   134: nop
+   135: cast %__inl_trace_matrix_2_tmp_t73 = (int64)@N
+   136: binary %__inl_trace_matrix_2_tmp_t74 = @__inl_trace_matrix_2_local_idx + %__inl_trace_matrix_2_tmp_t73
+   137: binary @__inl_trace_matrix_2_local_idx = %__inl_trace_matrix_2_tmp_t74 + 1
+   138: nop
+   139: binary @__inl_trace_matrix_2_local_i = @__inl_trace_matrix_2_local_i + 1
+   140: nop
+   141: jump __inl_trace_matrix_2_lbl_ir_while_17
+   142: label __inl_trace_matrix_2_lbl_ir_while_end_18
+   143: nop
+   144: nop
+   145: nop
+   146: nop
+   147: nop
+   148: nop
+   149: nop
+   150: nop
+   151: binary %t100 = @__inl_trace_matrix_2_local_sum != 15813861
+   152: branch_zero %t100 -> ir_errdefer_ok_26
+   153: nop
+   154: nop
+   155: nop
+   156: nop
+   157: nop
+   158: return 1
+   159: nop
+   160: nop
+   161: nop
+   162: nop
+   163: nop
+   164: nop
+   165: label ir_errdefer_ok_26
+   166: nop
+   167: return 0
+}
+

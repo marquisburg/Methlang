@@ -1,0 +1,85 @@
+function alloc_zeroed {
+     0: label ir_entry_0
+     1: call %t0 = calloc(1, @n)
+     2: assign %t1 <- %t0
+     3: branch_zero %t1 -> ir_errdefer_ok_1
+     4: jump ir_errdefer_end_2
+     5: label ir_errdefer_ok_1
+     6: label ir_errdefer_end_2
+     7: return %t0
+}
+
+function buf_dup {
+     0: label ir_entry_3
+     1: binary %t2 = @len <= 0
+     2: branch_zero %t2 -> ir_if_next_5
+     3: assign %t3 <- 0
+     4: branch_zero %t3 -> ir_errdefer_ok_6
+     5: jump ir_errdefer_end_7
+     6: label ir_errdefer_ok_6
+     7: label ir_errdefer_end_7
+     8: return 0
+     9: jump ir_if_end_4
+    10: label ir_if_next_5
+    11: label ir_if_end_4
+    12: local @dst : cstring
+    13: call %t4 = malloc(@len)
+    14: assign @dst <- %t4
+    15: binary %t5 = @dst == 0
+    16: branch_zero %t5 -> ir_if_next_9
+    17: assign %t6 <- 0
+    18: branch_zero %t6 -> ir_errdefer_ok_10
+    19: jump ir_errdefer_end_11
+    20: label ir_errdefer_ok_10
+    21: label ir_errdefer_end_11
+    22: return 0
+    23: jump ir_if_end_8
+    24: label ir_if_next_9
+    25: label ir_if_end_8
+    26: call %t7 = memcpy(@dst, @src, @len)
+    27: assign %t8 <- @dst
+    28: branch_zero %t8 -> ir_errdefer_ok_12
+    29: jump ir_errdefer_end_13
+    30: label ir_errdefer_ok_12
+    31: label ir_errdefer_end_13
+    32: return @dst
+}
+
+function main {
+     0: label ir_entry_14
+     1: local @b : cstring
+     2: call %t9 = malloc(16)
+     3: assign @b <- %t9
+     4: local @i : int64
+     5: assign @i <- 1
+     6: local @v : int64
+     7: branch_zero @b -> ir_trap_null_15
+     8: jump ir_nonnull_16
+     9: label ir_trap_null_15
+    10: call _ = mettle_crash_trap("Fatal error: Null pointer dereference")
+    11: label ir_nonnull_16
+    12: binary %t10 = @i * 1
+    13: binary %t11 = @b + %t10
+    14: load %t12 <- *%t11 [1]
+    15: cast %t13 = (uint8)%t12
+    16: cast %t14 = (int64)%t13
+    17: assign @v <- %t14
+    18: cast %t15 = (uint8)1
+    19: branch_zero @b -> ir_trap_null_17
+    20: jump ir_nonnull_18
+    21: label ir_trap_null_17
+    22: call _ = mettle_crash_trap("Fatal error: Null pointer dereference")
+    23: label ir_nonnull_18
+    24: binary %t16 = @i * 1
+    25: binary %t17 = @b + %t16
+    26: store *%t17 <- %t15 [1]
+    27: call %t18 = free(@b)
+    28: cast %t19 = (int32)@v
+    29: assign %t20 <- %t19
+    30: branch_zero %t20 -> ir_errdefer_ok_19
+    31: jump ir_errdefer_end_20
+    32: label ir_errdefer_ok_19
+    33: label ir_errdefer_end_20
+    34: return %t19
+}
+

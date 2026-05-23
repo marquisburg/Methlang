@@ -9,6 +9,7 @@
 #include "../semantic/type_checker.h"
 #include "binary_emitter.h"
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -99,6 +100,11 @@ typedef struct {
    * count is the function's return-type size. */
   int current_fn_returns_indirect;
   size_t current_fn_indirect_return_size;
+  int profile_runtime;
+  uint32_t profile_next_id;
+  char **profile_function_names;
+  size_t profile_function_count;
+  size_t profile_function_capacity;
 } CodeGenerator;
 
 // Function declarations
@@ -126,6 +132,10 @@ void code_generator_set_stack_trace_support(CodeGenerator *generator,
                                             int enable);
 void code_generator_set_eliminate_unreachable_functions(CodeGenerator *generator,
                                                         int enable);
+void code_generator_set_profile_runtime(CodeGenerator *generator, int enable);
+int code_generator_register_profile_function(CodeGenerator *generator,
+                                             const char *name,
+                                             uint32_t *id_out);
 void code_generator_emit(CodeGenerator *generator, const char *format, ...);
 void code_generator_flush_pending_spill(CodeGenerator *generator);
 char *code_generator_get_output(CodeGenerator *generator);

@@ -39,6 +39,9 @@ typedef struct {
   const char *stdlib_directory;
   int prelude;
   int profile;
+  int profile_runtime;
+  int profile_runtime_ops;
+  int debug_compiler;
   LinkerMode linker_mode;
 } CompilerOptions;
 

@@ -172,6 +172,7 @@ IRFunction *ir_function_create(const char *name) {
   }
 
   function->name = ir_strdup(name ? name : "<anonymous>");
+  function->profile_id = IR_PROFILE_ID_NONE;
   function->parameter_names = NULL;
   function->parameter_types = NULL;
   function->parameter_count = 0;
@@ -294,6 +295,59 @@ int ir_function_append_instruction(IRFunction *function,
   return 1;
 }
 
+int ir_function_insert_instruction(IRFunction *function, size_t index,
+                                   const IRInstruction *instruction) {
+  if (!function || !instruction || index > function->instruction_count) {
+    return 0;
+  }
+
+  if (function->instruction_count >= function->instruction_capacity) {
+    size_t new_capacity = function->instruction_capacity == 0
+                              ? 64
+                              : function->instruction_capacity * 2;
+    IRInstruction *new_instructions =
+        realloc(function->instructions, new_capacity * sizeof(IRInstruction));
+    if (!new_instructions) {
+      return 0;
+    }
+    function->instructions = new_instructions;
+    function->instruction_capacity = new_capacity;
+  }
+
+  if (index < function->instruction_count) {
+    memmove(&function->instructions[index + 1], &function->instructions[index],
+            (function->instruction_count - index) * sizeof(IRInstruction));
+  }
+
+  IRInstruction *slot = &function->instructions[index];
+  memset(slot, 0, sizeof(*slot));
+  slot->op = instruction->op;
+  slot->location = instruction->location;
+  slot->is_float = instruction->is_float;
+  slot->float_bits = instruction->float_bits;
+  slot->ast_ref = instruction->ast_ref;
+  slot->dest = ir_operand_clone(&instruction->dest);
+  slot->lhs = ir_operand_clone(&instruction->lhs);
+  slot->rhs = ir_operand_clone(&instruction->rhs);
+  slot->text = ir_strdup(instruction->text);
+  slot->argument_count = instruction->argument_count;
+  slot->arguments = NULL;
+
+  if (instruction->argument_count > 0) {
+    slot->arguments = malloc(instruction->argument_count * sizeof(IROperand));
+    if (!slot->arguments) {
+      ir_instruction_destroy(slot);
+      return 0;
+    }
+    for (size_t i = 0; i < instruction->argument_count; i++) {
+      slot->arguments[i] = ir_operand_clone(&instruction->arguments[i]);
+    }
+  }
+
+  function->instruction_count++;
+  return 1;
+}
+
 IRProgram *ir_program_create(void) {
   IRProgram *program = malloc(sizeof(IRProgram));
   if (!program) {
@@ -303,6 +357,9 @@ IRProgram *ir_program_create(void) {
   program->functions = NULL;
   program->function_count = 0;
   program->function_capacity = 0;
+  program->profile_entries = NULL;
+  program->profile_entry_count = 0;
+  program->profile_entry_capacity = 0;
   return program;
 }
 
@@ -316,6 +373,13 @@ void ir_program_destroy(IRProgram *program) {
       ir_function_destroy(program->functions[i]);
     }
     free(program->functions);
+  }
+  if (program->profile_entries) {
+    for (size_t i = 0; i < program->profile_entry_count; i++) {
+      free(program->profile_entries[i].name);
+      free(program->profile_entries[i].filename);
+    }
+    free(program->profile_entries);
   }
   free(program);
 }
@@ -384,6 +448,13 @@ static const char *ir_opcode_name(IROpcode op) {
   case IR_OP_SIMD_SUM_I32: return "simd_sum_i32";
   case IR_OP_SIMD_MATMUL_N32: return "simd_matmul_n32";
   case IR_OP_SIMD_INSERTION_SORT_I32: return "simd_insertion_sort_i32";
+  case IR_OP_SIMD_DOT_I32: return "simd_dot_i32";
+  case IR_OP_SIMD_SCALE_I32: return "simd_scale_i32";
+  case IR_OP_SIMD_CLAMP_I32: return "simd_clamp_i32";
+  case IR_OP_SIMD_REVERSE_COPY_I32: return "simd_reverse_copy_i32";
+  case IR_OP_LOWER_BOUND_I32: return "lower_bound_i32";
+  case IR_OP_PREFIX_SUM_I32: return "prefix_sum_i32";
+  case IR_OP_SIMD_MINMAX_I32: return "simd_minmax_i32";
   default:
     return "unknown";
   }
@@ -426,6 +497,228 @@ static void ir_format_operand(const IROperand *operand, char *buffer,
     snprintf(buffer, buffer_size, "_");
     break;
   }
+}
+
+static int ir_format_instruction_line(const IRInstruction *instruction,
+                                      char *buffer, size_t buffer_size) {
+  char dest[128];
+  char lhs[128];
+  char rhs[128];
+  int written = 0;
+
+  if (!instruction || !buffer || buffer_size == 0) {
+    return 0;
+  }
+
+  ir_format_operand(&instruction->dest, dest, sizeof(dest));
+  ir_format_operand(&instruction->lhs, lhs, sizeof(lhs));
+  ir_format_operand(&instruction->rhs, rhs, sizeof(rhs));
+
+  switch (instruction->op) {
+  case IR_OP_LABEL:
+    written = snprintf(buffer, buffer_size, "%s %s", ir_opcode_name(instruction->op),
+                       instruction->text ? instruction->text : "<label>");
+    break;
+  case IR_OP_JUMP:
+    written = snprintf(buffer, buffer_size, "%s %s", ir_opcode_name(instruction->op),
+                       instruction->text ? instruction->text : "<target>");
+    break;
+  case IR_OP_BRANCH_ZERO:
+    written = snprintf(buffer, buffer_size, "%s %s -> %s",
+                       ir_opcode_name(instruction->op), lhs,
+                       instruction->text ? instruction->text : "<target>");
+    break;
+  case IR_OP_BRANCH_EQ:
+    written = snprintf(buffer, buffer_size, "%s %s, %s -> %s",
+                       ir_opcode_name(instruction->op), lhs, rhs,
+                       instruction->text ? instruction->text : "<target>");
+    break;
+  case IR_OP_DECLARE_LOCAL:
+    written = snprintf(buffer, buffer_size, "%s %s : %s",
+                       ir_opcode_name(instruction->op), dest,
+                       instruction->text ? instruction->text : "<unknown>");
+    break;
+  case IR_OP_ASSIGN:
+    written = snprintf(buffer, buffer_size, "%s <- %s", dest, lhs);
+    break;
+  case IR_OP_ADDRESS_OF:
+    written = snprintf(buffer, buffer_size, "%s <- &%s", dest, lhs);
+    break;
+  case IR_OP_LOAD:
+    written = snprintf(buffer, buffer_size, "%s <- *%s [%s]", dest, lhs, rhs);
+    break;
+  case IR_OP_STORE:
+    written = snprintf(buffer, buffer_size, "*%s <- %s [%s]", dest, lhs, rhs);
+    break;
+  case IR_OP_BINARY:
+    written = snprintf(buffer, buffer_size, "%s = %s %s%s %s", dest, lhs,
+                       instruction->text ? instruction->text : "?",
+                       instruction->is_float ? " (float)" : "", rhs);
+    break;
+  case IR_OP_ROTATE_ADD:
+    written = snprintf(buffer, buffer_size, "%s = rotate_add(%s, %s)", dest, lhs,
+                       rhs);
+    break;
+  case IR_OP_UNARY:
+    written = snprintf(buffer, buffer_size, "%s = %s%s%s", dest,
+                       instruction->text ? instruction->text : "?", lhs,
+                       instruction->is_float ? " (float)" : "");
+    break;
+  case IR_OP_CALL: {
+    size_t offset = 0;
+    offset += (size_t)snprintf(buffer + offset, buffer_size - offset, "%s = %s(",
+                               dest, instruction->text ? instruction->text
+                                                       : "<callee>");
+    for (size_t arg_i = 0; arg_i < instruction->argument_count; arg_i++) {
+      char arg_buffer[128];
+      ir_format_operand(&instruction->arguments[arg_i], arg_buffer,
+                        sizeof(arg_buffer));
+      offset +=
+          (size_t)snprintf(buffer + offset, buffer_size - offset, "%s%s",
+                           arg_i == 0 ? "" : ", ", arg_buffer);
+      if (offset >= buffer_size) {
+        break;
+      }
+    }
+    written = (int)snprintf(buffer + offset, buffer_size - offset, ")");
+    if (written >= 0) {
+      written += (int)offset;
+    }
+    break;
+  }
+  case IR_OP_NEW:
+    written = snprintf(buffer, buffer_size, "%s = %s [%s]", dest,
+                       instruction->text ? instruction->text : "<type>", rhs);
+    break;
+  case IR_OP_RETURN:
+    written = snprintf(buffer, buffer_size, "return %s", lhs);
+    break;
+  case IR_OP_INLINE_ASM:
+    written = snprintf(buffer, buffer_size, "inline_asm \"%s\"",
+                       instruction->text ? instruction->text : "");
+    break;
+  case IR_OP_CAST:
+    written = snprintf(buffer, buffer_size, "%s = (%s)%s%s", dest,
+                       instruction->text ? instruction->text : "<type>", lhs,
+                       instruction->is_float ? " (float)" : "");
+    break;
+  case IR_OP_COUNT_WORD_STARTS:
+    written = snprintf(buffer, buffer_size, "%s = count_word_starts(buf=%s, len=%s)",
+                       dest, lhs, rhs);
+    break;
+  case IR_OP_MEMCPY_INLINE:
+    written = snprintf(buffer, buffer_size, "%s = memcpy_inline %s, %s", dest,
+                       lhs, rhs);
+    break;
+  case IR_OP_SIMD_SUM_I32:
+    written = snprintf(buffer, buffer_size, "%s += simd_sum_i32(base=%s, len=%s)",
+                       dest, lhs, rhs);
+    break;
+  case IR_OP_SIMD_MATMUL_N32:
+    written = snprintf(buffer, buffer_size, "%s = matmul_n32(c=%s, a=%s, b=%s)",
+                       dest, dest, lhs, rhs);
+    break;
+  case IR_OP_SIMD_INSERTION_SORT_I32:
+    written = snprintf(buffer, buffer_size, "simd_insertion_sort_i32(base=%s, len=%s)",
+                       dest, rhs);
+    break;
+  case IR_OP_SIMD_DOT_I32: {
+    char len[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    written = snprintf(buffer, buffer_size, "%s = dot_i32(a=%s, b=%s, len=%s)",
+                       dest, lhs, rhs, len);
+    break;
+  }
+  case IR_OP_SIMD_SCALE_I32: {
+    char len[128], mul[128], add[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    ir_format_operand(instruction->argument_count > 1 ? &instruction->arguments[1]
+                                                      : NULL,
+                      mul, sizeof(mul));
+    ir_format_operand(instruction->argument_count > 2 ? &instruction->arguments[2]
+                                                      : NULL,
+                      add, sizeof(add));
+    written = snprintf(buffer, buffer_size,
+                       "%s = scale_i32(src=%s, dst=%s, len=%s, mul=%s, add=%s)",
+                       dest, lhs, rhs, len, mul, add);
+    break;
+  }
+  case IR_OP_SIMD_CLAMP_I32: {
+    char len[128], lo[128], hi[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    ir_format_operand(instruction->argument_count > 1 ? &instruction->arguments[1]
+                                                      : NULL,
+                      lo, sizeof(lo));
+    ir_format_operand(instruction->argument_count > 2 ? &instruction->arguments[2]
+                                                      : NULL,
+                      hi, sizeof(hi));
+    written = snprintf(buffer, buffer_size,
+                       "%s = clamp_i32(src=%s, dst=%s, len=%s, lo=%s, hi=%s)",
+                       dest, lhs, rhs, len, lo, hi);
+    break;
+  }
+  case IR_OP_SIMD_REVERSE_COPY_I32: {
+    char len[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    written = snprintf(buffer, buffer_size,
+                       "%s = reverse_copy_i32(src=%s, dst=%s, len=%s)", dest,
+                       lhs, rhs, len);
+    break;
+  }
+  case IR_OP_LOWER_BOUND_I32: {
+    char key[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      key, sizeof(key));
+    written = snprintf(buffer, buffer_size,
+                       "%s = lower_bound_i32(arr=%s, n=%s, key=%s)", dest, lhs,
+                       rhs, key);
+    break;
+  }
+  case IR_OP_PREFIX_SUM_I32: {
+    char len[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    written = snprintf(buffer, buffer_size,
+                       "%s = prefix_sum_i32(src=%s, dst=%s, len=%s)", dest,
+                       lhs, rhs, len);
+    break;
+  }
+  case IR_OP_SIMD_MINMAX_I32: {
+    char maxv[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      maxv, sizeof(maxv));
+    written = snprintf(buffer, buffer_size,
+                       "%s = minmax_i32(arr=%s, n=%s, max=%s)", dest, lhs, rhs,
+                       maxv);
+    break;
+  }
+  case IR_OP_NOP:
+  default:
+    written = snprintf(buffer, buffer_size, "%s", ir_opcode_name(instruction->op));
+    break;
+  }
+
+  return written > 0 && (size_t)written < buffer_size;
+}
+
+int ir_instruction_dump(const IRInstruction *instruction, size_t index,
+                        char *buffer, size_t capacity) {
+  if (!instruction || !buffer || capacity == 0) {
+    return 0;
+  }
+  (void)index;
+  return ir_format_instruction_line(instruction, buffer, capacity);
 }
 
 int ir_program_dump(IRProgram *program, FILE *output) {
@@ -550,6 +843,65 @@ int ir_program_dump(IRProgram *program, FILE *output) {
         fprintf(output, "%s base=%s len=%s\n",
                 ir_opcode_name(instruction->op), dest, rhs);
         break;
+      case IR_OP_SIMD_DOT_I32: {
+        char len[128];
+        ir_format_operand(instruction->argument_count > 0
+                              ? &instruction->arguments[0]
+                              : NULL,
+                          len, sizeof(len));
+        fprintf(output, "%s %s = dot_i32(a=%s, b=%s, len=%s)\n",
+                ir_opcode_name(instruction->op), dest, lhs, rhs, len);
+        break;
+      }
+      case IR_OP_SIMD_SCALE_I32: {
+        char len[128], mul[128], add[128];
+        ir_format_operand(instruction->argument_count > 0
+                              ? &instruction->arguments[0]
+                              : NULL,
+                          len, sizeof(len));
+        ir_format_operand(instruction->argument_count > 1
+                              ? &instruction->arguments[1]
+                              : NULL,
+                          mul, sizeof(mul));
+        ir_format_operand(instruction->argument_count > 2
+                              ? &instruction->arguments[2]
+                              : NULL,
+                          add, sizeof(add));
+        fprintf(output,
+                "%s %s = scale_i32(src=%s, dst=%s, len=%s, mul=%s, add=%s)\n",
+                ir_opcode_name(instruction->op), dest, lhs, rhs, len, mul,
+                add);
+        break;
+      }
+      case IR_OP_SIMD_CLAMP_I32: {
+        char len[128], lo[128], hi[128];
+        ir_format_operand(instruction->argument_count > 0
+                              ? &instruction->arguments[0]
+                              : NULL,
+                          len, sizeof(len));
+        ir_format_operand(instruction->argument_count > 1
+                              ? &instruction->arguments[1]
+                              : NULL,
+                          lo, sizeof(lo));
+        ir_format_operand(instruction->argument_count > 2
+                              ? &instruction->arguments[2]
+                              : NULL,
+                          hi, sizeof(hi));
+        fprintf(output,
+                "%s %s = clamp_i32(src=%s, dst=%s, len=%s, lo=%s, hi=%s)\n",
+                ir_opcode_name(instruction->op), dest, lhs, rhs, len, lo, hi);
+        break;
+      }
+      case IR_OP_SIMD_REVERSE_COPY_I32: {
+        char len[128];
+        ir_format_operand(instruction->argument_count > 0
+                              ? &instruction->arguments[0]
+                              : NULL,
+                          len, sizeof(len));
+        fprintf(output, "%s %s = reverse_copy_i32(src=%s, dst=%s, len=%s)\n",
+                ir_opcode_name(instruction->op), dest, lhs, rhs, len);
+        break;
+      }
       case IR_OP_NOP:
       default:
         fprintf(output, "%s\n", ir_opcode_name(instruction->op));

@@ -515,6 +515,37 @@ $cases = @(
     IrMustNotMatch = @("BINARY %t[0-9]+ = @n % 2")
   },
   @{
+    Name          = "opt_collatz_odd_fold"
+    Path          = "tests/test_opt_collatz_odd_fold.mettle"
+    ShouldSucceed = $true
+    Args          = @("-O", "--dump-ir")
+    IrMustMatch   = @("(?s)binary %t[0-9]+ = 3 \* @x.*binary @x = %t[0-9]+ \+ 1.*binary @x = @x >> 1.*binary @count = @count \+ 2.*jump ir_while_")
+  },
+  @{
+    Name          = "opt_popcount_fold"
+    Path          = "tests/test_optimize_popcount_fold.mettle"
+    ShouldSucceed = $true
+    Args          = @("-O", "--dump-ir")
+    IrMustMatch   = @(">> 1", "branch_zero @v ->")
+    IrMustNotMatch = @("jump ir_while_", "binary %t[0-9]+ = @v / 2")
+  },
+  @{
+    Name          = "opt_popcount_buffer_fuse"
+    Path          = "tests/test_optimize_popcount_buffer_fuse.mettle"
+    ShouldSucceed = $true
+    Args          = @("--build", "--emit-obj", "--linker", "internal", "--release", "--profile-runtime-ops", "--dump-ir")
+    IrMustMatch   = @("load %pbf[0-9]+_raw", "binary @total = @total \+ %pbf")
+    IrMustNotMatch = @("call %t[0-9]+ = popcount_byte", "__inl_popcount_byte", "local_count")
+  },
+  @{
+    Name          = "opt_popcount_buffer_fuse_release"
+    Path          = "tests/test_optimize_popcount_buffer_fuse.mettle"
+    ShouldSucceed = $true
+    Args          = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch   = @("load %pbf[0-9]+_raw", "binary @total = @total \+ %pbf")
+    IrMustNotMatch = @("call %t[0-9]+ = popcount_byte", "__inl_popcount_byte", "local_count")
+  },
+  @{
     Name          = "opt_branch_notzero_forward"
     Path          = "tests/test_opt_branch_notzero_forward.mettle"
     ShouldSucceed = $true
@@ -568,11 +599,67 @@ $cases = @(
     IrMustMatch     = @("simd_sum_i32")
   },
   @{
+    Name            = "opt_ptr_induction"
+    Path            = "tests/test_opt_ptr_induction.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("@__ptr_", "load %", "<- \*@__ptr_")
+    IrMustNotMatch  = @("function map_inc[\s\S]*?@i << 2[\s\S]*?function main")
+  },
+  @{
+    Name            = "opt_prefix_sum_i32"
+    Path            = "tests/test_opt_prefix_sum_i32.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("prefix_sum_i32")
+  },
+  @{
+    Name            = "opt_simd_minmax_i32"
+    Path            = "tests/test_opt_simd_minmax.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("simd_minmax_i32")
+  },
+  @{
+    Name            = "opt_simd_clamp_shape"
+    Path            = "tests/test_opt_simd_clamp_shape.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("simd_clamp_i32")
+  },
+  @{
+    Name          = "opt_load_symbol_copy_branch"
+    Path          = "tests/test_opt_load_symbol_copy_branch.mettle"
+    ShouldSucceed = $true
+    Args          = @("--build", "--emit-obj", "--linker", "internal", "--release")
+  },
+  @{
     Name            = "opt_simd_insertion_sort_i32"
     Path            = "tests/test_opt_shift_loop.mettle"
     ShouldSucceed   = $true
     Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
     IrMustMatch     = @("simd_insertion_sort_i32")
+  },
+  @{
+    Name            = "opt_simd_insertion_sort_stack"
+    Path            = "tests/test_opt_simd_insertion_sort_stack.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("simd_insertion_sort_i32")
+  },
+  @{
+    Name            = "opt_simd_dot_i32"
+    Path            = "examples/dot_product/dot_product.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("simd_dot_i32")
+  },
+  @{
+    Name            = "opt_simd_matmul_n32"
+    Path            = "tests/test_opt_simd_matmul_n32.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("simd_matmul_n32")
   },
   @{
     Name          = "codegen_ir_fastpaths"
@@ -758,6 +845,7 @@ $cases = @(
   @{ Name = "err_codegen_member_expr"; Path = "tests/err_codegen_member_expr.mettle"; ShouldSucceed = $false },
   @{ Name = "err_function_arg_count"; Path = "tests/err_function_arg_count.mettle"; ShouldSucceed = $false; Pattern = "expects .* arguments, got" },
   @{ Name = "err_function_arg_type"; Path = "tests/err_function_arg_type.mettle"; ShouldSucceed = $false; Pattern = "Type mismatch" },
+  @{ Name = "err_match_bad_syntax"; Path = "tests/err_match_bad_syntax.mettle"; ShouldSucceed = $false; Pattern = "Expected .* after 'match'" },
   @{ Name = "err_match_non_exhaustive"; Path = "tests/err_match_non_exhaustive.mettle"; ShouldSucceed = $false; Pattern = "Non-exhaustive match" },
   @{ Name = "err_trait_bound_missing_impl"; Path = "tests/err_trait_bound_missing_impl.mettle"; ShouldSucceed = $false; Pattern = "does not implement trait 'Addable'" },
   @{ Name = "err_trait_bound_missing_second_impl"; Path = "tests/err_trait_bound_missing_second_impl.mettle"; ShouldSucceed = $false; Pattern = "does not implement trait 'SignedNumber'" },
@@ -2314,7 +2402,7 @@ try {
     'shl\s+\$0x2,%rax',
     '(?s)<scale_by_eight>.*shl\s+\$0x3,%rax',
     '(?s)<zero_const>.*xor\s+%eax,%eax',
-    '(?s)<even_branch>.*and\s+\$0x1,%rax.*test\s+%rax,%rax.*jne',
+    '(?s)<even_branch>.*(?:and\s+\$0x1,%rax.*test\s+%rax,%rax|test\s+\$0x1,%rax).*(?:jne)',
     '(?s)<fused_mul_add>.*%r12'
   )
   foreach ($pattern in $requiredPatterns) {
@@ -2593,6 +2681,40 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "direct_object_pointer_memory" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend release test: a reused byte-address temp must survive load+store fusion
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_byte_load_store_alias.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_byte_load_store_alias.exe"
+
+  $objOut = & $CompilerPath --emit-obj --release tests\test_direct_object_byte_load_store_alias.mettle -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object byte-load-store-alias compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object byte-load-store-alias compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal --release tests\test_direct_object_byte_load_store_alias.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object byte-load-store-alias build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object byte-load-store-alias build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 37) {
+    throw "Direct object byte-load-store-alias executable exited with $LASTEXITCODE (expected 37)"
+  }
+
+  Write-CaseResult -Name "direct_object_byte_load_store_alias" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_byte_load_store_alias" -Passed $false -Reason $_.Exception.Message
 }
 
 # Direct object backend aggregate-local test: stack-allocated struct addressed and passed by pointer
@@ -2937,6 +3059,121 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "opt_reduction_unroll" -Passed $false -Reason $_.Exception.Message
+}
+
+# Runtime profile mode: function entry/exit instrumentation and exit report
+$total++
+try {
+  $profileExe = Join-Path $tmpDir "test_profile_runtime.exe"
+  $profileBuild = & $CompilerPath --build --emit-obj --linker internal --profile-runtime `
+    tests\test_profile_runtime.mettle -o $profileExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "profile-runtime build failed: $profileBuild"
+  }
+  if (-not (Test-Path $profileExe)) {
+    throw "profile-runtime build did not produce an executable"
+  }
+
+  $profileRun = & $profileExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "profile-runtime exe exited with $LASTEXITCODE"
+  }
+  if ($profileRun -notmatch "Runtime profile:") {
+    throw "profile-runtime report missing header: $profileRun"
+  }
+  if ($profileRun -notmatch "helper") {
+    throw "profile-runtime report missing helper: $profileRun"
+  }
+  if ($profileRun -notmatch "work") {
+    throw "profile-runtime report missing work: $profileRun"
+  }
+  if ($profileRun -notmatch "main") {
+    throw "profile-runtime report missing main: $profileRun"
+  }
+  if ($profileRun -notmatch "location") {
+    throw "profile-runtime report missing location column: $profileRun"
+  }
+  if ($profileRun -notmatch "Runtime profile \(call graph\):") {
+    throw "profile-runtime report missing call graph: $profileRun"
+  }
+  if ($profileRun -notmatch "test_profile_runtime\.mettle:[0-9]+") {
+    throw "profile-runtime report missing file:line location: $profileRun"
+  }
+
+  Write-CaseResult -Name "profile_runtime" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "profile_runtime" -Passed $false -Reason $_.Exception.Message
+}
+
+$total++
+try {
+  $profileOpsExe = Join-Path $tmpDir "test_profile_runtime_ops.exe"
+  $profileOpsBuild = & $CompilerPath --build --emit-obj --linker internal --profile-runtime-ops `
+    tests\test_profile_runtime.mettle -o $profileOpsExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "profile-runtime-ops build failed: $profileOpsBuild"
+  }
+  if (-not (Test-Path $profileOpsExe)) {
+    throw "profile-runtime-ops build did not produce an executable"
+  }
+
+  $profileOpsRun = & $profileOpsExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "profile-runtime-ops exe exited with $LASTEXITCODE"
+  }
+  if ($profileOpsRun -notmatch "Operation profile:") {
+    throw "profile-runtime-ops report missing header: $profileOpsRun"
+  }
+  if ($profileOpsRun -notmatch "function\s+op_class\s+count") {
+    throw "profile-runtime-ops report missing columns: $profileOpsRun"
+  }
+  if ($profileOpsRun -notmatch "work\s+add") {
+    throw "profile-runtime-ops report missing expected op row: $profileOpsRun"
+  }
+  if ($profileOpsRun -notmatch "work\s+branch") {
+    throw "profile-runtime-ops report missing branch row: $profileOpsRun"
+  }
+
+  Write-CaseResult -Name "profile_runtime_ops" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "profile_runtime_ops" -Passed $false -Reason $_.Exception.Message
+}
+
+try {
+  $total++
+  $iceExe = Join-Path $tmpDir "compiler_ice_report_test.exe"
+  $iceCompile = & gcc -Wall -Wextra -std=c99 -g -O0 -Isrc tests\compiler_ice_report_test.c src\compiler\compiler_context.c src\compiler\compiler_crash.c src\ir\ir.c -o $iceExe -ldbghelp 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "compiler ICE report harness compile failed: $iceCompile"
+  }
+  $iceRun = & $iceExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "compiler ICE report harness exited with $LASTEXITCODE"
+  }
+  if ($iceRun -notmatch "Mettle internal compiler error") {
+    throw "compiler ICE report missing banner: $iceRun"
+  }
+  if ($iceRun -notmatch "Phase: IR optimization") {
+    throw "compiler ICE report missing phase: $iceRun"
+  }
+  if ($iceRun -notmatch "Pass: memcpy_inline") {
+    throw "compiler ICE report missing pass: $iceRun"
+  }
+  if ($iceRun -notmatch "Compiler backtrace:") {
+    throw "compiler ICE report missing backtrace: $iceRun"
+  }
+  if ($iceRun -notmatch "memcpy_inline") {
+    throw "compiler ICE report missing IR instruction text: $iceRun"
+  }
+  Write-CaseResult -Name "compiler_ice_report" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "compiler_ice_report" -Passed $false -Reason $_.Exception.Message
 }
 
 Write-Host ""

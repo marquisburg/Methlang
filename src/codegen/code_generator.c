@@ -1,4 +1,5 @@
 #include "code_generator_internal.h"
+#include "compiler/compiler_context.h"
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -58,6 +59,11 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->indirect_return_slot_cursor = 0;
   generator->current_fn_returns_indirect = 0;
   generator->current_fn_indirect_return_size = 0;
+  generator->profile_runtime = 0;
+  generator->profile_next_id = 0;
+  generator->profile_function_names = NULL;
+  generator->profile_function_count = 0;
+  generator->profile_function_capacity = 0;
   generator->binary_emitter =
       binary_emitter_create(BINARY_TARGET_FORMAT_COFF_WIN64);
 
@@ -110,6 +116,12 @@ void code_generator_destroy(CodeGenerator *generator) {
       }
     }
     free(generator->extern_symbols);
+    if (generator->profile_function_names) {
+      for (size_t i = 0; i < generator->profile_function_count; i++) {
+        free(generator->profile_function_names[i]);
+      }
+    }
+    free(generator->profile_function_names);
     free(generator->indirect_return_slot_offsets);
     free(generator);
   }
@@ -141,6 +153,11 @@ void code_generator_set_error(CodeGenerator *generator,
   if (generator->has_error) {
     return;
   }
+
+  if (generator->current_function_name) {
+    mettle_compiler_ctx_set_function_name(generator->current_function_name);
+  }
+  mettle_compiler_ctx_set_phase(METTLE_COMPILER_PHASE_CODEGEN);
 
   generator->has_error = 1;
   free(generator->error_message);
@@ -185,6 +202,50 @@ void code_generator_set_eliminate_unreachable_functions(
     return;
   }
   generator->eliminate_unreachable_functions = enable ? 1 : 0;
+}
+
+int code_generator_register_profile_function(CodeGenerator *generator,
+                                             const char *name,
+                                             uint32_t *id_out) {
+  char *name_copy = NULL;
+  size_t new_index = 0;
+
+  if (!generator || !name || !id_out) {
+    return 0;
+  }
+
+  new_index = generator->profile_function_count;
+  if (generator->profile_function_count >= generator->profile_function_capacity) {
+    size_t new_capacity = generator->profile_function_capacity == 0
+                              ? 16u
+                              : generator->profile_function_capacity * 2u;
+    char **names =
+        realloc(generator->profile_function_names,
+                new_capacity * sizeof(char *));
+    if (!names) {
+      return 0;
+    }
+    generator->profile_function_names = names;
+    generator->profile_function_capacity = new_capacity;
+  }
+
+  name_copy = strdup(name);
+  if (!name_copy) {
+    return 0;
+  }
+
+  generator->profile_function_names[new_index] = name_copy;
+  generator->profile_function_count = new_index + 1u;
+  generator->profile_next_id = (uint32_t)generator->profile_function_count;
+  *id_out = (uint32_t)new_index;
+  return 1;
+}
+
+void code_generator_set_profile_runtime(CodeGenerator *generator, int enable) {
+  if (!generator) {
+    return;
+  }
+  generator->profile_runtime = enable ? 1 : 0;
 }
 
 static char *code_generator_strip_asm_comments(const char *text) {

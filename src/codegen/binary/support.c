@@ -1,0 +1,435 @@
+#include "codegen/binary/internal.h"
+
+#include <limits.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+size_t binary_string_hash(const char *name) {
+  size_t hash = (size_t)1469598103934665603ULL;
+  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+    hash ^= (size_t)*p;
+    hash *= (size_t)1099511628211ULL;
+  }
+  return hash;
+}
+
+char *binary_codegen_strdup(const char *value) {
+  if (!value) {
+    return NULL;
+  }
+
+  size_t length = strlen(value) + 1;
+  char *copy = malloc(length);
+  if (!copy) {
+    return NULL;
+  }
+
+  memcpy(copy, value, length);
+  return copy;
+}
+int binary_align_up_int(int value, int alignment, int *result_out) {
+  if (!result_out || value < 0 || alignment <= 0) {
+    return 0;
+  }
+
+  int remainder = value % alignment;
+  if (remainder == 0) {
+    *result_out = value;
+    return 1;
+  }
+  if (value > INT_MAX - (alignment - remainder)) {
+    return 0;
+  }
+
+  *result_out = value + (alignment - remainder);
+  return 1;
+}
+int binary_code_buffer_reserve(BinaryCodeBuffer *buffer,
+                                      size_t minimum_capacity) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (buffer->capacity >= minimum_capacity) {
+    return 1;
+  }
+
+  size_t new_capacity = buffer->capacity == 0 ? 64 : buffer->capacity * 2;
+  while (new_capacity < minimum_capacity) {
+    new_capacity *= 2;
+  }
+
+  unsigned char *grown = realloc(buffer->data, new_capacity);
+  if (!grown) {
+    return 0;
+  }
+
+  buffer->data = grown;
+  buffer->capacity = new_capacity;
+  return 1;
+}
+
+int binary_code_buffer_append_bytes(BinaryCodeBuffer *buffer,
+                                           const void *data, size_t size) {
+  if (!buffer || (!data && size != 0)) {
+    return 0;
+  }
+
+  if (!binary_code_buffer_reserve(buffer, buffer->size + size)) {
+    return 0;
+  }
+
+  if (size != 0) {
+    memcpy(buffer->data + buffer->size, data, size);
+    buffer->size += size;
+  }
+
+  return 1;
+}
+
+int binary_code_buffer_append_u8(BinaryCodeBuffer *buffer,
+                                        unsigned char value) {
+  return binary_code_buffer_append_bytes(buffer, &value, sizeof(value));
+}
+
+int binary_code_buffer_append_u32(BinaryCodeBuffer *buffer,
+                                         uint32_t value) {
+  return binary_code_buffer_append_bytes(buffer, &value, sizeof(value));
+}
+
+int binary_code_buffer_append_u64(BinaryCodeBuffer *buffer,
+                                         uint64_t value) {
+  return binary_code_buffer_append_bytes(buffer, &value, sizeof(value));
+}
+
+void binary_code_buffer_destroy(BinaryCodeBuffer *buffer) {
+  if (!buffer) {
+    return;
+  }
+
+  free(buffer->data);
+  buffer->data = NULL;
+  buffer->size = 0;
+  buffer->capacity = 0;
+}
+
+int binary_named_slot_table_get_offset(const BinaryNamedSlotTable *table,
+                                              const char *name) {
+  if (!table || !name) {
+    return -1;
+  }
+
+  for (size_t i = 0; i < table->count; i++) {
+    if (table->items[i].name && strcmp(table->items[i].name, name) == 0) {
+      return table->items[i].offset;
+    }
+  }
+
+  return -1;
+}
+
+int binary_named_slot_table_add(BinaryNamedSlotTable *table,
+                                       const char *name, int offset) {
+  if (!table || !name || offset <= 0) {
+    return 0;
+  }
+
+  int existing = binary_named_slot_table_get_offset(table, name);
+  if (existing >= 0) {
+    return existing == offset;
+  }
+
+  if (table->count >= table->capacity) {
+    size_t new_capacity = table->capacity == 0 ? 8 : table->capacity * 2;
+    BinaryNamedSlot *grown =
+        realloc(table->items, new_capacity * sizeof(BinaryNamedSlot));
+    if (!grown) {
+      return 0;
+    }
+    table->items = grown;
+    table->capacity = new_capacity;
+  }
+
+  char *name_copy = binary_codegen_strdup(name);
+  if (!name_copy) {
+    return 0;
+  }
+
+  table->items[table->count].name = name_copy;
+  table->items[table->count].offset = offset;
+  table->count++;
+  return 1;
+}
+
+void binary_named_slot_table_destroy(BinaryNamedSlotTable *table) {
+  if (!table) {
+    return;
+  }
+
+  for (size_t i = 0; i < table->count; i++) {
+    free(table->items[i].name);
+  }
+  free(table->items);
+  table->items = NULL;
+  table->count = 0;
+  table->capacity = 0;
+}
+
+const char *
+binary_symbol_alias_table_get(const BinarySymbolAliasTable *table,
+                              const char *name) {
+  if (!table || !name) {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < table->count; i++) {
+    if (table->items[i].name && strcmp(table->items[i].name, name) == 0) {
+      return table->items[i].target;
+    }
+  }
+
+  return NULL;
+}
+
+int binary_symbol_alias_table_add(BinarySymbolAliasTable *table,
+                                         const char *name,
+                                         const char *target) {
+  const char *existing = NULL;
+  if (!table || !name || !target || name[0] == '\0' ||
+      target[0] == '\0') {
+    return 0;
+  }
+
+  existing = binary_symbol_alias_table_get(table, name);
+  if (existing) {
+    return strcmp(existing, target) == 0;
+  }
+
+  if (table->count >= table->capacity) {
+    size_t new_capacity = table->capacity == 0 ? 8 : table->capacity * 2;
+    BinarySymbolAliasEntry *grown =
+        realloc(table->items, new_capacity * sizeof(BinarySymbolAliasEntry));
+    if (!grown) {
+      return 0;
+    }
+    table->items = grown;
+    table->capacity = new_capacity;
+  }
+
+  table->items[table->count].name = name;
+  table->items[table->count].target = target;
+  table->count++;
+  return 1;
+}
+
+void binary_symbol_alias_table_destroy(BinarySymbolAliasTable *table) {
+  if (!table) {
+    return;
+  }
+  free(table->items);
+  table->items = NULL;
+  table->count = 0;
+  table->capacity = 0;
+}
+
+BinaryLabelEntry *binary_label_table_get(BinaryLabelTable *table,
+                                                const char *name) {
+  if (!table || !name) {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < table->count; i++) {
+    if (table->items[i].name && strcmp(table->items[i].name, name) == 0) {
+      return &table->items[i];
+    }
+  }
+
+  return NULL;
+}
+
+int binary_label_table_define(BinaryLabelTable *table, const char *name,
+                                     size_t offset) {
+  if (!table || !name) {
+    return 0;
+  }
+
+  if (binary_label_table_get(table, name)) {
+    return 0;
+  }
+
+  if (table->count >= table->capacity) {
+    size_t new_capacity = table->capacity == 0 ? 8 : table->capacity * 2;
+    BinaryLabelEntry *grown =
+        realloc(table->items, new_capacity * sizeof(BinaryLabelEntry));
+    if (!grown) {
+      return 0;
+    }
+    table->items = grown;
+    table->capacity = new_capacity;
+  }
+
+  char *name_copy = binary_codegen_strdup(name);
+  if (!name_copy) {
+    return 0;
+  }
+
+  table->items[table->count].name = name_copy;
+  table->items[table->count].offset = offset;
+  table->count++;
+  return 1;
+}
+
+void binary_label_table_destroy(BinaryLabelTable *table) {
+  if (!table) {
+    return;
+  }
+
+  for (size_t i = 0; i < table->count; i++) {
+    free(table->items[i].name);
+  }
+  free(table->items);
+  table->items = NULL;
+  table->count = 0;
+  table->capacity = 0;
+}
+
+int binary_label_fixup_table_add(BinaryLabelFixupTable *table,
+                                        const char *name,
+                                        size_t displacement_offset) {
+  if (!table || !name) {
+    return 0;
+  }
+
+  if (table->count >= table->capacity) {
+    size_t new_capacity = table->capacity == 0 ? 8 : table->capacity * 2;
+    BinaryLabelFixup *grown =
+        realloc(table->items, new_capacity * sizeof(BinaryLabelFixup));
+    if (!grown) {
+      return 0;
+    }
+    table->items = grown;
+    table->capacity = new_capacity;
+  }
+
+  char *name_copy = binary_codegen_strdup(name);
+  if (!name_copy) {
+    return 0;
+  }
+
+  table->items[table->count].name = name_copy;
+  table->items[table->count].displacement_offset = displacement_offset;
+  table->count++;
+  return 1;
+}
+
+void binary_label_fixup_table_destroy(BinaryLabelFixupTable *table) {
+  if (!table) {
+    return;
+  }
+
+  for (size_t i = 0; i < table->count; i++) {
+    free(table->items[i].name);
+  }
+  free(table->items);
+  table->items = NULL;
+  table->count = 0;
+  table->capacity = 0;
+}
+
+int binary_call_relocation_table_add(BinaryCallRelocationTable *table,
+                                            const char *symbol_name,
+                                            size_t displacement_offset) {
+  if (!table || !symbol_name) {
+    return 0;
+  }
+
+  if (table->count >= table->capacity) {
+    size_t new_capacity = table->capacity == 0 ? 8 : table->capacity * 2;
+    BinaryCallRelocation *grown =
+        realloc(table->items, new_capacity * sizeof(BinaryCallRelocation));
+    if (!grown) {
+      return 0;
+    }
+    table->items = grown;
+    table->capacity = new_capacity;
+  }
+
+  char *name_copy = binary_codegen_strdup(symbol_name);
+  if (!name_copy) {
+    return 0;
+  }
+
+  table->items[table->count].symbol_name = name_copy;
+  table->items[table->count].displacement_offset = displacement_offset;
+  table->count++;
+  return 1;
+}
+
+void binary_call_relocation_table_destroy(
+    BinaryCallRelocationTable *table) {
+  if (!table) {
+    return;
+  }
+
+  for (size_t i = 0; i < table->count; i++) {
+    free(table->items[i].symbol_name);
+  }
+  free(table->items);
+  table->items = NULL;
+  table->count = 0;
+  table->capacity = 0;
+}
+
+int binary_offset_table_add(BinaryOffsetTable *table, size_t offset) {
+  if (!table) {
+    return 0;
+  }
+
+  if (table->count >= table->capacity) {
+    size_t new_capacity = table->capacity == 0 ? 8 : table->capacity * 2;
+    size_t *grown = realloc(table->items, new_capacity * sizeof(size_t));
+    if (!grown) {
+      return 0;
+    }
+    table->items = grown;
+    table->capacity = new_capacity;
+  }
+
+  table->items[table->count++] = offset;
+  return 1;
+}
+
+void binary_offset_table_destroy(BinaryOffsetTable *table) {
+  if (!table) {
+    return;
+  }
+
+  free(table->items);
+  table->items = NULL;
+  table->count = 0;
+  table->capacity = 0;
+}
+
+void binary_function_context_destroy(BinaryFunctionContext *context) {
+  if (!context) {
+    return;
+  }
+
+  binary_code_buffer_destroy(&context->code);
+  binary_named_slot_table_destroy(&context->parameter_slots);
+  binary_named_slot_table_destroy(&context->local_slots);
+  binary_named_slot_table_destroy(&context->temp_slots);
+  binary_named_slot_table_destroy(&context->float64_symbols);
+  binary_named_slot_table_destroy(&context->address_taken_symbols);
+  binary_named_slot_table_destroy(&context->register_symbols);
+  binary_symbol_alias_table_destroy(&context->symbol_aliases);
+  binary_label_table_destroy(&context->labels);
+  binary_label_fixup_table_destroy(&context->label_fixups);
+  binary_call_relocation_table_destroy(&context->call_relocations);
+  binary_offset_table_destroy(&context->return_fixups);
+  free(context->indirect_return_slot_offsets);
+  free(context->indirect_temp_names);
+  free(context->indirect_temp_sizes);
+}
+

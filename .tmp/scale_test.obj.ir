@@ -1,0 +1,726 @@
+function cstr {
+     0: nop
+     1: nop
+     2: load %t1 <- *@s [8]
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: return %t1
+}
+
+function print {
+     0: nop
+     1: nop
+     2: call %__inl_get_stdout_0_tmp_t54 = __acrt_iob_func(1)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: call %t3 = fputs(@msg, %__inl_get_stdout_0_tmp_t54)
+    12: nop
+    13: nop
+    14: nop
+    15: nop
+    16: nop
+    17: return _
+}
+
+function println {
+     0: nop
+     1: call %t6 = puts(@msg)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return _
+}
+
+function newline {
+     0: nop
+     1: call %t8 = putchar(10)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return _
+}
+
+function print_int {
+     0: nop
+     1: local @buf : uint8[22]
+     2: local @pos : int32
+     3: assign @pos <- 21
+     4: local @neg : int32
+     5: assign @neg <- 0
+     6: addr_of %t10 <- &@buf
+     7: nop
+     8: binary %t12 = %t10 + 21
+     9: store *%t12 <- 0 [1]
+    10: binary %t13 = @n < 0
+    11: branch_zero %t13 -> ir_if_next_14
+    12: assign @neg <- 1
+    13: binary @n = 0 - @n
+    14: nop
+    15: jump ir_if_end_13
+    16: label ir_if_next_14
+    17: label ir_if_end_13
+    18: binary %t15 = @n == 0
+    19: branch_zero %t15 -> ir_if_next_16
+    20: addr_of %t16 <- &@buf
+    21: nop
+    22: nop
+    23: store *%t16 <- 48 [1]
+    24: addr_of %t19 <- &@buf
+    25: nop
+    26: binary %t21 = %t19 + 1
+    27: store *%t21 <- 0 [1]
+    28: addr_of %t23 <- &@buf
+    29: nop
+    30: nop
+    31: nop
+    32: call %__inl_get_stdout_1_tmp_t54 = __acrt_iob_func(1)
+    33: nop
+    34: nop
+    35: nop
+    36: nop
+    37: nop
+    38: nop
+    39: nop
+    40: nop
+    41: call %t22 = fputs(%t23, %__inl_get_stdout_1_tmp_t54)
+    42: nop
+    43: nop
+    44: nop
+    45: nop
+    46: nop
+    47: return _
+    48: nop
+    49: label ir_if_next_16
+    50: nop
+    51: label ir_while_19
+    52: binary %t28 = @n > 0
+    53: branch_zero %t28 -> ir_while_end_20
+    54: binary @pos = @pos - 1
+    55: nop
+    56: binary %t30 = 48 + @n
+    57: binary %t31 = @n / 10
+    58: binary %t32 = %t31 * 10
+    59: binary %t33 = %t30 - %t32
+    60: addr_of %t34 <- &@buf
+    61: nop
+    62: binary %t36 = %t34 + @pos
+    63: store *%t36 <- %t33 [1]
+    64: binary @n = @n / 10
+    65: nop
+    66: jump ir_while_19
+    67: label ir_while_end_20
+    68: nop
+    69: branch_zero @neg -> ir_if_next_22
+    70: binary @pos = @pos - 1
+    71: nop
+    72: addr_of %t40 <- &@buf
+    73: nop
+    74: binary %t42 = %t40 + @pos
+    75: store *%t42 <- 45 [1]
+    76: jump ir_if_end_21
+    77: label ir_if_next_22
+    78: label ir_if_end_21
+    79: addr_of %t44 <- &@buf
+    80: nop
+    81: binary %t46 = %t44 + @pos
+    82: nop
+    83: call %__inl_get_stdout_2_tmp_t54 = __acrt_iob_func(1)
+    84: nop
+    85: nop
+    86: nop
+    87: nop
+    88: nop
+    89: nop
+    90: nop
+    91: nop
+    92: call %t43 = fputs(%t46, %__inl_get_stdout_2_tmp_t54)
+    93: nop
+    94: nop
+    95: nop
+    96: nop
+    97: nop
+    98: return _
+}
+
+function println_int {
+     0: nop
+     1: call %t49 = print_int(@n)
+     2: call %t50 = putchar(10)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: return _
+}
+
+function get_stdin {
+     0: nop
+     1: call %t52 = __acrt_iob_func(0)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t52
+}
+
+function get_stdout {
+     0: nop
+     1: call %t54 = __acrt_iob_func(1)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t54
+}
+
+function get_stderr {
+     0: nop
+     1: call %t56 = __acrt_iob_func(2)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t56
+}
+
+function print_err {
+     0: nop
+     1: nop
+     2: call %__inl_get_stderr_3_tmp_t56 = __acrt_iob_func(2)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: call %t58 = fputs(@msg, %__inl_get_stderr_3_tmp_t56)
+    12: nop
+    13: nop
+    14: nop
+    15: nop
+    16: nop
+    17: return _
+}
+
+function println_err {
+     0: nop
+     1: nop
+     2: call %__inl_get_stderr_4_tmp_t56 = __acrt_iob_func(2)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: call %t61 = fputs(@msg, %__inl_get_stderr_4_tmp_t56)
+    12: local @__inl_cstr_5_param_s : string
+    13: assign @__inl_cstr_5_param_s <- "
+"
+    14: nop
+    15: nop
+    16: load %__inl_cstr_5_tmp_t1 <- *"
+" [8]
+    17: nop
+    18: nop
+    19: nop
+    20: nop
+    21: nop
+    22: nop
+    23: nop
+    24: nop
+    25: nop
+    26: call %__inl_get_stderr_6_tmp_t56 = __acrt_iob_func(2)
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: nop
+    33: nop
+    34: nop
+    35: call %t63 = fputs(%__inl_cstr_5_tmp_t1, %__inl_get_stderr_6_tmp_t56)
+    36: nop
+    37: nop
+    38: nop
+    39: nop
+    40: nop
+    41: return _
+}
+
+function alloc_zeroed {
+     0: nop
+     1: call %t67 = calloc(1, @n)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t67
+}
+
+function buf_dup {
+     0: nop
+     1: binary %t69 = @len <= 0
+     2: branch_zero %t69 -> ir_if_next_48
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: return 0
+     9: nop
+    10: label ir_if_next_48
+    11: nop
+    12: local @dst : cstring
+    13: call @dst = malloc(@len)
+    14: nop
+    15: binary %t72 = @dst == 0
+    16: branch_zero %t72 -> ir_if_next_52
+    17: nop
+    18: nop
+    19: nop
+    20: nop
+    21: nop
+    22: return 0
+    23: nop
+    24: label ir_if_next_52
+    25: nop
+    26: call %t74 = memcpy(@dst, @src, @len)
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: return @dst
+}
+
+function bench_time_us {
+     0: nop
+     1: binary %t76 = @g_bench_qpc_freq == 0
+     2: branch_zero %t76 -> ir_if_next_59
+     3: addr_of %t78 <- &@g_bench_qpc_freq
+     4: call %t77 = QueryPerformanceFrequency(%t78)
+     5: jump ir_if_end_58
+     6: label ir_if_next_59
+     7: label ir_if_end_58
+     8: local @counter : int64
+     9: assign @counter <- 0
+    10: addr_of %t80 <- &@counter
+    11: call %t79 = QueryPerformanceCounter(%t80)
+    12: binary %t81 = @g_bench_qpc_freq == 0
+    13: branch_zero %t81 -> ir_if_next_61
+    14: nop
+    15: nop
+    16: nop
+    17: nop
+    18: nop
+    19: return 0
+    20: nop
+    21: label ir_if_next_61
+    22: nop
+    23: binary %t83 = @counter * 1000000
+    24: binary %t84 = %t83 / @g_bench_qpc_freq
+    25: cast %t85 = (uint64)%t84
+    26: nop
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: return %t85
+}
+
+function scale_copy {
+     0: nop
+     1: local @sum : int64
+     2: assign @sum <- 0
+     3: local @i : int64
+     4: assign @i <- 0
+     5: label ir_while_67
+     6: binary %t87 = @i < @n
+     7: branch_zero %t87 -> ir_while_end_68
+     8: local @v : int32
+     9: binary %t88 = @i << 2
+    10: binary %t89 = @src + %t88
+    11: load %t90 <- *%t89 [4]
+    12: binary %t91 = %t90 * 3
+    13: binary %t92 = %t91 + 7
+    14: assign @v <- %t92
+    15: nop
+    16: binary %t94 = @dst + %t88
+    17: store *%t94 <- %t92 [4]
+    18: cast %t95 = (int64)@v
+    19: binary @sum = @sum + %t95
+    20: nop
+    21: binary @i = @i + 1
+    22: nop
+    23: jump ir_while_67
+    24: label ir_while_end_68
+    25: nop
+    26: nop
+    27: nop
+    28: nop
+    29: nop
+    30: return @sum
+}
+
+function main {
+     0: nop
+     1: local @n : int64
+     2: assign @n <- 65536
+     3: local @passes : int32
+     4: assign @passes <- 200
+     5: local @src : int32*
+     6: binary %t100 = @n << 2
+     7: call %t99 = malloc(%t100)
+     8: cast @src = (int32*)%t99
+     9: nop
+    10: local @dst : int32*
+    11: binary %t103 = @n << 2
+    12: call %t102 = malloc(%t103)
+    13: cast @dst = (int32*)%t102
+    14: nop
+    15: nop
+    16: branch_eq @src, 0 -> ir_cond_done_74
+    17: nop
+    18: nop
+    19: binary %t106 = @dst == 0
+    20: branch_zero %t106 -> ir_if_next_73
+    21: label ir_cond_done_74
+    22: local @__inl_cstr_7_param_s : string
+    23: assign @__inl_cstr_7_param_s <- "malloc failed"
+    24: nop
+    25: nop
+    26: load %__inl_cstr_7_tmp_t1 <- *"malloc failed" [8]
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: nop
+    33: nop
+    34: nop
+    35: local @__inl_println_8_param_msg : cstring
+    36: assign @__inl_println_8_param_msg <- %__inl_cstr_7_tmp_t1
+    37: nop
+    38: call %__inl_println_8_tmp_t6 = puts(%__inl_cstr_7_tmp_t1)
+    39: nop
+    40: nop
+    41: nop
+    42: nop
+    43: nop
+    44: nop
+    45: nop
+    46: nop
+    47: nop
+    48: nop
+    49: nop
+    50: nop
+    51: return 1
+    52: nop
+    53: label ir_if_next_73
+    54: nop
+    55: local @i : int64
+    56: assign @i <- 0
+    57: label ir_while_78
+    58: binary %t110 = @i < @n
+    59: branch_zero %t110 -> ir_while_end_79
+    60: binary %t111 = @i * 29
+    61: binary %t112 = %t111 + 3
+    62: binary %t113 = %t112 % 521
+    63: cast %t114 = (int32)%t113
+    64: binary %t115 = @i << 2
+    65: binary %t116 = @src + %t115
+    66: store *%t116 <- %t114 [4]
+    67: binary @i = @i + 1
+    68: nop
+    69: jump ir_while_78
+    70: label ir_while_end_79
+    71: local @__inl_cstr_9_param_s : string
+    72: assign @__inl_cstr_9_param_s <- "Scale i32: 65536 values x 200 passes"
+    73: nop
+    74: nop
+    75: load %__inl_cstr_9_tmp_t1 <- *"Scale i32: 65536 values x 200 passes" [8]
+    76: nop
+    77: nop
+    78: nop
+    79: nop
+    80: nop
+    81: nop
+    82: nop
+    83: nop
+    84: local @__inl_println_10_param_msg : cstring
+    85: assign @__inl_println_10_param_msg <- %__inl_cstr_9_tmp_t1
+    86: nop
+    87: call %__inl_println_10_tmp_t6 = puts(%__inl_cstr_9_tmp_t1)
+    88: nop
+    89: nop
+    90: nop
+    91: nop
+    92: nop
+    93: nop
+    94: nop
+    95: local @t0 : uint64
+    96: nop
+    97: binary %__inl_bench_time_us_11_tmp_t76 = @g_bench_qpc_freq == 0
+    98: branch_zero %__inl_bench_time_us_11_tmp_t76 -> __inl_bench_time_us_11_lbl_ir_if_next_59
+    99: addr_of %__inl_bench_time_us_11_tmp_t78 <- &@g_bench_qpc_freq
+   100: call %__inl_bench_time_us_11_tmp_t77 = QueryPerformanceFrequency(%__inl_bench_time_us_11_tmp_t78)
+   101: jump __inl_bench_time_us_11_lbl_ir_if_end_58
+   102: label __inl_bench_time_us_11_lbl_ir_if_next_59
+   103: label __inl_bench_time_us_11_lbl_ir_if_end_58
+   104: local @__inl_bench_time_us_11_local_counter : int64
+   105: assign @__inl_bench_time_us_11_local_counter <- 0
+   106: addr_of %__inl_bench_time_us_11_tmp_t80 <- &@__inl_bench_time_us_11_local_counter
+   107: call %__inl_bench_time_us_11_tmp_t79 = QueryPerformanceCounter(%__inl_bench_time_us_11_tmp_t80)
+   108: binary %__inl_bench_time_us_11_tmp_t81 = @g_bench_qpc_freq == 0
+   109: branch_zero %__inl_bench_time_us_11_tmp_t81 -> __inl_bench_time_us_11_lbl_ir_if_next_61
+   110: nop
+   111: nop
+   112: nop
+   113: nop
+   114: nop
+   115: assign %t120 <- 0
+   116: jump __inl_bench_time_us_11_label_end
+   117: nop
+   118: label __inl_bench_time_us_11_lbl_ir_if_next_61
+   119: nop
+   120: binary %__inl_bench_time_us_11_tmp_t83 = @__inl_bench_time_us_11_local_counter * 1000000
+   121: binary %__inl_bench_time_us_11_tmp_t84 = %__inl_bench_time_us_11_tmp_t83 / @g_bench_qpc_freq
+   122: cast %t120 = (uint64)%__inl_bench_time_us_11_tmp_t84
+   123: nop
+   124: nop
+   125: nop
+   126: nop
+   127: nop
+   128: nop
+   129: nop
+   130: label __inl_bench_time_us_11_label_end
+   131: assign @t0 <- %t120
+   132: local @bench_sum : int64
+   133: assign @bench_sum <- 0
+   134: local @p : int32
+   135: assign @p <- 0
+   136: label ir_while_80
+   137: binary %t121 = @p < @passes
+   138: branch_zero %t121 -> ir_while_end_81
+   139: local @__inl_scale_copy_12_param_src : int32*
+   140: assign @__inl_scale_copy_12_param_src <- @src
+   141: local @__inl_scale_copy_12_param_dst : int32*
+   142: assign @__inl_scale_copy_12_param_dst <- @dst
+   143: local @__inl_scale_copy_12_param_n : int64
+   144: assign @__inl_scale_copy_12_param_n <- @n
+   145: nop
+   146: local @__inl_scale_copy_12_local_sum : int64
+   147: assign @__inl_scale_copy_12_local_sum <- 0
+   148: local @__inl_scale_copy_12_local_i : int64
+   149: assign @__inl_scale_copy_12_local_i <- 0
+   150: label __inl_scale_copy_12_lbl_ir_while_67
+   151: binary %__inl_scale_copy_12_tmp_t87 = @__inl_scale_copy_12_local_i < @__inl_scale_copy_12_param_n
+   152: branch_zero %__inl_scale_copy_12_tmp_t87 -> __inl_scale_copy_12_lbl_ir_while_end_68
+   153: local @__inl_scale_copy_12_local_v : int32
+   154: binary %__inl_scale_copy_12_tmp_t88 = @__inl_scale_copy_12_local_i << 2
+   155: binary %__inl_scale_copy_12_tmp_t89 = @__inl_scale_copy_12_param_src + %__inl_scale_copy_12_tmp_t88
+   156: load %__inl_scale_copy_12_tmp_t90 <- *%__inl_scale_copy_12_tmp_t89 [4]
+   157: binary %__inl_scale_copy_12_tmp_t91 = %__inl_scale_copy_12_tmp_t90 * 3
+   158: binary %__inl_scale_copy_12_tmp_t92 = %__inl_scale_copy_12_tmp_t91 + 7
+   159: assign @__inl_scale_copy_12_local_v <- %__inl_scale_copy_12_tmp_t92
+   160: nop
+   161: binary %__inl_scale_copy_12_tmp_t94 = @__inl_scale_copy_12_param_dst + %__inl_scale_copy_12_tmp_t88
+   162: store *%__inl_scale_copy_12_tmp_t94 <- %__inl_scale_copy_12_tmp_t92 [4]
+   163: cast %__inl_scale_copy_12_tmp_t95 = (int64)@__inl_scale_copy_12_local_v
+   164: binary @__inl_scale_copy_12_local_sum = @__inl_scale_copy_12_local_sum + %__inl_scale_copy_12_tmp_t95
+   165: nop
+   166: binary @__inl_scale_copy_12_local_i = @__inl_scale_copy_12_local_i + 1
+   167: nop
+   168: jump __inl_scale_copy_12_lbl_ir_while_67
+   169: label __inl_scale_copy_12_lbl_ir_while_end_68
+   170: nop
+   171: nop
+   172: nop
+   173: nop
+   174: nop
+   175: nop
+   176: nop
+   177: nop
+   178: binary @bench_sum = @bench_sum + @__inl_scale_copy_12_local_sum
+   179: nop
+   180: binary @p = @p + 1
+   181: nop
+   182: jump ir_while_80
+   183: label ir_while_end_81
+   184: local @elapsed_us : uint64
+   185: nop
+   186: binary %__inl_bench_time_us_13_tmp_t76 = @g_bench_qpc_freq == 0
+   187: branch_zero %__inl_bench_time_us_13_tmp_t76 -> __inl_bench_time_us_13_lbl_ir_if_next_59
+   188: addr_of %__inl_bench_time_us_13_tmp_t78 <- &@g_bench_qpc_freq
+   189: call %__inl_bench_time_us_13_tmp_t77 = QueryPerformanceFrequency(%__inl_bench_time_us_13_tmp_t78)
+   190: jump __inl_bench_time_us_13_lbl_ir_if_end_58
+   191: label __inl_bench_time_us_13_lbl_ir_if_next_59
+   192: label __inl_bench_time_us_13_lbl_ir_if_end_58
+   193: local @__inl_bench_time_us_13_local_counter : int64
+   194: assign @__inl_bench_time_us_13_local_counter <- 0
+   195: addr_of %__inl_bench_time_us_13_tmp_t80 <- &@__inl_bench_time_us_13_local_counter
+   196: call %__inl_bench_time_us_13_tmp_t79 = QueryPerformanceCounter(%__inl_bench_time_us_13_tmp_t80)
+   197: binary %__inl_bench_time_us_13_tmp_t81 = @g_bench_qpc_freq == 0
+   198: branch_zero %__inl_bench_time_us_13_tmp_t81 -> __inl_bench_time_us_13_lbl_ir_if_next_61
+   199: nop
+   200: nop
+   201: nop
+   202: nop
+   203: nop
+   204: assign %t125 <- 0
+   205: jump __inl_bench_time_us_13_label_end
+   206: nop
+   207: label __inl_bench_time_us_13_lbl_ir_if_next_61
+   208: nop
+   209: binary %__inl_bench_time_us_13_tmp_t83 = @__inl_bench_time_us_13_local_counter * 1000000
+   210: binary %__inl_bench_time_us_13_tmp_t84 = %__inl_bench_time_us_13_tmp_t83 / @g_bench_qpc_freq
+   211: cast %t125 = (uint64)%__inl_bench_time_us_13_tmp_t84
+   212: nop
+   213: nop
+   214: nop
+   215: nop
+   216: nop
+   217: nop
+   218: nop
+   219: label __inl_bench_time_us_13_label_end
+   220: binary @elapsed_us = %t125 - @t0
+   221: nop
+   222: local @__inl_cstr_14_param_s : string
+   223: assign @__inl_cstr_14_param_s <- "Bench sum = "
+   224: nop
+   225: nop
+   226: load %__inl_cstr_14_tmp_t1 <- *"Bench sum = " [8]
+   227: nop
+   228: nop
+   229: nop
+   230: nop
+   231: nop
+   232: nop
+   233: nop
+   234: nop
+   235: local @__inl_print_15_param_msg : cstring
+   236: assign @__inl_print_15_param_msg <- %__inl_cstr_14_tmp_t1
+   237: nop
+   238: nop
+   239: call %__inl_print_15_tmp___inl_get_stdout_0_tmp_t54 = __acrt_iob_func(1)
+   240: nop
+   241: nop
+   242: nop
+   243: nop
+   244: nop
+   245: nop
+   246: nop
+   247: nop
+   248: call %__inl_print_15_tmp_t3 = fputs(@__inl_print_15_param_msg, %__inl_print_15_tmp___inl_get_stdout_0_tmp_t54)
+   249: nop
+   250: nop
+   251: nop
+   252: nop
+   253: nop
+   254: nop
+   255: nop
+   256: local @__inl_println_int_16_param_n : int64
+   257: assign @__inl_println_int_16_param_n <- @bench_sum
+   258: nop
+   259: call %__inl_println_int_16_tmp_t49 = print_int(@bench_sum)
+   260: call %__inl_println_int_16_tmp_t50 = putchar(10)
+   261: nop
+   262: nop
+   263: nop
+   264: nop
+   265: nop
+   266: nop
+   267: nop
+   268: local @__inl_cstr_17_param_s : string
+   269: assign @__inl_cstr_17_param_s <- "Time: "
+   270: nop
+   271: nop
+   272: load %__inl_cstr_17_tmp_t1 <- *"Time: " [8]
+   273: nop
+   274: nop
+   275: nop
+   276: nop
+   277: nop
+   278: nop
+   279: nop
+   280: nop
+   281: local @__inl_print_18_param_msg : cstring
+   282: assign @__inl_print_18_param_msg <- %__inl_cstr_17_tmp_t1
+   283: nop
+   284: nop
+   285: call %__inl_print_18_tmp___inl_get_stdout_0_tmp_t54 = __acrt_iob_func(1)
+   286: nop
+   287: nop
+   288: nop
+   289: nop
+   290: nop
+   291: nop
+   292: nop
+   293: nop
+   294: call %__inl_print_18_tmp_t3 = fputs(@__inl_print_18_param_msg, %__inl_print_18_tmp___inl_get_stdout_0_tmp_t54)
+   295: nop
+   296: nop
+   297: nop
+   298: nop
+   299: nop
+   300: nop
+   301: nop
+   302: call %t132 = print_int(@elapsed_us)
+   303: local @__inl_cstr_19_param_s : string
+   304: assign @__inl_cstr_19_param_s <- " us"
+   305: nop
+   306: nop
+   307: load %__inl_cstr_19_tmp_t1 <- *" us" [8]
+   308: nop
+   309: nop
+   310: nop
+   311: nop
+   312: nop
+   313: nop
+   314: nop
+   315: nop
+   316: local @__inl_println_20_param_msg : cstring
+   317: assign @__inl_println_20_param_msg <- %__inl_cstr_19_tmp_t1
+   318: nop
+   319: call %__inl_println_20_tmp_t6 = puts(%__inl_cstr_19_tmp_t1)
+   320: nop
+   321: nop
+   322: nop
+   323: nop
+   324: nop
+   325: nop
+   326: nop
+   327: cast %t136 = (cstring)@src
+   328: call %t135 = free(%t136)
+   329: cast %t138 = (cstring)@dst
+   330: call %t137 = free(%t138)
+   331: nop
+   332: nop
+   333: nop
+   334: nop
+   335: nop
+   336: return 0
+}
+

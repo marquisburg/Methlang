@@ -1,0 +1,949 @@
+function cstr {
+     0: nop
+     1: nop
+     2: load %t1 <- *@s [8]
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: return %t1
+}
+
+function print {
+     0: nop
+     1: nop
+     2: call %__inl_get_stdout_0_tmp_t54 = __acrt_iob_func(1)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: call %t3 = fputs(@msg, %__inl_get_stdout_0_tmp_t54)
+    12: nop
+    13: nop
+    14: nop
+    15: nop
+    16: nop
+    17: return _
+}
+
+function println {
+     0: nop
+     1: call %t6 = puts(@msg)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return _
+}
+
+function newline {
+     0: nop
+     1: call %t8 = putchar(10)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return _
+}
+
+function print_int {
+     0: nop
+     1: local @buf : uint8[22]
+     2: local @pos : int32
+     3: assign @pos <- 21
+     4: local @neg : int32
+     5: assign @neg <- 0
+     6: addr_of %t10 <- &@buf
+     7: nop
+     8: binary %t12 = %t10 + 21
+     9: store *%t12 <- 0 [1]
+    10: binary %t13 = @n < 0
+    11: branch_zero %t13 -> ir_if_next_14
+    12: assign @neg <- 1
+    13: binary @n = 0 - @n
+    14: nop
+    15: jump ir_if_end_13
+    16: label ir_if_next_14
+    17: label ir_if_end_13
+    18: binary %t15 = @n == 0
+    19: branch_zero %t15 -> ir_if_next_16
+    20: addr_of %t16 <- &@buf
+    21: nop
+    22: nop
+    23: store *%t16 <- 48 [1]
+    24: addr_of %t19 <- &@buf
+    25: nop
+    26: binary %t21 = %t19 + 1
+    27: store *%t21 <- 0 [1]
+    28: addr_of %t23 <- &@buf
+    29: nop
+    30: nop
+    31: nop
+    32: call %__inl_get_stdout_1_tmp_t54 = __acrt_iob_func(1)
+    33: nop
+    34: nop
+    35: nop
+    36: nop
+    37: nop
+    38: nop
+    39: nop
+    40: nop
+    41: call %t22 = fputs(%t23, %__inl_get_stdout_1_tmp_t54)
+    42: nop
+    43: nop
+    44: nop
+    45: nop
+    46: nop
+    47: return _
+    48: nop
+    49: label ir_if_next_16
+    50: nop
+    51: label ir_while_19
+    52: binary %t28 = @n > 0
+    53: branch_zero %t28 -> ir_while_end_20
+    54: binary @pos = @pos - 1
+    55: nop
+    56: binary %t30 = 48 + @n
+    57: binary %t31 = @n / 10
+    58: binary %t32 = %t31 * 10
+    59: binary %t33 = %t30 - %t32
+    60: addr_of %t34 <- &@buf
+    61: nop
+    62: binary %t36 = %t34 + @pos
+    63: store *%t36 <- %t33 [1]
+    64: binary @n = @n / 10
+    65: nop
+    66: jump ir_while_19
+    67: label ir_while_end_20
+    68: nop
+    69: branch_zero @neg -> ir_if_next_22
+    70: binary @pos = @pos - 1
+    71: nop
+    72: addr_of %t40 <- &@buf
+    73: nop
+    74: binary %t42 = %t40 + @pos
+    75: store *%t42 <- 45 [1]
+    76: jump ir_if_end_21
+    77: label ir_if_next_22
+    78: label ir_if_end_21
+    79: addr_of %t44 <- &@buf
+    80: nop
+    81: binary %t46 = %t44 + @pos
+    82: nop
+    83: call %__inl_get_stdout_2_tmp_t54 = __acrt_iob_func(1)
+    84: nop
+    85: nop
+    86: nop
+    87: nop
+    88: nop
+    89: nop
+    90: nop
+    91: nop
+    92: call %t43 = fputs(%t46, %__inl_get_stdout_2_tmp_t54)
+    93: nop
+    94: nop
+    95: nop
+    96: nop
+    97: nop
+    98: return _
+}
+
+function println_int {
+     0: nop
+     1: call %t49 = print_int(@n)
+     2: call %t50 = putchar(10)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: return _
+}
+
+function get_stdin {
+     0: nop
+     1: call %t52 = __acrt_iob_func(0)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t52
+}
+
+function get_stdout {
+     0: nop
+     1: call %t54 = __acrt_iob_func(1)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t54
+}
+
+function get_stderr {
+     0: nop
+     1: call %t56 = __acrt_iob_func(2)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t56
+}
+
+function print_err {
+     0: nop
+     1: nop
+     2: call %__inl_get_stderr_3_tmp_t56 = __acrt_iob_func(2)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: call %t58 = fputs(@msg, %__inl_get_stderr_3_tmp_t56)
+    12: nop
+    13: nop
+    14: nop
+    15: nop
+    16: nop
+    17: return _
+}
+
+function println_err {
+     0: nop
+     1: nop
+     2: call %__inl_get_stderr_4_tmp_t56 = __acrt_iob_func(2)
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: call %t61 = fputs(@msg, %__inl_get_stderr_4_tmp_t56)
+    12: local @__inl_cstr_5_param_s : string
+    13: assign @__inl_cstr_5_param_s <- "
+"
+    14: nop
+    15: nop
+    16: load %__inl_cstr_5_tmp_t1 <- *"
+" [8]
+    17: nop
+    18: nop
+    19: nop
+    20: nop
+    21: nop
+    22: nop
+    23: nop
+    24: nop
+    25: nop
+    26: call %__inl_get_stderr_6_tmp_t56 = __acrt_iob_func(2)
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: nop
+    33: nop
+    34: nop
+    35: call %t63 = fputs(%__inl_cstr_5_tmp_t1, %__inl_get_stderr_6_tmp_t56)
+    36: nop
+    37: nop
+    38: nop
+    39: nop
+    40: nop
+    41: return _
+}
+
+function alloc_zeroed {
+     0: nop
+     1: call %t67 = calloc(1, @n)
+     2: nop
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: return %t67
+}
+
+function buf_dup {
+     0: nop
+     1: binary %t69 = @len <= 0
+     2: branch_zero %t69 -> ir_if_next_48
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: return 0
+     9: nop
+    10: label ir_if_next_48
+    11: nop
+    12: local @dst : cstring
+    13: call @dst = malloc(@len)
+    14: nop
+    15: binary %t72 = @dst == 0
+    16: branch_zero %t72 -> ir_if_next_52
+    17: nop
+    18: nop
+    19: nop
+    20: nop
+    21: nop
+    22: return 0
+    23: nop
+    24: label ir_if_next_52
+    25: nop
+    26: call %t74 = memcpy(@dst, @src, @len)
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: return @dst
+}
+
+function bench_time_us {
+     0: nop
+     1: binary %t76 = @g_bench_qpc_freq == 0
+     2: branch_zero %t76 -> ir_if_next_59
+     3: addr_of %t78 <- &@g_bench_qpc_freq
+     4: call %t77 = QueryPerformanceFrequency(%t78)
+     5: jump ir_if_end_58
+     6: label ir_if_next_59
+     7: label ir_if_end_58
+     8: local @counter : int64
+     9: assign @counter <- 0
+    10: addr_of %t80 <- &@counter
+    11: call %t79 = QueryPerformanceCounter(%t80)
+    12: binary %t81 = @g_bench_qpc_freq == 0
+    13: branch_zero %t81 -> ir_if_next_61
+    14: nop
+    15: nop
+    16: nop
+    17: nop
+    18: nop
+    19: return 0
+    20: nop
+    21: label ir_if_next_61
+    22: nop
+    23: binary %t83 = @counter * 1000000
+    24: binary %t84 = %t83 / @g_bench_qpc_freq
+    25: cast %t85 = (uint64)%t84
+    26: nop
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: return %t85
+}
+
+function compare_bytes {
+     0: nop
+     1: local @i : int64
+     2: assign @i <- 0
+     3: label ir_while_67
+     4: binary %t87 = @i < @len
+     5: branch_zero %t87 -> ir_errdefer_ok_73
+     6: local @av : uint8
+     7: nop
+     8: binary %t89 = @a + @i
+     9: load %t90 <- *%t89 [1]
+    10: cast @av = (uint8)%t90
+    11: nop
+    12: local @bv : uint8
+    13: nop
+    14: binary %t93 = @b + @i
+    15: load %t94 <- *%t93 [1]
+    16: cast @bv = (uint8)%t94
+    17: nop
+    18: binary %t96 = @av != @bv
+    19: branch_zero %t96 -> ir_if_next_70
+    20: cast %t97 = (int64)@av
+    21: cast %t98 = (int64)@bv
+    22: binary %t99 = %t97 - %t98
+    23: nop
+    24: nop
+    25: nop
+    26: nop
+    27: nop
+    28: return %t99
+    29: nop
+    30: label ir_if_next_70
+    31: nop
+    32: binary @i = @i + 1
+    33: nop
+    34: jump ir_while_67
+    35: nop
+    36: nop
+    37: nop
+    38: nop
+    39: label ir_errdefer_ok_73
+    40: nop
+    41: return 0
+}
+
+function compare_chunks {
+     0: nop
+     1: local @sum : int64
+     2: assign @sum <- 0
+     3: local @off : int64
+     4: assign @off <- 0
+     5: label ir_while_76
+     6: binary %t103 = @off < @total
+     7: branch_zero %t103 -> ir_while_end_77
+     8: local @len : int64
+     9: assign @len <- @chunk
+    10: binary %t104 = @off + @len
+    11: binary %t105 = %t104 > @total
+    12: branch_zero %t105 -> ir_if_next_79
+    13: binary @len = @total - @off
+    14: nop
+    15: jump ir_if_end_78
+    16: label ir_if_next_79
+    17: label ir_if_end_78
+    18: binary %t108 = @a + @off
+    19: binary %t109 = @b + @off
+    20: local @__inl_compare_bytes_7_param_a : cstring
+    21: assign @__inl_compare_bytes_7_param_a <- %t108
+    22: local @__inl_compare_bytes_7_param_b : cstring
+    23: assign @__inl_compare_bytes_7_param_b <- %t109
+    24: local @__inl_compare_bytes_7_param_len : int64
+    25: assign @__inl_compare_bytes_7_param_len <- @len
+    26: nop
+    27: local @__inl_compare_bytes_7_local_i : int64
+    28: assign @__inl_compare_bytes_7_local_i <- 0
+    29: local @__ptr_29___inl_compare_bytes_7_param_a_p : cstring
+    30: local @__ptr_29___inl_compare_bytes_7_param_b_p : cstring
+    31: local @__ptr_29___inl_compare_bytes_7_param_a_end : cstring
+    32: assign @__ptr_29___inl_compare_bytes_7_param_a_p <- @__inl_compare_bytes_7_param_a
+    33: assign @__ptr_29___inl_compare_bytes_7_param_b_p <- @__inl_compare_bytes_7_param_b
+    34: assign @__ptr_29___inl_compare_bytes_7_param_a_end <- @__inl_compare_bytes_7_param_a
+    35: binary @__ptr_29___inl_compare_bytes_7_param_a_end = @__ptr_29___inl_compare_bytes_7_param_a_end + @__inl_compare_bytes_7_param_len
+    36: label __inl_compare_bytes_7_lbl_ir_while_67
+    37: binary %__inl_compare_bytes_7_tmp_t87 = @__ptr_29___inl_compare_bytes_7_param_a_p < @__ptr_29___inl_compare_bytes_7_param_a_end
+    38: branch_zero %__inl_compare_bytes_7_tmp_t87 -> __inl_compare_bytes_7_lbl_ir_errdefer_ok_73
+    39: local @__inl_compare_bytes_7_local_av : uint8
+    40: nop
+    41: nop
+    42: load %__inl_compare_bytes_7_tmp_t90 <- *@__ptr_29___inl_compare_bytes_7_param_a_p [1]
+    43: cast @__inl_compare_bytes_7_local_av = (uint8)%__inl_compare_bytes_7_tmp_t90
+    44: nop
+    45: local @__inl_compare_bytes_7_local_bv : uint8
+    46: nop
+    47: nop
+    48: load %__inl_compare_bytes_7_tmp_t94 <- *@__ptr_29___inl_compare_bytes_7_param_b_p [1]
+    49: cast @__inl_compare_bytes_7_local_bv = (uint8)%__inl_compare_bytes_7_tmp_t94
+    50: nop
+    51: binary %__inl_compare_bytes_7_tmp_t96 = @__inl_compare_bytes_7_local_av != @__inl_compare_bytes_7_local_bv
+    52: branch_zero %__inl_compare_bytes_7_tmp_t96 -> __inl_compare_bytes_7_lbl_ir_if_next_70
+    53: cast %__inl_compare_bytes_7_tmp_t97 = (int64)@__inl_compare_bytes_7_local_av
+    54: cast %__inl_compare_bytes_7_tmp_t98 = (int64)@__inl_compare_bytes_7_local_bv
+    55: binary %t107 = %__inl_compare_bytes_7_tmp_t97 - %__inl_compare_bytes_7_tmp_t98
+    56: nop
+    57: nop
+    58: nop
+    59: nop
+    60: nop
+    61: nop
+    62: jump __inl_compare_bytes_7_label_end
+    63: nop
+    64: label __inl_compare_bytes_7_lbl_ir_if_next_70
+    65: nop
+    66: nop
+    67: binary @__ptr_29___inl_compare_bytes_7_param_a_p = @__ptr_29___inl_compare_bytes_7_param_a_p + 1
+    68: binary @__ptr_29___inl_compare_bytes_7_param_b_p = @__ptr_29___inl_compare_bytes_7_param_b_p + 1
+    69: nop
+    70: jump __inl_compare_bytes_7_lbl_ir_while_67
+    71: nop
+    72: nop
+    73: nop
+    74: nop
+    75: label __inl_compare_bytes_7_lbl_ir_errdefer_ok_73
+    76: nop
+    77: assign %t107 <- 0
+    78: nop
+    79: label __inl_compare_bytes_7_label_end
+    80: binary @sum = @sum + %t107
+    81: nop
+    82: binary @off = @off + @chunk
+    83: nop
+    84: jump ir_while_76
+    85: label ir_while_end_77
+    86: nop
+    87: nop
+    88: nop
+    89: nop
+    90: nop
+    91: return @sum
+}
+
+function main {
+     0: nop
+     1: local @buf_size : int64
+     2: assign @buf_size <- 262144
+     3: local @chunk : int64
+     4: assign @chunk <- 4096
+     5: local @template : string
+     6: assign @template <- "0123456789abcdef"
+     7: local @template_len : int64
+     8: assign @template_len <- 16
+     9: local @a : cstring
+    10: call @a = malloc(262144)
+    11: nop
+    12: local @b : cstring
+    13: call @b = malloc(@buf_size)
+    14: nop
+    15: nop
+    16: branch_eq @a, 0 -> ir_cond_done_85
+    17: nop
+    18: nop
+    19: binary %t116 = @b == 0
+    20: branch_zero %t116 -> ir_if_next_84
+    21: label ir_cond_done_85
+    22: local @__inl_cstr_8_param_s : string
+    23: assign @__inl_cstr_8_param_s <- "malloc failed"
+    24: nop
+    25: nop
+    26: load %__inl_cstr_8_tmp_t1 <- *"malloc failed" [8]
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: nop
+    33: nop
+    34: nop
+    35: local @__inl_println_9_param_msg : cstring
+    36: assign @__inl_println_9_param_msg <- %__inl_cstr_8_tmp_t1
+    37: nop
+    38: call %__inl_println_9_tmp_t6 = puts(%__inl_cstr_8_tmp_t1)
+    39: nop
+    40: nop
+    41: nop
+    42: nop
+    43: nop
+    44: nop
+    45: nop
+    46: nop
+    47: nop
+    48: nop
+    49: nop
+    50: nop
+    51: return 1
+    52: nop
+    53: label ir_if_next_84
+    54: nop
+    55: local @pos : int64
+    56: assign @pos <- 0
+    57: label ir_while_89
+    58: binary %t120 = @pos < @buf_size
+    59: branch_zero %t120 -> ir_while_end_90
+    60: local @tchunk : int64
+    61: assign @tchunk <- @template_len
+    62: binary %t121 = @pos + @tchunk
+    63: binary %t122 = %t121 > @buf_size
+    64: branch_zero %t122 -> ir_if_next_92
+    65: binary @tchunk = @buf_size - @pos
+    66: nop
+    67: jump ir_if_end_91
+    68: label ir_if_next_92
+    69: label ir_if_end_91
+    70: binary %t125 = @a + @pos
+    71: local @__inl_cstr_10_param_s : string
+    72: assign @__inl_cstr_10_param_s <- @template
+    73: nop
+    74: nop
+    75: load %__inl_cstr_10_tmp_t1 <- *@template [8]
+    76: nop
+    77: nop
+    78: nop
+    79: nop
+    80: nop
+    81: nop
+    82: nop
+    83: nop
+    84: call %t124 = memcpy(%t125, %__inl_cstr_10_tmp_t1, @tchunk)
+    85: binary %t128 = @b + @pos
+    86: local @__inl_cstr_11_param_s : string
+    87: assign @__inl_cstr_11_param_s <- @template
+    88: nop
+    89: nop
+    90: load %__inl_cstr_11_tmp_t1 <- *@template [8]
+    91: nop
+    92: nop
+    93: nop
+    94: nop
+    95: nop
+    96: nop
+    97: nop
+    98: nop
+    99: call %t127 = memcpy(%t128, %__inl_cstr_11_tmp_t1, @tchunk)
+   100: binary @pos = @pos + @tchunk
+   101: nop
+   102: jump ir_while_89
+   103: label ir_while_end_90
+   104: local @i : int64
+   105: assign @i <- 0
+   106: label ir_while_93
+   107: binary %t131 = @i < @buf_size
+   108: branch_zero %t131 -> ir_while_end_94
+   109: local @v : int64
+   110: nop
+   111: binary %t133 = @b + @i
+   112: load %t134 <- *%t133 [1]
+   113: cast %t135 = (uint8)%t134
+   114: cast @v = (int64)%t135
+   115: nop
+   116: binary %t137 = @v + 1
+   117: cast %t138 = (uint8)%t137
+   118: nop
+   119: nop
+   120: store *%t133 <- %t138 [1]
+   121: binary @i = @i + 8192
+   122: nop
+   123: jump ir_while_93
+   124: label ir_while_end_94
+   125: local @__inl_cstr_12_param_s : string
+   126: assign @__inl_cstr_12_param_s <- "Byte compare: 256 KB in 4 KB chunks x 200 passes"
+   127: nop
+   128: nop
+   129: load %__inl_cstr_12_tmp_t1 <- *"Byte compare: 256 KB in 4 KB chunks x 200 passes" [8]
+   130: nop
+   131: nop
+   132: nop
+   133: nop
+   134: nop
+   135: nop
+   136: nop
+   137: nop
+   138: local @__inl_println_13_param_msg : cstring
+   139: assign @__inl_println_13_param_msg <- %__inl_cstr_12_tmp_t1
+   140: nop
+   141: call %__inl_println_13_tmp_t6 = puts(%__inl_cstr_12_tmp_t1)
+   142: nop
+   143: nop
+   144: nop
+   145: nop
+   146: nop
+   147: nop
+   148: nop
+   149: local @passes : int32
+   150: assign @passes <- 200
+   151: local @t0 : uint64
+   152: nop
+   153: binary %__inl_bench_time_us_14_tmp_t76 = @g_bench_qpc_freq == 0
+   154: branch_zero %__inl_bench_time_us_14_tmp_t76 -> __inl_bench_time_us_14_lbl_ir_if_next_59
+   155: addr_of %__inl_bench_time_us_14_tmp_t78 <- &@g_bench_qpc_freq
+   156: call %__inl_bench_time_us_14_tmp_t77 = QueryPerformanceFrequency(%__inl_bench_time_us_14_tmp_t78)
+   157: jump __inl_bench_time_us_14_lbl_ir_if_end_58
+   158: label __inl_bench_time_us_14_lbl_ir_if_next_59
+   159: label __inl_bench_time_us_14_lbl_ir_if_end_58
+   160: local @__inl_bench_time_us_14_local_counter : int64
+   161: assign @__inl_bench_time_us_14_local_counter <- 0
+   162: addr_of %__inl_bench_time_us_14_tmp_t80 <- &@__inl_bench_time_us_14_local_counter
+   163: call %__inl_bench_time_us_14_tmp_t79 = QueryPerformanceCounter(%__inl_bench_time_us_14_tmp_t80)
+   164: binary %__inl_bench_time_us_14_tmp_t81 = @g_bench_qpc_freq == 0
+   165: branch_zero %__inl_bench_time_us_14_tmp_t81 -> __inl_bench_time_us_14_lbl_ir_if_next_61
+   166: nop
+   167: nop
+   168: nop
+   169: nop
+   170: nop
+   171: assign %t144 <- 0
+   172: jump __inl_bench_time_us_14_label_end
+   173: nop
+   174: label __inl_bench_time_us_14_lbl_ir_if_next_61
+   175: nop
+   176: binary %__inl_bench_time_us_14_tmp_t83 = @__inl_bench_time_us_14_local_counter * 1000000
+   177: binary %__inl_bench_time_us_14_tmp_t84 = %__inl_bench_time_us_14_tmp_t83 / @g_bench_qpc_freq
+   178: cast %t144 = (uint64)%__inl_bench_time_us_14_tmp_t84
+   179: nop
+   180: nop
+   181: nop
+   182: nop
+   183: nop
+   184: nop
+   185: nop
+   186: label __inl_bench_time_us_14_label_end
+   187: assign @t0 <- %t144
+   188: local @bench_sum : int64
+   189: assign @bench_sum <- 0
+   190: local @p : int32
+   191: assign @p <- 0
+   192: label ir_while_95
+   193: binary %t145 = @p < @passes
+   194: branch_zero %t145 -> ir_while_end_96
+   195: local @__inl_compare_chunks_15_param_a : cstring
+   196: assign @__inl_compare_chunks_15_param_a <- @a
+   197: local @__inl_compare_chunks_15_param_b : cstring
+   198: assign @__inl_compare_chunks_15_param_b <- @b
+   199: local @__inl_compare_chunks_15_param_total : int64
+   200: assign @__inl_compare_chunks_15_param_total <- @buf_size
+   201: local @__inl_compare_chunks_15_param_chunk : int64
+   202: assign @__inl_compare_chunks_15_param_chunk <- @chunk
+   203: nop
+   204: local @__inl_compare_chunks_15_local_sum : int64
+   205: assign @__inl_compare_chunks_15_local_sum <- 0
+   206: local @__inl_compare_chunks_15_local_off : int64
+   207: assign @__inl_compare_chunks_15_local_off <- 0
+   208: label __inl_compare_chunks_15_lbl_ir_while_76
+   209: binary %__inl_compare_chunks_15_tmp_t103 = @__inl_compare_chunks_15_local_off < @__inl_compare_chunks_15_param_total
+   210: branch_zero %__inl_compare_chunks_15_tmp_t103 -> __inl_compare_chunks_15_lbl_ir_while_end_77
+   211: local @__inl_compare_chunks_15_local_len : int64
+   212: assign @__inl_compare_chunks_15_local_len <- @__inl_compare_chunks_15_param_chunk
+   213: binary %__inl_compare_chunks_15_tmp_t104 = @__inl_compare_chunks_15_local_off + @__inl_compare_chunks_15_local_len
+   214: binary %__inl_compare_chunks_15_tmp_t105 = %__inl_compare_chunks_15_tmp_t104 > @__inl_compare_chunks_15_param_total
+   215: branch_zero %__inl_compare_chunks_15_tmp_t105 -> __inl_compare_chunks_15_lbl_ir_if_next_79
+   216: binary @__inl_compare_chunks_15_local_len = @__inl_compare_chunks_15_param_total - @__inl_compare_chunks_15_local_off
+   217: nop
+   218: jump __inl_compare_chunks_15_lbl_ir_if_end_78
+   219: label __inl_compare_chunks_15_lbl_ir_if_next_79
+   220: label __inl_compare_chunks_15_lbl_ir_if_end_78
+   221: binary %__inl_compare_chunks_15_tmp_t108 = @__inl_compare_chunks_15_param_a + @__inl_compare_chunks_15_local_off
+   222: binary %__inl_compare_chunks_15_tmp_t109 = @__inl_compare_chunks_15_param_b + @__inl_compare_chunks_15_local_off
+   223: local @__inl_compare_chunks_15_local___inl_compare_bytes_7_param_a : cstring
+   224: assign @__inl_compare_chunks_15_local___inl_compare_bytes_7_param_a <- %__inl_compare_chunks_15_tmp_t108
+   225: local @__inl_compare_chunks_15_local___inl_compare_bytes_7_param_b : cstring
+   226: assign @__inl_compare_chunks_15_local___inl_compare_bytes_7_param_b <- %__inl_compare_chunks_15_tmp_t109
+   227: local @__inl_compare_chunks_15_local___inl_compare_bytes_7_param_len : int64
+   228: assign @__inl_compare_chunks_15_local___inl_compare_bytes_7_param_len <- @__inl_compare_chunks_15_local_len
+   229: nop
+   230: local @__inl_compare_chunks_15_local___inl_compare_bytes_7_local_i : int64
+   231: assign @__inl_compare_chunks_15_local___inl_compare_bytes_7_local_i <- 0
+   232: local @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_p : cstring
+   233: local @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_b_p : cstring
+   234: local @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_end : cstring
+   235: assign @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_p <- @__inl_compare_chunks_15_local___inl_compare_bytes_7_param_a
+   236: assign @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_b_p <- @__inl_compare_chunks_15_local___inl_compare_bytes_7_param_b
+   237: assign @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_end <- @__inl_compare_chunks_15_local___inl_compare_bytes_7_param_a
+   238: binary @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_end = @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_end + @__inl_compare_chunks_15_local___inl_compare_bytes_7_param_len
+   239: label __inl_compare_chunks_15_lbl___inl_compare_bytes_7_lbl_ir_while_67
+   240: binary %__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t87 = @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_p < @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_end
+   241: branch_zero %__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t87 -> __inl_compare_chunks_15_lbl___inl_compare_bytes_7_lbl_ir_errdefer_ok_73
+   242: local @__inl_compare_chunks_15_local___inl_compare_bytes_7_local_av : uint8
+   243: nop
+   244: nop
+   245: load %__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t90 <- *@__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_p [1]
+   246: cast @__inl_compare_chunks_15_local___inl_compare_bytes_7_local_av = (uint8)%__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t90
+   247: nop
+   248: local @__inl_compare_chunks_15_local___inl_compare_bytes_7_local_bv : uint8
+   249: nop
+   250: nop
+   251: load %__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t94 <- *@__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_b_p [1]
+   252: cast @__inl_compare_chunks_15_local___inl_compare_bytes_7_local_bv = (uint8)%__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t94
+   253: nop
+   254: binary %__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t96 = @__inl_compare_chunks_15_local___inl_compare_bytes_7_local_av != @__inl_compare_chunks_15_local___inl_compare_bytes_7_local_bv
+   255: branch_zero %__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t96 -> __inl_compare_chunks_15_lbl___inl_compare_bytes_7_lbl_ir_if_next_70
+   256: cast %__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t97 = (int64)@__inl_compare_chunks_15_local___inl_compare_bytes_7_local_av
+   257: cast %__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t98 = (int64)@__inl_compare_chunks_15_local___inl_compare_bytes_7_local_bv
+   258: binary %__inl_compare_chunks_15_tmp_t107 = %__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t97 - %__inl_compare_chunks_15_tmp___inl_compare_bytes_7_tmp_t98
+   259: nop
+   260: nop
+   261: nop
+   262: nop
+   263: nop
+   264: nop
+   265: jump __inl_compare_chunks_15_lbl___inl_compare_bytes_7_label_end
+   266: nop
+   267: label __inl_compare_chunks_15_lbl___inl_compare_bytes_7_lbl_ir_if_next_70
+   268: nop
+   269: nop
+   270: binary @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_p = @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_a_p + 1
+   271: binary @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_b_p = @__ptr_232___inl_compare_chunks_15_local___inl_compare_bytes_7_param_b_p + 1
+   272: nop
+   273: jump __inl_compare_chunks_15_lbl___inl_compare_bytes_7_lbl_ir_while_67
+   274: nop
+   275: nop
+   276: nop
+   277: nop
+   278: label __inl_compare_chunks_15_lbl___inl_compare_bytes_7_lbl_ir_errdefer_ok_73
+   279: nop
+   280: assign %__inl_compare_chunks_15_tmp_t107 <- 0
+   281: nop
+   282: label __inl_compare_chunks_15_lbl___inl_compare_bytes_7_label_end
+   283: binary @__inl_compare_chunks_15_local_sum = @__inl_compare_chunks_15_local_sum + %__inl_compare_chunks_15_tmp_t107
+   284: nop
+   285: binary @__inl_compare_chunks_15_local_off = @__inl_compare_chunks_15_local_off + @__inl_compare_chunks_15_param_chunk
+   286: nop
+   287: jump __inl_compare_chunks_15_lbl_ir_while_76
+   288: label __inl_compare_chunks_15_lbl_ir_while_end_77
+   289: nop
+   290: nop
+   291: nop
+   292: nop
+   293: nop
+   294: nop
+   295: nop
+   296: nop
+   297: binary @bench_sum = @bench_sum + @__inl_compare_chunks_15_local_sum
+   298: nop
+   299: binary @p = @p + 1
+   300: nop
+   301: jump ir_while_95
+   302: label ir_while_end_96
+   303: local @elapsed_us : uint64
+   304: nop
+   305: binary %__inl_bench_time_us_16_tmp_t76 = @g_bench_qpc_freq == 0
+   306: branch_zero %__inl_bench_time_us_16_tmp_t76 -> __inl_bench_time_us_16_lbl_ir_if_next_59
+   307: addr_of %__inl_bench_time_us_16_tmp_t78 <- &@g_bench_qpc_freq
+   308: call %__inl_bench_time_us_16_tmp_t77 = QueryPerformanceFrequency(%__inl_bench_time_us_16_tmp_t78)
+   309: jump __inl_bench_time_us_16_lbl_ir_if_end_58
+   310: label __inl_bench_time_us_16_lbl_ir_if_next_59
+   311: label __inl_bench_time_us_16_lbl_ir_if_end_58
+   312: local @__inl_bench_time_us_16_local_counter : int64
+   313: assign @__inl_bench_time_us_16_local_counter <- 0
+   314: addr_of %__inl_bench_time_us_16_tmp_t80 <- &@__inl_bench_time_us_16_local_counter
+   315: call %__inl_bench_time_us_16_tmp_t79 = QueryPerformanceCounter(%__inl_bench_time_us_16_tmp_t80)
+   316: binary %__inl_bench_time_us_16_tmp_t81 = @g_bench_qpc_freq == 0
+   317: branch_zero %__inl_bench_time_us_16_tmp_t81 -> __inl_bench_time_us_16_lbl_ir_if_next_61
+   318: nop
+   319: nop
+   320: nop
+   321: nop
+   322: nop
+   323: assign %t149 <- 0
+   324: jump __inl_bench_time_us_16_label_end
+   325: nop
+   326: label __inl_bench_time_us_16_lbl_ir_if_next_61
+   327: nop
+   328: binary %__inl_bench_time_us_16_tmp_t83 = @__inl_bench_time_us_16_local_counter * 1000000
+   329: binary %__inl_bench_time_us_16_tmp_t84 = %__inl_bench_time_us_16_tmp_t83 / @g_bench_qpc_freq
+   330: cast %t149 = (uint64)%__inl_bench_time_us_16_tmp_t84
+   331: nop
+   332: nop
+   333: nop
+   334: nop
+   335: nop
+   336: nop
+   337: nop
+   338: label __inl_bench_time_us_16_label_end
+   339: binary @elapsed_us = %t149 - @t0
+   340: nop
+   341: local @__inl_cstr_17_param_s : string
+   342: assign @__inl_cstr_17_param_s <- "Bench sum = "
+   343: nop
+   344: nop
+   345: load %__inl_cstr_17_tmp_t1 <- *"Bench sum = " [8]
+   346: nop
+   347: nop
+   348: nop
+   349: nop
+   350: nop
+   351: nop
+   352: nop
+   353: nop
+   354: local @__inl_print_18_param_msg : cstring
+   355: assign @__inl_print_18_param_msg <- %__inl_cstr_17_tmp_t1
+   356: nop
+   357: nop
+   358: call %__inl_print_18_tmp___inl_get_stdout_0_tmp_t54 = __acrt_iob_func(1)
+   359: nop
+   360: nop
+   361: nop
+   362: nop
+   363: nop
+   364: nop
+   365: nop
+   366: nop
+   367: call %__inl_print_18_tmp_t3 = fputs(@__inl_print_18_param_msg, %__inl_print_18_tmp___inl_get_stdout_0_tmp_t54)
+   368: nop
+   369: nop
+   370: nop
+   371: nop
+   372: nop
+   373: nop
+   374: nop
+   375: local @__inl_println_int_19_param_n : int64
+   376: assign @__inl_println_int_19_param_n <- @bench_sum
+   377: nop
+   378: call %__inl_println_int_19_tmp_t49 = print_int(@bench_sum)
+   379: call %__inl_println_int_19_tmp_t50 = putchar(10)
+   380: nop
+   381: nop
+   382: nop
+   383: nop
+   384: nop
+   385: nop
+   386: nop
+   387: local @__inl_cstr_20_param_s : string
+   388: assign @__inl_cstr_20_param_s <- "Time: "
+   389: nop
+   390: nop
+   391: load %__inl_cstr_20_tmp_t1 <- *"Time: " [8]
+   392: nop
+   393: nop
+   394: nop
+   395: nop
+   396: nop
+   397: nop
+   398: nop
+   399: nop
+   400: local @__inl_print_21_param_msg : cstring
+   401: assign @__inl_print_21_param_msg <- %__inl_cstr_20_tmp_t1
+   402: nop
+   403: nop
+   404: call %__inl_print_21_tmp___inl_get_stdout_0_tmp_t54 = __acrt_iob_func(1)
+   405: nop
+   406: nop
+   407: nop
+   408: nop
+   409: nop
+   410: nop
+   411: nop
+   412: nop
+   413: call %__inl_print_21_tmp_t3 = fputs(@__inl_print_21_param_msg, %__inl_print_21_tmp___inl_get_stdout_0_tmp_t54)
+   414: nop
+   415: nop
+   416: nop
+   417: nop
+   418: nop
+   419: nop
+   420: nop
+   421: call %t156 = print_int(@elapsed_us)
+   422: local @__inl_cstr_22_param_s : string
+   423: assign @__inl_cstr_22_param_s <- " us"
+   424: nop
+   425: nop
+   426: load %__inl_cstr_22_tmp_t1 <- *" us" [8]
+   427: nop
+   428: nop
+   429: nop
+   430: nop
+   431: nop
+   432: nop
+   433: nop
+   434: nop
+   435: local @__inl_println_23_param_msg : cstring
+   436: assign @__inl_println_23_param_msg <- %__inl_cstr_22_tmp_t1
+   437: nop
+   438: call %__inl_println_23_tmp_t6 = puts(%__inl_cstr_22_tmp_t1)
+   439: nop
+   440: nop
+   441: nop
+   442: nop
+   443: nop
+   444: nop
+   445: nop
+   446: call %t159 = free(@a)
+   447: call %t160 = free(@b)
+   448: nop
+   449: nop
+   450: nop
+   451: nop
+   452: nop
+   453: return 0
+}
+

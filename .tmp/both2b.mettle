@@ -1,0 +1,13 @@
+import "std/mem";
+function both2(b: cstring, i: int64) -> int32 {
+  var v: int64 = (int64)(uint8)b[i];
+  b[i] = (uint8)1;
+  return 0;
+}
+function main() -> int32 {
+  var b: cstring = malloc(16);
+  memset(b, 0, 16);
+  both2(b, 1);
+  free(b);
+  return 0;
+}

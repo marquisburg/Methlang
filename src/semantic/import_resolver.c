@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "import_resolver.h"
+#include "../compiler/compiler_context.h"
 #include "../lexer/lexer.h"
 #include "../parser/parser.h"
 #include "../string_intern.h"
@@ -2680,6 +2681,7 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
         *had_error = 1;
         continue;
       }
+      mettle_compiler_ctx_set_current_filename(full_path);
 
       size_t parse_error_count_before =
           ctx->reporter ? (size_t)error_reporter_get_error_count(ctx->reporter)
@@ -3000,6 +3002,7 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
         error_reporter_set_source_context(ctx->reporter,
                                           previous_reporter_filename,
                                           previous_reporter_source);
+        mettle_compiler_ctx_set_current_filename(previous_reporter_filename);
       }
       free(source);
       path_set_remove(ctx->active_files, &ctx->active_count, full_path);

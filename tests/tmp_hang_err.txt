@@ -1,0 +1,75 @@
+error[E0001]: Lexical error: Unknown character: �
+  --> tests\tmp_match_hang.mettle:1:1
+  |
+1 | ﻿function main() -> int32 {
+  | ^
+2 |   match x: int32 = 1 {
+
+error[E0002]: Expected primary expression
+  --> tests\tmp_match_hang.mettle:1:1
+  |
+1 | ﻿function main() -> int32 {
+  | ^
+2 |   match x: int32 = 1 {
+
+error[E0001]: Lexical error: Unknown character: �
+  --> tests\tmp_match_hang.mettle:1:2
+  |
+1 | ﻿function main() -> int32 {
+  |  ^
+2 |   match x: int32 = 1 {
+
+error[E0001]: Lexical error: Unknown character: �
+  --> tests\tmp_match_hang.mettle:1:3
+  |
+1 | ﻿function main() -> int32 {
+  |   ^
+2 |   match x: int32 = 1 {
+
+error[E0002]: Expected '(', found identifier
+  --> tests\tmp_match_hang.mettle:2:9
+  |
+1 | ﻿function main() -> int32 {
+2 |   match x: int32 = 1 {
+  |         ^
+3 |     _ => return 0;
+
+error[E0002]: Expected '(' after 'match'
+  --> tests\tmp_match_hang.mettle:2:9
+  |
+1 | ﻿function main() -> int32 {
+2 |   match x: int32 = 1 {
+  |         ^
+3 |     _ => return 0;
+
+error[E0002]: Expected '}', found identifier
+  --> tests\tmp_match_hang.mettle:2:9
+  |
+1 | ﻿function main() -> int32 {
+2 |   match x: int32 = 1 {
+  |         ^
+3 |     _ => return 0;
+
+error[E0002]: Expected primary expression
+  --> tests\tmp_match_hang.mettle:3:8
+  |
+2 |   match x: int32 = 1 {
+3 |     _ => return 0;
+  |        ^
+4 |   }
+
+error[E0002]: Expected primary expression
+  --> tests\tmp_match_hang.mettle:4:3
+  |
+3 |     _ => return 0;
+4 |   }
+  |   ^
+5 | }
+
+error[E0002]: Expected primary expression
+  --> tests\tmp_match_hang.mettle:5:1
+  |
+4 |   }
+5 | }
+  | ^
+6 | 

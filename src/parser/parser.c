@@ -367,7 +367,10 @@ void parser_synchronize(Parser *parser) {
       return;
     }
 
-    switch (parser->peek_token.type) {
+    // Synchronize on the current token, not peek. Using peek can return
+    // without consuming an invalid current token (e.g. current '=>', peek
+    // 'return'), causing parse/recover loops to spin forever at top level.
+    switch (parser->current_token.type) {
     case TOKEN_FUNCTION:
     case TOKEN_VAR:
     case TOKEN_STRUCT:
@@ -376,6 +379,7 @@ void parser_synchronize(Parser *parser) {
     case TOKEN_WHILE:
     case TOKEN_FOR:
     case TOKEN_SWITCH:
+    case TOKEN_MATCH:
     case TOKEN_BREAK:
     case TOKEN_CONTINUE:
     case TOKEN_RBRACE:
@@ -477,6 +481,8 @@ ASTNode *parser_parse_program(Parser *parser) {
   Program *prog_data = (Program *)program->data;
 
   while (parser->current_token.type != TOKEN_EOF) {
+    size_t token_pos_before = parser->lexer->position;
+
     // Skip empty statements/newlines at the top level
     if (parser->current_token.type == TOKEN_NEWLINE ||
         parser->current_token.type == TOKEN_SEMICOLON) {
@@ -503,6 +509,11 @@ ASTNode *parser_parse_program(Parser *parser) {
 
     if (parser->has_error) {
       parser_recover_from_error(parser);
+      // Hard guard against non-advancing recovery loops.
+      if (parser->current_token.type != TOKEN_EOF &&
+          parser->lexer->position == token_pos_before) {
+        parser_advance(parser);
+      }
     }
   }
 
@@ -721,44 +732,35 @@ ASTNode *parser_parse_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  // Labeled loop: IDENT ':' (while | for | switch)
+  // Labeled loop: IDENT ':' (while | for)
   if (parser->current_token.type == TOKEN_IDENTIFIER &&
       parser->peek_token.type == TOKEN_COLON) {
-    char *label = strdup(parser->current_token.value);
-    Token saved_current = parser->current_token;
-    Token saved_peek = parser->peek_token;
-    parser_advance(parser); // consume IDENT
-    parser_advance(parser); // consume ':'
+    Token after_colon = lexer_peek_token(parser->lexer);
+    if (after_colon.type == TOKEN_WHILE || after_colon.type == TOKEN_FOR) {
+      char *label = strdup(parser->current_token.value);
+      parser_advance(parser); // consume IDENT
+      parser_advance(parser); // consume ':'
 
-    ASTNode *loop = NULL;
-    if (parser->current_token.type == TOKEN_WHILE) {
-      loop = parser_parse_while_statement(parser);
-      if (loop && loop->data) {
-        WhileStatement *w = (WhileStatement *)loop->data;
-        w->label = label;
-        label = NULL;
+      ASTNode *loop = NULL;
+      if (parser->current_token.type == TOKEN_WHILE) {
+        loop = parser_parse_while_statement(parser);
+        if (loop && loop->data) {
+          WhileStatement *w = (WhileStatement *)loop->data;
+          w->label = label;
+          label = NULL;
+        }
+      } else if (parser->current_token.type == TOKEN_FOR) {
+        loop = parser_parse_for_statement(parser);
+        if (loop && loop->data) {
+          ForStatement *f = (ForStatement *)loop->data;
+          f->label = label;
+          label = NULL;
+        }
       }
-    } else if (parser->current_token.type == TOKEN_FOR) {
-      loop = parser_parse_for_statement(parser);
-      if (loop && loop->data) {
-        ForStatement *f = (ForStatement *)loop->data;
-        f->label = label;
-        label = NULL;
-      }
-    } else {
-      // Not a labeled loop; rewind. Because we already consumed two tokens
-      // and the lexer is one-token-lookahead, we cannot fully unwind. Treat
-      // this as a parse error explaining the constraint.
+
       free(label);
-      (void)saved_current;
-      (void)saved_peek;
-      parser_set_error(parser,
-                       "Labels may only be applied to 'while' or 'for' loops");
-      return NULL;
+      return loop;
     }
-
-    free(label);
-    return loop;
   }
 
   switch (parser->current_token.type) {
@@ -4091,7 +4093,11 @@ ASTNode *parser_parse_block(Parser *parser) {
 
   // Parse statements until we hit '}'
   while (parser->current_token.type != TOKEN_RBRACE &&
-         parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+         parser->current_token.type != TOKEN_EOF) {
+
+    if (parser->has_error) {
+      break;
+    }
 
     // Skip empty statements/newlines
     if (parser->current_token.type == TOKEN_NEWLINE ||
@@ -4120,10 +4126,10 @@ ASTNode *parser_parse_block(Parser *parser) {
         parser_expect_statement_end(parser);
       }
     } else if (parser->has_error) {
-      // Try to recover from error
-      parser_recover_from_error(parser);
+      break;
     } else {
       parser_set_error(parser, "Failed to parse statement in block");
+      break;
     }
   }
 

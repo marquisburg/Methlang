@@ -123,6 +123,126 @@
       "rust_source": "examples/sort_insertion/sort_insertion.rs",
       "rust_exe": "examples/sort_insertion/sort_insertion_rs.exe",
       "build_script": "examples/sort_insertion/build.bat"
+    },
+    {
+      "name": "memcpy_bench",
+      "kind": "runtime",
+      "description": "memcpy 256 KB buffer x 200 (memory bandwidth / libc memcpy path)",
+      "mettle_source": "examples/memcpy_bench/memcpy_bench.mettle",
+      "mettle_exe": "examples/memcpy_bench/memcpy_bench.exe",
+      "c_source": "examples/memcpy_bench/memcpy_bench.c",
+      "c_exe": "examples/memcpy_bench/memcpy_bench_c.exe",
+      "build_script": "examples/memcpy_bench/build.bat"
+    },
+    {
+      "name": "memset_bench",
+      "kind": "runtime",
+      "description": "memset 256 KB buffer x 200 (fill bandwidth / libc memset path)",
+      "mettle_source": "examples/memset_bench/memset_bench.mettle",
+      "mettle_exe": "examples/memset_bench/memset_bench.exe",
+      "c_source": "examples/memset_bench/memset_bench.c",
+      "c_exe": "examples/memset_bench/memset_bench_c.exe",
+      "build_script": "examples/memset_bench/build.bat"
+    },
+    {
+      "name": "memcmp_bench",
+      "kind": "runtime",
+      "description": "Byte-compare 256 KB in 4 KB chunks x 200 (manual compare loop)",
+      "mettle_source": "examples/memcmp_bench/memcmp_bench.mettle",
+      "mettle_exe": "examples/memcmp_bench/memcmp_bench.exe",
+      "c_source": "examples/memcmp_bench/memcmp_bench.c",
+      "c_exe": "examples/memcmp_bench/memcmp_bench_c.exe",
+      "build_script": "examples/memcmp_bench/build.bat"
+    },
+    {
+      "name": "binary_search",
+      "kind": "runtime",
+      "description": "Lower-bound search in sorted 65536 int32 array, 50000 queries x 200",
+      "mettle_source": "examples/binary_search/binary_search.mettle",
+      "mettle_exe": "examples/binary_search/binary_search.exe",
+      "c_source": "examples/binary_search/binary_search.c",
+      "c_exe": "examples/binary_search/binary_search_c.exe",
+      "build_script": "examples/binary_search/build.bat"
+    },
+    {
+      "name": "dot_product",
+      "kind": "runtime",
+      "description": "int32 dot product of 65536-element vectors x 200 (SIMD reduction)",
+      "mettle_source": "examples/dot_product/dot_product.mettle",
+      "mettle_exe": "examples/dot_product/dot_product.exe",
+      "c_source": "examples/dot_product/dot_product.c",
+      "c_exe": "examples/dot_product/dot_product_c.exe",
+      "build_script": "examples/dot_product/build.bat"
+    },
+    {
+      "name": "lcg_rng",
+      "kind": "runtime",
+      "description": "LCG PRNG 1M iterations x 200 (integer mul/add hot loop)",
+      "mettle_source": "examples/lcg_rng/lcg_rng.mettle",
+      "mettle_exe": "examples/lcg_rng/lcg_rng.exe",
+      "c_source": "examples/lcg_rng/lcg_rng.c",
+      "c_exe": "examples/lcg_rng/lcg_rng_c.exe",
+      "build_script": "examples/lcg_rng/build.bat"
+    },
+    {
+      "name": "prefix_sum",
+      "kind": "runtime",
+      "description": "Inclusive prefix sum over 65536 int32 values x 200 (scan / SIMD)",
+      "mettle_source": "examples/prefix_sum/prefix_sum.mettle",
+      "mettle_exe": "examples/prefix_sum/prefix_sum.exe",
+      "c_source": "examples/prefix_sum/prefix_sum.c",
+      "c_exe": "examples/prefix_sum/prefix_sum_c.exe",
+      "build_script": "examples/prefix_sum/build.bat"
+    },
+    {
+      "name": "popcount",
+      "kind": "runtime",
+      "description": "Population count over 256 KB byte buffer x 200 (bit ops)",
+      "mettle_source": "examples/popcount/popcount.mettle",
+      "mettle_exe": "examples/popcount/popcount.exe",
+      "c_source": "examples/popcount/popcount.c",
+      "c_exe": "examples/popcount/popcount_c.exe",
+      "build_script": "examples/popcount/build.bat"
+    },
+    {
+      "name": "reverse_i32",
+      "kind": "runtime",
+      "description": "Reverse-copy 65536 int32 values x 200 (indexed memory access)",
+      "mettle_source": "examples/reverse_i32/reverse_i32.mettle",
+      "mettle_exe": "examples/reverse_i32/reverse_i32.exe",
+      "c_source": "examples/reverse_i32/reverse_i32.c",
+      "c_exe": "examples/reverse_i32/reverse_i32_c.exe",
+      "build_script": "examples/reverse_i32/build.bat"
+    },
+    {
+      "name": "minmax_scan",
+      "kind": "runtime",
+      "description": "Min/max scan over 65536 int32 values x 200 (branchy reduction)",
+      "mettle_source": "examples/minmax_scan/minmax_scan.mettle",
+      "mettle_exe": "examples/minmax_scan/minmax_scan.exe",
+      "c_source": "examples/minmax_scan/minmax_scan.c",
+      "c_exe": "examples/minmax_scan/minmax_scan_c.exe",
+      "build_script": "examples/minmax_scan/build.bat"
+    },
+    {
+      "name": "scale_i32",
+      "kind": "runtime",
+      "description": "dst[i] = src[i]*3+7 over 65536 int32 values x 200 (map / vectorize)",
+      "mettle_source": "examples/scale_i32/scale_i32.mettle",
+      "mettle_exe": "examples/scale_i32/scale_i32.exe",
+      "c_source": "examples/scale_i32/scale_i32.c",
+      "c_exe": "examples/scale_i32/scale_i32_c.exe",
+      "build_script": "examples/scale_i32/build.bat"
+    },
+    {
+      "name": "clamp_i32",
+      "kind": "runtime",
+      "description": "clamp(src[i], -100, 100) over 65536 int32 values x 200 (branchy map)",
+      "mettle_source": "examples/clamp_i32/clamp_i32.mettle",
+      "mettle_exe": "examples/clamp_i32/clamp_i32.exe",
+      "c_source": "examples/clamp_i32/clamp_i32.c",
+      "c_exe": "examples/clamp_i32/clamp_i32_c.exe",
+      "build_script": "examples/clamp_i32/build.bat"
     }
   ],
   "compile_benchmarks": [

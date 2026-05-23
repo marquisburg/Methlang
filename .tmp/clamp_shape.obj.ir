@@ -1,0 +1,292 @@
+function narrow {
+     0: nop
+     1: binary %t0 = @x < @floor_bound
+     2: branch_zero %t0 -> ir_if_next_2
+     3: nop
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: return @floor_bound
+     9: nop
+    10: label ir_if_next_2
+    11: nop
+    12: binary %t2 = @x > @ceiling_bound
+    13: branch_zero %t2 -> ir_if_next_6
+    14: nop
+    15: nop
+    16: nop
+    17: nop
+    18: nop
+    19: return @ceiling_bound
+    20: nop
+    21: label ir_if_next_6
+    22: nop
+    23: nop
+    24: nop
+    25: nop
+    26: nop
+    27: nop
+    28: return @x
+}
+
+function bounded_copy {
+     0: nop
+     1: local @acc : int64
+     2: assign @acc <- 0
+     3: local @idx : int64
+     4: assign @idx <- 0
+     5: local @__ptr_5_input_buf_p : int32*
+     6: local @__ptr_5_output_buf_p : int32*
+     7: local @__ptr_5_input_buf_end : int32*
+     8: assign @__ptr_5_input_buf_p <- @input_buf
+     9: assign @__ptr_5_output_buf_p <- @output_buf
+    10: assign @__ptr_5_input_buf_end <- @input_buf
+    11: binary %__ptr_t5_end = @count << 2
+    12: binary @__ptr_5_input_buf_end = @__ptr_5_input_buf_end + %__ptr_t5_end
+    13: simd_clamp_i32 @acc = clamp_i32(src=@input_buf, dst=@output_buf, len=@count, lo=-90, hi=90)
+    14: nop
+    15: nop
+    16: nop
+    17: nop
+    18: nop
+    19: nop
+    20: nop
+    21: nop
+    22: nop
+    23: nop
+    24: nop
+    25: nop
+    26: nop
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: nop
+    33: nop
+    34: nop
+    35: nop
+    36: nop
+    37: nop
+    38: nop
+    39: nop
+    40: nop
+    41: nop
+    42: nop
+    43: nop
+    44: nop
+    45: nop
+    46: nop
+    47: nop
+    48: nop
+    49: nop
+    50: nop
+    51: nop
+    52: nop
+    53: nop
+    54: nop
+    55: nop
+    56: nop
+    57: nop
+    58: nop
+    59: nop
+    60: nop
+    61: nop
+    62: nop
+    63: nop
+    64: nop
+    65: nop
+    66: nop
+    67: nop
+    68: nop
+    69: nop
+    70: nop
+    71: nop
+    72: label ir_while_end_13
+    73: nop
+    74: nop
+    75: nop
+    76: nop
+    77: nop
+    78: return @acc
+}
+
+function main {
+     0: nop
+     1: local @src : int32[8]
+     2: local @dst : int32[8]
+     3: nop
+     4: addr_of %t18 <- &@src
+     5: nop
+     6: nop
+     7: store *%t18 <- -200 [4]
+     8: nop
+     9: addr_of %t22 <- &@src
+    10: nop
+    11: binary %t24 = %t22 + 4
+    12: store *%t24 <- -100 [4]
+    13: nop
+    14: addr_of %t26 <- &@src
+    15: nop
+    16: binary %t28 = %t26 + 8
+    17: store *%t28 <- -50 [4]
+    18: addr_of %t29 <- &@src
+    19: nop
+    20: binary %t31 = %t29 + 12
+    21: store *%t31 <- 0 [4]
+    22: addr_of %t32 <- &@src
+    23: nop
+    24: binary %t34 = %t32 + 16
+    25: store *%t34 <- 50 [4]
+    26: addr_of %t35 <- &@src
+    27: nop
+    28: binary %t37 = %t35 + 20
+    29: store *%t37 <- 100 [4]
+    30: addr_of %t38 <- &@src
+    31: nop
+    32: binary %t40 = %t38 + 24
+    33: store *%t40 <- 150 [4]
+    34: addr_of %t41 <- &@src
+    35: nop
+    36: binary %t43 = %t41 + 28
+    37: store *%t43 <- 200 [4]
+    38: local @total : int64
+    39: addr_of %t45 <- &@src
+    40: nop
+    41: nop
+    42: addr_of %t48 <- &@dst
+    43: nop
+    44: nop
+    45: local @__inl_bounded_copy_1_param_input_buf : int32*
+    46: assign @__inl_bounded_copy_1_param_input_buf <- %t45
+    47: local @__inl_bounded_copy_1_param_output_buf : int32*
+    48: assign @__inl_bounded_copy_1_param_output_buf <- %t48
+    49: local @__inl_bounded_copy_1_param_count : int64
+    50: assign @__inl_bounded_copy_1_param_count <- 8
+    51: nop
+    52: local @__inl_bounded_copy_1_local_acc : int64
+    53: assign @__inl_bounded_copy_1_local_acc <- 0
+    54: local @__inl_bounded_copy_1_local_idx : int64
+    55: assign @__inl_bounded_copy_1_local_idx <- 0
+    56: local @__ptr_56___inl_bounded_copy_1_param_input_buf_p : int32*
+    57: local @__ptr_56___inl_bounded_copy_1_param_output_buf_p : int32*
+    58: local @__ptr_56___inl_bounded_copy_1_param_input_buf_end : int32*
+    59: assign @__ptr_56___inl_bounded_copy_1_param_input_buf_p <- @__inl_bounded_copy_1_param_input_buf
+    60: assign @__ptr_56___inl_bounded_copy_1_param_output_buf_p <- @__inl_bounded_copy_1_param_output_buf
+    61: assign @__ptr_56___inl_bounded_copy_1_param_input_buf_end <- @__inl_bounded_copy_1_param_input_buf
+    62: binary %__ptr_t56_end = @__inl_bounded_copy_1_param_count << 2
+    63: binary @__ptr_56___inl_bounded_copy_1_param_input_buf_end = @__ptr_56___inl_bounded_copy_1_param_input_buf_end + %__ptr_t56_end
+    64: simd_clamp_i32 @__inl_bounded_copy_1_local_acc = clamp_i32(src=@__inl_bounded_copy_1_param_input_buf, dst=@__inl_bounded_copy_1_param_output_buf, len=@__inl_bounded_copy_1_param_count, lo=-90, hi=90)
+    65: nop
+    66: nop
+    67: nop
+    68: nop
+    69: nop
+    70: nop
+    71: nop
+    72: nop
+    73: nop
+    74: nop
+    75: nop
+    76: nop
+    77: nop
+    78: nop
+    79: nop
+    80: nop
+    81: nop
+    82: nop
+    83: nop
+    84: nop
+    85: nop
+    86: nop
+    87: nop
+    88: nop
+    89: nop
+    90: nop
+    91: nop
+    92: nop
+    93: nop
+    94: nop
+    95: nop
+    96: nop
+    97: nop
+    98: nop
+    99: nop
+   100: nop
+   101: nop
+   102: nop
+   103: nop
+   104: nop
+   105: nop
+   106: nop
+   107: nop
+   108: nop
+   109: nop
+   110: nop
+   111: nop
+   112: nop
+   113: nop
+   114: nop
+   115: nop
+   116: nop
+   117: nop
+   118: nop
+   119: nop
+   120: nop
+   121: nop
+   122: nop
+   123: label __inl_bounded_copy_1_lbl_ir_while_end_13
+   124: nop
+   125: nop
+   126: nop
+   127: nop
+   128: nop
+   129: nop
+   130: nop
+   131: nop
+   132: assign @total <- @__inl_bounded_copy_1_local_acc
+   133: binary %t51 = @total != 90
+   134: branch_zero %t51 -> ir_if_next_18
+   135: nop
+   136: nop
+   137: nop
+   138: nop
+   139: nop
+   140: return 2
+   141: nop
+   142: label ir_if_next_18
+   143: nop
+   144: addr_of %t53 <- &@dst
+   145: nop
+   146: nop
+   147: load %t56 <- *%t53 [4]
+   148: nop
+   149: binary %t58 = %t56 != -90
+   150: branch_zero %t58 -> ir_cond_false_24
+   151: jump ir_errdefer_end_26
+   152: label ir_cond_false_24
+   153: addr_of %t59 <- &@dst
+   154: nop
+   155: binary %t61 = %t59 + 28
+   156: load %t62 <- *%t61 [4]
+   157: binary %t63 = %t62 != 90
+   158: branch_zero %t63 -> ir_errdefer_ok_27
+   159: nop
+   160: nop
+   161: nop
+   162: nop
+   163: nop
+   164: label ir_errdefer_end_26
+   165: return 3
+   166: nop
+   167: nop
+   168: nop
+   169: nop
+   170: nop
+   171: nop
+   172: label ir_errdefer_ok_27
+   173: nop
+   174: return 0
+}
+

@@ -1,0 +1,10 @@
+import "std/io";
+import "std/mem";
+function main() -> int32 {
+  var b: cstring = malloc(262144);
+  memset(b, 0, 262144);
+  var v: int64 = (int64)(uint8)b[0];
+  println_int(v);
+  free(b);
+  return 0;
+}

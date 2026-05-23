@@ -1,0 +1,27 @@
+import "std/io";
+import "std/mem";
+
+function popcount_byte(b: uint8) -> int32 {
+  var count: int32 = 0;
+  var v: uint8 = b;
+  while (v != 0) {
+    count = count + (int32)(v & 1);
+    v = (uint8)(v / 2);
+  }
+  return count;
+}
+
+function popcount_buffer(buf: cstring, len: int64) -> int64 {
+  var total: int64 = 0;
+  var i: int64 = 0;
+  while (i < len) {
+    total = total + (int64)popcount_byte((uint8)buf[i]);
+    i = i + 1;
+  }
+  return total;
+}
+
+function main() -> int32 {
+  var data: cstring = cstr("0123456789abcdef");
+  return (int32)popcount_buffer(data, 16);
+}

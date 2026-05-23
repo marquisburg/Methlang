@@ -1,4 +1,5 @@
 #include "ir.h"
+#include "compiler/compiler_context.h"
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -25,6 +26,7 @@ typedef struct {
    * to give a width-less float literal in `return <lit>;` the correct
    * single/double precision (literals always infer to float64 otherwise). */
   const char *current_return_type_name;
+  const char *current_function_name;
 } IRLoweringContext;
 
 typedef struct {
@@ -1443,6 +1445,11 @@ static void ir_set_error(IRLoweringContext *context, const char *format, ...) {
   if (!context || context->error_message || !format) {
     return;
   }
+
+  if (context->current_function_name) {
+    mettle_compiler_ctx_set_function_name(context->current_function_name);
+  }
+  mettle_compiler_ctx_set_phase(METTLE_COMPILER_PHASE_IR_LOWERING);
 
   va_list args;
   va_start(args, format);
@@ -3917,6 +3924,8 @@ static IRFunction *ir_lower_function(IRLoweringContext *context,
   }
 
   context->current_return_type_name = function_data->return_type;
+  context->current_function_name = function_data->name;
+  mettle_compiler_ctx_set_function_name(function_data->name);
 
   IRFunction *function = ir_function_create(function_data->name);
   if (!function) {

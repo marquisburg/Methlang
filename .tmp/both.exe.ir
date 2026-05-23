@@ -1,0 +1,93 @@
+function alloc_zeroed {
+     0: label ir_entry_0
+     1: call %t0 = calloc(1, @n)
+     2: assign %t1 <- %t0
+     3: branch_zero %t1 -> ir_errdefer_ok_1
+     4: jump ir_errdefer_end_2
+     5: label ir_errdefer_ok_1
+     6: label ir_errdefer_end_2
+     7: return %t0
+}
+
+function buf_dup {
+     0: label ir_entry_3
+     1: binary %t2 = @len <= 0
+     2: branch_zero %t2 -> ir_if_next_5
+     3: assign %t3 <- 0
+     4: branch_zero %t3 -> ir_errdefer_ok_6
+     5: jump ir_errdefer_end_7
+     6: label ir_errdefer_ok_6
+     7: label ir_errdefer_end_7
+     8: return 0
+     9: jump ir_if_end_4
+    10: label ir_if_next_5
+    11: label ir_if_end_4
+    12: local @dst : cstring
+    13: call %t4 = malloc(@len)
+    14: assign @dst <- %t4
+    15: binary %t5 = @dst == 0
+    16: branch_zero %t5 -> ir_if_next_9
+    17: assign %t6 <- 0
+    18: branch_zero %t6 -> ir_errdefer_ok_10
+    19: jump ir_errdefer_end_11
+    20: label ir_errdefer_ok_10
+    21: label ir_errdefer_end_11
+    22: return 0
+    23: jump ir_if_end_8
+    24: label ir_if_next_9
+    25: label ir_if_end_8
+    26: call %t7 = memcpy(@dst, @src, @len)
+    27: assign %t8 <- @dst
+    28: branch_zero %t8 -> ir_errdefer_ok_12
+    29: jump ir_errdefer_end_13
+    30: label ir_errdefer_ok_12
+    31: label ir_errdefer_end_13
+    32: return @dst
+}
+
+function both {
+     0: label ir_entry_14
+     1: local @v : int64
+     2: branch_zero @b -> ir_trap_null_15
+     3: jump ir_nonnull_16
+     4: label ir_trap_null_15
+     5: call _ = mettle_crash_trap("Fatal error: Null pointer dereference")
+     6: label ir_nonnull_16
+     7: binary %t9 = @i * 1
+     8: binary %t10 = @b + %t9
+     9: load %t11 <- *%t10 [1]
+    10: cast %t12 = (uint8)%t11
+    11: cast %t13 = (int64)%t12
+    12: assign @v <- %t13
+    13: cast %t14 = (uint8)1
+    14: branch_zero @b -> ir_trap_null_17
+    15: jump ir_nonnull_18
+    16: label ir_trap_null_17
+    17: call _ = mettle_crash_trap("Fatal error: Null pointer dereference")
+    18: label ir_nonnull_18
+    19: binary %t15 = @i * 1
+    20: binary %t16 = @b + %t15
+    21: store *%t16 <- %t14 [1]
+    22: assign %t17 <- @v
+    23: branch_zero %t17 -> ir_errdefer_ok_19
+    24: jump ir_errdefer_end_20
+    25: label ir_errdefer_ok_19
+    26: label ir_errdefer_end_20
+    27: return @v
+}
+
+function main {
+     0: label ir_entry_21
+     1: local @b : cstring
+     2: call %t18 = malloc(16)
+     3: assign @b <- %t18
+     4: call %t19 = both(@b, 1)
+     5: call %t20 = free(@b)
+     6: assign %t21 <- 0
+     7: branch_zero %t21 -> ir_errdefer_ok_22
+     8: jump ir_errdefer_end_23
+     9: label ir_errdefer_ok_22
+    10: label ir_errdefer_end_23
+    11: return 0
+}
+

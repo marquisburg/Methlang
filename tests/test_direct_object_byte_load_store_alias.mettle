@@ -1,0 +1,29 @@
+import "std/mem";
+
+function load_then_store(buf: cstring, idx: int64) -> int32 {
+  var old: int64 = (int64)(uint8)buf[idx];
+  buf[idx] = (uint8)(old + 17);
+  return (int32)(old + (int64)(uint8)buf[idx]);
+}
+
+function main() -> int32 {
+  var buf: cstring = malloc(4);
+  if (buf == 0) {
+    return 3;
+  }
+
+  memset(buf, 0, 4);
+  buf[1] = (uint8)5;
+
+  var result: int32 = load_then_store(buf, 1);
+  var updated: int64 = (int64)(uint8)buf[1];
+  free(buf);
+
+  if (result != 27) {
+    return 1;
+  }
+  if (updated != 22) {
+    return 2;
+  }
+  return 37;
+}
