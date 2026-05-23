@@ -11523,28 +11523,12 @@ int ir_optimize_program(IRProgram *program,
     if (!ir_prefix_sum_i32_pass(function, &pre_changed)) {
       mettle_compiler_ice("IR optimization pre-inline pass failed");
     }
-  }
-
-  for (size_t pre = 0; pre < program->function_count; pre++) {
-    IRFunction *function = program->functions[pre];
-    int ptr_pre_changed = 0;
-    if (function) {
-      mettle_compiler_ctx_set_function_name(
-          function->name ? function->name : "<anonymous>");
-    }
+    pre_changed = 0;
     mettle_compiler_ctx_set_pass_name("induction_pointer");
-    if (!ir_pointer_induction_pass(function, &ptr_pre_changed)) {
+    if (!ir_pointer_induction_pass(function, &pre_changed)) {
       mettle_compiler_ice("IR optimization pre-inline pass failed");
     }
-  }
-
-  for (size_t pre = 0; pre < program->function_count; pre++) {
-    IRFunction *function = program->functions[pre];
-    int pre_changed = 0;
-    if (function) {
-      mettle_compiler_ctx_set_function_name(
-          function->name ? function->name : "<anonymous>");
-    }
+    pre_changed = 0;
     mettle_compiler_ctx_set_pass_name("simd_matmul");
     if (!ir_simd_matmul_pass(function, &pre_changed)) {
       mettle_compiler_ice("IR optimization pre-inline pass failed");
