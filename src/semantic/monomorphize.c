@@ -1371,6 +1371,48 @@ static void collect_type_instantiations(ASTNode *node, MonoContext *ctx) {
   }
 }
 
+static void rewrite_generic_type_name_in_place(char **slot,
+                                               const char **type_params,
+                                               const char **concrete_types,
+                                               size_t type_param_count) {
+  char *type_str = *slot;
+  size_t len = strlen(type_str);
+  size_t ptr_count = 0;
+  char *base = NULL;
+  char **args = NULL;
+  size_t arg_count = 0;
+
+  (void)type_params;
+  (void)concrete_types;
+  (void)type_param_count;
+
+  while (len > 0 && type_str[len - 1] == '*') {
+    ptr_count++;
+    len--;
+  }
+
+  char *core = malloc(len + 1);
+  memcpy(core, type_str, len);
+  core[len] = '\0';
+
+  if (parse_generic_type_name(core, &base, &args, &arg_count)) {
+    char *mangled = mangle_name(base, args, arg_count);
+    size_t new_len = strlen(mangled) + ptr_count + 1;
+    char *new_type = malloc(new_len);
+    strcpy(new_type, mangled);
+    for (size_t i = 0; i < ptr_count; i++)
+      strcat(new_type, "*");
+    mettle_free_string(*slot);
+    *slot = new_type;
+    free(mangled);
+    free(base);
+    for (size_t i = 0; i < arg_count; i++)
+      free(args[i]);
+    free(args);
+  }
+  free(core);
+}
+
 static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
   if (!node)
     return;
@@ -1379,41 +1421,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
   case AST_VAR_DECLARATION: {
     VarDeclaration *vd = (VarDeclaration *)node->data;
     if (vd && vd->type_name) {
-      // Replace generic type names with mangled names
-      // Need to handle "List<int32>" -> "List__int32" and "List<int32>*" -> "List__int32*"
-      char *base = NULL;
-      char **args = NULL;
-      size_t arg_count = 0;
-
-      // Strip pointer suffix for matching
-      char *type_str = vd->type_name;
-      size_t len = strlen(type_str);
-      size_t ptr_count = 0;
-      while (len > 0 && type_str[len - 1] == '*') {
-        ptr_count++;
-        len--;
-      }
-
-      char *core = malloc(len + 1);
-      memcpy(core, type_str, len);
-      core[len] = '\0';
-
-      if (parse_generic_type_name(core, &base, &args, &arg_count)) {
-        char *mangled = mangle_name(base, args, arg_count);
-        size_t new_len = strlen(mangled) + ptr_count + 1;
-        char *new_type = malloc(new_len);
-        strcpy(new_type, mangled);
-        for (size_t i = 0; i < ptr_count; i++)
-          strcat(new_type, "*");
-        mettle_free_string(vd->type_name);
-        vd->type_name = new_type;
-        free(mangled);
-        free(base);
-        for (size_t i = 0; i < arg_count; i++)
-          free(args[i]);
-        free(args);
-      }
-      free(core);
+      rewrite_generic_type_name_in_place(&vd->type_name, NULL, NULL, 0);
     }
     if (vd && vd->initializer)
       rewrite_generic_references(vd->initializer, ctx);
@@ -1463,51 +1471,12 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
     if (fd && fd->type_param_count == 0) {
       for (size_t i = 0; i < fd->parameter_count; i++) {
         if (fd->parameter_types[i]) {
-          char *base = NULL;
-          char **args = NULL;
-          size_t arg_count = 0;
-          char *type_str = fd->parameter_types[i];
-          size_t len = strlen(type_str);
-          size_t ptr_count = 0;
-          while (len > 0 && type_str[len - 1] == '*') {
-            ptr_count++;
-            len--;
-          }
-          char *core = malloc(len + 1);
-          memcpy(core, type_str, len);
-          core[len] = '\0';
-          if (parse_generic_type_name(core, &base, &args, &arg_count)) {
-            char *mangled = mangle_name(base, args, arg_count);
-            size_t new_len = strlen(mangled) + ptr_count + 1;
-            char *new_type = malloc(new_len);
-            strcpy(new_type, mangled);
-            for (size_t j = 0; j < ptr_count; j++)
-              strcat(new_type, "*");
-            mettle_free_string(fd->parameter_types[i]);
-            fd->parameter_types[i] = new_type;
-            free(mangled);
-            free(base);
-            for (size_t j = 0; j < arg_count; j++)
-              free(args[j]);
-            free(args);
-          }
-          free(core);
+          rewrite_generic_type_name_in_place(&fd->parameter_types[i], NULL,
+                                             NULL, 0);
         }
       }
       if (fd->return_type) {
-        char *base = NULL;
-        char **args = NULL;
-        size_t arg_count = 0;
-        if (parse_generic_type_name(fd->return_type, &base, &args,
-                                    &arg_count)) {
-          char *mangled = mangle_name(base, args, arg_count);
-          mettle_free_string(fd->return_type);
-          fd->return_type = mangled;
-          free(base);
-          for (size_t i = 0; i < arg_count; i++)
-            free(args[i]);
-          free(args);
-        }
+        rewrite_generic_type_name_in_place(&fd->return_type, NULL, NULL, 0);
       }
       if (fd->body)
         rewrite_generic_references(fd->body, ctx);
@@ -1519,35 +1488,8 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
     if (sd && sd->type_param_count == 0) {
       for (size_t i = 0; i < sd->field_count; i++) {
         if (sd->field_types[i]) {
-          char *base = NULL;
-          char **args = NULL;
-          size_t arg_count = 0;
-          char *type_str = sd->field_types[i];
-          size_t len = strlen(type_str);
-          size_t ptr_count = 0;
-          while (len > 0 && type_str[len - 1] == '*') {
-            ptr_count++;
-            len--;
-          }
-          char *core = malloc(len + 1);
-          memcpy(core, type_str, len);
-          core[len] = '\0';
-          if (parse_generic_type_name(core, &base, &args, &arg_count)) {
-            char *mangled = mangle_name(base, args, arg_count);
-            size_t new_len = strlen(mangled) + ptr_count + 1;
-            char *new_type = malloc(new_len);
-            strcpy(new_type, mangled);
-            for (size_t j = 0; j < ptr_count; j++)
-              strcat(new_type, "*");
-            mettle_free_string(sd->field_types[i]);
-            sd->field_types[i] = new_type;
-            free(mangled);
-            free(base);
-            for (size_t j = 0; j < arg_count; j++)
-              free(args[j]);
-            free(args);
-          }
-          free(core);
+          rewrite_generic_type_name_in_place(&sd->field_types[i], NULL, NULL,
+                                             0);
         }
       }
     }

@@ -1,4 +1,5 @@
 #include "profile.h"
+#include "crash_handler.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -53,53 +54,44 @@ static size_t g_edge_capacity = 0;
 static int g_qpc_initialized = 0;
 static LARGE_INTEGER g_qpc_frequency = {0};
 
-static void mettle_profile_write_stderr_bytes(const char *text, size_t length) {
-  if (!text || length == 0) {
-    return;
-  }
-
-  HANDLE stderr_handle = GetStdHandle(STD_ERROR_HANDLE);
-  if (stderr_handle && stderr_handle != INVALID_HANDLE_VALUE) {
-    DWORD written = 0;
-    WriteFile(stderr_handle, text, (DWORD)length, &written, NULL);
-  }
-}
-
-static void mettle_profile_write_stderr(const char *text) {
-  if (!text) {
-    return;
-  }
-  mettle_profile_write_stderr_bytes(text, strlen(text));
-}
-
 static void mettle_profile_write_padded_field(const char *text, size_t width) {
   size_t length = text ? strlen(text) : 0;
-  mettle_profile_write_stderr(text ? text : "");
+  mettle_crash_write_stderr(text ? text : "");
   while (length < width) {
-    mettle_profile_write_stderr(" ");
+    mettle_crash_write_stderr(" ");
     length++;
   }
 }
 
-static void mettle_profile_write_padded_uint64(uint64_t value, size_t width) {
-  char buffer[32];
-  size_t index = sizeof(buffer);
-  size_t length = 0;
+static int uint64_to_decimal(uint64_t value, char *buf, size_t buf_size) {
+  size_t index = buf_size;
+  int count = 0;
 
-  buffer[--index] = '\0';
+  buf[--index] = '\0';
   if (value == 0) {
-    buffer[--index] = '0';
+    buf[--index] = '0';
+    count = 1;
   } else {
     while (value != 0 && index > 0) {
-      buffer[--index] = (char)('0' + (value % 10u));
+      buf[--index] = (char)('0' + (value % 10u));
       value /= 10u;
+      count++;
     }
   }
 
-  length = strlen(buffer + index);
-  mettle_profile_write_stderr(buffer + index);
+  if (index > 0) {
+    memmove(buf, buf + index, (size_t)count + 1);
+  }
+  return count;
+}
+
+static void mettle_profile_write_padded_uint64(uint64_t value, size_t width) {
+  char buffer[32];
+  size_t length = (size_t)uint64_to_decimal(value, buffer, sizeof(buffer));
+
+  mettle_crash_write_stderr(buffer);
   while (length < width) {
-    mettle_profile_write_stderr(" ");
+    mettle_crash_write_stderr(" ");
     length++;
   }
 }
@@ -144,7 +136,7 @@ static void mettle_profile_write_pct(double pct) {
   buffer[index++] = (char)('0' + tenths);
   buffer[index++] = '%';
   buffer[index] = '\0';
-  mettle_profile_write_stderr(buffer);
+  mettle_crash_write_stderr(buffer);
 }
 
 static void mettle_profile_write_location(uint32_t fn_id, size_t width) {
@@ -211,6 +203,18 @@ static uint64_t mettle_profile_now_ns(void) {
                     (uint64_t)g_qpc_frequency.QuadPart);
 }
 
+#define METTLE_PROFILE_ENSURE_CAPACITY(ptr, count, capacity, type, needed) do { \
+    if ((needed) > (capacity)) { \
+        size_t new_cap = (capacity) ? (capacity) : 16u; \
+        while (new_cap < (needed)) new_cap *= 2; \
+        type *new_buf = realloc((ptr), new_cap * sizeof(type)); \
+        if (!new_buf) break; \
+        memset(new_buf + (capacity), 0, (new_cap - (capacity)) * sizeof(type)); \
+        (ptr) = new_buf; \
+        (capacity) = new_cap; \
+    } \
+} while (0)
+
 static int mettle_profile_ensure_stats(uint32_t fn_id) {
   size_t needed = (size_t)fn_id + 1u;
 
@@ -218,25 +222,9 @@ static int mettle_profile_ensure_stats(uint32_t fn_id) {
     return 1;
   }
 
-  {
-    size_t new_capacity = g_stats_capacity == 0 ? 16u : g_stats_capacity;
-    while (new_capacity < needed) {
-      new_capacity *= 2u;
-    }
-
-    MettleProfileStats *stats =
-        realloc(g_stats, new_capacity * sizeof(MettleProfileStats));
-    if (!stats) {
-      return 0;
-    }
-
-    memset(stats + g_stats_capacity, 0,
-           (new_capacity - g_stats_capacity) * sizeof(MettleProfileStats));
-    g_stats = stats;
-    g_stats_capacity = new_capacity;
-  }
-
-  return 1;
+  METTLE_PROFILE_ENSURE_CAPACITY(g_stats, g_stats_capacity, g_stats_capacity,
+                                 MettleProfileStats, needed);
+  return needed <= g_stats_capacity;
 }
 
 static int mettle_profile_ensure_op_stats(uint32_t fn_id) {
@@ -246,25 +234,10 @@ static int mettle_profile_ensure_op_stats(uint32_t fn_id) {
     return 1;
   }
 
-  {
-    size_t old_capacity = g_op_stats_capacity;
-    size_t new_capacity = old_capacity == 0 ? 16u : old_capacity;
-    while (new_capacity < needed) {
-      new_capacity *= 2u;
-    }
-
-    MettleProfileOpStats *op_stats =
-        realloc(g_op_stats, new_capacity * sizeof(MettleProfileOpStats));
-    if (!op_stats) {
-      return 0;
-    }
-    memset(op_stats + old_capacity, 0,
-           (new_capacity - old_capacity) * sizeof(MettleProfileOpStats));
-    g_op_stats = op_stats;
-    g_op_stats_capacity = new_capacity;
-  }
-
-  return 1;
+  METTLE_PROFILE_ENSURE_CAPACITY(g_op_stats, g_op_stats_capacity,
+                                 g_op_stats_capacity, MettleProfileOpStats,
+                                 needed);
+  return needed <= g_op_stats_capacity;
 }
 
 static MettleProfileEdge *mettle_profile_find_edge(uint32_t caller_id,
@@ -484,19 +457,8 @@ static uint32_t mettle_profile_find_root_id(size_t function_count) {
 
 static void mettle_profile_write_uint64_plain(uint64_t value) {
   char buffer[32];
-  size_t index = sizeof(buffer);
-
-  buffer[--index] = '\0';
-  if (value == 0) {
-    mettle_profile_write_stderr("0");
-    return;
-  }
-
-  while (value != 0 && index > 0) {
-    buffer[--index] = (char)('0' + (value % 10u));
-    value /= 10u;
-  }
-  mettle_profile_write_stderr(buffer + index);
+  uint64_to_decimal(value, buffer, sizeof(buffer));
+  mettle_crash_write_stderr(buffer);
 }
 
 static void mettle_profile_write_uint64_grouped(uint64_t value) {
@@ -504,7 +466,7 @@ static void mettle_profile_write_uint64_grouped(uint64_t value) {
   size_t count = 0;
 
   if (value == 0) {
-    mettle_profile_write_stderr("0");
+    mettle_crash_write_stderr("0");
     return;
   }
 
@@ -516,16 +478,16 @@ static void mettle_profile_write_uint64_grouped(uint64_t value) {
   for (size_t i = 0; i < count; i++) {
     size_t rev = count - 1 - i;
     char c = digits[rev];
-    mettle_profile_write_stderr_bytes(&c, 1);
+    mettle_crash_write_stderr_bytes(&c, 1);
     if (rev > 0 && (rev % 3) == 0) {
-      mettle_profile_write_stderr(",");
+      mettle_crash_write_stderr(",");
     }
   }
 }
 
 static void mettle_profile_write_indent(size_t depth) {
   for (size_t i = 0; i < depth; i++) {
-    mettle_profile_write_stderr("  ");
+    mettle_crash_write_stderr("  ");
   }
 }
 
@@ -577,12 +539,12 @@ static void mettle_profile_report_callgraph_node(uint32_t fn_id, size_t depth,
     uint64_t calls = edge ? edge->call_count : 0;
 
     mettle_profile_write_indent(depth);
-    mettle_profile_write_stderr(mettle_profile_function_name(child_id));
-    mettle_profile_write_stderr("  ");
+    mettle_crash_write_stderr(mettle_profile_function_name(child_id));
+    mettle_crash_write_stderr("  ");
     mettle_profile_write_uint64_plain(calls);
-    mettle_profile_write_stderr(" calls  ");
+    mettle_crash_write_stderr(" calls  ");
     mettle_profile_write_uint64_plain(edge_us);
-    mettle_profile_write_stderr(" us\n");
+    mettle_crash_write_stderr(" us\n");
 
     mettle_profile_report_callgraph_node(child_id, depth + 1, visited,
                                          function_count);
@@ -604,9 +566,9 @@ static void mettle_profile_report_callgraph(size_t function_count) {
     return;
   }
 
-  mettle_profile_write_stderr("\nRuntime profile (call graph):\n");
-  mettle_profile_write_stderr(mettle_profile_function_name(root_id));
-  mettle_profile_write_stderr("\n");
+  mettle_crash_write_stderr("\nRuntime profile (call graph):\n");
+  mettle_crash_write_stderr(mettle_profile_function_name(root_id));
+  mettle_crash_write_stderr("\n");
   mettle_profile_report_callgraph_node(root_id, 1, visited, function_count);
   free(visited);
 }
@@ -643,8 +605,8 @@ static void mettle_profile_report_operations(
     return;
   }
 
-  mettle_profile_write_stderr("\nOperation profile:\n");
-  mettle_profile_write_stderr(
+  mettle_crash_write_stderr("\nOperation profile:\n");
+  mettle_crash_write_stderr(
       "function             op_class               count\n");
 
   for (size_t i = 0; i < active_count; i++) {
@@ -657,11 +619,11 @@ static void mettle_profile_report_operations(
         continue;
       }
       mettle_profile_write_padded_field(fn_name, 20);
-      mettle_profile_write_stderr(" ");
+      mettle_crash_write_stderr(" ");
       mettle_profile_write_padded_field(mettle_profile_op_class_name(op), 22);
-      mettle_profile_write_stderr(" ");
+      mettle_crash_write_stderr(" ");
       mettle_profile_write_uint64_grouped(count);
-      mettle_profile_write_stderr("\n");
+      mettle_crash_write_stderr("\n");
     }
   }
 }
@@ -703,8 +665,8 @@ void mettle_profile_report(void) {
   qsort(entries, active_count, sizeof(MettleProfileSortEntry),
         mettle_profile_sort_desc);
 
-  mettle_profile_write_stderr("\nRuntime profile:\n");
-  mettle_profile_write_stderr(
+  mettle_crash_write_stderr("\nRuntime profile:\n");
+  mettle_crash_write_stderr(
       "function             location                             calls    "
       "total_us    avg_ns    self_us     pct\n");
 
@@ -719,19 +681,19 @@ void mettle_profile_report(void) {
     double pct = 100.0 * ((double)stats->total_ns / (double)root_total_ns);
 
     mettle_profile_write_padded_field(name, 20);
-    mettle_profile_write_stderr(" ");
+    mettle_crash_write_stderr(" ");
     mettle_profile_write_location(fn_id, 36);
-    mettle_profile_write_stderr(" ");
+    mettle_crash_write_stderr(" ");
     mettle_profile_write_padded_uint64(stats->call_count, 8);
-    mettle_profile_write_stderr("  ");
+    mettle_crash_write_stderr("  ");
     mettle_profile_write_padded_uint64(total_us, 8);
-    mettle_profile_write_stderr("  ");
+    mettle_crash_write_stderr("  ");
     mettle_profile_write_padded_uint64(avg_ns, 8);
-    mettle_profile_write_stderr("  ");
+    mettle_crash_write_stderr("  ");
     mettle_profile_write_padded_uint64(self_us, 8);
-    mettle_profile_write_stderr("  ");
+    mettle_crash_write_stderr("  ");
     mettle_profile_write_pct(pct);
-    mettle_profile_write_stderr("\n");
+    mettle_crash_write_stderr("\n");
   }
 
   mettle_profile_report_callgraph(function_count);

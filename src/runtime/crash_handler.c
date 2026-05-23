@@ -50,7 +50,7 @@ static volatile sig_atomic_t g_runtime_debug_in_handler = 0;
  * symbolized backtraces Windows already produced.
  * ------------------------------------------------------------------------- */
 
-static void mettle_crash_write_stderr_bytes(const char *text, size_t length) {
+void mettle_crash_write_stderr_bytes(const char *text, size_t length) {
   if (!text || length == 0) {
     return;
   }
@@ -79,7 +79,7 @@ static void mettle_crash_write_stderr_bytes(const char *text, size_t length) {
 #endif
 }
 
-static void mettle_crash_write_stderr(const char *text) {
+void mettle_crash_write_stderr(const char *text) {
   if (!text) {
     return;
   }
@@ -122,7 +122,7 @@ static void mettle_crash_write_pointer(const void *value) {
 }
 
 #if defined(_WIN32) || defined(_WIN64)
-static const char *mettle_crash_exception_name(DWORD code) {
+const char *mettle_crash_exception_name(DWORD code) {
   switch (code) {
   case EXCEPTION_ACCESS_VIOLATION:
     return "access violation";

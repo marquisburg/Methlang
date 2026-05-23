@@ -309,15 +309,10 @@ void error_reporter_add_error_with_suggestion(ErrorReporter *reporter,
                                                     message, suggestion);
 }
 
-void error_reporter_add_error_with_span(ErrorReporter *reporter, ErrorType type,
-                                        SourceSpan span, const char *message) {
-  error_reporter_add_error_with_span_and_suggestion(reporter, type, span,
-                                                    message, NULL);
-}
-
-void error_reporter_add_error_with_span_and_suggestion(
-    ErrorReporter *reporter, ErrorType type, SourceSpan span, const char *message,
-    const char *suggestion) {
+static void error_reporter_add_report(ErrorReporter *reporter,
+                                      ErrorSeverity severity, SourceSpan span,
+                                      ErrorType type, const char *message,
+                                      const char *suggestion) {
   if (!reporter || reporter->count >= reporter->max_errors)
     return;
 
@@ -336,7 +331,7 @@ void error_reporter_add_error_with_span_and_suggestion(
 
   ErrorReport *error = &reporter->errors[reporter->count];
   error->type = type;
-  error->severity = DIAG_SEVERITY_ERROR;
+  error->severity = severity;
   error->location = source_location_create(span.line, span.column);
   error->location.filename = filename;
   error->span = span;
@@ -351,6 +346,19 @@ void error_reporter_add_error_with_span_and_suggestion(
   reporter->count++;
 }
 
+void error_reporter_add_error_with_span(ErrorReporter *reporter, ErrorType type,
+                                        SourceSpan span, const char *message) {
+  error_reporter_add_error_with_span_and_suggestion(reporter, type, span,
+                                                    message, NULL);
+}
+
+void error_reporter_add_error_with_span_and_suggestion(
+    ErrorReporter *reporter, ErrorType type, SourceSpan span, const char *message,
+    const char *suggestion) {
+  error_reporter_add_report(reporter, DIAG_SEVERITY_ERROR, span, type, message,
+                            suggestion);
+}
+
 void error_reporter_add_warning(ErrorReporter *reporter, ErrorType type,
                                 SourceLocation location, const char *message) {
   SourceSpan span = source_span_from_location(location, 1);
@@ -359,37 +367,8 @@ void error_reporter_add_warning(ErrorReporter *reporter, ErrorType type,
 
 void error_reporter_add_warning_with_span(ErrorReporter *reporter, ErrorType type,
                                           SourceSpan span, const char *message) {
-  if (!reporter || reporter->count >= reporter->max_errors)
-    return;
-
-  if (!error_reporter_expand_capacity(reporter))
-    return;
-
-  if (span.length == 0)
-    span.length = 1;
-
-  const char *filename =
-      span.filename ? span.filename : reporter->current_filename;
-  const ErrorReporterSource *source_entry =
-      filename ? error_reporter_find_source(reporter, filename) : NULL;
-  const char *source_code =
-      source_entry ? source_entry->source_code : reporter->current_source_code;
-
-  ErrorReport *error = &reporter->errors[reporter->count];
-  error->type = type;
-  error->severity = DIAG_SEVERITY_WARNING;
-  error->location = source_location_create(span.line, span.column);
-  error->location.filename = filename;
-  error->span = span;
-  error->span.filename = filename;
-  error->filename = filename ? er_strdup(filename) : NULL;
-  error->source_code = source_code;
-  error->message = er_strdup(message);
-  error->suggestion = NULL;
-  error->code_snippet =
-      error_reporter_get_line_from_source(source_code, span.line);
-
-  reporter->count++;
+  error_reporter_add_report(reporter, DIAG_SEVERITY_WARNING, span, type,
+                            message, NULL);
 }
 
 void error_reporter_add_note(ErrorReporter *reporter, const char *message) {
