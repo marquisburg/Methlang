@@ -1,4 +1,5 @@
 #include "linker/relocation.h"
+#include "../common.h"
 #include "linker/symbol_resolve.h"
 
 /* Supported AMD64 relocation kinds here match object input after
@@ -22,47 +23,6 @@ typedef struct {
   size_t merged_offset;
   uint64_t virtual_address;
 } RelocationTarget;
-
-static char *relocation_strdup(const char *value) {
-  size_t length = 0;
-  char *copy = NULL;
-
-  if (!value) {
-    return NULL;
-  }
-
-  length = strlen(value);
-  copy = malloc(length + 1);
-  if (!copy) {
-    return NULL;
-  }
-
-  memcpy(copy, value, length + 1);
-  return copy;
-}
-
-static void relocation_set_error(char **error_message_out, const char *format,
-                                 ...) {
-  char buffer[512];
-  va_list args;
-  char *copy = NULL;
-
-  if (!error_message_out) {
-    return;
-  }
-
-  va_start(args, format);
-  vsnprintf(buffer, sizeof(buffer), format, args);
-  va_end(args);
-
-  copy = relocation_strdup(buffer);
-  if (!copy) {
-    return;
-  }
-
-  free(*error_message_out);
-  *error_message_out = copy;
-}
 
 static uint32_t relocation_read_u32(const unsigned char *bytes) {
   return (uint32_t)(bytes[0] | ((uint32_t)bytes[1] << 8) |
@@ -117,7 +77,7 @@ static int relocation_resolve_target(const LinkResolution *resolution,
     return 0;
   }
   if (symbol_index >= input->symbol_count) {
-    relocation_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                          "Relocation refers to symbol index %u outside the "
                          "object symbol table",
                          symbol_index);
@@ -132,7 +92,7 @@ static int relocation_resolve_target(const LinkResolution *resolution,
   }
 
   if (object_symbol->is_auxiliary) {
-    relocation_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                          "Relocation refers to auxiliary symbol '%s'",
                          target_out->name);
     return 0;
@@ -149,7 +109,7 @@ static int relocation_resolve_target(const LinkResolution *resolution,
   global_symbol = link_resolution_find_symbol(resolution, object_symbol->name);
   if (!global_symbol || !global_symbol->is_defined ||
       global_symbol->merged_section_index == LINKED_SECTION_INDEX_NONE) {
-    relocation_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                          "Relocation target '%s' is unresolved",
                          target_out->name);
     return 0;
@@ -172,7 +132,7 @@ int link_apply_relocations(LinkResolution *resolution,
     *error_message_out = NULL;
   }
   if (!resolution) {
-    relocation_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                          "Link resolution is required before applying relocations");
     return 0;
   }
@@ -206,7 +166,7 @@ int link_apply_relocations(LinkResolution *resolution,
         if (relocation_section_is_debug_only(source_section)) {
           continue;
         }
-        relocation_set_error(error_message_out,
+        mettle_set_error(error_message_out,
                              "Section '%s' has relocations but was not merged",
                              source_section->name ? source_section->name
                                                   : "<unknown>");
@@ -243,7 +203,7 @@ int link_apply_relocations(LinkResolution *resolution,
           width = 4u;
           break;
         default:
-          relocation_set_error(error_message_out,
+          mettle_set_error(error_message_out,
                                "Unsupported relocation type %s for symbol '%s'",
                                coff_relocation_type_name(relocation->type),
                                target.name);
@@ -251,7 +211,7 @@ int link_apply_relocations(LinkResolution *resolution,
         }
 
         if (patch_offset + width > merged->size) {
-          relocation_set_error(error_message_out,
+          mettle_set_error(error_message_out,
                                "Relocation for symbol '%s' writes past merged "
                                "section '%s'",
                                target.name, merged->name);
@@ -269,7 +229,7 @@ int link_apply_relocations(LinkResolution *resolution,
           value = (int64_t)target.virtual_address + addend -
                   (int64_t)(patch_address + 4u);
           if (value < INT32_MIN || value > INT32_MAX) {
-            relocation_set_error(error_message_out,
+            mettle_set_error(error_message_out,
                                  "REL32 relocation for symbol '%s' is out of range",
                                  target.name);
             return 0;
@@ -279,7 +239,7 @@ int link_apply_relocations(LinkResolution *resolution,
         case COFF_RELOC_AMD64_ADDR64:
           value = (int64_t)target.virtual_address + addend;
           if (value < 0) {
-            relocation_set_error(error_message_out,
+            mettle_set_error(error_message_out,
                                  "ADDR64 relocation for symbol '%s' is negative",
                                  target.name);
             return 0;
@@ -293,7 +253,7 @@ int link_apply_relocations(LinkResolution *resolution,
             value = (int64_t)target.virtual_address + addend;
           }
           if (value < 0 || (uint64_t)value > UINT32_MAX) {
-            relocation_set_error(error_message_out,
+            mettle_set_error(error_message_out,
                                  "ADDR32NB relocation for symbol '%s' is out of range",
                                  target.name);
             return 0;
@@ -303,7 +263,7 @@ int link_apply_relocations(LinkResolution *resolution,
         case COFF_RELOC_AMD64_SECREL:
           value = (int64_t)target.merged_offset + addend;
           if (value < 0 || (uint64_t)value > UINT32_MAX) {
-            relocation_set_error(error_message_out,
+            mettle_set_error(error_message_out,
                                  "SECREL relocation for symbol '%s' is out of range",
                                  target.name);
             return 0;

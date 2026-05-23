@@ -1,4 +1,5 @@
 #include "binary_emitter.h"
+#include "../common.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,21 +22,6 @@
 #define COFF_RELOC_AMD64_REL32 0x0004
 #define COFF_RELOC_AMD64_SECREL 0x000Bu
 
-static char *binary_emitter_strdup(const char *value) {
-  if (!value) {
-    return NULL;
-  }
-
-  size_t length = strlen(value);
-  char *copy = malloc(length + 1);
-  if (!copy) {
-    return NULL;
-  }
-
-  memcpy(copy, value, length + 1);
-  return copy;
-}
-
 static void binary_emitter_set_error(BinaryEmitter *emitter,
                                      const char *message) {
   if (!emitter || !message) {
@@ -43,7 +29,7 @@ static void binary_emitter_set_error(BinaryEmitter *emitter,
   }
 
   free(emitter->error_message);
-  emitter->error_message = binary_emitter_strdup(message);
+  emitter->error_message = mettle_strdup(message);
 }
 
 static void binary_section_clear(BinarySection *section) {
@@ -471,7 +457,7 @@ size_t binary_emitter_get_or_create_section(BinaryEmitter *emitter,
 
   BinarySection *section = &emitter->sections[emitter->section_count];
   memset(section, 0, sizeof(*section));
-  section->name = binary_emitter_strdup(name);
+  section->name = mettle_strdup(name);
   if (!section->name) {
     binary_emitter_set_error(emitter,
                              "Out of memory while storing section name");
@@ -618,7 +604,7 @@ int binary_emitter_define_symbol(BinaryEmitter *emitter, const char *name,
 
   BinarySymbol *symbol = &emitter->symbols[emitter->symbol_count];
   memset(symbol, 0, sizeof(*symbol));
-  symbol->name = binary_emitter_strdup(name);
+  symbol->name = mettle_strdup(name);
   if (!symbol->name) {
     binary_emitter_set_error(emitter,
                              "Out of memory while storing symbol name");
@@ -673,7 +659,7 @@ int binary_emitter_add_relocation(BinaryEmitter *emitter, size_t section_index,
   BinaryRelocation *relocation =
       &emitter->relocations[emitter->relocation_count];
   memset(relocation, 0, sizeof(*relocation));
-  relocation->symbol_name = binary_emitter_strdup(symbol_name);
+  relocation->symbol_name = mettle_strdup(symbol_name);
   if (!relocation->symbol_name) {
     binary_emitter_set_error(emitter,
                              "Out of memory while storing relocation symbol");

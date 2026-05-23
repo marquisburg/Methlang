@@ -1,4 +1,5 @@
 #include "ir_optimize.h"
+#include "../common.h"
 #include "ir_profile.h"
 #include "compiler/compiler_context.h"
 #include "compiler/compiler_crash.h"
@@ -102,31 +103,6 @@ typedef struct {
   size_t capacity;
 } IRExpressionMap;
 
-static char *ir_opt_strdup(const char *text) {
-  if (!text) {
-    return NULL;
-  }
-
-  size_t length = strlen(text) + 1;
-  char *copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-
-  memcpy(copy, text, length);
-  return copy;
-}
-
-static size_t ir_opt_name_hash(const char *name) {
-  /* FNV-1a */
-  size_t hash = (size_t)1469598103934665603ULL;
-  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
-    hash ^= (size_t)*p;
-    hash *= (size_t)1099511628211ULL;
-  }
-  return hash;
-}
-
 static int ir_operand_clone(const IROperand *source, IROperand *out) {
   if (!out) {
     return 0;
@@ -150,7 +126,7 @@ static int ir_operand_clone(const IROperand *source, IROperand *out) {
     if (!source->name) {
       return 0;
     }
-    out->name = ir_opt_strdup(source->name);
+    out->name = mettle_strdup(source->name);
     if (!out->name) {
       *out = ir_operand_none();
       return 0;
@@ -205,8 +181,8 @@ static int ir_name_map_add(IRNameMap *map, const char *from, const char *to) {
     map->capacity = new_capacity;
   }
 
-  char *from_copy = ir_opt_strdup(from);
-  char *to_copy = ir_opt_strdup(to);
+  char *from_copy = mettle_strdup(from);
+  char *to_copy = mettle_strdup(to);
   if (!from_copy || !to_copy) {
     free(from_copy);
     free(to_copy);
@@ -645,7 +621,7 @@ static int ir_temp_value_map_set(IRTempValueMap *map, const char *name,
     map->capacity = new_capacity;
   }
 
-  char *name_copy = ir_opt_strdup(name);
+  char *name_copy = mettle_strdup(name);
   IROperand cloned = ir_operand_none();
   if (!name_copy || !ir_operand_clone(value, &cloned)) {
     free(name_copy);
@@ -815,7 +791,7 @@ static IRLabelValueEntry *ir_label_value_map_get_or_add(IRLabelValueMap *map,
 
   IRLabelValueEntry *entry = &map->items[map->count];
   memset(entry, 0, sizeof(*entry));
-  entry->label = ir_opt_strdup(label);
+  entry->label = mettle_strdup(label);
   if (!entry->label || !ir_temp_value_map_init(&entry->in_map)) {
     free(entry->label);
     entry->label = NULL;
@@ -1084,7 +1060,7 @@ static int ir_expression_map_store_value_for_instruction(
   case IR_OP_BINARY:
     entry->kind = IR_EXPR_BINARY;
     entry->is_float = instruction->is_float;
-    entry->op_text = ir_opt_strdup(instruction->text);
+    entry->op_text = mettle_strdup(instruction->text);
     if (!entry->op_text) {
       ir_expression_entry_destroy(entry);
       return 0;
@@ -1098,7 +1074,7 @@ static int ir_expression_map_store_value_for_instruction(
   case IR_OP_UNARY:
     entry->kind = IR_EXPR_UNARY;
     entry->is_float = instruction->is_float;
-    entry->op_text = ir_opt_strdup(instruction->text);
+    entry->op_text = mettle_strdup(instruction->text);
     if (!entry->op_text) {
       ir_expression_entry_destroy(entry);
       return 0;
@@ -1111,7 +1087,7 @@ static int ir_expression_map_store_value_for_instruction(
   case IR_OP_CAST:
     entry->kind = IR_EXPR_CAST;
     entry->is_float = instruction->is_float;
-    entry->op_text = ir_opt_strdup(instruction->text);
+    entry->op_text = mettle_strdup(instruction->text);
     if (!entry->op_text) {
       ir_expression_entry_destroy(entry);
       return 0;
@@ -1265,7 +1241,7 @@ static int ir_temp_use_map_init(IRTempUseMap *map) {
 /* Insert items[index] into the hash table (hash table must have room). */
 static void ir_temp_use_map_hash_put(IRTempUseMap *map, size_t index) {
   size_t mask = map->hash_count - 1;
-  size_t h = ir_opt_name_hash(map->items[index].name) & mask;
+  size_t h = mettle_fnv1a_hash(map->items[index].name) & mask;
   while (map->hash[h] != 0) {
     h = (h + 1) & mask;
   }
@@ -1302,7 +1278,7 @@ static int ir_temp_use_map_find(const IRTempUseMap *map, const char *name) {
   }
 
   size_t mask = map->hash_count - 1;
-  size_t h = ir_opt_name_hash(name) & mask;
+  size_t h = mettle_fnv1a_hash(name) & mask;
   while (map->hash[h] != 0) {
     size_t idx = map->hash[h] - 1;
     if (map->items[idx].name && strcmp(map->items[idx].name, name) == 0) {
@@ -1340,7 +1316,7 @@ static int ir_temp_use_map_add(IRTempUseMap *map, const char *name) {
     return 0;
   }
 
-  char *name_copy = ir_opt_strdup(name);
+  char *name_copy = mettle_strdup(name);
   if (!name_copy) {
     return 0;
   }
@@ -1532,20 +1508,10 @@ static void ir_function_index_reset(void) {
   g_ir_function_index.function_count = 0;
 }
 
-static size_t ir_function_index_hash(const char *name) {
-  /* FNV-1a */
-  size_t hash = (size_t)1469598103934665603ULL;
-  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
-    hash ^= (size_t)*p;
-    hash *= (size_t)1099511628211ULL;
-  }
-  return hash;
-}
-
 static void ir_function_index_insert(IRFunctionIndex *index,
                                      IRFunction *function) {
   size_t mask = index->slot_count - 1;
-  size_t i = ir_function_index_hash(function->name) & mask;
+  size_t i = mettle_fnv1a_hash(function->name) & mask;
   while (index->slots[i].name) {
     /* First definition of a given name wins, matching the old linear scan. */
     if (strcmp(index->slots[i].name, function->name) == 0) {
@@ -1602,7 +1568,7 @@ static IRFunction *ir_program_find_function(IRProgram *program,
   if (ir_function_index_ensure(program)) {
     const IRFunctionIndex *index = &g_ir_function_index;
     size_t mask = index->slot_count - 1;
-    size_t i = ir_function_index_hash(name) & mask;
+    size_t i = mettle_fnv1a_hash(name) & mask;
     while (index->slots[i].name) {
       if (strcmp(index->slots[i].name, name) == 0) {
         return index->slots[i].function;
@@ -1780,7 +1746,7 @@ static int ir_clone_instruction_plain(const IRInstruction *source,
   }
 
   if (source->text) {
-    out->text = ir_opt_strdup(source->text);
+    out->text = mettle_strdup(source->text);
     if (!out->text) {
       ir_instruction_destroy_storage(out);
       return 0;
@@ -1842,9 +1808,9 @@ static int ir_clone_instruction_for_inline(const IRInstruction *source,
         ir_instruction_destroy_storage(out);
         return 0;
       }
-      out->text = ir_opt_strdup(mapped);
+      out->text = mettle_strdup(mapped);
     } else {
-      out->text = ir_opt_strdup(source->text);
+      out->text = mettle_strdup(source->text);
     }
 
     if (!out->text) {
@@ -1897,7 +1863,7 @@ static int ir_append_parameter_materialization(
     declare_local.op = IR_OP_DECLARE_LOCAL;
     declare_local.location = call_instruction->location;
     declare_local.dest = ir_operand_symbol(mapped_name);
-    declare_local.text = ir_opt_strdup(type_name);
+    declare_local.text = mettle_strdup(type_name);
     if (!declare_local.dest.name || !declare_local.text ||
         !ir_instruction_vector_append_move(vector, &declare_local)) {
       ir_instruction_destroy_storage(&declare_local);
@@ -2003,7 +1969,7 @@ static int ir_inline_call_instruction(IRInstructionVector *vector,
       memset(&emitted, 0, sizeof(emitted));
       emitted.op = IR_OP_JUMP;
       emitted.location = call_instruction->location;
-      emitted.text = ir_opt_strdup(inline_end_label);
+      emitted.text = mettle_strdup(inline_end_label);
       if (!emitted.text || !ir_instruction_vector_append_move(vector, &emitted)) {
         ir_instruction_destroy_storage(&emitted);
         free(inline_end_label);
@@ -2668,7 +2634,7 @@ static int ir_rewrite_to_shift_left(IRInstruction *instruction,
   instruction->rhs = ir_operand_int(shift);
 
   free(instruction->text);
-  instruction->text = ir_opt_strdup("<<");
+  instruction->text = mettle_strdup("<<");
   if (!instruction->text) {
     return 0;
   }
@@ -2904,7 +2870,7 @@ static int ir_try_rewrite_mod_pow2_compare_zero(IRFunction *function,
   long long mask = ((long long)1 << shift) - 1;
   producer->rhs.int_value = mask;
   free(producer->text);
-  producer->text = ir_opt_strdup("&");
+  producer->text = mettle_strdup("&");
   if (!producer->text) {
     return 0;
   }
@@ -3085,7 +3051,7 @@ static int ir_rewrite_branch_eq_shortcut(IRInstruction *producer,
     return 0;
   }
 
-  char *target = ir_opt_strdup(jump_true->text);
+  char *target = mettle_strdup(jump_true->text);
   if (!target) {
     ir_operand_destroy(&lhs);
     ir_operand_destroy(&rhs);
@@ -3401,7 +3367,7 @@ static int ir_thread_jump_targets_pass(IRFunction *function, int *changed) {
     }
 
     if (strcmp(current_target, instruction->text) != 0) {
-      char *target_copy = ir_opt_strdup(current_target);
+      char *target_copy = mettle_strdup(current_target);
       if (!target_copy) {
         return 0;
       }
@@ -3758,7 +3724,7 @@ static int ir_try_fuse_rotate_add_at(IRFunction *function, size_t index,
   fused.dest = ir_operand_symbol(sym_next);
   fused.lhs = ir_operand_symbol(sym_a);
   fused.rhs = ir_operand_symbol(sym_b);
-  fused.text = ir_opt_strdup("+");
+  fused.text = mettle_strdup("+");
   if (!fused.dest.name || !fused.lhs.name || !fused.rhs.name || !fused.text) {
     ir_operand_destroy(&fused.dest);
     ir_operand_destroy(&fused.lhs);
@@ -4420,7 +4386,7 @@ static int ir_positive_loop_div2_to_shift_pass(IRFunction *function,
           ir_operand_is_symbol_named(&instruction->lhs, positive_symbol) &&
           ir_operand_is_int_value(&instruction->rhs, 2) &&
           !symbol_written_before_div) {
-        char *op = ir_opt_strdup(">>");
+        char *op = mettle_strdup(">>");
         if (!op) {
           return 0;
         }
@@ -5208,7 +5174,7 @@ static int ir_vec_clone_body_inst(const IRInstruction *src, IRInstruction *out,
       o->name = nn;
     } else if (o->kind == IR_OPERAND_SYMBOL && o->name && acc &&
                strcmp(o->name, acc) == 0) {
-      char *nn = ir_opt_strdup(acc_lane);
+      char *nn = mettle_strdup(acc_lane);
       if (!nn) {
         return 0;
       }
@@ -5448,7 +5414,7 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
   acc_name[0] = (char *)acc;
   for (int L = 1; L < IR_VEC_UNROLL; L++) {
     snprintf(buf, sizeof(buf), "%s__a%d", acc, L);
-    acc_name[L] = ir_opt_strdup(buf);
+    acc_name[L] = mettle_strdup(buf);
     if (!acc_name[L]) {
       for (int q = 1; q < L; q++) free(acc_name[q]);
       return 0;
@@ -5477,7 +5443,7 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
     VEC_EMIT({
       out[out_n].op = IR_OP_DECLARE_LOCAL;
       out[out_n].dest = ir_operand_symbol(acc_name[L]);
-      out[out_n].text = ir_opt_strdup(acc_type);
+      out[out_n].text = mettle_strdup(acc_type);
       if (!out[out_n].text) { goto oom; }
     });
     VEC_EMIT({
@@ -5493,14 +5459,14 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
   snprintf(hcomb, sizeof(hcomb), "%s_comb", pre);
 
   /* label HM */
-  VEC_EMIT({ out[out_n].op = IR_OP_LABEL; out[out_n].text = ir_opt_strdup(hm); if(!out[out_n].text){goto oom;} });
+  VEC_EMIT({ out[out_n].op = IR_OP_LABEL; out[out_n].text = mettle_strdup(hm); if(!out[out_n].text){goto oom;} });
 
   /* %ub = i + (K-1) ; %gu = %ub <op> BOUND ; branch_zero %gu -> HTAIL */
   char t_ub[64], t_gu[64];
   snprintf(t_ub, sizeof(t_ub), "%s_ub", pre);
   snprintf(t_gu, sizeof(t_gu), "%s_gu", pre);
   VEC_EMIT({
-    out[out_n].op = IR_OP_BINARY; out[out_n].text = ir_opt_strdup("+");
+    out[out_n].op = IR_OP_BINARY; out[out_n].text = mettle_strdup("+");
     if(!out[out_n].text){goto oom;}
     out[out_n].dest = ir_operand_temp(t_ub);
     out[out_n].lhs = ir_operand_symbol(iv);
@@ -5508,7 +5474,7 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
   });
   VEC_EMIT({
     out[out_n].op = IR_OP_BINARY;
-    out[out_n].text = ir_opt_strdup(op_le ? "<=" : "<");
+    out[out_n].text = mettle_strdup(op_le ? "<=" : "<");
     if(!out[out_n].text){goto oom;}
     out[out_n].dest = ir_operand_temp(t_gu);
     out[out_n].lhs = ir_operand_temp(t_ub);
@@ -5520,7 +5486,7 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
   VEC_EMIT({
     out[out_n].op = IR_OP_BRANCH_ZERO;
     out[out_n].lhs = ir_operand_temp(t_gu);
-    out[out_n].text = ir_opt_strdup(htail);
+    out[out_n].text = mettle_strdup(htail);
     if(!out[out_n].text){goto oom;}
   });
 
@@ -5531,7 +5497,7 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
     if (L > 0) {
       snprintf(tiL, sizeof(tiL), "%s_ti%d", pre, L);
       VEC_EMIT({
-        out[out_n].op = IR_OP_BINARY; out[out_n].text = ir_opt_strdup("+");
+        out[out_n].op = IR_OP_BINARY; out[out_n].text = mettle_strdup("+");
         if(!out[out_n].text){goto oom;}
         out[out_n].dest = ir_operand_temp(tiL);
         out[out_n].lhs = ir_operand_symbol(iv);
@@ -5555,7 +5521,7 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
         for (int s = 0; s < sn; s++) {
           if (sl[s]->kind == IR_OPERAND_SYMBOL && sl[s]->name &&
               strcmp(sl[s]->name, iv) == 0) {
-            char *nn = ir_opt_strdup(tiL);
+            char *nn = mettle_strdup(tiL);
             if (!nn) { ir_instruction_destroy_storage(&tmp); goto oom; }
             free(sl[s]->name); sl[s]->name = nn;
             sl[s]->kind = IR_OPERAND_TEMP;
@@ -5571,7 +5537,7 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
     char t_st[64];
     snprintf(t_st, sizeof(t_st), "%s_st", pre);
     VEC_EMIT({
-      out[out_n].op = IR_OP_BINARY; out[out_n].text = ir_opt_strdup("+");
+      out[out_n].op = IR_OP_BINARY; out[out_n].text = mettle_strdup("+");
       if(!out[out_n].text){goto oom;}
       out[out_n].dest = ir_operand_temp(t_st);
       out[out_n].lhs = ir_operand_symbol(iv);
@@ -5582,13 +5548,13 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
       out[out_n].dest = ir_operand_symbol(iv);
       out[out_n].lhs = ir_operand_temp(t_st);
     });
-    VEC_EMIT({ out[out_n].op = IR_OP_JUMP; out[out_n].text = ir_opt_strdup(hm); if(!out[out_n].text){goto oom;} });
+    VEC_EMIT({ out[out_n].op = IR_OP_JUMP; out[out_n].text = mettle_strdup(hm); if(!out[out_n].text){goto oom;} });
   }
 
   /* label HTAIL : original scalar loop verbatim (instructions h..J), but with
    * its header label renamed to a fresh one so the two loops don't collide,
    * and its exit kept as exit_label. We simply clone the original range. */
-  VEC_EMIT({ out[out_n].op = IR_OP_LABEL; out[out_n].text = ir_opt_strdup(htail); if(!out[out_n].text){goto oom;} });
+  VEC_EMIT({ out[out_n].op = IR_OP_LABEL; out[out_n].text = mettle_strdup(htail); if(!out[out_n].text){goto oom;} });
   {
     /* fresh header label for the scalar remainder loop */
     char sh[64];
@@ -5602,12 +5568,12 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
       /* rename the loop's own header label + back-jump target h->sh */
       if (tmp.op == IR_OP_LABEL && tmp.text &&
           strcmp(tmp.text, head_label) == 0) {
-        free(tmp.text); tmp.text = ir_opt_strdup(sh);
+        free(tmp.text); tmp.text = mettle_strdup(sh);
         if(!tmp.text){ir_instruction_destroy_storage(&tmp);goto oom;}
       }
       if (tmp.op == IR_OP_JUMP && tmp.text &&
           strcmp(tmp.text, head_label) == 0) {
-        free(tmp.text); tmp.text = ir_opt_strdup(sh);
+        free(tmp.text); tmp.text = mettle_strdup(sh);
         if(!tmp.text){ir_instruction_destroy_storage(&tmp);goto oom;}
       }
       /* The remainder loop's exit must run the accumulator-combine before
@@ -5615,7 +5581,7 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
        * (branch_zero %g -> exit_label) to HCOMB. */
       if (tmp.op == IR_OP_BRANCH_ZERO && tmp.text &&
           strcmp(tmp.text, exit_label) == 0) {
-        free(tmp.text); tmp.text = ir_opt_strdup(hcomb);
+        free(tmp.text); tmp.text = mettle_strdup(hcomb);
         if(!tmp.text){ir_instruction_destroy_storage(&tmp);goto oom;}
       }
       VEC_EMIT({ out[out_n] = tmp; });
@@ -5623,12 +5589,12 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
   }
 
   /* label HCOMB ; ACC = ACC + ACC1 ; ... ; jump EXIT */
-  VEC_EMIT({ out[out_n].op = IR_OP_LABEL; out[out_n].text = ir_opt_strdup(hcomb); if(!out[out_n].text){goto oom;} });
+  VEC_EMIT({ out[out_n].op = IR_OP_LABEL; out[out_n].text = mettle_strdup(hcomb); if(!out[out_n].text){goto oom;} });
   for (int L = 1; L < IR_VEC_UNROLL; L++) {
     char t_c[64];
     snprintf(t_c, sizeof(t_c), "%s_c%d", pre, L);
     VEC_EMIT({
-      out[out_n].op = IR_OP_BINARY; out[out_n].text = ir_opt_strdup("+");
+      out[out_n].op = IR_OP_BINARY; out[out_n].text = mettle_strdup("+");
       if(!out[out_n].text){goto oom;}
       out[out_n].dest = ir_operand_temp(t_c);
       out[out_n].lhs = ir_operand_symbol(acc);
@@ -7184,7 +7150,7 @@ static char *ir_opt_make_temp_name(size_t *serial) {
   }
 
   snprintf(buffer, sizeof(buffer), "__opt_%zu", (*serial)++);
-  return ir_opt_strdup(buffer);
+  return mettle_strdup(buffer);
 }
 
 static int ir_binary_is_unit_increment_of_iv(const IRInstruction *instruction,
@@ -7518,7 +7484,7 @@ static int ir_clone_instruction_with_pointer_rewrite(
     memset(out, 0, sizeof(*out));
     out->op = IR_OP_BINARY;
     out->location = source->location;
-    out->text = ir_opt_strdup("<");
+    out->text = mettle_strdup("<");
     out->dest = ir_operand_temp(source->dest.name);
     out->lhs = ir_operand_temp(ptr_symbol);
     out->rhs = ir_operand_temp(end_temp);
@@ -7605,7 +7571,7 @@ static char *ir_ptr_induction_make_name(const char *base, size_t header_index,
   char buf[96];
   const char *tag = ir_ptr_induction_base_tag(base);
   snprintf(buf, sizeof(buf), "__ptr_%zu_%s_%s", header_index, tag, suffix);
-  return ir_opt_strdup(buf);
+  return mettle_strdup(buf);
 }
 
 static int ir_ptr_binding_find(IRPtrBaseBinding *bindings, size_t count,
@@ -7634,7 +7600,7 @@ static int ir_ptr_binding_add(IRPtrBaseBinding *bindings, size_t *count,
     if (!bindings[*count].ptr_p) {
       return 0;
     }
-    bindings[*count].addr_temps[0] = ir_opt_strdup(addr_temp);
+    bindings[*count].addr_temps[0] = mettle_strdup(addr_temp);
     if (!bindings[*count].addr_temps[0]) {
       free(bindings[*count].ptr_p);
       return 0;
@@ -7653,7 +7619,7 @@ static int ir_ptr_binding_add(IRPtrBaseBinding *bindings, size_t *count,
     }
   }
   bindings[idx].addr_temps[bindings[idx].addr_temp_count] =
-      ir_opt_strdup(addr_temp);
+      mettle_strdup(addr_temp);
   if (!bindings[idx].addr_temps[bindings[idx].addr_temp_count]) {
     return 0;
   }
@@ -7890,7 +7856,7 @@ static int ir_try_pointer_induction_at(IRFunction *function, size_t header_index
     }
     decl.op = IR_OP_DECLARE_LOCAL;
     decl.dest = ir_operand_symbol(bindings[b].ptr_p);
-    decl.text = ir_opt_strdup(ptr_type);
+    decl.text = mettle_strdup(ptr_type);
     init.op = IR_OP_ASSIGN;
     init.dest = ir_operand_symbol(bindings[b].ptr_p);
     init.lhs = ir_operand_symbol(bindings[b].base);
@@ -7920,17 +7886,17 @@ static int ir_try_pointer_induction_at(IRFunction *function, size_t header_index
              header_index);
     end_decl.op = IR_OP_DECLARE_LOCAL;
     end_decl.dest = ir_operand_symbol(end_ptr);
-    end_decl.text = ir_opt_strdup(ptr_type ? ptr_type : "int32*");
+    end_decl.text = mettle_strdup(ptr_type ? ptr_type : "int32*");
     end_init.op = IR_OP_ASSIGN;
     end_init.dest = ir_operand_symbol(end_ptr);
     end_init.lhs = ir_operand_symbol(bindings[0].base);
     end_scale.op = IR_OP_BINARY;
-    end_scale.text = ir_opt_strdup("<<");
+    end_scale.text = mettle_strdup("<<");
     end_scale.dest = ir_operand_temp(end_scale_temp);
     end_scale.lhs = ir_operand_symbol(bound_symbol);
     end_scale.rhs = ir_operand_int(2);
     end_add.op = IR_OP_BINARY;
-    end_add.text = ir_opt_strdup("+");
+    end_add.text = mettle_strdup("+");
     end_add.dest = ir_operand_symbol(end_ptr);
     end_add.lhs = ir_operand_symbol(end_ptr);
     end_add.rhs = ir_operand_temp(end_scale_temp);
@@ -7969,7 +7935,7 @@ static int ir_try_pointer_induction_at(IRFunction *function, size_t header_index
         IRInstruction step = {0};
         step.op = IR_OP_BINARY;
         step.location = function->instructions[i].location;
-        step.text = ir_opt_strdup("+");
+        step.text = mettle_strdup("+");
         step.dest = ir_operand_symbol(bindings[b].ptr_p);
         step.lhs = ir_operand_symbol(bindings[b].ptr_p);
         step.rhs = ir_operand_int(4);
@@ -8213,7 +8179,7 @@ static int ir_popcount_emit_unrolled_step(IRInstructionVector *vector,
   IRInstruction branch = {0};
   branch.op = IR_OP_BRANCH_ZERO;
   branch.lhs = ir_operand_symbol(v_symbol);
-  branch.text = ir_opt_strdup(done_label);
+  branch.text = mettle_strdup(done_label);
   if (!branch.lhs.name || !branch.text ||
       !ir_instruction_vector_append_move(vector, &branch)) {
     ir_instruction_destroy_storage(&branch);
@@ -8222,7 +8188,7 @@ static int ir_popcount_emit_unrolled_step(IRInstructionVector *vector,
 
   IRInstruction and_ins = {0};
   and_ins.op = IR_OP_BINARY;
-  and_ins.text = ir_opt_strdup("&");
+  and_ins.text = mettle_strdup("&");
   and_ins.dest = ir_operand_temp(bit_temp);
   and_ins.lhs = ir_operand_symbol(v_symbol);
   and_ins.rhs = ir_operand_int(1);
@@ -8236,7 +8202,7 @@ static int ir_popcount_emit_unrolled_step(IRInstructionVector *vector,
   if (use_int32_cast) {
     IRInstruction cast_ins = {0};
     cast_ins.op = IR_OP_CAST;
-    cast_ins.text = ir_opt_strdup("(int32)");
+    cast_ins.text = mettle_strdup("(int32)");
     cast_ins.dest = ir_operand_temp(cast_temp);
     cast_ins.lhs = ir_operand_temp(bit_temp);
     if (!cast_ins.text || !cast_ins.dest.name || !cast_ins.lhs.name ||
@@ -8249,7 +8215,7 @@ static int ir_popcount_emit_unrolled_step(IRInstructionVector *vector,
 
   IRInstruction add_ins = {0};
   add_ins.op = IR_OP_BINARY;
-  add_ins.text = ir_opt_strdup("+");
+  add_ins.text = mettle_strdup("+");
   add_ins.dest = ir_operand_symbol(count_symbol);
   add_ins.lhs = ir_operand_symbol(count_symbol);
   add_ins.rhs = ir_operand_temp(add_operand);
@@ -8263,7 +8229,7 @@ static int ir_popcount_emit_unrolled_step(IRInstructionVector *vector,
   if (use_uint8_cast) {
     IRInstruction shift_ins = {0};
     shift_ins.op = IR_OP_BINARY;
-    shift_ins.text = ir_opt_strdup(">>");
+    shift_ins.text = mettle_strdup(">>");
     shift_ins.dest = ir_operand_temp(shift_temp);
     shift_ins.lhs = ir_operand_symbol(v_symbol);
     shift_ins.rhs = ir_operand_int(1);
@@ -8275,7 +8241,7 @@ static int ir_popcount_emit_unrolled_step(IRInstructionVector *vector,
 
     IRInstruction cast_v = {0};
     cast_v.op = IR_OP_CAST;
-    cast_v.text = ir_opt_strdup("(uint8)");
+    cast_v.text = mettle_strdup("(uint8)");
     cast_v.dest = ir_operand_symbol(v_symbol);
     cast_v.lhs = ir_operand_temp(shift_temp);
     if (!cast_v.text || !cast_v.dest.name || !cast_v.lhs.name ||
@@ -8286,7 +8252,7 @@ static int ir_popcount_emit_unrolled_step(IRInstructionVector *vector,
   } else {
     IRInstruction shift_ins = {0};
     shift_ins.op = IR_OP_BINARY;
-    shift_ins.text = ir_opt_strdup(">>");
+    shift_ins.text = mettle_strdup(">>");
     shift_ins.dest = ir_operand_symbol(v_symbol);
     shift_ins.lhs = ir_operand_symbol(v_symbol);
     shift_ins.rhs = ir_operand_int(1);
@@ -8807,7 +8773,7 @@ static int ir_popcount_emit_fused_load_byte(IRInstructionVector *vector,
     }
     IRInstruction addr_ins = {0};
     addr_ins.op = IR_OP_BINARY;
-    addr_ins.text = ir_opt_strdup("+");
+    addr_ins.text = mettle_strdup("+");
     addr_ins.dest = ir_operand_temp(addr_temp);
     addr_ins.lhs = ir_operand_symbol(load_source);
     addr_ins.rhs = ir_operand_symbol(advance_symbol);
@@ -8832,7 +8798,7 @@ static int ir_popcount_emit_fused_load_byte(IRInstructionVector *vector,
 
   IRInstruction cast_ins = {0};
   cast_ins.op = IR_OP_CAST;
-  cast_ins.text = ir_opt_strdup("(uint8)");
+  cast_ins.text = mettle_strdup("(uint8)");
   cast_ins.dest = ir_operand_temp(v_temp);
   cast_ins.lhs = ir_operand_temp(raw_temp);
   if (!cast_ins.text || !cast_ins.dest.name || !cast_ins.lhs.name ||
@@ -8863,7 +8829,7 @@ static int ir_popcount_emit_unrolled_step_to_total(IRInstructionVector *vector,
   IRInstruction branch = {0};
   branch.op = IR_OP_BRANCH_ZERO;
   branch.lhs = ir_operand_temp(v_temp);
-  branch.text = ir_opt_strdup(done_label);
+  branch.text = mettle_strdup(done_label);
   if (!branch.lhs.name || !branch.text ||
       !ir_instruction_vector_append_move(vector, &branch)) {
     ir_instruction_destroy_storage(&branch);
@@ -8872,7 +8838,7 @@ static int ir_popcount_emit_unrolled_step_to_total(IRInstructionVector *vector,
 
   IRInstruction and_ins = {0};
   and_ins.op = IR_OP_BINARY;
-  and_ins.text = ir_opt_strdup("&");
+  and_ins.text = mettle_strdup("&");
   and_ins.dest = ir_operand_temp(bit_temp);
   and_ins.lhs = ir_operand_temp(v_temp);
   and_ins.rhs = ir_operand_int(1);
@@ -8884,7 +8850,7 @@ static int ir_popcount_emit_unrolled_step_to_total(IRInstructionVector *vector,
 
   IRInstruction cast_ins = {0};
   cast_ins.op = IR_OP_CAST;
-  cast_ins.text = ir_opt_strdup("(int64)");
+  cast_ins.text = mettle_strdup("(int64)");
   cast_ins.dest = ir_operand_temp(bit64_temp);
   cast_ins.lhs = ir_operand_temp(bit_temp);
   if (!cast_ins.text || !cast_ins.dest.name || !cast_ins.lhs.name ||
@@ -8895,7 +8861,7 @@ static int ir_popcount_emit_unrolled_step_to_total(IRInstructionVector *vector,
 
   IRInstruction add_ins = {0};
   add_ins.op = IR_OP_BINARY;
-  add_ins.text = ir_opt_strdup("+");
+  add_ins.text = mettle_strdup("+");
   add_ins.dest = ir_operand_symbol(total_symbol);
   add_ins.lhs = ir_operand_symbol(total_symbol);
   add_ins.rhs = ir_operand_temp(bit64_temp);
@@ -8908,7 +8874,7 @@ static int ir_popcount_emit_unrolled_step_to_total(IRInstructionVector *vector,
 
   IRInstruction shift_ins = {0};
   shift_ins.op = IR_OP_BINARY;
-  shift_ins.text = ir_opt_strdup(">>");
+  shift_ins.text = mettle_strdup(">>");
   shift_ins.dest = ir_operand_temp(shift_temp);
   shift_ins.lhs = ir_operand_temp(v_temp);
   shift_ins.rhs = ir_operand_int(1);
@@ -8920,7 +8886,7 @@ static int ir_popcount_emit_unrolled_step_to_total(IRInstructionVector *vector,
 
   IRInstruction cast_v = {0};
   cast_v.op = IR_OP_CAST;
-  cast_v.text = ir_opt_strdup("(uint8)");
+  cast_v.text = mettle_strdup("(uint8)");
   cast_v.dest = ir_operand_temp(v_temp);
   cast_v.lhs = ir_operand_temp(shift_temp);
   if (!cast_v.text || !cast_v.dest.name || !cast_v.lhs.name ||
@@ -9014,7 +8980,7 @@ static int ir_try_fuse_popcount_buffer_at(IRFunction *function,
     snprintf(pop_i64_temp, sizeof(pop_i64_temp), "%s_pc64", prefix);
 
     pop.op = IR_OP_UNARY;
-    pop.text = ir_opt_strdup("popcnt");
+    pop.text = mettle_strdup("popcnt");
     pop.dest = ir_operand_temp(pop_temp);
     pop.lhs = ir_operand_temp(v_temp);
     if (!pop.text || !pop.dest.name || !pop.lhs.name ||
@@ -9025,7 +8991,7 @@ static int ir_try_fuse_popcount_buffer_at(IRFunction *function,
     }
 
     cast.op = IR_OP_CAST;
-    cast.text = ir_opt_strdup("(int64)");
+    cast.text = mettle_strdup("(int64)");
     cast.dest = ir_operand_temp(pop_i64_temp);
     cast.lhs = ir_operand_temp(pop_temp);
     if (!cast.text || !cast.dest.name || !cast.lhs.name ||
@@ -9036,7 +9002,7 @@ static int ir_try_fuse_popcount_buffer_at(IRFunction *function,
     }
 
     add_total.op = IR_OP_BINARY;
-    add_total.text = ir_opt_strdup("+");
+    add_total.text = mettle_strdup("+");
     add_total.dest = ir_operand_symbol(total_symbol);
     add_total.lhs = ir_operand_symbol(total_symbol);
     add_total.rhs = ir_operand_temp(pop_i64_temp);
@@ -9271,7 +9237,7 @@ static int ir_try_fold_collatz_odd_step_at(IRFunction *function,
   }
 
   free(odd_fold_shift.text);
-  odd_fold_shift.text = ir_opt_strdup(">>");
+  odd_fold_shift.text = mettle_strdup(">>");
   ir_operand_destroy(&odd_fold_shift.rhs);
   odd_fold_shift.rhs = ir_operand_int(1);
   if (!odd_fold_shift.text) {

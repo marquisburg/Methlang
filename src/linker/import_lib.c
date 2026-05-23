@@ -1,4 +1,5 @@
 #include "linker/import_lib.h"
+#include "../common.h"
 
 #include "linker/coff_reader.h"
 
@@ -22,47 +23,6 @@ typedef struct {
   uint16_t type_info;
 } ImportObjectHeader;
 
-static char *import_library_strdup(const char *value) {
-  size_t length = 0u;
-  char *copy = NULL;
-
-  if (!value) {
-    return NULL;
-  }
-
-  length = strlen(value);
-  copy = malloc(length + 1u);
-  if (!copy) {
-    return NULL;
-  }
-
-  memcpy(copy, value, length + 1u);
-  return copy;
-}
-
-static void import_library_set_error(char **error_message_out,
-                                     const char *format, ...) {
-  char buffer[512];
-  va_list args;
-  char *copy = NULL;
-
-  if (!error_message_out) {
-    return;
-  }
-
-  va_start(args, format);
-  vsnprintf(buffer, sizeof(buffer), format, args);
-  va_end(args);
-
-  copy = import_library_strdup(buffer);
-  if (!copy) {
-    return;
-  }
-
-  free(*error_message_out);
-  *error_message_out = copy;
-}
-
 static int import_library_read_file(const char *path,
                                     unsigned char **file_data_out,
                                     size_t *file_size_out,
@@ -78,20 +38,20 @@ static int import_library_read_file(const char *path,
     *file_size_out = 0u;
   }
   if (!path || !file_data_out || !file_size_out) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Invalid arguments while reading import library");
     return 0;
   }
 
   file = fopen(path, "rb");
   if (!file) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Failed to open import library '%s'", path);
     return 0;
   }
 
   if (fseek(file, 0, SEEK_END) != 0) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Failed to seek import library '%s'", path);
     fclose(file);
     return 0;
@@ -99,7 +59,7 @@ static int import_library_read_file(const char *path,
 
   size = ftell(file);
   if (size < 0 || fseek(file, 0, SEEK_SET) != 0) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Failed to measure import library '%s'", path);
     fclose(file);
     return 0;
@@ -107,7 +67,7 @@ static int import_library_read_file(const char *path,
 
   file_data = malloc((size_t)size);
   if (!file_data) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Out of memory while reading import library '%s'",
                              path);
     fclose(file);
@@ -115,7 +75,7 @@ static int import_library_read_file(const char *path,
   }
 
   if (size > 0 && fread(file_data, 1u, (size_t)size, file) != (size_t)size) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Failed while reading import library '%s'", path);
     free(file_data);
     fclose(file);
@@ -157,7 +117,7 @@ static int import_library_reserve_symbols(ImportLibrary *library,
 
   grown = realloc(library->symbols, new_capacity * sizeof(ImportLibrarySymbol));
   if (!grown) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Out of memory while growing import symbol table");
     return 0;
   }
@@ -210,7 +170,7 @@ static int import_library_parse_archive_member_size(const unsigned char *header,
     end++;
   }
   if (!end || *end != '\0') {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Malformed import library member size");
     return 0;
   }
@@ -257,7 +217,7 @@ static int import_library_parse_strings(const unsigned char *member_data,
   }
   if (!member_data || member_size < IMPORT_OBJECT_HEADER_SIZE || !symbol_name_out ||
       !dll_name_out) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Malformed short import library member");
     return 0;
   }
@@ -268,14 +228,14 @@ static int import_library_parse_strings(const unsigned char *member_data,
     symbol_length++;
   }
   if (symbol_length >= remaining) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Import library member is missing the symbol name");
     return 0;
   }
 
   symbol_name = malloc(symbol_length + 1u);
   if (!symbol_name) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Out of memory while parsing import symbol");
     return 0;
   }
@@ -288,7 +248,7 @@ static int import_library_parse_strings(const unsigned char *member_data,
     dll_length++;
   }
   if (dll_length >= remaining) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Import library member is missing the DLL name");
     free(symbol_name);
     return 0;
@@ -296,7 +256,7 @@ static int import_library_parse_strings(const unsigned char *member_data,
 
   dll_name = malloc(dll_length + 1u);
   if (!dll_name) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Out of memory while parsing import DLL name");
     free(symbol_name);
     return 0;
@@ -357,7 +317,7 @@ int import_library_read(const char *path, ImportLibrary **library_out,
   }
 
   if (!path || !library_out) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "An import library path is required");
     return 0;
   }
@@ -367,21 +327,21 @@ int import_library_read(const char *path, ImportLibrary **library_out,
     return 0;
   }
   if (file_size < 8u || memcmp(file_data, "!<arch>\n", 8u) != 0) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Import library '%s' is not a COFF archive", path);
     goto cleanup;
   }
 
   library = calloc(1, sizeof(ImportLibrary));
   if (!library) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Out of memory while creating import library");
     goto cleanup;
   }
 
-  library->path = import_library_strdup(path);
+  library->path = mettle_strdup(path);
   if (!library->path) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Out of memory while storing import library path");
     goto cleanup;
   }
@@ -397,7 +357,7 @@ int import_library_read(const char *path, ImportLibrary **library_out,
     char *dll_name = NULL;
 
     if (member_header[58] != '`' || member_header[59] != '\n') {
-      import_library_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                                "Malformed archive member header in '%s'", path);
       goto cleanup;
     }
@@ -408,7 +368,7 @@ int import_library_read(const char *path, ImportLibrary **library_out,
 
     member_data_offset = offset + IMPORT_ARCHIVE_MEMBER_HEADER_SIZE;
     if (member_data_offset + member_size > file_size) {
-      import_library_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                                "Import library '%s' has a truncated archive member",
                                path);
       goto cleanup;
@@ -439,7 +399,7 @@ int import_library_read(const char *path, ImportLibrary **library_out,
   }
 
   if (library->symbol_count == 0u) {
-    import_library_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                              "Import library '%s' did not contain AMD64 import members",
                              path);
     goto cleanup;

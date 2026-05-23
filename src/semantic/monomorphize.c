@@ -1,5 +1,6 @@
 #include "monomorphize.h"
 #include "../string_intern.h"
+#include "../common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -107,16 +108,6 @@ static void free_string_array(char **values, size_t count) {
     free(values[i]);
   }
   free(values);
-}
-
-static void mono_free_string(char *value) {
-  if (!value) {
-    return;
-  }
-
-  if (!string_is_interned(value)) {
-    free(value);
-  }
 }
 
 static int mono_has_trait(MonoContext *ctx, const char *trait_name) {
@@ -584,7 +575,7 @@ static ASTNode *mono_create_impl_method_function(MonoContext *ctx,
     return NULL;
   }
 
-  mono_free_string(fn->name);
+  mettle_free_string(fn->name);
   fn->name = mangled;
   fn->is_exported = 0;
 
@@ -593,7 +584,7 @@ static ASTNode *mono_create_impl_method_function(MonoContext *ctx,
         mono_substitute_self_type(fn->parameter_types[i], impl->for_type_name,
                                   ctx);
     if (new_type) {
-      mono_free_string(fn->parameter_types[i]);
+      mettle_free_string(fn->parameter_types[i]);
       fn->parameter_types[i] = new_type;
     }
   }
@@ -602,7 +593,7 @@ static ASTNode *mono_create_impl_method_function(MonoContext *ctx,
     char *new_type =
         mono_substitute_self_type(fn->return_type, impl->for_type_name, ctx);
     if (new_type) {
-      mono_free_string(fn->return_type);
+      mettle_free_string(fn->return_type);
       fn->return_type = new_type;
     }
   }
@@ -934,7 +925,7 @@ static void substitute_types_in_ast(ASTNode *node, char **param_names,
       char *new_type =
           substitute_type_string(vd->type_name, param_names, arg_names, count, ctx);
       if (new_type) {
-        mono_free_string(vd->type_name);
+        mettle_free_string(vd->type_name);
         vd->type_name = new_type;
       }
     }
@@ -949,7 +940,7 @@ static void substitute_types_in_ast(ASTNode *node, char **param_names,
       char *new_type =
           substitute_type_string(ne->type_name, param_names, arg_names, count, ctx);
       if (new_type) {
-        mono_free_string(ne->type_name);
+        mettle_free_string(ne->type_name);
         ne->type_name = new_type;
       }
     }
@@ -964,7 +955,7 @@ static void substitute_types_in_ast(ASTNode *node, char **param_names,
           char *new_arg = substitute_type_string(ce->type_args[i], param_names,
                                                  arg_names, count, ctx);
           if (new_arg) {
-            mono_free_string(ce->type_args[i]);
+            mettle_free_string(ce->type_args[i]);
             ce->type_args[i] = new_arg;
           }
         }
@@ -1414,7 +1405,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
         strcpy(new_type, mangled);
         for (size_t i = 0; i < ptr_count; i++)
           strcat(new_type, "*");
-        mono_free_string(vd->type_name);
+        mettle_free_string(vd->type_name);
         vd->type_name = new_type;
         free(mangled);
         free(base);
@@ -1436,7 +1427,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
       size_t arg_count = 0;
       if (parse_generic_type_name(ne->type_name, &base, &args, &arg_count)) {
         char *mangled = mangle_name(base, args, arg_count);
-        mono_free_string(ne->type_name);
+        mettle_free_string(ne->type_name);
         ne->type_name = mangled;
         free(base);
         for (size_t i = 0; i < arg_count; i++)
@@ -1451,10 +1442,10 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
     if (ce && ce->type_arg_count > 0 && ce->function_name) {
       char *mangled =
           mangle_name(ce->function_name, ce->type_args, ce->type_arg_count);
-      mono_free_string(ce->function_name);
+      mettle_free_string(ce->function_name);
       ce->function_name = mangled;
       for (size_t i = 0; i < ce->type_arg_count; i++)
-        mono_free_string(ce->type_args[i]);
+        mettle_free_string(ce->type_args[i]);
       free(ce->type_args);
       ce->type_args = NULL;
       ce->type_arg_count = 0;
@@ -1492,7 +1483,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
             strcpy(new_type, mangled);
             for (size_t j = 0; j < ptr_count; j++)
               strcat(new_type, "*");
-            mono_free_string(fd->parameter_types[i]);
+            mettle_free_string(fd->parameter_types[i]);
             fd->parameter_types[i] = new_type;
             free(mangled);
             free(base);
@@ -1510,7 +1501,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
         if (parse_generic_type_name(fd->return_type, &base, &args,
                                     &arg_count)) {
           char *mangled = mangle_name(base, args, arg_count);
-          mono_free_string(fd->return_type);
+          mettle_free_string(fd->return_type);
           fd->return_type = mangled;
           free(base);
           for (size_t i = 0; i < arg_count; i++)
@@ -1548,7 +1539,7 @@ static void rewrite_generic_references(ASTNode *node, MonoContext *ctx) {
             strcpy(new_type, mangled);
             for (size_t j = 0; j < ptr_count; j++)
               strcat(new_type, "*");
-            mono_free_string(sd->field_types[i]);
+            mettle_free_string(sd->field_types[i]);
             sd->field_types[i] = new_type;
             free(mangled);
             free(base);
@@ -1727,15 +1718,15 @@ static ASTNode *create_monomorphized_struct(GenericDef *def,
   StructDeclaration *sd = (StructDeclaration *)clone->data;
 
   // Set the mangled name
-  mono_free_string(sd->name);
+  mettle_free_string(sd->name);
   sd->name = strdup(inst->mangled_name);
 
   // Clear type params (this is now a concrete type)
   for (size_t i = 0; i < sd->type_param_count; i++)
-    mono_free_string(sd->type_params[i]);
+    mettle_free_string(sd->type_params[i]);
   free(sd->type_params);
   for (size_t i = 0; i < sd->type_param_count; i++)
-    mono_free_string(sd->type_param_traits[i]);
+    mettle_free_string(sd->type_param_traits[i]);
   free(sd->type_param_traits);
   sd->type_params = NULL;
   sd->type_param_traits = NULL;
@@ -1747,7 +1738,7 @@ static ASTNode *create_monomorphized_struct(GenericDef *def,
         sd->field_types[i], def->type_params, inst->type_args,
         inst->type_arg_count, ctx);
     if (new_type) {
-      mono_free_string(sd->field_types[i]);
+      mettle_free_string(sd->field_types[i]);
       sd->field_types[i] = new_type;
     }
   }
@@ -1765,15 +1756,15 @@ static ASTNode *create_monomorphized_function(GenericDef *def,
   FunctionDeclaration *fd = (FunctionDeclaration *)clone->data;
 
   // Set the mangled name
-  mono_free_string(fd->name);
+  mettle_free_string(fd->name);
   fd->name = strdup(inst->mangled_name);
 
   // Clear type params
   for (size_t i = 0; i < fd->type_param_count; i++)
-    mono_free_string(fd->type_params[i]);
+    mettle_free_string(fd->type_params[i]);
   free(fd->type_params);
   for (size_t i = 0; i < fd->type_param_count; i++)
-    mono_free_string(fd->type_param_traits[i]);
+    mettle_free_string(fd->type_param_traits[i]);
   free(fd->type_param_traits);
   fd->type_params = NULL;
   fd->type_param_traits = NULL;
@@ -1785,7 +1776,7 @@ static ASTNode *create_monomorphized_function(GenericDef *def,
         fd->parameter_types[i], def->type_params, inst->type_args,
         inst->type_arg_count, ctx);
     if (new_type) {
-      mono_free_string(fd->parameter_types[i]);
+      mettle_free_string(fd->parameter_types[i]);
       fd->parameter_types[i] = new_type;
     }
   }
@@ -1796,7 +1787,7 @@ static ASTNode *create_monomorphized_function(GenericDef *def,
         fd->return_type, def->type_params, inst->type_args,
         inst->type_arg_count, ctx);
     if (new_type) {
-      mono_free_string(fd->return_type);
+      mettle_free_string(fd->return_type);
       fd->return_type = new_type;
     }
   }
@@ -1967,7 +1958,7 @@ static int mono_rewrite_trait_method_call(MonoContext *ctx, ASTNode *node,
   call->argument_count++;
   ast_add_child(node, self_arg);
 
-  mono_free_string(call->function_name);
+  mettle_free_string(call->function_name);
   call->function_name = mangled;
   call->object = NULL;
   return 1;

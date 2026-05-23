@@ -1,20 +1,8 @@
 #include "ir.h"
+#include "../common.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-
-static char *ir_strdup(const char *text) {
-  if (!text) {
-    return NULL;
-  }
-  size_t length = strlen(text) + 1;
-  char *copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-  memcpy(copy, text, length);
-  return copy;
-}
 
 IROperand ir_operand_none(void) {
   IROperand operand = {0};
@@ -25,14 +13,14 @@ IROperand ir_operand_none(void) {
 IROperand ir_operand_temp(const char *name) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_TEMP;
-  operand.name = ir_strdup(name);
+  operand.name = mettle_strdup(name);
   return operand;
 }
 
 IROperand ir_operand_symbol(const char *name) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_SYMBOL;
-  operand.name = ir_strdup(name);
+  operand.name = mettle_strdup(name);
   return operand;
 }
 
@@ -60,14 +48,14 @@ IROperand ir_operand_float_sized(double value, int float_bits) {
 IROperand ir_operand_string(const char *value) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_STRING;
-  operand.name = ir_strdup(value);
+  operand.name = mettle_strdup(value);
   return operand;
 }
 
 IROperand ir_operand_label(const char *name) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_LABEL;
-  operand.name = ir_strdup(name);
+  operand.name = mettle_strdup(name);
   return operand;
 }
 
@@ -171,7 +159,7 @@ IRFunction *ir_function_create(const char *name) {
     return NULL;
   }
 
-  function->name = ir_strdup(name ? name : "<anonymous>");
+  function->name = mettle_strdup(name ? name : "<anonymous>");
   function->profile_id = IR_PROFILE_ID_NONE;
   function->parameter_names = NULL;
   function->parameter_types = NULL;
@@ -208,13 +196,13 @@ int ir_function_set_parameters(IRFunction *function, const char **parameter_name
       goto fail;
     }
 
-    name_copies[i] = ir_strdup(parameter_names[i]);
+    name_copies[i] = mettle_strdup(parameter_names[i]);
     if (!name_copies[i]) {
       goto fail;
     }
 
     if (parameter_types && parameter_types[i]) {
-      type_copies[i] = ir_strdup(parameter_types[i]);
+      type_copies[i] = mettle_strdup(parameter_types[i]);
       if (!type_copies[i]) {
         goto fail;
       }
@@ -275,7 +263,7 @@ int ir_function_append_instruction(IRFunction *function,
   slot->dest = ir_operand_clone(&instruction->dest);
   slot->lhs = ir_operand_clone(&instruction->lhs);
   slot->rhs = ir_operand_clone(&instruction->rhs);
-  slot->text = ir_strdup(instruction->text);
+  slot->text = mettle_strdup(instruction->text);
   slot->is_float = instruction->is_float;
   slot->arguments = NULL;
   slot->argument_count = instruction->argument_count;
@@ -329,7 +317,7 @@ int ir_function_insert_instruction(IRFunction *function, size_t index,
   slot->dest = ir_operand_clone(&instruction->dest);
   slot->lhs = ir_operand_clone(&instruction->lhs);
   slot->rhs = ir_operand_clone(&instruction->rhs);
-  slot->text = ir_strdup(instruction->text);
+  slot->text = mettle_strdup(instruction->text);
   slot->argument_count = instruction->argument_count;
   slot->arguments = NULL;
 

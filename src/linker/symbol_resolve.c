@@ -1,4 +1,5 @@
 #include "linker/symbol_resolve.h"
+#include "../common.h"
 
 /* Section merge and symbol resolution for COFF produced by the object backend;
  * pair with relocation.c and see docs/linker-build-pipelines.md for pipeline
@@ -27,47 +28,6 @@
 #define IMAGE_SCN_ALIGN_2048BYTES 0x00C00000u
 #define IMAGE_SCN_ALIGN_4096BYTES 0x00D00000u
 #define IMAGE_SCN_ALIGN_8192BYTES 0x00E00000u
-
-static char *linker_strdup(const char *value) {
-  size_t length = 0;
-  char *copy = NULL;
-
-  if (!value) {
-    return NULL;
-  }
-
-  length = strlen(value);
-  copy = malloc(length + 1);
-  if (!copy) {
-    return NULL;
-  }
-
-  memcpy(copy, value, length + 1);
-  return copy;
-}
-
-static void link_resolution_set_error(char **error_message_out,
-                                      const char *format, ...) {
-  char buffer[512];
-  va_list args;
-  char *copy = NULL;
-
-  if (!error_message_out) {
-    return;
-  }
-
-  va_start(args, format);
-  vsnprintf(buffer, sizeof(buffer), format, args);
-  va_end(args);
-
-  copy = linker_strdup(buffer);
-  if (!copy) {
-    return;
-  }
-
-  free(*error_message_out);
-  *error_message_out = copy;
-}
 
 static size_t link_align_up(size_t value, size_t alignment) {
   size_t remainder = 0;
@@ -213,7 +173,7 @@ static int link_section_reserve_data(LinkedSection *section, size_t minimum_size
 
   grown = realloc(section->data, new_capacity);
   if (!grown) {
-    link_resolution_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                               "Out of memory while growing merged section '%s'",
                               section->name);
     return 0;
@@ -246,7 +206,7 @@ static int link_section_reserve_contributions(LinkedSection *section,
   grown = realloc(section->contributions,
                   new_capacity * sizeof(LinkedSectionContribution));
   if (!grown) {
-    link_resolution_set_error(
+    mettle_set_error(
         error_message_out,
         "Out of memory while recording contributions for merged section '%s'",
         section->name);
@@ -348,7 +308,7 @@ static int link_resolution_load_objects(LinkResolution *resolution,
 
   resolution->objects = calloc(object_count, sizeof(LinkedInputObject));
   if (!resolution->objects && object_count != 0u) {
-    link_resolution_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                               "Out of memory while allocating input objects");
     return 0;
   }
@@ -357,9 +317,9 @@ static int link_resolution_load_objects(LinkResolution *resolution,
   for (i = 0; i < object_count; i++) {
     LinkedInputObject *input = &resolution->objects[i];
 
-    input->path = linker_strdup(object_paths[i]);
+    input->path = mettle_strdup(object_paths[i]);
     if (!input->path) {
-      link_resolution_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                                 "Out of memory while storing object path");
       return 0;
     }
@@ -395,7 +355,7 @@ static int link_resolution_merge_sections(LinkResolution *resolution,
         (!input->section_merged_offsets && section_count != 0u) ||
         (!input->section_merged_sizes && section_count != 0u) ||
         (!input->section_alignments && section_count != 0u)) {
-      link_resolution_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                                 "Out of memory while mapping object sections");
       return 0;
     }
@@ -502,7 +462,7 @@ static int link_resolution_reserve_symbols(LinkResolution *resolution,
 
   grown = realloc(resolution->symbols, new_capacity * sizeof(LinkedSymbol));
   if (!grown) {
-    link_resolution_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                               "Out of memory while growing global symbol table");
     return 0;
   }
@@ -533,9 +493,9 @@ static int link_resolution_record_global_symbol(
 
     global_symbol = &resolution->symbols[resolution->symbol_count++];
     memset(global_symbol, 0, sizeof(*global_symbol));
-    global_symbol->name = linker_strdup(object_symbol->name);
+    global_symbol->name = mettle_strdup(object_symbol->name);
     if (!global_symbol->name) {
-      link_resolution_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                                 "Out of memory while storing symbol '%s'",
                                 object_symbol->name);
       return 0;
@@ -550,7 +510,7 @@ static int link_resolution_record_global_symbol(
   }
 
   if (global_symbol->is_defined) {
-    link_resolution_set_error(
+    mettle_set_error(
         error_message_out,
         "Duplicate external symbol '%s' in '%s' and object index %zu",
         object_symbol->name, input->path ? input->path : "<unknown>",
@@ -582,7 +542,7 @@ static int link_resolution_build_symbols(LinkResolution *resolution,
     input->symbol_count = input->object ? input->object->symbol_count : 0u;
     input->symbols = calloc(input->symbol_count, sizeof(LinkedObjectSymbol));
     if (!input->symbols && input->symbol_count != 0u) {
-      link_resolution_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                                 "Out of memory while mapping object symbols");
       return 0;
     }
@@ -598,9 +558,9 @@ static int link_resolution_build_symbols(LinkResolution *resolution,
       resolved->section_number = symbol->section_number;
       resolved->merged_section_index = LINKED_SECTION_INDEX_NONE;
       resolved->is_auxiliary = symbol->is_auxiliary;
-      resolved->name = linker_strdup(symbol->name);
+      resolved->name = mettle_strdup(symbol->name);
       if (symbol->name && !resolved->name) {
-        link_resolution_set_error(error_message_out,
+        mettle_set_error(error_message_out,
                                   "Out of memory while storing object symbol");
         return 0;
       }
@@ -616,7 +576,7 @@ static int link_resolution_build_symbols(LinkResolution *resolution,
       if (symbol->section_number > 0) {
         section_index = (size_t)(symbol->section_number - 1);
         if (section_index >= input->object->section_count) {
-          link_resolution_set_error(error_message_out,
+          mettle_set_error(error_message_out,
                                     "Symbol '%s' in '%s' refers to section %d "
                                     "outside the section table",
                                     symbol->name ? symbol->name : "<unnamed>",
@@ -716,7 +676,7 @@ static int link_resolution_validate_externals(
          symbol_index++) {
       const LinkedSymbol *symbol = &resolution->symbols[symbol_index];
       if (symbol->is_external && !symbol->is_defined) {
-        link_resolution_set_error(error_message_out,
+        mettle_set_error(error_message_out,
                                   "Unresolved external symbol '%s'",
                                   symbol->name ? symbol->name : "<unnamed>");
         return 0;
@@ -730,7 +690,7 @@ static int link_resolution_validate_externals(
   if (entry_name && entry_name[0] != '\0') {
     resolution->entry_symbol = link_resolution_find_symbol(resolution, entry_name);
     if (!resolution->entry_symbol || !resolution->entry_symbol->is_defined) {
-      link_resolution_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                                 "Entry point symbol '%s' was not resolved",
                                 entry_name);
       return 0;
@@ -757,14 +717,14 @@ int link_resolution_build(const char **object_paths, size_t object_count,
   }
 
   if (!object_paths || object_count == 0u || !resolution_out) {
-    link_resolution_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                               "At least one object file is required");
     return 0;
   }
 
   resolution = calloc(1, sizeof(LinkResolution));
   if (!resolution) {
-    link_resolution_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                               "Out of memory while creating link resolution");
     return 0;
   }

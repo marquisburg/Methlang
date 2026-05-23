@@ -1,4 +1,5 @@
 #include "ir.h"
+#include "../common.h"
 #include "compiler/compiler_context.h"
 #include <limits.h>
 #include <stdarg.h>
@@ -128,19 +129,6 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
                                                  ASTNode *expression,
                                                  Symbol *constructor_symbol,
                                                  IROperand *out_value);
-static char *ir_strdup_local(const char *text) {
-  if (!text) {
-    return NULL;
-  }
-  size_t length = strlen(text) + 1;
-  char *copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-  memcpy(copy, text, length);
-  return copy;
-}
-
 static int ir_emit_jump_instruction(IRLoweringContext *context,
                                     IRFunction *function, const char *label,
                                     SourceLocation location) {
@@ -1470,14 +1458,14 @@ static void ir_set_error(IRLoweringContext *context, const char *format, ...) {
 static char *ir_new_temp_name(IRLoweringContext *context) {
   char buffer[64];
   snprintf(buffer, sizeof(buffer), "t%d", context->next_temp_id++);
-  return ir_strdup_local(buffer);
+  return mettle_strdup(buffer);
 }
 
 static char *ir_new_label_name(IRLoweringContext *context, const char *prefix) {
   char buffer[64];
   snprintf(buffer, sizeof(buffer), "ir_%s_%d", prefix ? prefix : "label",
            context->next_label_id++);
-  return ir_strdup_local(buffer);
+  return mettle_strdup(buffer);
 }
 
 static int ir_emit(IRLoweringContext *context, IRFunction *function,
@@ -1696,9 +1684,9 @@ static int ir_push_labeled_control_frame(IRLoweringContext *context,
   }
 
   IRControlFrame *frame = &context->control_stack[context->control_count++];
-  frame->break_label = ir_strdup_local(break_label);
-  frame->continue_label = ir_strdup_local(continue_label);
-  frame->user_label = ir_strdup_local(user_label);
+  frame->break_label = mettle_strdup(break_label);
+  frame->continue_label = mettle_strdup(continue_label);
+  frame->user_label = mettle_strdup(user_label);
   return 1;
 }
 
@@ -3995,7 +3983,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
   if (!program || program->type != AST_PROGRAM) {
     if (error_message) {
       *error_message =
-          ir_strdup_local("Expected AST_PROGRAM root for IR lowering");
+          mettle_strdup("Expected AST_PROGRAM root for IR lowering");
     }
     return NULL;
   }
@@ -4003,7 +3991,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
   IRProgram *ir_program = ir_program_create();
   if (!ir_program) {
     if (error_message) {
-      *error_message = ir_strdup_local("Failed to allocate IR program");
+      *error_message = mettle_strdup("Failed to allocate IR program");
     }
     return NULL;
   }
@@ -4037,7 +4025,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       if (error_message) {
         *error_message = context.error_message
                              ? context.error_message
-                             : ir_strdup_local("Unknown IR lowering error");
+                             : mettle_strdup("Unknown IR lowering error");
       } else {
         free(context.error_message);
       }
@@ -4062,7 +4050,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       if (error_message) {
         *error_message = context.error_message
                              ? context.error_message
-                             : ir_strdup_local("Unknown IR lowering error");
+                             : mettle_strdup("Unknown IR lowering error");
       } else {
         free(context.error_message);
       }
@@ -4082,7 +4070,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       if (error_message) {
         *error_message = context.error_message
                              ? context.error_message
-                             : ir_strdup_local("Unknown IR lowering error");
+                             : mettle_strdup("Unknown IR lowering error");
       } else {
         free(context.error_message);
       }

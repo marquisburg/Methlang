@@ -1,4 +1,5 @@
 #include "code_generator_internal.h"
+#include "../common.h"
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -154,19 +155,6 @@ static const x86Register IR_PROMOTION_REGISTERS[] = {
 static int ir_binary_operator_is_comparison(const char *op);
 static int ir_binary_operator_is_commutative(const char *op);
 
-static char *ir_codegen_strdup(const char *text) {
-  if (!text) {
-    return NULL;
-  }
-  size_t length = strlen(text) + 1;
-  char *copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-  memcpy(copy, text, length);
-  return copy;
-}
-
 /* Per-instruction loop nesting depth, derived from backward branches.
  *
  * A label that is targeted by a later JUMP/BRANCH forms a loop whose body is
@@ -276,7 +264,7 @@ static IRSymbolStatsEntry *ir_symbol_stats_map_get_or_add(IRSymbolStatsMap *map,
     map->capacity = new_capacity;
   }
 
-  char *name_copy = ir_codegen_strdup(name);
+  char *name_copy = mettle_strdup(name);
   if (!name_copy) {
     return NULL;
   }
@@ -425,7 +413,7 @@ static int ir_temp_use_map_add(IRTempUseMap *map, const char *name) {
     map->capacity = new_capacity;
   }
 
-  char *name_copy = ir_codegen_strdup(name);
+  char *name_copy = mettle_strdup(name);
   if (!name_copy) {
     return 0;
   }
