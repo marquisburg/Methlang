@@ -150,13 +150,7 @@ char *code_generator_generate_label(CodeGenerator *generator,
                                     const char *prefix);
 
 // Assembly helpers
-void code_generator_emit_data_section(CodeGenerator *generator);
 void code_generator_emit_text_section(CodeGenerator *generator);
-void code_generator_emit_global_symbol(CodeGenerator *generator,
-                                       const char *symbol);
-void code_generator_emit_instruction(CodeGenerator *generator,
-                                     const char *mnemonic,
-                                     const char *operands);
 
 // Variable declaration helpers
 void code_generator_generate_global_variable(CodeGenerator *generator,
@@ -236,7 +230,6 @@ void code_generator_load_string_literal(CodeGenerator *generator,
                                         const char *string_value);
 void code_generator_load_string_literal_as_cstring(CodeGenerator *generator,
                                                    const char *string_value);
-int code_generator_get_operator_precedence(const char *op);
 const char *code_generator_get_arithmetic_instruction(const char *op,
                                                       int is_float);
 

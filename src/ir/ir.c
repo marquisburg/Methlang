@@ -556,7 +556,8 @@ static int ir_format_instruction_line(const IRInstruction *instruction,
                        instruction->text ? instruction->text : "?", lhs,
                        instruction->is_float ? " (float)" : "");
     break;
-  case IR_OP_CALL: {
+  case IR_OP_CALL:
+  case IR_OP_CALL_INDIRECT: {
     size_t offset = 0;
     offset += (size_t)snprintf(buffer + offset, buffer_size - offset, "%s = %s(",
                                dest, instruction->text ? instruction->text

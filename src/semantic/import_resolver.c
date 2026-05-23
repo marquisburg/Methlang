@@ -558,13 +558,7 @@ static char *duplicate_string_slice(const char *value, size_t length) {
 }
 
 static void free_string_array(char **items, size_t count) {
-  if (!items) {
-    return;
-  }
-  for (size_t i = 0; i < count; i++) {
-    free(items[i]);
-  }
-  free(items);
+  mettle_free_string_array(items, count);
 }
 
 static int clone_string_array(char **items, size_t count, char ***out_items,

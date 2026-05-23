@@ -611,6 +611,16 @@ int code_generator_binary_symbol_assigned_register(
     return 0;
   }
 
+  symbol = generator->symbol_table
+               ? symbol_table_lookup(generator->symbol_table, name)
+               : NULL;
+  if (symbol && symbol->type &&
+      (!code_generator_binary_resolved_type_is_supported(symbol->type, 0) ||
+       code_generator_binary_resolved_type_float_bits(symbol->type) != 0 ||
+       symbol->type->kind == TYPE_STRING)) {
+    return 0;
+  }
+
   promoted_register =
       binary_named_slot_table_get_offset(&context->register_symbols, name);
   if (promoted_register >= 0) {
@@ -620,17 +630,7 @@ int code_generator_binary_symbol_assigned_register(
       return 1;
     }
   }
-
-  symbol = generator->symbol_table ? symbol_table_lookup(generator->symbol_table,
-                                                         name)
-                                   : NULL;
   if (!symbol || !symbol->type || !symbol->data.variable.is_in_register) {
-    return 0;
-  }
-
-  if (!code_generator_binary_resolved_type_is_supported(symbol->type, 0) ||
-      code_generator_binary_resolved_type_float_bits(symbol->type) != 0 ||
-      symbol->type->kind == TYPE_STRING) {
     return 0;
   }
 

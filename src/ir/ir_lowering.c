@@ -1682,9 +1682,23 @@ static int ir_push_labeled_control_frame(IRLoweringContext *context,
   }
 
   IRControlFrame *frame = &context->control_stack[context->control_count++];
-  frame->break_label = mettle_strdup(break_label);
-  frame->continue_label = mettle_strdup(continue_label);
-  frame->user_label = mettle_strdup(user_label);
+  frame->break_label = break_label ? mettle_strdup(break_label) : NULL;
+  frame->continue_label =
+      continue_label ? mettle_strdup(continue_label) : NULL;
+  frame->user_label = user_label ? mettle_strdup(user_label) : NULL;
+  if ((break_label && !frame->break_label) ||
+      (continue_label && !frame->continue_label) ||
+      (user_label && !frame->user_label)) {
+    free(frame->break_label);
+    free(frame->continue_label);
+    free(frame->user_label);
+    frame->break_label = NULL;
+    frame->continue_label = NULL;
+    frame->user_label = NULL;
+    context->control_count--;
+    ir_set_error(context, "Out of memory while setting up control-flow labels");
+    return 0;
+  }
   return 1;
 }
 

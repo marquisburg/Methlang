@@ -114,10 +114,6 @@ char *error_reporter_get_line_from_source(const char *source,
                                           size_t line_number);
 char *error_reporter_create_caret_line(size_t column, size_t length);
 
-// Note API: attach a follow-up note to the most recently added diagnostic.
-// The note appears immediately after its parent when printed.
-void error_reporter_add_note(ErrorReporter *reporter, const char *message);
-
 // Common error suggestions
 const char *error_reporter_suggest_for_token(const char *token);
 // Returns a heap-allocated suggestion string (caller must free), or NULL.

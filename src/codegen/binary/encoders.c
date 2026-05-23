@@ -20,6 +20,17 @@ int binary_emit_rex(BinaryCodeBuffer *buffer, int w, int r, int x,
   return binary_code_buffer_append_u8(buffer, rex);
 }
 
+static int binary_emit_rex_maybe_forced(BinaryCodeBuffer *buffer, int w, int r,
+                                        int x, int b, int force) {
+  unsigned char rex = (unsigned char)(0x40 | (w ? 0x08 : 0) |
+                                      (r ? 0x04 : 0) | (x ? 0x02 : 0) |
+                                      (b ? 0x01 : 0));
+  if (rex == 0x40 && !force) {
+    return 1;
+  }
+  return binary_code_buffer_append_u8(buffer, rex);
+}
+
 int binary_emit_push_reg(BinaryCodeBuffer *buffer,
                                 BinaryGpRegister reg) {
   if (!buffer) {
@@ -228,7 +239,9 @@ int binary_emit_mov_reg_imm64(BinaryCodeBuffer *buffer,
     return 0;
   }
   if (immediate == 0) {
-    return binary_emit_xor_reg_reg32(buffer, destination);
+    /* mov, not xor: xor sets ZF and breaks cmov/cc sequences that load a
+     * zero immediate between compare and conditional move. */
+    return binary_emit_mov_reg_imm32_zero_extend(buffer, destination, 0);
   }
   if (immediate <= UINT32_MAX) {
     return binary_emit_mov_reg_imm32_zero_extend(buffer, destination,
@@ -256,14 +269,11 @@ int binary_emit_mov_reg_imm64(BinaryCodeBuffer *buffer,
   return 1;
 }
 
-int binary_emit_memory_access_ex(BinaryCodeBuffer *buffer,
-                                        int operand_size_prefix, int rex_w,
-                                        unsigned char opcode1,
-                                        int has_opcode2,
-                                        unsigned char opcode2,
-                                        BinaryGpRegister reg,
-                                        BinaryGpRegister base,
-                                        int displacement) {
+static int binary_emit_memory_access_ex_internal(
+    BinaryCodeBuffer *buffer, int operand_size_prefix, int rex_w,
+    unsigned char opcode1, int has_opcode2, unsigned char opcode2,
+    BinaryGpRegister reg, BinaryGpRegister base, int displacement,
+    int force_rex) {
   if (!buffer) {
     return 0;
   }
@@ -277,7 +287,8 @@ int binary_emit_memory_access_ex(BinaryCodeBuffer *buffer,
 
   if ((operand_size_prefix &&
        !binary_code_buffer_append_u8(buffer, 0x66)) ||
-      !binary_emit_rex(buffer, rex_w, reg >> 3, 0, base >> 3) ||
+      !binary_emit_rex_maybe_forced(buffer, rex_w, reg >> 3, 0, base >> 3,
+                                    force_rex) ||
       !binary_code_buffer_append_u8(buffer, opcode1) ||
       (has_opcode2 && !binary_code_buffer_append_u8(buffer, opcode2)) ||
       !binary_code_buffer_append_u8(buffer, modrm)) {
@@ -297,6 +308,19 @@ int binary_emit_memory_access_ex(BinaryCodeBuffer *buffer,
   }
 
   return binary_code_buffer_append_u32(buffer, (uint32_t)(int32_t)displacement);
+}
+
+int binary_emit_memory_access_ex(BinaryCodeBuffer *buffer,
+                                        int operand_size_prefix, int rex_w,
+                                        unsigned char opcode1,
+                                        int has_opcode2,
+                                        unsigned char opcode2,
+                                        BinaryGpRegister reg,
+                                        BinaryGpRegister base,
+                                        int displacement) {
+  return binary_emit_memory_access_ex_internal(
+      buffer, operand_size_prefix, rex_w, opcode1, has_opcode2, opcode2, reg,
+      base, displacement, 0);
 }
 
 int binary_emit_memory_access(BinaryCodeBuffer *buffer,
@@ -344,10 +368,13 @@ int binary_emit_mov_reg_mem32(BinaryCodeBuffer *buffer,
 }
 
 int binary_emit_mov_mem_reg8(BinaryCodeBuffer *buffer,
-                                    BinaryGpRegister base, int displacement,
-                                    BinaryGpRegister source) {
-  return binary_emit_memory_access_ex(buffer, 0, 0, 0x88, 0, 0, source, base,
-                                      displacement);
+                                     BinaryGpRegister base, int displacement,
+                                     BinaryGpRegister source) {
+  /* REX is mandatory for SPL/BPL/SIL/DIL; without it ModRM reg codes 4..7
+   * name AH/CH/DH/BH instead. */
+  int force_rex = source >= BINARY_GP_RSP && source <= BINARY_GP_RDI;
+  return binary_emit_memory_access_ex_internal(
+      buffer, 0, 0, 0x88, 0, 0, source, base, displacement, force_rex);
 }
 
 int binary_emit_mov_mem_reg16(BinaryCodeBuffer *buffer,
@@ -460,17 +487,18 @@ int binary_emit_lea_reg_rip_placeholder(BinaryCodeBuffer *buffer,
   return binary_code_buffer_append_u32(buffer, 0);
 }
 
-int binary_emit_rip_relative_access_ex(
+static int binary_emit_rip_relative_access_ex_internal(
     BinaryCodeBuffer *buffer, int operand_size_prefix, int rex_w,
     unsigned char opcode1, int has_opcode2, unsigned char opcode2,
-    BinaryGpRegister reg, size_t *displacement_offset_out) {
+    BinaryGpRegister reg, size_t *displacement_offset_out, int force_rex) {
   if (!buffer || !displacement_offset_out) {
     return 0;
   }
 
   if ((operand_size_prefix &&
        !binary_code_buffer_append_u8(buffer, 0x66)) ||
-      !binary_emit_rex(buffer, rex_w, reg >> 3, 0, 0) ||
+      !binary_emit_rex_maybe_forced(buffer, rex_w, reg >> 3, 0, 0,
+                                    force_rex) ||
       !binary_code_buffer_append_u8(buffer, opcode1) ||
       (has_opcode2 && !binary_code_buffer_append_u8(buffer, opcode2)) ||
       !binary_code_buffer_append_u8(
@@ -480,6 +508,15 @@ int binary_emit_rip_relative_access_ex(
 
   *displacement_offset_out = buffer->size;
   return binary_code_buffer_append_u32(buffer, 0);
+}
+
+int binary_emit_rip_relative_access_ex(
+    BinaryCodeBuffer *buffer, int operand_size_prefix, int rex_w,
+    unsigned char opcode1, int has_opcode2, unsigned char opcode2,
+    BinaryGpRegister reg, size_t *displacement_offset_out) {
+  return binary_emit_rip_relative_access_ex_internal(
+      buffer, operand_size_prefix, rex_w, opcode1, has_opcode2, opcode2, reg,
+      displacement_offset_out, 0);
 }
 
 int binary_emit_mov_reg_rip_mem(BinaryCodeBuffer *buffer,
@@ -499,10 +536,11 @@ int binary_emit_mov_reg32_rip_mem(BinaryCodeBuffer *buffer,
 }
 
 int binary_emit_mov_mem_rip_reg8(BinaryCodeBuffer *buffer,
-                                        BinaryGpRegister source,
-                                        size_t *displacement_offset_out) {
-  return binary_emit_rip_relative_access_ex(buffer, 0, 0, 0x88, 0, 0, source,
-                                            displacement_offset_out);
+                                         BinaryGpRegister source,
+                                         size_t *displacement_offset_out) {
+  int force_rex = source >= BINARY_GP_RSP && source <= BINARY_GP_RDI;
+  return binary_emit_rip_relative_access_ex_internal(
+      buffer, 0, 0, 0x88, 0, 0, source, displacement_offset_out, force_rex);
 }
 
 int binary_emit_mov_mem_rip_reg16(BinaryCodeBuffer *buffer,

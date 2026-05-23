@@ -126,6 +126,8 @@ int ir_profile_build_enter_instruction(IRInstruction *instruction,
   instruction->argument_count = 1;
   instruction->arguments = malloc(sizeof(IROperand));
   if (!instruction->arguments) {
+    free(instruction->text);
+    instruction->text = NULL;
     return 0;
   }
   instruction->arguments[0] = ir_operand_int((long long)profile_id);

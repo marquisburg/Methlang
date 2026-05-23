@@ -56,3 +56,13 @@ void mettle_free_string(char *str) {
     free(str);
   }
 }
+
+void mettle_free_string_array(char **values, size_t count) {
+  if (!values) {
+    return;
+  }
+  for (size_t i = 0; i < count; i++) {
+    free(values[i]);
+  }
+  free(values);
+}

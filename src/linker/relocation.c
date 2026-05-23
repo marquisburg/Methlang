@@ -21,10 +21,7 @@ typedef struct {
 } RelocationTarget;
 
 static uint64_t relocation_read_u64(const unsigned char *bytes) {
-  return (uint64_t)bytes[0] | ((uint64_t)bytes[1] << 8) |
-         ((uint64_t)bytes[2] << 16) | ((uint64_t)bytes[3] << 24) |
-         ((uint64_t)bytes[4] << 32) | ((uint64_t)bytes[5] << 40) |
-         ((uint64_t)bytes[6] << 48) | ((uint64_t)bytes[7] << 56);
+  return linker_read_u64(bytes);
 }
 
 static int relocation_section_is_debug_only(const CoffSection *section) {

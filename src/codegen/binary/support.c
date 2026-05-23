@@ -6,20 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-char *binary_codegen_strdup(const char *value) {
-  if (!value) {
-    return NULL;
-  }
-
-  size_t length = strlen(value) + 1;
-  char *copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-
-  memcpy(copy, value, length);
-  return copy;
-}
 int binary_align_up_int(int value, int alignment, int *result_out) {
   if (!result_out || value < 0 || alignment <= 0) {
     return 0;
@@ -143,7 +129,7 @@ int binary_named_slot_table_add(BinaryNamedSlotTable *table,
     table->capacity = new_capacity;
   }
 
-  char *name_copy = binary_codegen_strdup(name);
+  char *name_copy = mettle_strdup(name);
   if (!name_copy) {
     return 0;
   }
@@ -261,7 +247,7 @@ int binary_label_table_define(BinaryLabelTable *table, const char *name,
     table->capacity = new_capacity;
   }
 
-  char *name_copy = binary_codegen_strdup(name);
+  char *name_copy = mettle_strdup(name);
   if (!name_copy) {
     return 0;
   }
@@ -304,7 +290,7 @@ int binary_label_fixup_table_add(BinaryLabelFixupTable *table,
     table->capacity = new_capacity;
   }
 
-  char *name_copy = binary_codegen_strdup(name);
+  char *name_copy = mettle_strdup(name);
   if (!name_copy) {
     return 0;
   }
@@ -347,7 +333,7 @@ int binary_call_relocation_table_add(BinaryCallRelocationTable *table,
     table->capacity = new_capacity;
   }
 
-  char *name_copy = binary_codegen_strdup(symbol_name);
+  char *name_copy = mettle_strdup(symbol_name);
   if (!name_copy) {
     return 0;
   }

@@ -626,29 +626,9 @@ char *code_generator_generate_label(CodeGenerator *generator,
 }
 
 // Assembly helper functions
-void code_generator_emit_data_section(CodeGenerator *generator) {
-  code_generator_emit(generator, "section .data\n");
-  code_generator_emit(generator, "; Global variables will be placed here\n\n");
-}
-
 void code_generator_emit_text_section(CodeGenerator *generator) {
   code_generator_emit(generator, "section .text\n");
   code_generator_emit(generator, "; Code section\n\n");
-}
-
-void code_generator_emit_global_symbol(CodeGenerator *generator,
-                                       const char *symbol) {
-  code_generator_emit(generator, "global %s\n", symbol);
-}
-
-void code_generator_emit_instruction(CodeGenerator *generator,
-                                     const char *mnemonic,
-                                     const char *operands) {
-  if (operands && strlen(operands) > 0) {
-    code_generator_emit(generator, "    %s %s\n", mnemonic, operands);
-  } else {
-    code_generator_emit(generator, "    %s\n", mnemonic);
-  }
 }
 
 // Helper function to emit to global variables buffer

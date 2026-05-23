@@ -2153,42 +2153,6 @@ void type_checker_init_builtin_types(TypeChecker *checker) {
   }
 }
 
-Type *type_checker_get_builtin_type(TypeChecker *checker, TypeKind kind) {
-  if (!checker)
-    return NULL;
-
-  switch (kind) {
-  case TYPE_INT8:
-    return checker->builtin_int8;
-  case TYPE_INT16:
-    return checker->builtin_int16;
-  case TYPE_INT32:
-    return checker->builtin_int32;
-  case TYPE_INT64:
-    return checker->builtin_int64;
-  case TYPE_UINT8:
-    return checker->builtin_uint8;
-  case TYPE_UINT16:
-    return checker->builtin_uint16;
-  case TYPE_UINT32:
-    return checker->builtin_uint32;
-  case TYPE_UINT64:
-    return checker->builtin_uint64;
-  case TYPE_BOOL:
-    return checker->builtin_bool;
-  case TYPE_FLOAT32:
-    return checker->builtin_float32;
-  case TYPE_FLOAT64:
-    return checker->builtin_float64;
-  case TYPE_STRING:
-    return checker->builtin_string;
-  case TYPE_VOID:
-    return checker->builtin_void;
-  default:
-    return NULL;
-  }
-}
-
 static Type *type_checker_parse_function_pointer_type(TypeChecker *checker,
                                                       const char *name) {
   if (!checker || !name) {
@@ -2545,18 +2509,6 @@ int type_checker_is_numeric_type(Type *type) {
          type_checker_is_floating_type(type);
 }
 
-size_t type_checker_get_type_size(Type *type) {
-  if (!type)
-    return 0;
-  return type->size;
-}
-
-size_t type_checker_get_type_alignment(Type *type) {
-  if (!type)
-    return 1;
-  return type->alignment;
-}
-
 // Type inference and promotion functions implementation
 
 Type *type_checker_promote_types(TypeChecker *checker, Type *left, Type *right,
@@ -2638,15 +2590,6 @@ int type_checker_get_type_rank(Type *type) {
   default:
     return 0;
   }
-}
-
-Type *type_checker_infer_variable_type(TypeChecker *checker,
-                                       ASTNode *initializer) {
-  if (!checker || !initializer)
-    return NULL;
-
-  // Use the general type inference function
-  return type_checker_infer_type(checker, initializer);
 }
 
 // Type compatibility and conversion functions implementation
@@ -2760,85 +2703,6 @@ int type_checker_is_implicitly_convertible(Type *from_type, Type *to_type) {
 
   // No other implicit conversions are allowed
   return 0;
-}
-
-int type_checker_validate_function_call(TypeChecker *checker,
-                                        CallExpression *call,
-                                        Symbol *func_symbol) {
-  if (!checker || !call || !func_symbol)
-    return 0;
-
-  // Check argument count
-  if (call->argument_count != func_symbol->data.function.parameter_count) {
-    type_checker_set_error(
-        checker, "Function '%s' expects %llu arguments, got %llu",
-        call->function_name,
-        (unsigned long long)func_symbol->data.function.parameter_count,
-        (unsigned long long)call->argument_count);
-    return 0;
-  }
-
-  // Check each argument type
-  for (size_t i = 0; i < call->argument_count; i++) {
-    Type *arg_type = type_checker_infer_type(checker, call->arguments[i]);
-    if (!arg_type) {
-      type_checker_set_error(
-          checker, "Cannot infer type for argument %zu in call to '%s'", i + 1,
-          call->function_name);
-      return 0;
-    }
-
-    Type *param_type = func_symbol->data.function.parameter_types[i];
-    int is_null_pointer_arg =
-        (param_type && param_type->kind == TYPE_POINTER &&
-         type_checker_is_null_pointer_constant(call->arguments[i]));
-    // Allow implicit string -> cstring coercion on extern calls.
-    int is_string_to_cstring = (func_symbol->is_extern && param_type &&
-                                param_type->name &&
-                                strcmp(param_type->name, "cstring") == 0 &&
-                                arg_type && arg_type->kind == TYPE_STRING);
-    if (!is_null_pointer_arg && !is_string_to_cstring &&
-        !type_checker_is_assignable(checker, param_type, arg_type)) {
-      type_checker_set_error(
-          checker,
-          "Argument %zu in call to '%s': cannot convert from '%s' to '%s'",
-          i + 1, call->function_name,
-          arg_type->name ? arg_type->name : "unknown",
-          param_type->name ? param_type->name : "unknown");
-      return 0;
-    }
-  }
-
-  return 1;
-}
-
-int type_checker_validate_assignment(TypeChecker *checker, Type *dest_type,
-                                     ASTNode *src_expr) {
-  if (!checker || !dest_type || !src_expr)
-    return 0;
-
-  Type *src_type = type_checker_infer_type(checker, src_expr);
-  if (!src_type) {
-    if (!checker->has_error) {
-      type_checker_set_error(checker, "Cannot infer type of assignment value");
-    }
-    return 0;
-  }
-
-  if (dest_type->kind == TYPE_POINTER &&
-      type_checker_is_null_pointer_constant(src_expr)) {
-    return 1;
-  }
-
-  if (!type_checker_is_assignable(checker, dest_type, src_type)) {
-    type_checker_set_error(
-        checker, "Cannot assign value of type '%s' to variable of type '%s'",
-        src_type->name ? src_type->name : "unknown",
-        dest_type->name ? dest_type->name : "unknown");
-    return 0;
-  }
-
-  return 1;
 }
 
 void type_checker_set_error(TypeChecker *checker, const char *format, ...) {
@@ -3252,7 +3116,13 @@ static int type_checker_check_match_statement(TypeChecker *checker,
           free(covered);
           return 0;
         }
-        symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK);
+        if (!symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK)) {
+          type_checker_set_error_at_location(
+              checker, statement->location,
+              "Out of memory while entering match binding scope");
+          free(covered);
+          return 0;
+        }
         Symbol *binding =
             symbol_create(arm->binding_name, SYMBOL_VARIABLE, payload);
         if (binding) {
@@ -3392,7 +3262,12 @@ static Type *type_checker_check_match_expression(TypeChecker *checker,
 
     int has_binding_scope = (payload && arm->binding_name);
     if (has_binding_scope) {
-      symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK);
+      if (!symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK)) {
+        type_checker_set_error_at_location(
+            checker, expression->location,
+            "Out of memory while entering match binding scope");
+        return NULL;
+      }
       Symbol *binding =
           symbol_create(arm->binding_name, SYMBOL_VARIABLE, payload);
       if (binding) {
@@ -4023,7 +3898,12 @@ int type_checker_process_declaration(TypeChecker *checker,
     checker->current_function_decl = declaration;
 
     // Enter a new scope for the function body
-    symbol_table_enter_scope(checker->symbol_table, SCOPE_FUNCTION);
+    if (!symbol_table_enter_scope(checker->symbol_table, SCOPE_FUNCTION)) {
+      type_checker_set_error_at_location(
+          checker, declaration->location,
+          "Out of memory while entering function scope");
+      return 0;
+    }
     type_checker_init_tracker_reset(checker);
     if (!type_checker_init_tracker_enter_scope(checker)) {
       type_checker_set_error_at_location(
@@ -4489,40 +4369,6 @@ void type_checker_report_duplicate_declaration(TypeChecker *checker,
   }
 }
 
-void type_checker_report_scope_violation(TypeChecker *checker,
-                                         SourceLocation location,
-                                         const char *symbol_name,
-                                         const char *violation_type) {
-  if (!checker || !symbol_name || !violation_type)
-    return;
-
-  char error_msg[512];
-  snprintf(error_msg, sizeof(error_msg), "Scope violation: %s '%s'",
-           violation_type, symbol_name);
-
-  checker->has_error = 1;
-  free(checker->error_message);
-  checker->error_message = strdup(error_msg);
-
-  if (checker->error_reporter) {
-    char suggestion[256];
-    if (strcmp(violation_type,
-               "cannot access local variable from outer scope") == 0) {
-      snprintf(suggestion, sizeof(suggestion),
-               "declare '%s' in the current scope or pass it as a parameter",
-               symbol_name);
-    } else if (strcmp(violation_type, "cannot redeclare parameter") == 0) {
-      snprintf(suggestion, sizeof(suggestion), "use a different variable name");
-    } else {
-      snprintf(suggestion, sizeof(suggestion), "check the scope rules for '%s'",
-               symbol_name);
-    }
-    SourceSpan span = source_span_from_location(location, strlen(symbol_name));
-    error_reporter_add_error_with_span_and_suggestion(
-        checker->error_reporter, ERROR_SCOPE, span, error_msg, suggestion);
-  }
-}
-
 // Validation functions for semantic analysis
 
 // Statement and expression validation functions
@@ -4609,7 +4455,12 @@ static int type_checker_check_for_statement(TypeChecker *checker,
     return 0;
   }
 
-  symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK);
+  if (!symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK)) {
+    type_checker_set_error_at_location(
+        checker, statement->location,
+        "Out of memory while entering for-loop scope");
+    return 0;
+  }
   if (!type_checker_init_tracker_enter_scope(checker)) {
     type_checker_set_error_at_location(
         checker, statement->location,
@@ -5134,7 +4985,12 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     Program *block = (Program *)statement->data;
     if (block) {
       // Enter a new nested scope
-      symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK);
+      if (!symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK)) {
+        type_checker_set_error_at_location(
+            checker, statement->location,
+            "Out of memory while entering block scope");
+        return 0;
+      }
       if (!type_checker_init_tracker_enter_scope(checker)) {
         type_checker_set_error_at_location(
             checker, statement->location,

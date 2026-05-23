@@ -905,7 +905,8 @@ static int pe_append_imports_from_dlls(LinkResolution *resolution,
       }
 
       canonical_name =
-          pe_is_imp_symbol_name(symbol->name) ? symbol->name + 6u : symbol->name;
+          pe_is_imp_symbol_name(symbol->name) ? symbol->name + PE_IMP_PREFIX_LEN
+                                              : symbol->name;
       if (pe_find_import_symbol(*libraries_in_out, *library_count_in_out,
                                 canonical_name) ||
           pe_import_library_has_symbol(library, canonical_name)) {
@@ -1085,7 +1086,7 @@ static int pe_build_import_plan(LinkResolution *resolution,
     }
 
     needs_iat_symbol = pe_is_imp_symbol_name(symbol->name);
-    lookup_name = needs_iat_symbol ? symbol->name + 6u : symbol->name;
+    lookup_name = needs_iat_symbol ? symbol->name + PE_IMP_PREFIX_LEN : symbol->name;
     library_symbol = pe_find_import_symbol(libraries, library_count, lookup_name);
     if (!library_symbol) {
       continue;

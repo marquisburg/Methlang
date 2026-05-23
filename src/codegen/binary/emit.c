@@ -4220,6 +4220,17 @@ int code_generator_binary_emit_instruction(
  * one page at a time. We do an unrolled probe (no helper call): for each 4 KiB
  * step, `sub rsp, 4096` then write to [rsp], then handle the remainder. RAX is
  * scratch here (prologue runs before any value is live in it). */
+static int binary_emit_stack_probe_touch(BinaryCodeBuffer *code) {
+  if (!code) {
+    return 0;
+  }
+  /* test byte ptr [rsp], 0 */
+  return binary_code_buffer_append_u8(code, 0xF6) &&
+         binary_code_buffer_append_u8(code, 0x04) &&
+         binary_code_buffer_append_u8(code, 0x24) &&
+         binary_code_buffer_append_u8(code, 0x00);
+}
+
 int binary_emit_frame_allocation(BinaryCodeBuffer *code, int frame_size) {
   if (frame_size <= 0) {
     return 1;
@@ -4235,7 +4246,7 @@ int binary_emit_frame_allocation(BinaryCodeBuffer *code, int frame_size) {
       return 0;
     }
     /* Touch the freshly-stepped page so the guard page is hit in order. */
-    if (!binary_emit_mov_mem_reg(code, BINARY_GP_RSP, 0, BINARY_GP_RAX)) {
+    if (!binary_emit_stack_probe_touch(code)) {
       return 0;
     }
     remaining -= BINARY_STACK_PAGE_SIZE;
@@ -4244,7 +4255,7 @@ int binary_emit_frame_allocation(BinaryCodeBuffer *code, int frame_size) {
   if (!binary_emit_sub_rsp_imm32(code, (uint32_t)remaining)) {
     return 0;
   }
-  return binary_emit_mov_mem_reg(code, BINARY_GP_RSP, 0, BINARY_GP_RAX);
+  return binary_emit_stack_probe_touch(code);
 }
 
 int code_generator_binary_emit_prologue(CodeGenerator *generator,

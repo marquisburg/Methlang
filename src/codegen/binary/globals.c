@@ -130,7 +130,7 @@ int binary_global_const_table_add(const char *name, long long int_value,
     g_binary_global_consts.capacity = new_capacity;
   }
 
-  char *name_copy = binary_codegen_strdup(name);
+  char *name_copy = mettle_strdup(name);
   if (!name_copy) {
     return 0;
   }

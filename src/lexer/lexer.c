@@ -461,6 +461,12 @@ static Token lexer_lex_number(Lexer *lexer) {
   size_t length = lexer->position - start;
   token.type = TOKEN_NUMBER;
   token.value = malloc(length + 1);
+  if (!token.value) {
+    token.type = TOKEN_ERROR;
+    token.value = strdup("Memory allocation failed");
+    lexer_set_error(lexer, token.value);
+    return token;
+  }
   strncpy(token.value, &lexer->source[start], length);
   token.value[length] = '\0';
   token_set_lexeme(&token, &lexer->source[start], length);
@@ -1150,63 +1156,6 @@ Token token_clone(const Token *token) {
   return clone;
 }
 
-Token *lexer_tokenize(Lexer *lexer, size_t *token_count) {
-  if (!lexer || !token_count) {
-    return NULL;
-  }
-
-  // Reset lexer position to start
-  lexer->position = 0;
-  lexer->line = 1;
-  lexer->column = 1;
-  lexer->continuation_depth = 0;
-
-  // First pass: count tokens
-  size_t count = 0;
-  size_t saved_position = lexer->position;
-  size_t saved_line = lexer->line;
-  size_t saved_column = lexer->column;
-  size_t saved_continuation_depth = lexer->continuation_depth;
-
-  Token token;
-  do {
-    token = lexer_next_token(lexer);
-    count++;
-    token_destroy(&token);
-  } while (token.type != TOKEN_EOF);
-
-  // Reset lexer position
-  lexer->position = saved_position;
-  lexer->line = saved_line;
-  lexer->column = saved_column;
-  lexer->continuation_depth = saved_continuation_depth;
-
-  // Allocate token array
-  Token *tokens = malloc(count * sizeof(Token));
-  if (!tokens) {
-    *token_count = 0;
-    return NULL;
-  }
-
-  // Second pass: collect tokens
-  for (size_t i = 0; i < count; i++) {
-    tokens[i] = lexer_next_token(lexer);
-  }
-
-  *token_count = count;
-  return tokens;
-}
-
-void tokens_destroy(Token *tokens, size_t count) {
-  if (!tokens)
-    return;
-
-  for (size_t i = 0; i < count; i++) {
-    token_destroy(&tokens[i]);
-  }
-  free(tokens);
-}
-
 // Error reporting functions
 void lexer_set_error(Lexer *lexer, const char *message) {
   if (!lexer)
@@ -1231,20 +1180,4 @@ void lexer_set_error(Lexer *lexer, const char *message) {
   }
 
   lexer->has_error = (message != NULL);
-}
-
-const char *lexer_get_error(Lexer *lexer) {
-  return lexer ? lexer->error_message : NULL;
-}
-
-int lexer_has_error(Lexer *lexer) { return lexer ? lexer->has_error : 0; }
-
-void lexer_clear_error(Lexer *lexer) {
-  if (lexer) {
-    if (lexer->error_message) {
-      free(lexer->error_message);
-      lexer->error_message = NULL;
-    }
-    lexer->has_error = 0;
-  }
 }

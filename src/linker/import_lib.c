@@ -5,6 +5,7 @@
 #include "linker/coff_reader.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -359,8 +360,16 @@ int import_library_read(const char *path, ImportLibrary **library_out,
       goto cleanup;
     }
 
+    if (offset > SIZE_MAX - IMPORT_ARCHIVE_MEMBER_HEADER_SIZE) {
+      mettle_set_error(error_message_out,
+                       "Import library '%s' archive offset overflows",
+                       path);
+      goto cleanup;
+    }
+
     member_data_offset = offset + IMPORT_ARCHIVE_MEMBER_HEADER_SIZE;
-    if (member_data_offset + member_size > file_size) {
+    if (member_data_offset > file_size ||
+        member_size > file_size - member_data_offset) {
       mettle_set_error(error_message_out,
                                "Import library '%s' has a truncated archive member",
                                path);
@@ -385,8 +394,21 @@ int import_library_read(const char *path, ImportLibrary **library_out,
       }
     }
 
+    if (member_data_offset > SIZE_MAX - member_size) {
+      mettle_set_error(error_message_out,
+                       "Import library '%s' archive member size overflows",
+                       path);
+      goto cleanup;
+    }
+
     offset = member_data_offset + member_size;
-    if ((offset & 1u) != 0u) {
+    if ((member_size & 1u) != 0u) {
+      if (offset == SIZE_MAX) {
+        mettle_set_error(error_message_out,
+                         "Import library '%s' archive offset overflows",
+                         path);
+        goto cleanup;
+      }
       offset++;
     }
   }

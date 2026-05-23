@@ -1094,28 +1094,6 @@ void code_generator_load_string_literal_as_cstring(CodeGenerator *generator,
   }
 }
 
-int code_generator_get_operator_precedence(const char *op) {
-  if (!op)
-    return 0;
-
-  // Higher numbers = higher precedence
-  if (strcmp(op, "*") == 0 || strcmp(op, "/") == 0 || strcmp(op, "%") == 0) {
-    return 6;
-  } else if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0) {
-    return 5;
-  } else if (strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
-             strcmp(op, ">") == 0 || strcmp(op, ">=") == 0) {
-    return 4;
-  } else if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
-    return 3;
-  } else if (strcmp(op, "&&") == 0) {
-    return 2;
-  } else if (strcmp(op, "||") == 0) {
-    return 1;
-  }
-  return 0;
-}
-
 const char *code_generator_get_arithmetic_instruction(const char *op,
                                                       int is_float) {
   if (!op)

@@ -17,17 +17,21 @@ static MettleCompilerContext g_default_compiler_context = {0};
 #if defined(_WIN32) || defined(_WIN64)
 static DWORD g_compiler_context_tls_index = TLS_OUT_OF_INDEXES;
 
+static VOID WINAPI mettle_compiler_context_tls_free(PVOID ptr) {
+  free(ptr);
+}
+
 static MettleCompilerContext *mettle_compiler_ctx_storage(void) {
   MettleCompilerContext *ctx = NULL;
 
   if (g_compiler_context_tls_index == TLS_OUT_OF_INDEXES) {
-    g_compiler_context_tls_index = TlsAlloc();
-    if (g_compiler_context_tls_index == TLS_OUT_OF_INDEXES) {
+    g_compiler_context_tls_index = FlsAlloc(mettle_compiler_context_tls_free);
+    if (g_compiler_context_tls_index == FLS_OUT_OF_INDEXES) {
       return &g_default_compiler_context;
     }
   }
 
-  ctx = (MettleCompilerContext *)TlsGetValue(g_compiler_context_tls_index);
+  ctx = (MettleCompilerContext *)FlsGetValue(g_compiler_context_tls_index);
   if (!ctx) {
     ctx = (MettleCompilerContext *)calloc(1, sizeof(MettleCompilerContext));
     if (!ctx) {
@@ -35,7 +39,7 @@ static MettleCompilerContext *mettle_compiler_ctx_storage(void) {
     }
     ctx->phase = METTLE_COMPILER_PHASE_UNKNOWN;
     ctx->ir_instruction_index = IR_INSTRUCTION_INDEX_NONE;
-    TlsSetValue(g_compiler_context_tls_index, ctx);
+    FlsSetValue(g_compiler_context_tls_index, ctx);
   }
   return ctx;
 }

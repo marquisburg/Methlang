@@ -11,5 +11,6 @@ char *mettle_strdup(const char *text);
 size_t mettle_fnv1a_hash(const char *str);
 void mettle_set_error(char **dest, const char *fmt, ...);
 void mettle_free_string(char *str);
+void mettle_free_string_array(char **values, size_t count);
 
 #endif

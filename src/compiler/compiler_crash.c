@@ -22,6 +22,9 @@
 
 static int g_compiler_crash_installed = 0;
 static int g_compiler_in_ice_handler = 0;
+#if defined(_WIN32) || defined(_WIN64)
+static int g_sym_initialized = 0;
+#endif
 
 static void mettle_compiler_write_backtrace(FILE *output) {
   if (!output) {
@@ -37,7 +40,10 @@ static void mettle_compiler_write_backtrace(FILE *output) {
   char symbol_buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
   SYMBOL_INFO *symbol = (SYMBOL_INFO *)symbol_buffer;
 
-  SymInitialize(process, NULL, TRUE);
+  if (!g_sym_initialized) {
+    SymInitialize(process, NULL, TRUE);
+    g_sym_initialized = 1;
+  }
   frame_count = CaptureStackBackTrace(0, MAX_BACKTRACE_FRAMES, frames, NULL);
   symbol->MaxNameLen = MAX_SYM_NAME;
   symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
@@ -51,7 +57,6 @@ static void mettle_compiler_write_backtrace(FILE *output) {
       fprintf(output, "  %p\n", frames[i]);
     }
   }
-  SymCleanup(process);
 #else
   void *frames[MAX_BACKTRACE_FRAMES];
   int frame_count = backtrace(frames, MAX_BACKTRACE_FRAMES);
@@ -103,7 +108,6 @@ static LONG WINAPI mettle_compiler_unhandled_exception_filter(
       mettle_crash_exception_name(info->ExceptionRecord->ExceptionCode),
       detail);
   ExitProcess(3);
-  return EXCEPTION_EXECUTE_HANDLER;
 }
 #else
 static void mettle_compiler_signal_handler(int signo, siginfo_t *info,

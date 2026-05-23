@@ -1024,7 +1024,12 @@ void code_generator_generate_function(CodeGenerator *generator,
   }
 
   // Enter a new scope for the function
-  symbol_table_enter_scope(generator->symbol_table, SCOPE_FUNCTION);
+  if (!symbol_table_enter_scope(generator->symbol_table, SCOPE_FUNCTION)) {
+    code_generator_set_error(generator,
+                             "Out of memory while entering function scope");
+    free(runtime_end_label);
+    return;
+  }
 
   // Add debug symbol for function
   if (generator->generate_debug_info) {

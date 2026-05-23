@@ -4,6 +4,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -198,6 +199,12 @@ static int coff_reader_parse_string_table(CoffObject *object,
     return 0;
   }
 
+  if (object->symbol_count > SIZE_MAX / COFF_SYMBOL_SIZE) {
+    mettle_set_error(error_message_out,
+                     "COFF symbol count overflows string table offset");
+    return 0;
+  }
+
   string_table_offset =
       (size_t)object->pointer_to_symbol_table +
       ((size_t)object->symbol_count * COFF_SYMBOL_SIZE);
@@ -370,6 +377,12 @@ static int coff_reader_parse_symbols(CoffObject *object,
   }
   if (object->symbol_count == 0u) {
     return 1;
+  }
+
+  if (object->symbol_count > SIZE_MAX / COFF_SYMBOL_SIZE) {
+    mettle_set_error(error_message_out,
+                     "COFF symbol count overflows symbol table size");
+    return 0;
   }
 
   symbol_table_bytes = (size_t)object->symbol_count * COFF_SYMBOL_SIZE;

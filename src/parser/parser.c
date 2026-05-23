@@ -1272,7 +1272,13 @@ static char *parser_parse_type_annotation(Parser *parser) {
 
         if (args_len + 1 >= args_cap) {
           args_cap *= 2;
-          args_buf = realloc(args_buf, args_cap);
+          char *new_args_buf = realloc(args_buf, args_cap);
+          if (!new_args_buf) {
+            free(args_buf);
+            free(type_name);
+            return NULL;
+          }
+          args_buf = new_args_buf;
         }
         args_buf[args_len++] = ',';
         args_buf[args_len] = '\0';
@@ -1291,7 +1297,14 @@ static char *parser_parse_type_annotation(Parser *parser) {
       size_t arg_len = strlen(arg);
       while (args_len + arg_len + 1 >= args_cap) {
         args_cap *= 2;
-        args_buf = realloc(args_buf, args_cap);
+        char *new_args_buf = realloc(args_buf, args_cap);
+        if (!new_args_buf) {
+          free(arg);
+          free(args_buf);
+          free(type_name);
+          return NULL;
+        }
+        args_buf = new_args_buf;
       }
       memcpy(args_buf + args_len, arg, arg_len);
       args_len += arg_len;
@@ -1489,9 +1502,10 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
   SourceLocation location = parser_current_location(parser);
 
   if (parser_is_identifier_like(parser->current_token.type)) {
-    char *name = strdup(parser->current_token.value);
+    ASTNode *result =
+        ast_create_identifier(parser->current_token.value, location);
     parser_advance(parser);
-    return ast_create_identifier(name, location);
+    return result;
   }
 
   switch (parser->current_token.type) {
@@ -1520,9 +1534,10 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
     return result;
   }
   case TOKEN_STRING: {
-    char *value = strdup(parser->current_token.value);
+    ASTNode *result =
+        ast_create_string_literal(parser->current_token.value, location);
     parser_advance(parser);
-    return ast_create_string_literal(value, location);
+    return result;
   }
   case TOKEN_IMPORT_STR: {
     parser_advance(parser); // consume 'import_str'
@@ -1707,12 +1722,11 @@ ASTNode *parser_parse_unary_expression(Parser *parser) {
   }
 
   if (parser_is_unary_operator(parser->current_token.type)) {
-    char *operator = strdup(parser->current_token.value);
+    const char *operator = parser->current_token.value;
     parser_advance(parser);
 
     ASTNode *operand = parser_parse_unary_expression(parser);
     if (!operand) {
-      free(operator);
       return NULL;
     }
 

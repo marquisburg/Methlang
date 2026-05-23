@@ -126,7 +126,7 @@ typedef struct SymbolTable {
 // Function declarations
 SymbolTable *symbol_table_create(void);
 void symbol_table_destroy(SymbolTable *table);
-void symbol_table_enter_scope(SymbolTable *table, ScopeType type);
+int symbol_table_enter_scope(SymbolTable *table, ScopeType type);
 void symbol_table_exit_scope(SymbolTable *table);
 int symbol_table_declare(SymbolTable *table, Symbol *symbol);
 Symbol *symbol_table_lookup(SymbolTable *table, const char *name);
@@ -158,6 +158,5 @@ Type *type_create_struct(const char *name, char **field_names,
                          Type **field_types, size_t field_count);
 Type *type_get_field_type(Type *struct_type, const char *field_name);
 size_t type_get_field_offset(Type *struct_type, const char *field_name);
-int type_has_field(Type *struct_type, const char *field_name);
 
 #endif // SYMBOL_TABLE_H

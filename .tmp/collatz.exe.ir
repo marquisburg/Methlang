@@ -1,43 +1,46 @@
 function main {
      0: nop
      1: local @x : int64
-     2: assign @x <- 7
+     2: @x <- 7
      3: local @count : int64
-     4: assign @count <- 0
+     4: @count <- 0
      5: label ir_while_1
-     6: binary %t0 = @x > 1
+     6: %t0 = @x > 1
      7: branch_zero %t0 -> ir_while_end_2
-     8: binary %t1 = @x & 1
-     9: binary %t2 = %t1 == 0
+     8: %t1 = @x & 1
+     9: %t2 = %t1 == 0
     10: branch_zero %t2 -> ir_if_next_4
-    11: binary @x = @x >> 2
+    11: @x = @x >> 1
     12: nop
-    13: jump ir_if_end_3
-    14: label ir_if_next_4
-    15: binary %t4 = 3 * @x
-    16: binary @x = %t4 + 1
-    17: nop
-    18: label ir_if_end_3
-    19: binary @count = @count + 1
-    20: nop
-    21: jump ir_while_1
-    22: label ir_while_end_2
-    23: binary %t7 = @count == 16
-    24: branch_zero %t7 -> ir_errdefer_end_10
-    25: nop
-    26: nop
-    27: nop
+    13: @count = @count + 1
+    14: jump ir_while_1
+    15: label ir_if_next_4
+    16: %t4 = 3 * @x
+    17: @x = %t4 + 1
+    18: nop
+    19: @x = @x >> 1
+    20: @count = @count + 2
+    21: nop
+    22: nop
+    23: nop
+    24: jump ir_while_1
+    25: label ir_while_end_2
+    26: %t7 = @count == 16
+    27: branch_zero %t7 -> ir_errdefer_end_10
     28: nop
     29: nop
-    30: return 0
+    30: nop
     31: nop
     32: nop
-    33: nop
+    33: return 0
     34: nop
     35: nop
     36: nop
     37: nop
-    38: label ir_errdefer_end_10
-    39: return 1
+    38: nop
+    39: nop
+    40: nop
+    41: label ir_errdefer_end_10
+    42: return 1
 }
 

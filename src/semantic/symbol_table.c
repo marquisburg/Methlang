@@ -66,21 +66,6 @@ static int scope_name_index_ensure(Scope *scope) {
   return 1;
 }
 
-/* Records that scope->symbols[symbol_index] now exists in the index. The
- * symbol must already be appended to the array. */
-static void scope_name_index_insert(Scope *scope, size_t symbol_index) {
-  if (!scope->name_index || scope->name_index_bucket_count == 0) {
-    return;
-  }
-  size_t mask = scope->name_index_bucket_count - 1;
-  const char *name = scope->symbols[symbol_index]->name;
-  size_t pos = mettle_fnv1a_hash(name) & mask;
-  while (scope->name_index[pos] != 0) {
-    pos = (pos + 1) & mask;
-  }
-  scope->name_index[pos] = symbol_index + 1;
-}
-
 /* Called immediately after a symbol is appended at `new_index`. Keeps the
  * scope's name index consistent: ensure() rebuilds and reindexes every
  * symbol (including this one) when the scope first crosses the size threshold
@@ -315,13 +300,13 @@ void symbol_table_destroy(SymbolTable *table) {
   free(table);
 }
 
-void symbol_table_enter_scope(SymbolTable *table, ScopeType type) {
+int symbol_table_enter_scope(SymbolTable *table, ScopeType type) {
   if (!table)
-    return;
+    return 0;
 
   Scope *new_scope = malloc(sizeof(Scope));
   if (!new_scope)
-    return;
+    return 0;
 
   new_scope->type = type;
   new_scope->parent = table->current_scope;
@@ -332,6 +317,7 @@ void symbol_table_enter_scope(SymbolTable *table, ScopeType type) {
   new_scope->name_index_bucket_count = 0;
 
   table->current_scope = new_scope;
+  return 1;
 }
 
 void symbol_table_exit_scope(SymbolTable *table) {
@@ -923,22 +909,6 @@ size_t type_get_field_offset(Type *struct_type, const char *field_name) {
   for (size_t i = 0; i < struct_type->field_count; i++) {
     if (symbol_table_names_equal(struct_type->field_names[i], field_name)) {
       return struct_type->field_offsets[i];
-    }
-  }
-
-  return 0; // Field not found
-}
-
-int type_has_field(Type *struct_type, const char *field_name) {
-  if (!struct_type ||
-      (struct_type->kind != TYPE_STRUCT && struct_type->kind != TYPE_STRING) ||
-      !field_name) {
-    return 0;
-  }
-
-  for (size_t i = 0; i < struct_type->field_count; i++) {
-    if (symbol_table_names_equal(struct_type->field_names[i], field_name)) {
-      return 1; // Field found
     }
   }
 

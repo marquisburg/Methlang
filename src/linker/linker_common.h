@@ -19,6 +19,11 @@ static inline uint32_t linker_read_u32(const unsigned char *data) {
          ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
 }
 
+static inline uint64_t linker_read_u64(const unsigned char *data) {
+  return (uint64_t)linker_read_u32(data) |
+         ((uint64_t)linker_read_u32(data + 4) << 32);
+}
+
 static inline void linker_write_u32(unsigned char *data, uint32_t value) {
   data[0] = (unsigned char)(value & 0xFF);
   data[1] = (unsigned char)((value >> 8) & 0xFF);

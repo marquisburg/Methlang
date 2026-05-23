@@ -1165,6 +1165,13 @@ ASTNode *ast_create_function_declaration(const char *name, char **param_names,
   if (param_count > 0) {
     func_decl->parameter_names = malloc(param_count * sizeof(char *));
     func_decl->parameter_types = malloc(param_count * sizeof(char *));
+    if (!func_decl->parameter_names || !func_decl->parameter_types) {
+      free(func_decl->parameter_names);
+      free(func_decl->parameter_types);
+      free(func_decl);
+      free(node);
+      return NULL;
+    }
 
     for (size_t i = 0; i < param_count; i++) {
       func_decl->parameter_names[i] = ast_intern_string(param_names[i]);
@@ -1257,7 +1264,7 @@ ASTNode *ast_create_enum_declaration(const char *name, EnumVariant *variants,
     enum_decl->variants = malloc(variant_count * sizeof(EnumVariant));
     if (!enum_decl->variants) {
       if (enum_decl->name)
-        free(enum_decl->name);
+        ast_free_string(enum_decl->name);
       free(enum_decl);
       free(node);
       return NULL;

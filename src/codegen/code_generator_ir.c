@@ -4500,7 +4500,11 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
         generator->debug_info->source_filename);
   }
 
-  symbol_table_enter_scope(generator->symbol_table, SCOPE_FUNCTION);
+  if (!symbol_table_enter_scope(generator->symbol_table, SCOPE_FUNCTION)) {
+    code_generator_set_error(generator,
+                             "Out of memory while entering function scope");
+    return 0;
+  }
 
   if (generator->generate_debug_info) {
     code_generator_add_debug_symbol(

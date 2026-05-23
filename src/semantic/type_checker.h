@@ -64,13 +64,10 @@ int type_checker_are_compatible(Type *type1, Type *type2);
 
 // Built-in type system functions
 void type_checker_init_builtin_types(TypeChecker *checker);
-Type *type_checker_get_builtin_type(TypeChecker *checker, TypeKind kind);
 Type *type_checker_get_type_by_name(TypeChecker *checker, const char *name);
 int type_checker_is_integer_type(Type *type);
 int type_checker_is_floating_type(Type *type);
 int type_checker_is_numeric_type(Type *type);
-size_t type_checker_get_type_size(Type *type);
-size_t type_checker_get_type_alignment(Type *type);
 
 // Type inference and promotion functions
 Type *type_checker_promote_types(TypeChecker *checker, Type *left, Type *right,
@@ -78,19 +75,12 @@ Type *type_checker_promote_types(TypeChecker *checker, Type *left, Type *right,
 Type *type_checker_get_larger_type(TypeChecker *checker, Type *type1,
                                    Type *type2);
 int type_checker_get_type_rank(Type *type);
-Type *type_checker_infer_variable_type(TypeChecker *checker,
-                                       ASTNode *initializer);
 
 // Type compatibility and conversion functions
 int type_checker_is_assignable(TypeChecker *checker, Type *dest_type,
                                Type *src_type);
 int type_checker_is_implicitly_convertible(Type *from_type, Type *to_type);
 int type_checker_is_cast_valid(Type *from, Type *to);
-int type_checker_validate_function_call(TypeChecker *checker,
-                                        CallExpression *call,
-                                        Symbol *func_symbol);
-int type_checker_validate_assignment(TypeChecker *checker, Type *dest_type,
-                                     ASTNode *src_expr);
 void type_checker_set_error(TypeChecker *checker, const char *format, ...);
 void type_checker_set_error_at_location(TypeChecker *checker,
                                         SourceLocation location,
@@ -106,10 +96,6 @@ void type_checker_report_undefined_symbol(TypeChecker *checker,
 void type_checker_report_duplicate_declaration(TypeChecker *checker,
                                                SourceLocation location,
                                                const char *symbol_name);
-void type_checker_report_scope_violation(TypeChecker *checker,
-                                         SourceLocation location,
-                                         const char *symbol_name,
-                                         const char *violation_type);
 
 // Struct type processing functions
 int type_checker_process_struct_declaration(TypeChecker *checker,

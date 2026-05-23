@@ -1,0 +1,362 @@
+function cstr {
+     0: label ir_entry_0
+     1: %t0 = @s + 0
+     2: %t1 <- *%t0 [8]
+     3: %t2 <- %t1
+     4: branch_zero %t2 -> ir_errdefer_ok_1
+     5: jump ir_errdefer_end_2
+     6: label ir_errdefer_ok_1
+     7: label ir_errdefer_end_2
+     8: return %t1
+}
+
+function print {
+     0: label ir_entry_3
+     1: %t4 = get_stdout()
+     2: %t3 = fputs(@msg, %t4)
+     3: %t5 <- 0
+     4: branch_zero %t5 -> ir_errdefer_ok_4
+     5: jump ir_errdefer_end_5
+     6: label ir_errdefer_ok_4
+     7: label ir_errdefer_end_5
+     8: return _
+}
+
+function println {
+     0: label ir_entry_6
+     1: %t6 = puts(@msg)
+     2: %t7 <- 0
+     3: branch_zero %t7 -> ir_errdefer_ok_7
+     4: jump ir_errdefer_end_8
+     5: label ir_errdefer_ok_7
+     6: label ir_errdefer_end_8
+     7: return _
+}
+
+function newline {
+     0: label ir_entry_9
+     1: %t8 = putchar(10)
+     2: %t9 <- 0
+     3: branch_zero %t9 -> ir_errdefer_ok_10
+     4: jump ir_errdefer_end_11
+     5: label ir_errdefer_ok_10
+     6: label ir_errdefer_end_11
+     7: return _
+}
+
+function print_int {
+     0: label ir_entry_12
+     1: local @buf : uint8[22]
+     2: local @pos : int32
+     3: @pos <- 21
+     4: local @neg : int32
+     5: @neg <- 0
+     6: %t10 <- &@buf
+     7: %t11 = 21 < 22
+     8: branch_zero %t11 -> ir_trap_bounds_13
+     9: jump ir_in_bounds_14
+    10: label ir_trap_bounds_13
+    11: _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    12: label ir_in_bounds_14
+    13: %t12 = 21 * 1
+    14: %t13 = %t10 + %t12
+    15: *%t13 <- 0 [1]
+    16: %t14 = @n < 0
+    17: branch_zero %t14 -> ir_if_next_16
+    18: @neg <- 1
+    19: %t15 = 0 - @n
+    20: @n <- %t15
+    21: jump ir_if_end_15
+    22: label ir_if_next_16
+    23: label ir_if_end_15
+    24: %t16 = @n == 0
+    25: branch_zero %t16 -> ir_if_next_18
+    26: %t17 <- &@buf
+    27: %t18 = 0 < 22
+    28: branch_zero %t18 -> ir_trap_bounds_19
+    29: jump ir_in_bounds_20
+    30: label ir_trap_bounds_19
+    31: _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    32: label ir_in_bounds_20
+    33: %t19 = 0 * 1
+    34: %t20 = %t17 + %t19
+    35: *%t20 <- 48 [1]
+    36: %t21 <- &@buf
+    37: %t22 = 1 < 22
+    38: branch_zero %t22 -> ir_trap_bounds_21
+    39: jump ir_in_bounds_22
+    40: label ir_trap_bounds_21
+    41: _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    42: label ir_in_bounds_22
+    43: %t23 = 1 * 1
+    44: %t24 = %t21 + %t23
+    45: *%t24 <- 0 [1]
+    46: %t26 <- &@buf
+    47: %t27 = 0 < 22
+    48: branch_zero %t27 -> ir_trap_bounds_23
+    49: jump ir_in_bounds_24
+    50: label ir_trap_bounds_23
+    51: _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    52: label ir_in_bounds_24
+    53: %t28 = 0 * 1
+    54: %t29 = %t26 + %t28
+    55: %t30 = get_stdout()
+    56: %t25 = fputs(%t29, %t30)
+    57: %t31 <- 0
+    58: branch_zero %t31 -> ir_errdefer_ok_25
+    59: jump ir_errdefer_end_26
+    60: label ir_errdefer_ok_25
+    61: label ir_errdefer_end_26
+    62: return _
+    63: jump ir_if_end_17
+    64: label ir_if_next_18
+    65: label ir_if_end_17
+    66: label ir_while_27
+    67: %t32 = @n > 0
+    68: branch_zero %t32 -> ir_while_end_28
+    69: %t33 = @pos - 1
+    70: @pos <- %t33
+    71: %t34 = 48 + @n
+    72: %t35 = @n / 10
+    73: %t36 = %t35 * 10
+    74: %t37 = %t34 - %t36
+    75: %t38 <- &@buf
+    76: %t39 = @pos < 22
+    77: branch_zero %t39 -> ir_trap_bounds_29
+    78: jump ir_in_bounds_30
+    79: label ir_trap_bounds_29
+    80: _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    81: label ir_in_bounds_30
+    82: %t40 = @pos * 1
+    83: %t41 = %t38 + %t40
+    84: *%t41 <- %t37 [1]
+    85: %t42 = @n / 10
+    86: @n <- %t42
+    87: jump ir_while_27
+    88: label ir_while_end_28
+    89: %t43 = @neg != 0
+    90: branch_zero %t43 -> ir_if_next_32
+    91: %t44 = @pos - 1
+    92: @pos <- %t44
+    93: %t45 <- &@buf
+    94: %t46 = @pos < 22
+    95: branch_zero %t46 -> ir_trap_bounds_33
+    96: jump ir_in_bounds_34
+    97: label ir_trap_bounds_33
+    98: _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+    99: label ir_in_bounds_34
+   100: %t47 = @pos * 1
+   101: %t48 = %t45 + %t47
+   102: *%t48 <- 45 [1]
+   103: jump ir_if_end_31
+   104: label ir_if_next_32
+   105: label ir_if_end_31
+   106: %t50 <- &@buf
+   107: %t51 = @pos < 22
+   108: branch_zero %t51 -> ir_trap_bounds_35
+   109: jump ir_in_bounds_36
+   110: label ir_trap_bounds_35
+   111: _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+   112: label ir_in_bounds_36
+   113: %t52 = @pos * 1
+   114: %t53 = %t50 + %t52
+   115: %t54 = get_stdout()
+   116: %t49 = fputs(%t53, %t54)
+   117: %t55 <- 0
+   118: branch_zero %t55 -> ir_errdefer_ok_37
+   119: jump ir_errdefer_end_38
+   120: label ir_errdefer_ok_37
+   121: label ir_errdefer_end_38
+   122: return _
+}
+
+function println_int {
+     0: label ir_entry_39
+     1: %t56 = print_int(@n)
+     2: %t57 = putchar(10)
+     3: %t58 <- 0
+     4: branch_zero %t58 -> ir_errdefer_ok_40
+     5: jump ir_errdefer_end_41
+     6: label ir_errdefer_ok_40
+     7: label ir_errdefer_end_41
+     8: return _
+}
+
+function get_stdin {
+     0: label ir_entry_42
+     1: %t59 = __acrt_iob_func(0)
+     2: %t60 <- %t59
+     3: branch_zero %t60 -> ir_errdefer_ok_43
+     4: jump ir_errdefer_end_44
+     5: label ir_errdefer_ok_43
+     6: label ir_errdefer_end_44
+     7: return %t59
+}
+
+function get_stdout {
+     0: label ir_entry_45
+     1: %t61 = __acrt_iob_func(1)
+     2: %t62 <- %t61
+     3: branch_zero %t62 -> ir_errdefer_ok_46
+     4: jump ir_errdefer_end_47
+     5: label ir_errdefer_ok_46
+     6: label ir_errdefer_end_47
+     7: return %t61
+}
+
+function get_stderr {
+     0: label ir_entry_48
+     1: %t63 = __acrt_iob_func(2)
+     2: %t64 <- %t63
+     3: branch_zero %t64 -> ir_errdefer_ok_49
+     4: jump ir_errdefer_end_50
+     5: label ir_errdefer_ok_49
+     6: label ir_errdefer_end_50
+     7: return %t63
+}
+
+function print_err {
+     0: label ir_entry_51
+     1: %t66 = get_stderr()
+     2: %t65 = fputs(@msg, %t66)
+     3: %t67 <- 0
+     4: branch_zero %t67 -> ir_errdefer_ok_52
+     5: jump ir_errdefer_end_53
+     6: label ir_errdefer_ok_52
+     7: label ir_errdefer_end_53
+     8: return _
+}
+
+function println_err {
+     0: label ir_entry_54
+     1: %t69 = get_stderr()
+     2: %t68 = fputs(@msg, %t69)
+     3: %t71 = cstr("
+")
+     4: %t72 = get_stderr()
+     5: %t70 = fputs(%t71, %t72)
+     6: %t73 <- 0
+     7: branch_zero %t73 -> ir_errdefer_ok_55
+     8: jump ir_errdefer_end_56
+     9: label ir_errdefer_ok_55
+    10: label ir_errdefer_end_56
+    11: return _
+}
+
+function append {
+     0: label ir_entry_57
+     1: %t74 = @dst == 0
+     2: branch_zero %t74 -> ir_cond_false_61
+     3: jump ir_cond_done_60
+     4: label ir_cond_false_61
+     5: %t75 = @src == 0
+     6: branch_zero %t75 -> ir_if_next_59
+     7: label ir_cond_done_60
+     8: %t76 <- @pos
+     9: branch_zero %t76 -> ir_errdefer_ok_62
+    10: jump ir_errdefer_end_63
+    11: label ir_errdefer_ok_62
+    12: label ir_errdefer_end_63
+    13: return @pos
+    14: jump ir_if_end_58
+    15: label ir_if_next_59
+    16: label ir_if_end_58
+    17: local @j : int32
+    18: @j <- @pos
+    19: local @k : int32
+    20: @k <- 0
+    21: label ir_while_64
+    22: %t77 = @j + 1
+    23: %t78 = %t77 < @dst_cap
+    24: branch_zero %t78 -> ir_while_end_65
+    25: local @ch : uint8
+    26: branch_zero @src -> ir_trap_null_66
+    27: jump ir_nonnull_67
+    28: label ir_trap_null_66
+    29: _ = mettle_crash_trap("Fatal error: Null pointer dereference")
+    30: label ir_nonnull_67
+    31: %t79 = @k * 1
+    32: %t80 = @src + %t79
+    33: %t81 <- *%t80 [1]
+    34: %t82 = (uint8)%t81
+    35: @ch <- %t82
+    36: %t83 = (uint8)0
+    37: %t84 = @ch == %t83
+    38: branch_zero %t84 -> ir_if_next_69
+    39: %t85 <- @j
+    40: branch_zero %t85 -> ir_errdefer_ok_70
+    41: jump ir_errdefer_end_71
+    42: label ir_errdefer_ok_70
+    43: label ir_errdefer_end_71
+    44: return @j
+    45: jump ir_if_end_68
+    46: label ir_if_next_69
+    47: label ir_if_end_68
+    48: branch_zero @dst -> ir_trap_null_72
+    49: jump ir_nonnull_73
+    50: label ir_trap_null_72
+    51: _ = mettle_crash_trap("Fatal error: Null pointer dereference")
+    52: label ir_nonnull_73
+    53: %t86 = @j * 1
+    54: %t87 = @dst + %t86
+    55: *%t87 <- @ch [1]
+    56: %t88 = @j + 1
+    57: @j <- %t88
+    58: %t89 = @k + 1
+    59: @k <- %t89
+    60: jump ir_while_64
+    61: label ir_while_end_65
+    62: %t90 <- @j
+    63: branch_zero %t90 -> ir_errdefer_ok_74
+    64: jump ir_errdefer_end_75
+    65: label ir_errdefer_ok_74
+    66: label ir_errdefer_end_75
+    67: return @j
+}
+
+function main {
+     0: label ir_entry_76
+     1: local @buf : uint8[128]
+     2: local @out : cstring
+     3: %t91 <- &@buf
+     4: %t92 = 0 < 128
+     5: branch_zero %t92 -> ir_trap_bounds_77
+     6: jump ir_in_bounds_78
+     7: label ir_trap_bounds_77
+     8: _ = mettle_crash_trap("Fatal error: Array index out of bounds")
+     9: label ir_in_bounds_78
+    10: %t93 = 0 * 1
+    11: %t94 = %t91 + %t93
+    12: %t95 = (int64)%t94
+    13: %t96 = (cstring)%t95
+    14: @out <- %t96
+    15: local @p : int32
+    16: %t98 = cstr("Project: ")
+    17: %t97 = append(@out, 128, 0, %t98)
+    18: @p <- %t97
+    19: %t100 = cstr("Untitled")
+    20: %t99 = append(@out, 128, @p, %t100)
+    21: @p <- %t99
+    22: %t102 = cstr("   Root: ")
+    23: %t101 = append(@out, 128, @p, %t102)
+    24: @p <- %t101
+    25: %t104 = cstr("G:\Projects\Mettle\examples")
+    26: %t103 = append(@out, 128, @p, %t104)
+    27: @p <- %t103
+    28: branch_zero @out -> ir_trap_null_79
+    29: jump ir_nonnull_80
+    30: label ir_trap_null_79
+    31: _ = mettle_crash_trap("Fatal error: Null pointer dereference")
+    32: label ir_nonnull_80
+    33: %t105 = @p * 1
+    34: %t106 = @out + %t105
+    35: *%t106 <- 0 [1]
+    36: %t107 = println(@out)
+    37: %t108 <- 0
+    38: branch_zero %t108 -> ir_errdefer_ok_81
+    39: jump ir_errdefer_end_82
+    40: label ir_errdefer_ok_81
+    41: label ir_errdefer_end_82
+    42: return 0
+}
+

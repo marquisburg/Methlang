@@ -1019,12 +1019,12 @@ int code_generator_binary_try_emit_compare_update_pair_diamond(
     return 0;
   }
 
-  if (!code_generator_binary_emit_operand_load(generator, context,
+  if (!code_generator_binary_emit_compare_flags(generator, context, compare) ||
+      !code_generator_binary_emit_operand_load(generator, context,
                                                &true_assign->dest,
                                                BINARY_GP_RAX) ||
       !code_generator_binary_emit_value_to_r10(generator, context,
                                                true_assign) ||
-      !code_generator_binary_emit_compare_flags(generator, context, compare) ||
       !binary_emit_cmovcc_reg_reg(&context->code, true_cmov, BINARY_GP_RAX,
                                   BINARY_GP_R10) ||
       !code_generator_binary_emit_destination_store(generator, context,
@@ -1033,12 +1033,12 @@ int code_generator_binary_try_emit_compare_update_pair_diamond(
     return 0;
   }
 
-  if (!code_generator_binary_emit_operand_load(generator, context,
+  if (!code_generator_binary_emit_compare_flags(generator, context, compare) ||
+      !code_generator_binary_emit_operand_load(generator, context,
                                                &false_assign->dest,
                                                BINARY_GP_RAX) ||
       !code_generator_binary_emit_value_to_r10(generator, context,
                                                false_assign) ||
-      !code_generator_binary_emit_compare_flags(generator, context, compare) ||
       !binary_emit_cmovcc_reg_reg(&context->code, false_cmov, BINARY_GP_RAX,
                                   BINARY_GP_R10) ||
       !code_generator_binary_emit_destination_store(generator, context,
@@ -1853,4 +1853,3 @@ int code_generator_binary_try_emit_binary_expression_chain(
   *consumed_out = 2;
   return 1;
 }
-

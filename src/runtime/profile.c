@@ -50,6 +50,7 @@ static size_t g_stats_capacity = 0;
 static size_t g_op_stats_capacity = 0;
 static MettleProfileFrame g_stack[METTLE_PROFILE_MAX_STACK];
 static size_t g_stack_depth = 0;
+static size_t g_stack_overflow_exits = 0;
 static MettleProfileEdge *g_edges = NULL;
 static size_t g_edge_count = 0;
 static size_t g_edge_capacity = 0;
@@ -315,6 +316,7 @@ void mettle_profile_enter(uint32_t fn_id) {
   g_stats[fn_id].call_count++;
 
   if (g_stack_depth >= METTLE_PROFILE_MAX_STACK) {
+    g_stack_overflow_exits++;
     return;
   }
 
@@ -348,6 +350,11 @@ void mettle_profile_exit(void) {
   uint32_t caller_id = UINT32_MAX;
 
   if (g_stack_depth == 0) {
+    return;
+  }
+
+  if (g_stack_overflow_exits > 0) {
+    g_stack_overflow_exits--;
     return;
   }
 
@@ -461,8 +468,10 @@ static void mettle_profile_write_uint64_plain(uint64_t value) {
 }
 
 static void mettle_profile_write_uint64_grouped(uint64_t value) {
+  char out[48];
   char digits[32];
   size_t count = 0;
+  size_t out_len = 0;
 
   if (value == 0) {
     mettle_crash_write_stderr("0");
@@ -474,14 +483,15 @@ static void mettle_profile_write_uint64_grouped(uint64_t value) {
     value /= 10u;
   }
 
-  for (size_t i = 0; i < count; i++) {
+  for (size_t i = 0; i < count && out_len + 1 < sizeof(out); i++) {
     size_t rev = count - 1 - i;
-    char c = digits[rev];
-    mettle_crash_write_stderr_bytes(&c, 1);
-    if (rev > 0 && (rev % 3) == 0) {
-      mettle_crash_write_stderr(",");
+    out[out_len++] = digits[rev];
+    if (rev > 0 && (rev % 3) == 0 && out_len + 1 < sizeof(out)) {
+      out[out_len++] = ',';
     }
   }
+  out[out_len] = '\0';
+  mettle_crash_write_stderr(out);
 }
 
 static void mettle_profile_write_indent(size_t depth) {

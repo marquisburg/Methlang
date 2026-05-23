@@ -1,0 +1,8 @@
+﻿bin\mettle.exe : Warning: Internal linker PE emission failed: Unresolved external symbol 'mettle_crash_write_stderr'
+At C:\Users\Marquis\AppData\Local\Temp\ps-script-48205b0c-725c-48cd-b4c4-46913af320ed.ps1:87 char:1
++ bin\mettle.exe --build --emit-obj --linker internal --release --profi ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Warning: Intern...h_write_stderr':String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Error: Internal linker failed to produce an executable

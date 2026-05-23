@@ -2401,7 +2401,7 @@ try {
     'cmp\s+\$0xc,%rax',
     'shl\s+\$0x2,%rax',
     '(?s)<scale_by_eight>.*shl\s+\$0x3,%rax',
-    '(?s)<zero_const>.*xor\s+%eax,%eax',
+    '(?s)<zero_const>.*mov\s+\$0x0,',
     '(?s)<even_branch>.*(?:and\s+\$0x1,%rax.*test\s+%rax,%rax|test\s+\$0x1,%rax).*(?:jne)',
     '(?s)<fused_mul_add>.*%r12'
   )
@@ -2475,7 +2475,8 @@ $directObjectScalarCases = @(
   @{ Name = "direct_object_abi_float4_args"; Path = "tests/test_abi_float4_args.mettle"; ExitCode = 1; Label = "float4-args" },
   @{ Name = "direct_object_abi_float_stack"; Path = "tests/test_abi_float_stack.mettle"; ExitCode = 1; Label = "float-stack" },
   @{ Name = "direct_object_cast_expression"; Path = "tests/test_cast_expression.mettle"; ExitCode = 0; Label = "cast-expression" },
-  @{ Name = "direct_object_int32_load_sign_ext"; Path = "tests/test_direct_object_int32_load_sign_ext.mettle"; ExitCode = 0; Label = "int32-load-sign-ext" }
+  @{ Name = "direct_object_int32_load_sign_ext"; Path = "tests/test_direct_object_int32_load_sign_ext.mettle"; ExitCode = 0; Label = "int32-load-sign-ext" },
+  @{ Name = "direct_object_int32_call_return_compare"; Path = "tests/test_int32_call_return_compare.mettle"; ExitCode = 1; Label = "int32-call-return-compare" }
 )
 
 foreach ($case in $directObjectScalarCases) {

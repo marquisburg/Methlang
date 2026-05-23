@@ -1,4 +1,5 @@
 #include "monomorphize.h"
+#include "../common.h"
 #include "../string_intern.h"
 #include "../common.h"
 #include <stdio.h>
@@ -103,14 +104,7 @@ static void mono_report_error(MonoContext *ctx, SourceLocation location,
 }
 
 static void free_string_array(char **values, size_t count) {
-  if (!values) {
-    return;
-  }
-
-  for (size_t i = 0; i < count; i++) {
-    free(values[i]);
-  }
-  free(values);
+  mettle_free_string_array(values, count);
 }
 
 static int mono_has_trait(MonoContext *ctx, const char *trait_name) {
@@ -1150,8 +1144,14 @@ static void collect_generic_defs(ASTNode *program, MonoContext *ctx) {
     } else if (decl->type == AST_STRUCT_DECLARATION) {
       StructDeclaration *sd = (StructDeclaration *)decl->data;
       if (sd && sd->type_param_count > 0) {
-        ctx->defs =
+        GenericDef *new_defs =
             realloc(ctx->defs, (ctx->def_count + 1) * sizeof(GenericDef));
+        if (!new_defs) {
+          mono_report_error(ctx, decl->location,
+                            "Out of memory collecting generic definitions");
+          return;
+        }
+        ctx->defs = new_defs;
         GenericDef *def = &ctx->defs[ctx->def_count];
         def->name = strdup(sd->name);
         def->node = decl;
@@ -1175,8 +1175,14 @@ static void collect_generic_defs(ASTNode *program, MonoContext *ctx) {
     } else if (decl->type == AST_FUNCTION_DECLARATION) {
       FunctionDeclaration *fd = (FunctionDeclaration *)decl->data;
       if (fd && fd->type_param_count > 0) {
-        ctx->defs =
+        GenericDef *new_defs =
             realloc(ctx->defs, (ctx->def_count + 1) * sizeof(GenericDef));
+        if (!new_defs) {
+          mono_report_error(ctx, decl->location,
+                            "Out of memory collecting generic definitions");
+          return;
+        }
+        ctx->defs = new_defs;
         GenericDef *def = &ctx->defs[ctx->def_count];
         def->name = strdup(fd->name);
         def->node = decl;

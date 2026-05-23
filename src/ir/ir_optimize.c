@@ -314,6 +314,13 @@ static int ir_instruction_writes_symbol(const IRInstruction *instruction) {
   case IR_OP_SIMD_SUM_I32:
   case IR_OP_SIMD_MATMUL_N32:
   case IR_OP_SIMD_INSERTION_SORT_I32:
+  case IR_OP_SIMD_DOT_I32:
+  case IR_OP_SIMD_SCALE_I32:
+  case IR_OP_SIMD_CLAMP_I32:
+  case IR_OP_SIMD_REVERSE_COPY_I32:
+  case IR_OP_LOWER_BOUND_I32:
+  case IR_OP_PREFIX_SUM_I32:
+  case IR_OP_SIMD_MINMAX_I32:
     return 1;
   default:
     return 0;
@@ -337,8 +344,17 @@ static int ir_instruction_writes_destination(const IRInstruction *instruction) {
   case IR_OP_NEW:
   case IR_OP_CAST:
   case IR_OP_COUNT_WORD_STARTS:
+  case IR_OP_MEMCPY_INLINE:
   case IR_OP_SIMD_SUM_I32:
+  case IR_OP_SIMD_MATMUL_N32:
   case IR_OP_SIMD_INSERTION_SORT_I32:
+  case IR_OP_SIMD_DOT_I32:
+  case IR_OP_SIMD_SCALE_I32:
+  case IR_OP_SIMD_CLAMP_I32:
+  case IR_OP_SIMD_REVERSE_COPY_I32:
+  case IR_OP_LOWER_BOUND_I32:
+  case IR_OP_PREFIX_SUM_I32:
+  case IR_OP_SIMD_MINMAX_I32:
     return 1;
   default:
     return 0;
@@ -1395,10 +1411,22 @@ static int ir_collect_instruction_temp_uses(IRTempUseMap *uses,
   case IR_OP_SIMD_SUM_I32:
   case IR_OP_SIMD_MATMUL_N32:
   case IR_OP_SIMD_INSERTION_SORT_I32:
+  case IR_OP_SIMD_DOT_I32:
+  case IR_OP_SIMD_SCALE_I32:
+  case IR_OP_SIMD_CLAMP_I32:
+  case IR_OP_SIMD_REVERSE_COPY_I32:
+  case IR_OP_LOWER_BOUND_I32:
+  case IR_OP_PREFIX_SUM_I32:
+  case IR_OP_SIMD_MINMAX_I32:
     if (!ir_collect_operand_temp_use(uses, &instruction->dest) ||
         !ir_collect_operand_temp_use(uses, &instruction->lhs) ||
         !ir_collect_operand_temp_use(uses, &instruction->rhs)) {
       return 0;
+    }
+    for (size_t i = 0; i < instruction->argument_count; i++) {
+      if (!ir_collect_operand_temp_use(uses, &instruction->arguments[i])) {
+        return 0;
+      }
     }
     break;
 
@@ -3819,8 +3847,17 @@ static int ir_instruction_has_side_effect(const IRInstruction *instruction) {
   case IR_OP_CALL:
   case IR_OP_CALL_INDIRECT:
   case IR_OP_MEMCPY_INLINE:
+  case IR_OP_COUNT_WORD_STARTS:
+  case IR_OP_SIMD_SUM_I32:
   case IR_OP_SIMD_MATMUL_N32:
   case IR_OP_SIMD_INSERTION_SORT_I32:
+  case IR_OP_SIMD_DOT_I32:
+  case IR_OP_SIMD_SCALE_I32:
+  case IR_OP_SIMD_CLAMP_I32:
+  case IR_OP_SIMD_REVERSE_COPY_I32:
+  case IR_OP_LOWER_BOUND_I32:
+  case IR_OP_PREFIX_SUM_I32:
+  case IR_OP_SIMD_MINMAX_I32:
   case IR_OP_RETURN:
   case IR_OP_INLINE_ASM:
     return 1;
@@ -9510,9 +9547,7 @@ static int ir_make_simd_with_len_and_two_ints(IRInstruction *out,
     return 0;
   }
   out->argument_count = 3;
-  if (!ir_operand_clone(len_operand, &out->arguments[0]) ||
-      !ir_operand_clone(&out->arguments[1], &out->arguments[1]) ||
-      !ir_operand_clone(&out->arguments[2], &out->arguments[2])) {
+  if (!ir_operand_clone(len_operand, &out->arguments[0])) {
     ir_instruction_destroy_storage(out);
     return 0;
   }

@@ -1,0 +1,190 @@
+export struct VkPipelineShaderStageCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  stage: uint32;
+  module_handle: int64;
+  p_name: int64;
+  p_specialization_info: int64;
+}
+
+export struct VkPipelineVertexInputStateCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  vertex_binding_description_count: uint32;
+  p_vertex_binding_descriptions: int64;
+  vertex_attribute_description_count: uint32;
+  p_vertex_attribute_descriptions: int64;
+}
+
+export struct VkPipelineInputAssemblyStateCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  topology: uint32;
+  primitive_restart_enable: uint32;
+}
+
+export struct VkPipelineViewportStateCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  viewport_count: uint32;
+  p_viewports: int64;
+  scissor_count: uint32;
+  p_scissors: int64;
+}
+
+export struct VkPipelineRasterizationStateCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  depth_clamp_enable: uint32;
+  rasterizer_discard_enable: uint32;
+  polygon_mode: uint32;
+  cull_mode: uint32;
+  front_face: uint32;
+  depth_bias_enable: uint32;
+  depth_bias_constant_factor: float32;
+  depth_bias_clamp: float32;
+  depth_bias_slope_factor: float32;
+  line_width: float32;
+}
+
+export struct VkPipelineMultisampleStateCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  rasterization_samples: uint32;
+  sample_shading_enable: uint32;
+  min_sample_shading: float32;
+  p_sample_mask: int64;
+  alpha_to_coverage_enable: uint32;
+  alpha_to_one_enable: uint32;
+}
+
+export struct VkPipelineColorBlendAttachmentState {
+  blend_enable: uint32;
+  src_color_blend_factor: uint32;
+  dst_color_blend_factor: uint32;
+  color_blend_op: uint32;
+  src_alpha_blend_factor: uint32;
+  dst_alpha_blend_factor: uint32;
+  alpha_blend_op: uint32;
+  color_write_mask: uint32;
+}
+
+export struct VkPipelineColorBlendStateCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  logic_op_enable: uint32;
+  logic_op: uint32;
+  attachment_count: uint32;
+  p_attachments: int64;
+  blend_constant0: float32;
+  blend_constant1: float32;
+  blend_constant2: float32;
+  blend_constant3: float32;
+}
+
+export struct VkPipelineDepthStencilStateCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  depth_test_enable: uint32;
+  depth_write_enable: uint32;
+  depth_compare_op: uint32;
+  depth_bounds_test_enable: uint32;
+  stencil_test_enable: uint32;
+  front_fail_op: uint32;
+  front_pass_op: uint32;
+  front_depth_fail_op: uint32;
+  front_compare_op: uint32;
+  front_compare_mask: uint32;
+  front_write_mask: uint32;
+  front_reference: uint32;
+  back_fail_op: uint32;
+  back_pass_op: uint32;
+  back_depth_fail_op: uint32;
+  back_compare_op: uint32;
+  back_compare_mask: uint32;
+  back_write_mask: uint32;
+  back_reference: uint32;
+  min_depth_bounds: float32;
+  max_depth_bounds: float32;
+}
+
+export struct VkPipelineDynamicStateCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  dynamic_state_count: uint32;
+  p_dynamic_states: int64;
+}
+
+export struct VkPushConstantRange {
+  stage_flags: uint32;
+  offset: uint32;
+  size: uint32;
+}
+
+export struct VkPipelineLayoutCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  set_layout_count: uint32;
+  p_set_layouts: int64;
+  push_constant_range_count: uint32;
+  p_push_constant_ranges: int64;
+}
+
+export struct VkGraphicsPipelineCreateInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  stage_count: uint32;
+  p_stages: int64;
+  p_vertex_input_state: int64;
+  p_input_assembly_state: int64;
+  p_tessellation_state: int64;
+  p_viewport_state: int64;
+  p_rasterization_state: int64;
+  p_multisample_state: int64;
+  p_depth_stencil_state: int64;
+  p_color_blend_state: int64;
+  p_dynamic_state: int64;
+  layout: int64;
+  render_pass: int64;
+  subpass: uint32;
+  base_pipeline_handle: int64;
+  base_pipeline_index: int32;
+}
+
+import "std/io";
+
+export function main() -> int32 {
+  print(cstr("StageInfo "));
+  print_int((int64)sizeof(VkPipelineShaderStageCreateInfo));
+  newline();
+  print(cstr("GraphicsPipeline "));
+  print_int((int64)sizeof(VkGraphicsPipelineCreateInfo));
+  newline();
+  print(cstr("DepthStencil "));
+  print_int((int64)sizeof(VkPipelineDepthStencilStateCreateInfo));
+  newline();
+  print(cstr("Raster "));
+  print_int((int64)sizeof(VkPipelineRasterizationStateCreateInfo));
+  newline();
+  print(cstr("ColorBlend "));
+  print_int((int64)sizeof(VkPipelineColorBlendStateCreateInfo));
+  newline();
+  print(cstr("VertexInput "));
+  print_int((int64)sizeof(VkPipelineVertexInputStateCreateInfo));
+  newline();
+  print(cstr("Layout "));
+  print_int((int64)sizeof(VkPipelineLayoutCreateInfo));
+  newline();
+  return 0;
+}

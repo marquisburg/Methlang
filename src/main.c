@@ -235,112 +235,54 @@ static char *get_executable_path(const char *argv0) {
 #endif
 }
 
-static char *infer_default_stdlib_directory(const char *argv0) {
+static char *infer_default_sibling_directory(const char *argv0,
+                                             const char *leaf_name,
+                                             const char *fallback_path) {
   char *exe_path = get_executable_path(argv0);
   char *exe_dir = directory_from_path(exe_path);
 
   if (exe_dir) {
     char *parent_dir = join_paths(exe_dir, "..");
     if (parent_dir) {
-      char *packaged_stdlib = join_paths(parent_dir, "stdlib");
+      char *packaged = join_paths(parent_dir, leaf_name);
       free(parent_dir);
-      if (packaged_stdlib && directory_exists(packaged_stdlib)) {
+      if (packaged && directory_exists(packaged)) {
         free(exe_path);
         free(exe_dir);
-        return packaged_stdlib;
+        return packaged;
       }
-      free(packaged_stdlib);
+      free(packaged);
     }
 
-    char *local_stdlib = join_paths(exe_dir, "stdlib");
-    if (local_stdlib && directory_exists(local_stdlib)) {
+    char *local = join_paths(exe_dir, leaf_name);
+    if (local && directory_exists(local)) {
       free(exe_path);
       free(exe_dir);
-      return local_stdlib;
+      return local;
     }
-    free(local_stdlib);
+    free(local);
   }
 
   free(exe_path);
   free(exe_dir);
 
-  if (directory_exists("stdlib")) {
-    return strdup("stdlib");
+  if (directory_exists(leaf_name)) {
+    return strdup(leaf_name);
   }
 
-  return strdup("stdlib");
+  return fallback_path ? strdup(fallback_path) : NULL;
+}
+
+static char *infer_default_stdlib_directory(const char *argv0) {
+  return infer_default_sibling_directory(argv0, "stdlib", "stdlib");
 }
 
 static char *infer_default_runtime_directory(const char *argv0) {
-  char *exe_path = get_executable_path(argv0);
-  char *exe_dir = directory_from_path(exe_path);
-
-  if (exe_dir) {
-    char *parent_dir = join_paths(exe_dir, "..");
-    if (parent_dir) {
-      char *packaged_runtime = join_paths(parent_dir, "runtime");
-      free(parent_dir);
-      if (packaged_runtime && directory_exists(packaged_runtime)) {
-        free(exe_path);
-        free(exe_dir);
-        return packaged_runtime;
-      }
-      free(packaged_runtime);
-    }
-
-    char *local_runtime = join_paths(exe_dir, "runtime");
-    if (local_runtime && directory_exists(local_runtime)) {
-      free(exe_path);
-      free(exe_dir);
-      return local_runtime;
-    }
-    free(local_runtime);
-  }
-
-  free(exe_path);
-  free(exe_dir);
-
-  if (directory_exists("runtime")) {
-    return strdup("runtime");
-  }
-
-  return NULL;
+  return infer_default_sibling_directory(argv0, "runtime", NULL);
 }
 
 static char *infer_default_docs_directory(const char *argv0) {
-  char *exe_path = get_executable_path(argv0);
-  char *exe_dir = directory_from_path(exe_path);
-
-  if (exe_dir) {
-    char *parent_dir = join_paths(exe_dir, "..");
-    if (parent_dir) {
-      char *packaged_docs = join_paths(parent_dir, "docs");
-      free(parent_dir);
-      if (packaged_docs && directory_exists(packaged_docs)) {
-        free(exe_path);
-        free(exe_dir);
-        return packaged_docs;
-      }
-      free(packaged_docs);
-    }
-
-    char *local_docs = join_paths(exe_dir, "docs");
-    if (local_docs && directory_exists(local_docs)) {
-      free(exe_path);
-      free(exe_dir);
-      return local_docs;
-    }
-    free(local_docs);
-  }
-
-  free(exe_path);
-  free(exe_dir);
-
-  if (directory_exists("docs")) {
-    return strdup("docs");
-  }
-
-  return NULL;
+  return infer_default_sibling_directory(argv0, "docs", NULL);
 }
 
 static void print_doc_reference(const char *argv0, const char *relative_path) {
@@ -924,16 +866,21 @@ static int object_has_undefined_symbol_prefix(const char *object_path,
   return found;
 }
 
+static int object_needs_runtime_object(const char *object_path,
+                                       const char *prefix) {
+  return object_has_undefined_symbol_prefix(object_path, prefix);
+}
+
 static int object_needs_crash_handler(const char *object_path) {
-  return object_has_undefined_symbol_prefix(object_path, "mettle_crash_");
+  return object_needs_runtime_object(object_path, "mettle_crash_");
 }
 
 static int object_needs_atomics(const char *object_path) {
-  return object_has_undefined_symbol_prefix(object_path, "mettle_atomic_");
+  return object_needs_runtime_object(object_path, "mettle_atomic_");
 }
 
 static int object_needs_profile_runtime(const char *object_path) {
-  return object_has_undefined_symbol_prefix(object_path, "mettle_profile_");
+  return object_needs_runtime_object(object_path, "mettle_profile_");
 }
 
 static int append_argument_text(char *buffer, size_t buffer_size, size_t *offset,

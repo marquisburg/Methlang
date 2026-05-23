@@ -207,7 +207,6 @@ extern const BinaryXmmRegister BINARY_WIN64_FLOAT_PARAM_REGISTERS[];
 extern BinaryGlobalConstTable g_binary_global_consts;
 extern BinaryIRFunctionIndex g_binary_ir_function_index;
 
-char *binary_codegen_strdup(const char *value);
 BinaryLabelEntry *binary_label_table_get(BinaryLabelTable *table, const char *name);
 size_t *code_generator_binary_build_loop_weights( const IRFunction *function);
 const IRInstruction *code_generator_binary_find_temp_producer_before( const IRFunction *function, size_t before, const char *name);
