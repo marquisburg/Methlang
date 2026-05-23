@@ -1,0 +1,16 @@
+// Mettle Hello World (Console)
+//
+// The simplest Mettle program - prints "Hello, world!" to the console.
+//
+// Author: Vinnie Falco
+//
+// Build: build.bat
+// Run:   hello.exe
+
+import "std/io";
+
+function main() -> int32 {
+  var msg: string = "Hello, world!";
+  println(cstr(msg));
+  return 0;
+}
