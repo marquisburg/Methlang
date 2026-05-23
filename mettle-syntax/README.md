@@ -42,7 +42,6 @@ The TextMate grammar (`syntaxes/meth.tmLanguage.json`) scopes Mettle source as `
 
 1. **Regex-based (on open and while typing, debounced)**  
    Fast checks aligned with [known limitations](../docs/known-limitations.md) and the lexer:
-   - No compound assignment (`+=`, `-=`, `*=`, `/=`)
    - Invalid `0x` / `0b` literals, underscores inside numbers
    - Block comments `/* */` (only `//` is valid)
    - Labeled `break` / `continue`

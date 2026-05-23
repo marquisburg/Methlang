@@ -1605,6 +1605,17 @@ static int mettle_build_executable(const char *asm_filename,
         goto cleanup;
       }
     }
+    if (profile_object && !crash_object) {
+      crash_object = (_access(crash_msvc_object, 0) == 0) ? crash_msvc_object
+                                                          : crash_gcc_object;
+      if (_access(crash_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled crash-handler runtime object not found in '%s'\n",
+                runtime_directory);
+        free(object_paths);
+        goto cleanup;
+      }
+    }
 
     object_paths[object_count++] = msvc_object_filename;
     if (crash_object) {
@@ -1784,6 +1795,9 @@ static int mettle_link_object_file(const char *object_filename,
       options && compiler_options_use_profile_runtime(options) ? 1 : 0;
   if (profile_runtime) {
     needs_profile = 1;
+  }
+  if (needs_profile) {
+    needs_crash = 1;
   }
 
   int build_result = 1;

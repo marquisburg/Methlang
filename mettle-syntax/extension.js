@@ -185,7 +185,6 @@ function lintRegex(document) {
         }
       };
 
-      add(/[+\-*/]=/g, 'Compound assignment (+=, -=, *=, /=) is not supported. Use x = x + 1 instead.');
       add(/\b0[xX](?=\s|$|[^0-9a-fA-F])/g, 'Invalid hex literal. Expected hex digits after 0x.');
       add(/\b0[bB](?=\s|$|[^01])/g, 'Invalid binary literal. Expected 0 or 1 after 0b.');
       add(/\b[0-9]+\d*_[0-9_]*\b/g, 'Underscores in numeric literals are not supported. Use 1000000 instead of 1_000_000.');

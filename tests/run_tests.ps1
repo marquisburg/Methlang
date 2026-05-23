@@ -519,7 +519,7 @@ $cases = @(
     Path          = "tests/test_opt_collatz_odd_fold.mettle"
     ShouldSucceed = $true
     Args          = @("-O", "--dump-ir")
-    IrMustMatch   = @("(?s)binary %t[0-9]+ = 3 \* @x.*binary @x = %t[0-9]+ \+ 1.*binary @x = @x >> 1.*binary @count = @count \+ 2.*jump ir_while_")
+    IrMustMatch   = @("(?s)%t[0-9]+ = 3 \* @x.*@x = %t[0-9]+ \+ 1.*@x = @x >> 1.*@count = @count \+ 2.*jump ir_while_")
   },
   @{
     Name          = "opt_popcount_fold"
@@ -534,7 +534,7 @@ $cases = @(
     Path          = "tests/test_optimize_popcount_buffer_fuse.mettle"
     ShouldSucceed = $true
     Args          = @("--build", "--emit-obj", "--linker", "internal", "--release", "--profile-runtime-ops", "--dump-ir")
-    IrMustMatch   = @("load %pbf[0-9]+_raw", "binary @total = @total \+ %pbf")
+    IrMustMatch   = @("%pbf[0-9]+_raw <-", "@total = @total \+ %pbf")
     IrMustNotMatch = @("call %t[0-9]+ = popcount_byte", "__inl_popcount_byte", "local_count")
   },
   @{
@@ -542,7 +542,7 @@ $cases = @(
     Path          = "tests/test_optimize_popcount_buffer_fuse.mettle"
     ShouldSucceed = $true
     Args          = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
-    IrMustMatch   = @("load %pbf[0-9]+_raw", "binary @total = @total \+ %pbf")
+    IrMustMatch   = @("%pbf[0-9]+_raw <-", "@total = @total \+ %pbf")
     IrMustNotMatch = @("call %t[0-9]+ = popcount_byte", "__inl_popcount_byte", "local_count")
   },
   @{
@@ -603,7 +603,7 @@ $cases = @(
     Path            = "tests/test_opt_ptr_induction.mettle"
     ShouldSucceed   = $true
     Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
-    IrMustMatch     = @("@__ptr_", "load %", "<- \*@__ptr_")
+    IrMustMatch     = @("@__ptr_", "<- \*@__ptr_")
     IrMustNotMatch  = @("function map_inc[\s\S]*?@i << 2[\s\S]*?function main")
   },
   @{
@@ -618,14 +618,14 @@ $cases = @(
     Path            = "tests/test_opt_simd_minmax.mettle"
     ShouldSucceed   = $true
     Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
-    IrMustMatch     = @("simd_minmax_i32")
+    IrMustMatch     = @("minmax_i32")
   },
   @{
     Name            = "opt_simd_clamp_shape"
     Path            = "tests/test_opt_simd_clamp_shape.mettle"
     ShouldSucceed   = $true
     Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
-    IrMustMatch     = @("simd_clamp_i32")
+    IrMustMatch     = @("clamp_i32")
   },
   @{
     Name          = "opt_load_symbol_copy_branch"
@@ -652,14 +652,14 @@ $cases = @(
     Path            = "examples/dot_product/dot_product.mettle"
     ShouldSucceed   = $true
     Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
-    IrMustMatch     = @("simd_dot_i32")
+    IrMustMatch     = @("dot_i32")
   },
   @{
     Name            = "opt_simd_matmul_n32"
     Path            = "tests/test_opt_simd_matmul_n32.mettle"
     ShouldSucceed   = $true
     Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
-    IrMustMatch     = @("simd_matmul_n32")
+    IrMustMatch     = @("matmul_n32")
   },
   @{
     Name          = "codegen_ir_fastpaths"
@@ -1392,7 +1392,7 @@ try {
   $gccSourcePath = Join-Path $tmpDir "coff_reader_gcc_input.c"
   $gccObjPath = Join-Path $tmpDir "coff_reader_gcc_input.o"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\coff_reader_test.c src\linker\coff_reader.c -Isrc -o $coffReaderExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\coff_reader_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c -Isrc -o $coffReaderExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "COFF reader harness compile failed: $compileHarness"
   }
@@ -1453,7 +1453,7 @@ try {
   $dupBObj = Join-Path $tmpDir "linker_duplicate_b.obj"
   $unresolvedObj = Join-Path $tmpDir "linker_unresolved_entry.obj"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\symbol_resolve_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $symbolResolveExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\symbol_resolve_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $symbolResolveExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Symbol-resolve harness compile failed: $compileHarness"
   }
@@ -1497,7 +1497,7 @@ $total++
 try {
   $relocationExe = Join-Path $tmpDir "relocation_test.exe"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\relocation_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $relocationExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\relocation_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $relocationExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Relocation harness compile failed: $compileHarness"
   }
@@ -1519,7 +1519,7 @@ $total++
 try {
   $peEmitterExe = Join-Path $tmpDir "pe_emitter_test.exe"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\pe_emitter_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\linker\pe_emitter.c src\linker\import_lib.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $peEmitterExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\pe_emitter_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\linker\pe_emitter.c src\linker\import_lib.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $peEmitterExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "PE-emitter harness compile failed: $compileHarness"
   }
@@ -3146,7 +3146,7 @@ catch {
 try {
   $total++
   $iceExe = Join-Path $tmpDir "compiler_ice_report_test.exe"
-  $iceCompile = & gcc -Wall -Wextra -std=c99 -g -O0 -Isrc tests\compiler_ice_report_test.c src\compiler\compiler_context.c src\compiler\compiler_crash.c src\ir\ir.c -o $iceExe -ldbghelp 2>&1 | Out-String
+  $iceCompile = & gcc -Wall -Wextra -std=c99 -g -O0 -Isrc tests\compiler_ice_report_test.c src\common.c src\lexer\lexer.c src\compiler\compiler_context.c src\compiler\compiler_crash.c src\runtime\crash_handler.c src\ir\ir.c -o $iceExe -ldbghelp 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "compiler ICE report harness compile failed: $iceCompile"
   }

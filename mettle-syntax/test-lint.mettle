@@ -3,11 +3,6 @@
 
 var x: int32 = 42;
 
-x += 1;                          // compound assignment - not supported
-x -= 1;
-x *= 2;
-x /= 2;
-
 var bad_hex: int32 = 0x;         // invalid hex - no digits
 var bad_bin: int32 = 0b;         // invalid binary - no digits
 var bad_hex2: int32 = 0Xg;       // invalid hex - g not allowed
