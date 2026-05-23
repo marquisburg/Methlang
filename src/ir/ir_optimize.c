@@ -5024,6 +5024,41 @@ static int ir_try_unroll_loop_at(IRFunction *function, size_t header_index,
 
 #define IR_VEC_UNROLL 4
 
+/* Defined later in the file; needed by the purity check below to admit
+ * loop-invariant indexed loads (e.g. a[i]) as pure reduction leaves. */
+static const IRInstruction *
+ir_find_temp_producer_before(const IRFunction *function, size_t before_index,
+                             const char *temp_name);
+static int ir_resolve_indexed_address_temp(const IRFunction *function,
+                                            size_t before_index, const char *iv,
+                                            const char *bound,
+                                            const char *addr_temp,
+                                            const char **base_out,
+                                            int *elem_size_out, int *step_out);
+static const char *ir_function_local_declared_type(IRFunction *function,
+                                                    const char *symbol_name);
+static int ir_symbol_is_sum_array_base(IRFunction *function,
+                                        const char *symbol_name);
+
+/* True if `sym` (a symbol) is never the destination of an ASSIGN/BINARY/CAST/
+ * STORE/LOAD/NEW within body range [lo, hi). Used to prove a load's base
+ * pointer is loop-invariant, so duplicating the load per unroll lane (with
+ * i -> i+L) reads stable, independent memory. */
+static int ir_vec_symbol_invariant_in_body(const IRFunction *fn, size_t lo,
+                                            size_t hi, const char *sym) {
+  if (!sym) {
+    return 0;
+  }
+  for (size_t k = lo; k < hi; k++) {
+    const IRInstruction *m = &fn->instructions[k];
+    if (m->dest.kind == IR_OPERAND_SYMBOL && m->dest.name &&
+        strcmp(m->dest.name, sym) == 0) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 /* Body instruction whose only role is loop control / a NOP we may skip. */
 static int ir_vec_binary_is(const IRInstruction *in, const char *op) {
   return in && in->op == IR_OP_BINARY && !in->is_float && !in->ast_ref &&
@@ -5068,6 +5103,37 @@ static int ir_vec_expr_is_pure(const IRFunction *fn, size_t lo, size_t hi,
     }
   }
   if (!prod) {
+    return 0;
+  }
+  /* A loop-invariant indexed load a[i] is a valid pure leaf: its value depends
+   * only on the iteration index, and duplicating it per lane (with i -> i+L) is
+   * sound as long as the base pointer is never written in the body and nothing
+   * in the body stores to memory (the caller's body scan rejects all stores).
+   * We do NOT recurse into the address-arithmetic temps; the load result stands
+   * in for the whole subtree. */
+  if (prod->op == IR_OP_LOAD && prod->lhs.kind == IR_OPERAND_TEMP &&
+      prod->lhs.name) {
+    const char *base = NULL;
+    /* locate the load's own index within [lo,hi) so producer lookups are scoped
+     * to instructions that precede it */
+    size_t load_idx = hi;
+    for (size_t k = lo; k < hi; k++) {
+      if (&fn->instructions[k] == prod) {
+        load_idx = k;
+        break;
+      }
+    }
+    if (load_idx < hi &&
+        ir_resolve_indexed_address_temp(fn, load_idx, iv, NULL,
+                                        prod->lhs.name, &base, NULL, NULL) &&
+        base && strcmp(base, iv) != 0 && strcmp(base, acc) != 0 &&
+        ir_vec_symbol_invariant_in_body(fn, lo, hi, base)) {
+      if (*seen_n >= seen_cap) {
+        return 0;
+      }
+      seen[(*seen_n)++] = prod->dest.name;
+      return 1;
+    }
     return 0;
   }
   /* only pure integer BINARY (+,-,*) or CAST may produce expression temps */
@@ -5268,6 +5334,8 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
                            seen, &seen_n, 128, 0)) {
     return 1;
   }
+  int body_has_load = 0;       /* any indexed load admitted in the body */
+  int all_loads_sum_array = 1; /* every load base passes the intrinsic gate */
   for (size_t k = body_lo; k < body_hi; k++) {
     IRInstruction *m = &function->instructions[k];
     if (k == acc_add_idx || k == acc_add_idx + 1) {
@@ -5281,8 +5349,42 @@ static int ir_vec_try_unroll_reduction_at(IRFunction *function, size_t h,
         return 1; /* writes a symbol inside the body -> reject */
       }
       break;
+    case IR_OP_LOAD: {
+      /* Permit a load only if it reads a loop-invariant indexed slot base[iv]
+       * into a temp (same condition the purity check used to accept it as a
+       * leaf). This keeps per-lane duplication sound: lane L reads base[i+L],
+       * stable independent memory. Any other load (symbol dest, non-invariant
+       * base, or address not of the base[iv] form) -> reject. */
+      const char *base = NULL;
+      if (m->dest.kind != IR_OPERAND_TEMP || m->lhs.kind != IR_OPERAND_TEMP ||
+          !m->lhs.name ||
+          !ir_resolve_indexed_address_temp(function, k, iv, NULL, m->lhs.name,
+                                           &base, NULL, NULL) ||
+          !base || strcmp(base, iv) == 0 || strcmp(base, acc) == 0 ||
+          !ir_vec_symbol_invariant_in_body(function, body_lo, body_hi, base)) {
+        return 1;
+      }
+      body_has_load = 1;
+      if (!ir_symbol_is_sum_array_base(function, base)) {
+        all_loads_sum_array = 0;
+      }
+      break;
+    }
     default:
-      return 1; /* load/store/call/branch/label/etc -> reject */
+      return 1; /* store/call/branch/label/etc -> reject */
+    }
+  }
+
+  /* Defer to the dedicated SIMD intrinsic matchers (simd_sum_i32 /
+   * simd_dot_i32) for exactly the shapes they claim: an int64 accumulator fed
+   * by loads from recognized int32 array bases. Those passes run later in the
+   * same fixpoint and emit hand-tuned kernels; the general unroller only takes
+   * over load-reductions outside that class (e.g. sum-of-squares, non-parameter
+   * arrays), so existing intrinsic coverage is preserved. */
+  if (body_has_load && all_loads_sum_array) {
+    const char *at = ir_function_local_declared_type(function, acc);
+    if (at && strcmp(at, "int64") == 0) {
+      return 1;
     }
   }
 
@@ -10179,6 +10281,191 @@ static int ir_make_simd_minmax_i32(IRInstruction *out, SourceLocation location,
   return 1;
 }
 
+static int ir_make_lower_bound_i32(IRInstruction *out, SourceLocation location,
+                                   const char *lo_symbol,
+                                   const char *arr_symbol,
+                                   const IROperand *n_operand,
+                                   const IROperand *key_operand) {
+  if (!out || !lo_symbol || !arr_symbol || !n_operand || !key_operand) {
+    return 0;
+  }
+  memset(out, 0, sizeof(*out));
+  out->op = IR_OP_LOWER_BOUND_I32;
+  out->location = location;
+  out->dest = ir_operand_symbol(lo_symbol);
+  out->lhs = ir_operand_symbol(arr_symbol);
+  if (!out->dest.name || !out->lhs.name || !ir_operand_clone(n_operand, &out->rhs)) {
+    ir_instruction_destroy_storage(out);
+    return 0;
+  }
+  out->arguments = calloc(1, sizeof(IROperand));
+  if (!out->arguments) {
+    ir_instruction_destroy_storage(out);
+    return 0;
+  }
+  out->argument_count = 1;
+  if (!ir_operand_clone(key_operand, &out->arguments[0])) {
+    ir_instruction_destroy_storage(out);
+    return 0;
+  }
+  return 1;
+}
+
+static int ir_try_fuse_lower_bound_i32_at(IRFunction *function,
+                                          size_t header_index, int *changed) {
+  IRWhileLoopBounds bounds = {0};
+  IRInstruction *compare = NULL;
+  size_t exit_label_index = (size_t)-1;
+  const char *lo_symbol = NULL;
+  const char *hi_symbol = NULL;
+  const char *mid_symbol = NULL;
+  const char *arr_symbol = NULL;
+  const char *delta_temp = NULL;
+  const char *half_temp = NULL;
+  const char *scaled_temp = NULL;
+  const char *addr_temp = NULL;
+  const char *loaded_temp = NULL;
+  const char *cmp_temp = NULL;
+  const char *false_label = NULL;
+  IROperand key_operand = {0};
+  IRInstruction fused = {0};
+  int saw_lo_update = 0;
+  int saw_hi_update = 0;
+
+  if (!function || !ir_find_while_loop_bounds(function, header_index, &bounds)) {
+    return 1;
+  }
+  if (!ir_find_label_index(function, bounds.exit_label, &exit_label_index) ||
+      exit_label_index <= bounds.branch_index) {
+    return 1;
+  }
+  if (ir_loop_body_has_nested_while(function, bounds.branch_index + 1,
+                                    exit_label_index)) {
+    return 1;
+  }
+
+  compare = &function->instructions[bounds.compare_index];
+  if (!compare->text || strcmp(compare->text, "<") != 0 ||
+      compare->lhs.kind != IR_OPERAND_SYMBOL || !compare->lhs.name ||
+      compare->rhs.kind != IR_OPERAND_SYMBOL || !compare->rhs.name) {
+    return 1;
+  }
+  lo_symbol = compare->lhs.name;
+  hi_symbol = compare->rhs.name;
+
+  for (size_t i = bounds.branch_index + 1; i < exit_label_index; i++) {
+    const IRInstruction *ins = &function->instructions[i];
+    if (ins->op == IR_OP_NOP || ins->op == IR_OP_DECLARE_LOCAL ||
+        ins->op == IR_OP_JUMP || ins->op == IR_OP_LABEL) {
+      continue;
+    }
+    if (ins->op == IR_OP_BINARY && ins->text && strcmp(ins->text, "-") == 0 &&
+        !ins->is_float && ins->dest.kind == IR_OPERAND_TEMP && ins->dest.name &&
+        ir_operand_is_symbol_named(&ins->lhs, hi_symbol) &&
+        ir_operand_is_symbol_named(&ins->rhs, lo_symbol)) {
+      delta_temp = ins->dest.name;
+      continue;
+    }
+    if (ins->op == IR_OP_BINARY && ins->text && !ins->is_float &&
+        ins->dest.kind == IR_OPERAND_TEMP && ins->dest.name && delta_temp &&
+        ir_operand_is_temp_named(&ins->lhs, delta_temp) &&
+        ((strcmp(ins->text, "/") == 0 && ir_operand_is_int_value(&ins->rhs, 2)) ||
+         (strcmp(ins->text, ">>") == 0 && ir_operand_is_int_value(&ins->rhs, 1)))) {
+      half_temp = ins->dest.name;
+      continue;
+    }
+    if (ins->op == IR_OP_BINARY && ins->text && strcmp(ins->text, "+") == 0 &&
+        !ins->is_float && ins->dest.kind == IR_OPERAND_SYMBOL && ins->dest.name &&
+        half_temp && ir_operand_is_symbol_named(&ins->lhs, lo_symbol) &&
+        ir_operand_is_temp_named(&ins->rhs, half_temp)) {
+      mid_symbol = ins->dest.name;
+      continue;
+    }
+    if (ins->op == IR_OP_BINARY && ins->text && !ins->is_float &&
+        ins->dest.kind == IR_OPERAND_TEMP && ins->dest.name && mid_symbol &&
+        ir_operand_is_symbol_named(&ins->lhs, mid_symbol) &&
+        ((strcmp(ins->text, "<<") == 0 && ir_operand_is_int_value(&ins->rhs, 2)) ||
+         (strcmp(ins->text, "*") == 0 && ir_operand_is_int_value(&ins->rhs, 4)))) {
+      scaled_temp = ins->dest.name;
+      continue;
+    }
+    if (ins->op == IR_OP_BINARY && ins->text && strcmp(ins->text, "+") == 0 &&
+        !ins->is_float && ins->dest.kind == IR_OPERAND_TEMP && ins->dest.name &&
+        scaled_temp && ins->lhs.kind == IR_OPERAND_SYMBOL && ins->lhs.name &&
+        ir_operand_is_temp_named(&ins->rhs, scaled_temp)) {
+      arr_symbol = ins->lhs.name;
+      addr_temp = ins->dest.name;
+      continue;
+    }
+    if (ins->op == IR_OP_LOAD && addr_temp &&
+        ir_operand_is_temp_named(&ins->lhs, addr_temp) &&
+        ir_operand_is_int_value(&ins->rhs, 4) &&
+        ins->dest.kind == IR_OPERAND_TEMP && ins->dest.name) {
+      loaded_temp = ins->dest.name;
+      continue;
+    }
+    if (ins->op == IR_OP_BINARY && ins->text && strcmp(ins->text, "<") == 0 &&
+        !ins->is_float && loaded_temp &&
+        ir_operand_is_temp_named(&ins->lhs, loaded_temp) &&
+        ins->dest.kind == IR_OPERAND_TEMP && ins->dest.name) {
+      cmp_temp = ins->dest.name;
+      key_operand = ins->rhs;
+      continue;
+    }
+    if (ins->op == IR_OP_BRANCH_ZERO && cmp_temp &&
+        ir_operand_is_temp_named(&ins->lhs, cmp_temp) && ins->text) {
+      false_label = ins->text;
+      continue;
+    }
+    if (ins->op == IR_OP_BINARY && ins->text && strcmp(ins->text, "+") == 0 &&
+        !ins->is_float && mid_symbol &&
+        ir_operand_is_symbol_named(&ins->dest, lo_symbol) &&
+        ir_operand_is_symbol_named(&ins->lhs, mid_symbol) &&
+        ir_operand_is_int_value(&ins->rhs, 1)) {
+      saw_lo_update = 1;
+      continue;
+    }
+    if (ins->op == IR_OP_ASSIGN && mid_symbol &&
+        ir_operand_is_symbol_named(&ins->dest, hi_symbol) &&
+        ir_operand_is_symbol_named(&ins->lhs, mid_symbol)) {
+      saw_hi_update = 1;
+      continue;
+    }
+    if (ins->op == IR_OP_CAST) {
+      continue;
+    }
+    return 1;
+  }
+
+  if (!delta_temp || !half_temp || !mid_symbol || !arr_symbol || !addr_temp ||
+      !loaded_temp || !cmp_temp || !false_label || !saw_lo_update ||
+      !saw_hi_update || key_operand.kind == IR_OPERAND_NONE) {
+    return 1;
+  }
+  if (!ir_make_lower_bound_i32(&fused, function->instructions[header_index].location,
+                               lo_symbol, arr_symbol, &compare->rhs,
+                               &key_operand)) {
+    return 0;
+  }
+  return ir_fuse_while_loop_to_insn(function, header_index, exit_label_index - 1,
+                                    &fused, changed);
+}
+
+static int ir_lower_bound_i32_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (function->instructions[i].op == IR_OP_LABEL &&
+        ir_label_is_while_header(function->instructions[i].text)) {
+      if (!ir_try_fuse_lower_bound_i32_at(function, i, changed)) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
 static int ir_verify_minmax_preloop_init(const IRFunction *function,
                                          size_t header_index, const char *iv,
                                          const char **arr_base_out,
@@ -11228,6 +11515,14 @@ static int ir_optimize_function(IRFunction *function) {
   }
 
   {
+    int lb_changed = 0;
+    mettle_compiler_ctx_set_pass_name("lower_bound_i32");
+    if (!ir_lower_bound_i32_pass(function, &lb_changed)) {
+      mettle_compiler_ice("IR optimization pass failed");
+    }
+  }
+
+  {
     int detect_changed = 0;
     mettle_compiler_ctx_set_pass_name("detect_shift_loops");
     if (!ir_detect_shift_loops_pass(function, &detect_changed)) {
@@ -11301,6 +11596,11 @@ int ir_optimize_program(IRProgram *program,
     pre_changed = 0;
     mettle_compiler_ctx_set_pass_name("simd_minmax_i32");
     if (!ir_simd_minmax_i32_pass(function, &pre_changed)) {
+      mettle_compiler_ice("IR optimization pre-inline pass failed");
+    }
+    pre_changed = 0;
+    mettle_compiler_ctx_set_pass_name("lower_bound_i32");
+    if (!ir_lower_bound_i32_pass(function, &pre_changed)) {
       mettle_compiler_ice("IR optimization pre-inline pass failed");
     }
     pre_changed = 0;

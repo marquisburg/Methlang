@@ -1326,22 +1326,45 @@ int code_generator_binary_try_match_scaled_temp_address(
     return 0;
   }
 
+  /* Identify which operand is the scaled index: it must be a temp whose
+   * producer is a scaling shift (`idx << k`). When both operands are temps
+   * (e.g. `addr_of_base + (i << 2)`), we cannot assume lhs is the index -- the
+   * base may equally be a temp -- so probe each candidate and accept the one
+   * that actually resolves to a shift. Picking the wrong operand here silently
+   * dropped the scale to 1 and re-read an unmaterialized slot, collapsing every
+   * a[i] access onto a[0]. */
+  const IROperand *candidates[2] = {NULL, NULL};
+  const IROperand *others[2] = {NULL, NULL};
+  int candidate_count = 0;
   if (address->lhs.kind == IR_OPERAND_TEMP && address->lhs.name &&
       address->rhs.kind != IR_OPERAND_INT) {
-    scaled_operand = &address->lhs;
-    base_operand = &address->rhs;
-  } else if (address->rhs.kind == IR_OPERAND_TEMP && address->rhs.name &&
-             address->lhs.kind != IR_OPERAND_INT) {
-    scaled_operand = &address->rhs;
-    base_operand = &address->lhs;
-  } else {
+    candidates[candidate_count] = &address->lhs;
+    others[candidate_count] = &address->rhs;
+    candidate_count++;
+  }
+  if (address->rhs.kind == IR_OPERAND_TEMP && address->rhs.name &&
+      address->lhs.kind != IR_OPERAND_INT) {
+    candidates[candidate_count] = &address->rhs;
+    others[candidate_count] = &address->lhs;
+    candidate_count++;
+  }
+  if (candidate_count == 0) {
     return 0;
   }
 
-  shift = code_generator_binary_find_temp_producer_before(
-      function, instruction_index, scaled_operand->name);
-  if (!shift || shift->lhs.kind == IR_OPERAND_INT ||
-      !code_generator_binary_shift_scale(shift, &scale)) {
+  for (int c = 0; c < candidate_count; c++) {
+    const IRInstruction *producer =
+        code_generator_binary_find_temp_producer_before(
+            function, instruction_index, candidates[c]->name);
+    if (producer && producer->lhs.kind != IR_OPERAND_INT &&
+        code_generator_binary_shift_scale(producer, &scale)) {
+      scaled_operand = candidates[c];
+      base_operand = others[c];
+      shift = producer;
+      break;
+    }
+  }
+  if (!shift) {
     return 0;
   }
 
@@ -1406,8 +1429,15 @@ int code_generator_binary_shift_only_feeds_scaled_addresses(
   }
 
   shift = &function->instructions[shift_index];
+  /* Only skip the shift if the consuming scaled-address fold can re-derive it.
+   * That fold re-reads the shift's source operand from its home slot and so
+   * requires a SYMBOL (which always owns a stack slot); a temp source may have
+   * been folded away and never materialized. Keeping this precondition in lock-
+   * step with try_match_scaled_temp_address prevents skipping a shift the fold
+   * will then decline -- which left the index uncomputed and silently scaled
+   * the address by 1. */
   if (!shift || shift->dest.kind != IR_OPERAND_TEMP || !shift->dest.name ||
-      shift->lhs.kind == IR_OPERAND_INT ||
+      shift->lhs.kind != IR_OPERAND_SYMBOL ||
       !code_generator_binary_shift_scale(shift, NULL)) {
     return 0;
   }
