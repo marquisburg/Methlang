@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define IR_OPERAND_FMT_BUFSIZE 128
+
 IROperand ir_operand_none(void) {
   IROperand operand = {0};
   operand.kind = IR_OPERAND_NONE;
@@ -423,6 +425,8 @@ static const char *ir_opcode_name(IROpcode op) {
     return "unary";
   case IR_OP_CALL:
     return "call";
+  case IR_OP_CALL_INDIRECT:
+    return "call_indirect";
   case IR_OP_NEW:
     return "new";
   case IR_OP_RETURN:
@@ -489,9 +493,9 @@ static void ir_format_operand(const IROperand *operand, char *buffer,
 
 static int ir_format_instruction_line(const IRInstruction *instruction,
                                       char *buffer, size_t buffer_size) {
-  char dest[128];
-  char lhs[128];
-  char rhs[128];
+  char dest[IR_OPERAND_FMT_BUFSIZE];
+  char lhs[IR_OPERAND_FMT_BUFSIZE];
+  char rhs[IR_OPERAND_FMT_BUFSIZE];
   int written = 0;
 
   if (!instruction || !buffer || buffer_size == 0) {

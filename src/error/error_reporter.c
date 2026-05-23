@@ -59,46 +59,56 @@ static void error_reporter_enable_vt_windows(void) {
 #endif
 
 static int error_reporter_should_use_color(void) {
+  static int cached = -1;
+  if (cached >= 0) return cached;
+
   /* CLICOLOR_FORCE=1 overrides everything (force color even when not a tty) */
   const char *force = getenv("CLICOLOR_FORCE");
   if (force && force[0] != '\0' && strcmp(force, "0") != 0) {
 #ifdef _WIN32
     error_reporter_enable_vt_windows();
 #endif
-    return 1;
+    cached = 1;
+    return cached;
   }
 
   /* NO_COLOR disables color (https://no-color.org/) */
   const char *no_color = getenv("NO_COLOR");
   if (no_color && no_color[0] != '\0') {
-    return 0;
+    cached = 0;
+    return cached;
   }
 
-  /* TERM=dumb — no sequences */
+  /* TERM=dumb - no sequences */
   const char *term = getenv("TERM");
   if (term && strcmp(term, "dumb") == 0) {
-    return 0;
+    cached = 0;
+    return cached;
   }
 
   /* CLICOLOR=0 disables even when tty */
   const char *clicolor = getenv("CLICOLOR");
   if (clicolor && strcmp(clicolor, "0") == 0) {
-    return 0;
+    cached = 0;
+    return cached;
   }
 
   /* Only color when stderr is a tty */
   int fd = fileno(DIAG_STREAM);
   if (fd < 0) {
-    return 0;
+    cached = 0;
+    return cached;
   }
   if (!isatty(fd)) {
-    return 0;
+    cached = 0;
+    return cached;
   }
 
 #ifdef _WIN32
   error_reporter_enable_vt_windows();
 #endif
-  return 1;
+  cached = 1;
+  return cached;
 }
 
 /* Return the short error-code string for an ErrorType */
@@ -610,7 +620,6 @@ char *error_reporter_get_line_from_source(const char *source,
   const char *line_start = source;
   const char *line_end = source;
 
-  // Find the start of the target line
   while (*line_end && current_line < line_number) {
     if (*line_end == '\n') {
       current_line++;
@@ -622,12 +631,10 @@ char *error_reporter_get_line_from_source(const char *source,
   if (current_line != line_number)
     return NULL;
 
-  // Find the end of the line
   while (*line_end && *line_end != '\n') {
     line_end++;
   }
 
-  // Copy the line
   size_t line_length = line_end - line_start;
   char *line = malloc(line_length + 1);
   if (!line)
@@ -648,12 +655,10 @@ char *error_reporter_create_caret_line(size_t column, size_t length) {
   if (!caret_line)
     return NULL;
 
-  // Fill with spaces up to the error column
   for (size_t i = 0; i < column - 1; i++) {
     caret_line[i] = ' ';
   }
 
-  // Add carets for the error length
   for (size_t i = column - 1; i < column - 1 + (length > 0 ? length : 1); i++) {
     caret_line[i] = '^';
   }
@@ -666,7 +671,6 @@ const char *error_reporter_suggest_for_token(const char *token) {
   if (!token)
     return NULL;
 
-  // Common typos and suggestions
   if (strcmp(token, "fucntion") == 0)
     return "did you mean 'function'?";
   if (strcmp(token, "retrun") == 0)

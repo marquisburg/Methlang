@@ -407,7 +407,6 @@ static int ir_lower_switch_statement(IRLoweringContext *context,
     return 0;
   }
 
-  // Evaluate the switch expression once.
   IROperand switch_value = ir_operand_none();
   if (!ir_lower_expression(context, function, switch_data->expression,
                            &switch_value)) {
@@ -415,7 +414,6 @@ static int ir_lower_switch_statement(IRLoweringContext *context,
     return 0;
   }
 
-  // Precompute labels for each case.
   char **case_labels = NULL;
   if (switch_data->case_count > 0) {
     case_labels = calloc(switch_data->case_count, sizeof(char *));
@@ -3268,14 +3266,12 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       return 0;
     }
 
-    // Lower the function pointer expression
     IROperand func_ptr = ir_operand_none();
     if (!ir_lower_expression(context, function, fp_call->function, &func_ptr)) {
       ir_operand_destroy(&destination);
       return 0;
     }
 
-    // Lower arguments
     IROperand *arguments = NULL;
     if (fp_call->argument_count > 0) {
       arguments = calloc(fp_call->argument_count, sizeof(IROperand));

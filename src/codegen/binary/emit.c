@@ -4220,8 +4220,6 @@ int code_generator_binary_emit_instruction(
  * one page at a time. We do an unrolled probe (no helper call): for each 4 KiB
  * step, `sub rsp, 4096` then write to [rsp], then handle the remainder. RAX is
  * scratch here (prologue runs before any value is live in it). */
-#define BINARY_STACK_PAGE_SIZE 4096
-
 int binary_emit_frame_allocation(BinaryCodeBuffer *code, int frame_size) {
   if (frame_size <= 0) {
     return 1;

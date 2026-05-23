@@ -616,24 +616,22 @@ static int code_generator_emit_entry_point(CodeGenerator *generator,
   }
 
   int is_ms_x64 = (entry_conv_spec->convention == CALLING_CONV_MS_X64);
-  const char *second_param_reg =
-      (entry_conv_spec->int_param_count > 1 &&
-       code_generator_get_register_name(entry_conv_spec->int_param_registers[1]))
-          ? code_generator_get_register_name(
-                entry_conv_spec->int_param_registers[1])
-          : (is_ms_x64 ? "rdx" : "rsi");
-  const char *third_param_reg =
-      (entry_conv_spec->int_param_count > 2 &&
-       code_generator_get_register_name(entry_conv_spec->int_param_registers[2]))
-          ? code_generator_get_register_name(
-                entry_conv_spec->int_param_registers[2])
-          : (is_ms_x64 ? "r8" : "rdx");
-  const char *fourth_param_reg =
-      (entry_conv_spec->int_param_count > 3 &&
-       code_generator_get_register_name(entry_conv_spec->int_param_registers[3]))
-          ? code_generator_get_register_name(
-                entry_conv_spec->int_param_registers[3])
-          : (is_ms_x64 ? "r9" : "rcx");
+  const char *reg = NULL;
+
+  reg = (entry_conv_spec->int_param_count > 1)
+            ? code_generator_get_register_name(entry_conv_spec->int_param_registers[1])
+            : NULL;
+  const char *second_param_reg = reg ? reg : (is_ms_x64 ? "rdx" : "rsi");
+
+  reg = (entry_conv_spec->int_param_count > 2)
+            ? code_generator_get_register_name(entry_conv_spec->int_param_registers[2])
+            : NULL;
+  const char *third_param_reg = reg ? reg : (is_ms_x64 ? "r8" : "rdx");
+
+  reg = (entry_conv_spec->int_param_count > 3)
+            ? code_generator_get_register_name(entry_conv_spec->int_param_registers[3])
+            : NULL;
+  const char *fourth_param_reg = reg ? reg : (is_ms_x64 ? "r9" : "rcx");
 
   code_generator_emit(generator, "\n; Default program entry point\n");
   if (is_ms_x64) {

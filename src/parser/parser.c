@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define PARSER_ERROR_BUF_SIZE 512
+#define PARSER_SCRATCH_BUF_SIZE 1024
+
 static void parser_report_lexer_token_error(Parser *parser,
                                             const Token *token) {
   if (!parser || !token || token->type != TOKEN_ERROR) {
@@ -18,7 +21,7 @@ static void parser_report_lexer_token_error(Parser *parser,
   const char *message = (token->value && token->value[0] != '\0')
                             ? token->value
                             : "Invalid token";
-  char error_msg[512];
+  char error_msg[PARSER_ERROR_BUF_SIZE];
   snprintf(error_msg, sizeof(error_msg), "Lexical error: %s", message);
 
   parser->has_error = 1;
@@ -263,8 +266,7 @@ int parser_expect(Parser *parser, TokenType type) {
     return 1;
   }
 
-  // Create a helpful error message
-  char error_msg[512];
+  char error_msg[PARSER_ERROR_BUF_SIZE];
   const char *expected_str = token_type_to_string(type);
   const char *actual_str = token_type_to_string(parser->current_token.type);
 
@@ -808,62 +810,51 @@ ASTNode *parser_parse_statement(Parser *parser) {
   return expr;
 }
 
-ASTNode *parser_parse_defer_statement(Parser *parser) {
+static ASTNode *parser_parse_defer_or_errdefer(Parser *parser,
+                                               TokenType token_type) {
   if (!parser) {
     return NULL;
   }
 
   SourceLocation location = parser_current_location(parser);
+  const char *keyword =
+      (token_type == TOKEN_DEFER) ? "defer" : "errdefer";
 
-  if (!parser_expect(parser, TOKEN_DEFER)) {
+  if (!parser_expect(parser, token_type)) {
     return NULL;
   }
 
   if (parser->current_token.type == TOKEN_SEMICOLON ||
       parser->current_token.type == TOKEN_NEWLINE) {
-    parser_set_error(parser, "Expected statement after 'defer'");
+    char msg[PARSER_ERROR_BUF_SIZE];
+    snprintf(msg, sizeof(msg), "Expected statement after '%s'", keyword);
+    parser_set_error(parser, msg);
     return NULL;
   }
 
   ASTNode *stmt = parser_parse_statement(parser);
   if (!stmt) {
     if (!parser->has_error) {
-      parser_set_error(parser, "Expected statement after 'defer'");
+      char msg[PARSER_ERROR_BUF_SIZE];
+      snprintf(msg, sizeof(msg), "Expected statement after '%s'", keyword);
+      parser_set_error(parser, msg);
     }
     return NULL;
   }
 
   parser_expect_statement_end(parser);
-  return ast_create_defer_statement(stmt, location);
+  if (token_type == TOKEN_DEFER) {
+    return ast_create_defer_statement(stmt, location);
+  }
+  return ast_create_errdefer_statement(stmt, location);
+}
+
+ASTNode *parser_parse_defer_statement(Parser *parser) {
+  return parser_parse_defer_or_errdefer(parser, TOKEN_DEFER);
 }
 
 ASTNode *parser_parse_errdefer_statement(Parser *parser) {
-  if (!parser) {
-    return NULL;
-  }
-
-  SourceLocation location = parser_current_location(parser);
-
-  if (!parser_expect(parser, TOKEN_ERRDEFER)) {
-    return NULL;
-  }
-
-  if (parser->current_token.type == TOKEN_SEMICOLON ||
-      parser->current_token.type == TOKEN_NEWLINE) {
-    parser_set_error(parser, "Expected statement after 'errdefer'");
-    return NULL;
-  }
-
-  ASTNode *stmt = parser_parse_statement(parser);
-  if (!stmt) {
-    if (!parser->has_error) {
-      parser_set_error(parser, "Expected statement after 'errdefer'");
-    }
-    return NULL;
-  }
-
-  parser_expect_statement_end(parser);
-  return ast_create_errdefer_statement(stmt, location);
+  return parser_parse_defer_or_errdefer(parser, TOKEN_ERRDEFER);
 }
 
 ASTNode *parser_parse_expression(Parser *parser) {
@@ -3545,12 +3536,13 @@ ASTNode *parser_parse_while_statement(Parser *parser) {
   return while_node;
 }
 
-ASTNode *parser_parse_break_statement(Parser *parser) {
+static ASTNode *parser_parse_break_or_continue(Parser *parser,
+                                               TokenType token_type) {
   if (!parser)
     return NULL;
 
   SourceLocation location = parser_current_location(parser);
-  if (!parser_expect(parser, TOKEN_BREAK)) {
+  if (!parser_expect(parser, token_type)) {
     return NULL;
   }
 
@@ -3561,30 +3553,19 @@ ASTNode *parser_parse_break_statement(Parser *parser) {
   }
 
   parser_expect_statement_end(parser);
-  ASTNode *node = ast_create_labeled_break_statement(target_label, location);
+  ASTNode *node = (token_type == TOKEN_BREAK)
+                      ? ast_create_labeled_break_statement(target_label, location)
+                      : ast_create_labeled_continue_statement(target_label, location);
   free(target_label);
   return node;
 }
 
+ASTNode *parser_parse_break_statement(Parser *parser) {
+  return parser_parse_break_or_continue(parser, TOKEN_BREAK);
+}
+
 ASTNode *parser_parse_continue_statement(Parser *parser) {
-  if (!parser)
-    return NULL;
-
-  SourceLocation location = parser_current_location(parser);
-  if (!parser_expect(parser, TOKEN_CONTINUE)) {
-    return NULL;
-  }
-
-  char *target_label = NULL;
-  if (parser->current_token.type == TOKEN_IDENTIFIER) {
-    target_label = strdup(parser->current_token.value);
-    parser_advance(parser);
-  }
-
-  parser_expect_statement_end(parser);
-  ASTNode *node = ast_create_labeled_continue_statement(target_label, location);
-  free(target_label);
-  return node;
+  return parser_parse_break_or_continue(parser, TOKEN_CONTINUE);
 }
 
 ASTNode *parser_parse_for_statement(Parser *parser) {

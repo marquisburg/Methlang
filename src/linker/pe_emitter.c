@@ -82,6 +82,9 @@
 #define PE_SECTION_INDEX_PDATA 4u
 #define PE_SECTION_INDEX_XDATA 5u
 
+#define PE_IMP_PREFIX "__imp_"
+#define PE_IMP_PREFIX_LEN 6u
+
 typedef struct {
   size_t merged_section_index;
   const char *name;
@@ -980,7 +983,7 @@ pe_find_import_symbol(ImportLibrary **libraries, size_t library_count,
 }
 
 static int pe_is_imp_symbol_name(const char *symbol_name) {
-  return symbol_name && strncmp(symbol_name, "__imp_", 6u) == 0;
+  return symbol_name && strncmp(symbol_name, PE_IMP_PREFIX, PE_IMP_PREFIX_LEN) == 0;
 }
 
 static int pe_bind_import_symbol(LinkResolution *resolution, PeImportPlan *plan,

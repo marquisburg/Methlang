@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define BINARY_LOOP_WEIGHT_CAP 262144
+
 int code_generator_binary_get_parameter_offset(
     BinaryFunctionContext *context, const char *name) {
   return binary_named_slot_table_get_offset(&context->parameter_slots, name);
@@ -527,7 +529,7 @@ size_t *code_generator_binary_build_loop_weights(
       for (size_t i = label_index; i <= jump_index; i++) {
         /* Cap to avoid overflow on pathologically deep nesting; 4^10 already
          * dwarfs any realistic outer-loop score. */
-        if (weights[i] <= (size_t)262144) {
+        if (weights[i] <= (size_t)BINARY_LOOP_WEIGHT_CAP) {
           weights[i] *= 4;
         }
       }

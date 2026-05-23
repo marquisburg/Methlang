@@ -4,7 +4,6 @@
 #include "../error/error_reporter.h"
 #include "../lexer/lexer.h"
 #include "ast.h"
-#include <string.h>
 
 typedef struct {
   Lexer *lexer;

@@ -18,6 +18,8 @@
 #include <unistd.h>
 #endif
 
+#define MAX_BACKTRACE_FRAMES 64
+
 static int g_compiler_crash_installed = 0;
 static int g_compiler_in_ice_handler = 0;
 
@@ -29,14 +31,14 @@ static void mettle_compiler_write_backtrace(FILE *output) {
   fprintf(output, "\nCompiler backtrace:\n");
 
 #if defined(_WIN32) || defined(_WIN64)
-  void *frames[64];
+  void *frames[MAX_BACKTRACE_FRAMES];
   USHORT frame_count = 0;
   HANDLE process = GetCurrentProcess();
   char symbol_buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
   SYMBOL_INFO *symbol = (SYMBOL_INFO *)symbol_buffer;
 
   SymInitialize(process, NULL, TRUE);
-  frame_count = CaptureStackBackTrace(0, 64, frames, NULL);
+  frame_count = CaptureStackBackTrace(0, MAX_BACKTRACE_FRAMES, frames, NULL);
   symbol->MaxNameLen = MAX_SYM_NAME;
   symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
 
@@ -51,8 +53,8 @@ static void mettle_compiler_write_backtrace(FILE *output) {
   }
   SymCleanup(process);
 #else
-  void *frames[64];
-  int frame_count = backtrace(frames, 64);
+  void *frames[MAX_BACKTRACE_FRAMES];
+  int frame_count = backtrace(frames, MAX_BACKTRACE_FRAMES);
   char **symbols = backtrace_symbols(frames, frame_count);
   if (symbols) {
     for (int i = 0; i < frame_count; i++) {

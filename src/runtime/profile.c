@@ -41,6 +41,8 @@ typedef struct {
 } MettleProfileEdge;
 
 #define METTLE_PROFILE_MAX_STACK 1024u
+#define METTLE_PROFILE_INITIAL_CAPACITY 16u
+#define NS_PER_US 1000u
 
 static MettleProfileStats *g_stats = NULL;
 static MettleProfileOpStats *g_op_stats = NULL;
@@ -201,7 +203,7 @@ static uint64_t mettle_profile_now_ns(void) {
 
 #define METTLE_PROFILE_ENSURE_CAPACITY(ptr, count, capacity, type, needed) do { \
     if ((needed) > (capacity)) { \
-        size_t new_cap = (capacity) ? (capacity) : 16u; \
+        size_t new_cap = (capacity) ? (capacity) : METTLE_PROFILE_INITIAL_CAPACITY; \
         while (new_cap < (needed)) new_cap *= 2; \
         type *new_buf = realloc((ptr), new_cap * sizeof(type)); \
         if (!new_buf) break; \
@@ -403,6 +405,7 @@ static int mettle_profile_sort_desc(const void *left, const void *right) {
 
 typedef struct {
   uint32_t callee_id;
+  uint64_t call_count;
   uint64_t total_ns;
 } MettleProfileChildEntry;
 
@@ -519,6 +522,7 @@ static void mettle_profile_report_callgraph_node(uint32_t fn_id, size_t depth,
       continue;
     }
     children[child_count].callee_id = g_edges[i].callee_id;
+    children[child_count].call_count = g_edges[i].call_count;
     children[child_count].total_ns = g_edges[i].total_ns;
     child_count++;
   }
@@ -528,11 +532,8 @@ static void mettle_profile_report_callgraph_node(uint32_t fn_id, size_t depth,
 
   for (size_t i = 0; i < child_count; i++) {
     uint32_t child_id = children[i].callee_id;
-    MettleProfileEdge *edge =
-        mettle_profile_find_edge(fn_id, child_id);
-    uint64_t edge_us =
-        edge ? edge->total_ns / 1000u : children[i].total_ns / 1000u;
-    uint64_t calls = edge ? edge->call_count : 0;
+    uint64_t edge_us = children[i].total_ns / NS_PER_US;
+    uint64_t calls = children[i].call_count;
 
     mettle_profile_write_indent(depth);
     mettle_crash_write_stderr(mettle_profile_function_name(child_id));
@@ -670,8 +671,8 @@ void mettle_profile_report(void) {
     uint32_t fn_id = entries[i].fn_id;
     MettleProfileStats *stats = &g_stats[fn_id];
     const char *name = mettle_profile_function_name(fn_id);
-    uint64_t total_us = stats->total_ns / 1000u;
-    uint64_t self_us = stats->self_ns / 1000u;
+    uint64_t total_us = stats->total_ns / NS_PER_US;
+    uint64_t self_us = stats->self_ns / NS_PER_US;
     uint64_t avg_ns =
         stats->call_count == 0 ? 0 : stats->total_ns / stats->call_count;
     double pct = 100.0 * ((double)stats->total_ns / (double)root_total_ns);

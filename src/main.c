@@ -186,14 +186,21 @@ static char *directory_from_path(const char *path) {
 }
 
 static char *get_executable_path(const char *argv0) {
+  static char *cached_path = NULL;
+  static int cached = 0;
+  if (cached) return cached_path ? strdup(cached_path) : NULL;
+  cached = 1;
+
 #ifdef _WIN32
   char *program_path = NULL;
   if (_get_pgmptr(&program_path) == 0 && program_path &&
       program_path[0] != '\0') {
-    return strdup(program_path);
+    cached_path = strdup(program_path);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   if (argv0 && argv0[0] != '\0') {
-    return strdup(argv0);
+    cached_path = strdup(argv0);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   return NULL;
 #elif defined(__APPLE__)
@@ -210,16 +217,19 @@ static char *get_executable_path(const char *argv0) {
     return NULL;
   }
   buffer[size] = '\0';
-  return buffer;
+  cached_path = buffer;
+  return strdup(cached_path);
 #else
   char buffer[PATH_MAX + 1];
   ssize_t len = readlink("/proc/self/exe", buffer, PATH_MAX);
   if (len > 0) {
     buffer[len] = '\0';
-    return strdup(buffer);
+    cached_path = strdup(buffer);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   if (argv0 && argv0[0] != '\0') {
-    return strdup(argv0);
+    cached_path = strdup(argv0);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   return NULL;
 #endif
@@ -725,7 +735,8 @@ static int resolve_import_library_path(const char *library_name,
     }
   }
 
-  env_copy = getenv("LIB") ? strdup(getenv("LIB")) : NULL;
+  const char *lib_env = getenv("LIB");
+  env_copy = lib_env ? strdup(lib_env) : NULL;
   token = env_copy ? strtok(env_copy, ";") : NULL;
   while (token) {
     candidate = join_paths(token, library_name);

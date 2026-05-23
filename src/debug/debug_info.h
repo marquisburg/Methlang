@@ -70,11 +70,9 @@ typedef struct {
     char* assembly_filename;
 } DebugInfo;
 
-// Function declarations
 DebugInfo* debug_info_create(const char* source_filename, const char* assembly_filename);
 void debug_info_destroy(DebugInfo* debug_info);
 
-// Symbol management
 void debug_info_add_symbol(DebugInfo* debug_info, const char* name, DebugSymbolType type,
                           const char* type_name, size_t line, size_t column);
 void debug_info_set_symbol_address(DebugInfo* debug_info, const char* name, size_t address, size_t size);
@@ -82,7 +80,6 @@ void debug_info_set_symbol_register(DebugInfo* debug_info, const char* name, con
 void debug_info_set_symbol_stack_offset(DebugInfo* debug_info, const char* name, int stack_offset);
 DebugSymbol* debug_info_find_symbol(DebugInfo* debug_info, const char* name);
 
-// Source line mapping
 void debug_info_add_line_mapping(DebugInfo* debug_info, size_t source_line, size_t source_column,
                                 size_t assembly_line, const char* filename);
 SourceLineMapping* debug_info_find_line_mapping(DebugInfo* debug_info, size_t assembly_line);
@@ -100,12 +97,10 @@ void debug_info_add_runtime_location_mapping(DebugInfo* debug_info,
                                              const char* filename,
                                              size_t line, size_t column);
 
-// Debug output generation
 void debug_info_generate_dwarf(DebugInfo* debug_info, const char* output_filename);
 void debug_info_generate_stabs(DebugInfo* debug_info, const char* output_filename);
 void debug_info_generate_debug_map(DebugInfo* debug_info, const char* output_filename);
 
-// Stack trace support
 typedef struct {
     char* function_name;
     char* filename;

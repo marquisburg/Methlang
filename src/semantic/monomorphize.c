@@ -59,7 +59,7 @@ static char *mangle_name(const char *base, char **type_args,
                            size_t type_arg_count) {
   size_t len = strlen(base);
   for (size_t i = 0; i < type_arg_count; i++) {
-    len += 2 + strlen(type_args[i]);
+    len += 2 + strlen(type_args[i]) * 4;
   }
   len += 1;
 
@@ -67,22 +67,25 @@ static char *mangle_name(const char *base, char **type_args,
   if (!result)
     return NULL;
 
-  strcpy(result, base);
+  size_t base_len = strlen(base);
+  memcpy(result, base, base_len);
+  size_t pos = base_len;
+
   for (size_t i = 0; i < type_arg_count; i++) {
-    strcat(result, "__");
+    result[pos++] = '_';
+    result[pos++] = '_';
     for (const char *p = type_args[i]; *p; p++) {
-      size_t cur = strlen(result);
       if (*p == '*') {
-        strcat(result, "_ptr");
+        memcpy(result + pos, "_ptr", 4);
+        pos += 4;
       } else if (*p == '<' || *p == '>' || *p == ',') {
-        result[cur] = '_';
-        result[cur + 1] = '\0';
+        result[pos++] = '_';
       } else {
-        result[cur] = *p;
-        result[cur + 1] = '\0';
+        result[pos++] = *p;
       }
     }
   }
+  result[pos] = '\0';
 
   return result;
 }
