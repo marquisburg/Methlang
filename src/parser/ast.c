@@ -976,6 +976,42 @@ void ast_destroy_node(ASTNode *node) {
     }
     break;
   }
+  case AST_RETURN_STATEMENT: {
+    ReturnStatement *ret_stmt = (ReturnStatement *)node->data;
+    if (ret_stmt) {
+      free(ret_stmt);
+    }
+    break;
+  }
+  case AST_NUMBER_LITERAL: {
+    NumberLiteral *num_lit = (NumberLiteral *)node->data;
+    if (num_lit) {
+      free(num_lit);
+    }
+    break;
+  }
+  case AST_METHOD_DECLARATION: {
+    FunctionDeclaration *method_decl = (FunctionDeclaration *)node->data;
+    if (method_decl) {
+      ast_free_string(method_decl->name);
+      ast_free_string(method_decl->return_type);
+      ast_free_string(method_decl->link_name);
+      for (size_t i = 0; i < method_decl->parameter_count; i++) {
+        ast_free_string(method_decl->parameter_names[i]);
+        ast_free_string(method_decl->parameter_types[i]);
+      }
+      free(method_decl->parameter_names);
+      free(method_decl->parameter_types);
+      for (size_t i = 0; i < method_decl->type_param_count; i++) {
+        ast_free_string(method_decl->type_params[i]);
+        ast_free_string(method_decl->type_param_traits[i]);
+      }
+      free(method_decl->type_params);
+      free(method_decl->type_param_traits);
+      free(method_decl);
+    }
+    break;
+  }
   default:
     // For other node types, assume data is managed by children or is NULL
     break;

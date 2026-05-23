@@ -4348,6 +4348,7 @@ ASTNode *parser_parse_method_declaration(Parser *parser) {
     ast_destroy_node(method_decl);
     return NULL;
   }
+  memset(method_data, 0, sizeof(FunctionDeclaration));
 
   method_data->name = (char *)string_intern(method_name);
   method_data->return_type =
