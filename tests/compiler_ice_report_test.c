@@ -24,7 +24,7 @@ int main(void) {
   instruction.rhs = ir_operand_temp("size");
 
   mettle_compiler_ctx_set_ir_instruction(184, &instruction);
-  if (!ir_instruction_dump(&instruction, 184, line, sizeof(line))) {
+  if (!ir_instruction_dump(&instruction, line, sizeof(line))) {
     fprintf(stderr, "ir_instruction_dump failed\n");
     return 1;
   }

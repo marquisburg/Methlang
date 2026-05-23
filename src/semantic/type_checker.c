@@ -5127,9 +5127,7 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     return 1;
 
   case AST_INLINE_ASM:
-    // Inline assembly is passed through without type checking
     return 1;
-    break;
 
   case AST_PROGRAM: {
     // A block of statements

@@ -1,4 +1,5 @@
 #include "linker/symbol_resolve.h"
+#include "linker/linker_common.h"
 #include "../common.h"
 
 /* Section merge and symbol resolution for COFF produced by the object backend;
@@ -29,19 +30,6 @@
 #define IMAGE_SCN_ALIGN_4096BYTES 0x00D00000u
 #define IMAGE_SCN_ALIGN_8192BYTES 0x00E00000u
 
-static size_t link_align_up(size_t value, size_t alignment) {
-  size_t remainder = 0;
-
-  if (alignment <= 1u) {
-    return value;
-  }
-
-  remainder = value % alignment;
-  if (remainder == 0u) {
-    return value;
-  }
-  return value + (alignment - remainder);
-}
 
 static size_t link_section_index_from_kind(CoffSectionKind kind) {
   switch (kind) {
@@ -379,7 +367,7 @@ static int link_resolution_merge_sections(LinkResolution *resolution,
       }
 
       contribution_size = link_estimate_section_size(input->object, section_index);
-      start = link_align_up(merged->virtual_size, alignment);
+      start = linker_align_up(merged->virtual_size, alignment);
 
       if (!link_section_reserve_contributions(merged, merged->contribution_count + 1u,
                                               error_message_out)) {
@@ -624,7 +612,7 @@ static int link_resolution_assign_virtual_addresses(
       continue;
     }
 
-    current_address = (uint64_t)link_align_up((size_t)current_address,
+    current_address = (uint64_t)linker_align_up((size_t)current_address,
                                               section_alignment);
     section->virtual_address = current_address;
     current_address += (uint64_t)section->virtual_size;

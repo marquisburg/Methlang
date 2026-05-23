@@ -1,4 +1,5 @@
 #include "linker/relocation.h"
+#include "linker/linker_common.h"
 #include "../common.h"
 #include "linker/symbol_resolve.h"
 
@@ -12,11 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define COFF_RELOC_AMD64_ADDR64 0x0001u
-#define COFF_RELOC_AMD64_ADDR32NB 0x0003u
-#define COFF_RELOC_AMD64_REL32 0x0004u
-#define COFF_RELOC_AMD64_SECREL 0x000Bu
-
 typedef struct {
   const char *name;
   size_t merged_section_index;
@@ -24,34 +20,11 @@ typedef struct {
   uint64_t virtual_address;
 } RelocationTarget;
 
-static uint32_t relocation_read_u32(const unsigned char *bytes) {
-  return (uint32_t)(bytes[0] | ((uint32_t)bytes[1] << 8) |
-                    ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24));
-}
-
 static uint64_t relocation_read_u64(const unsigned char *bytes) {
   return (uint64_t)bytes[0] | ((uint64_t)bytes[1] << 8) |
          ((uint64_t)bytes[2] << 16) | ((uint64_t)bytes[3] << 24) |
          ((uint64_t)bytes[4] << 32) | ((uint64_t)bytes[5] << 40) |
          ((uint64_t)bytes[6] << 48) | ((uint64_t)bytes[7] << 56);
-}
-
-static void relocation_write_u32(unsigned char *bytes, uint32_t value) {
-  bytes[0] = (unsigned char)(value & 0xFFu);
-  bytes[1] = (unsigned char)((value >> 8) & 0xFFu);
-  bytes[2] = (unsigned char)((value >> 16) & 0xFFu);
-  bytes[3] = (unsigned char)((value >> 24) & 0xFFu);
-}
-
-static void relocation_write_u64(unsigned char *bytes, uint64_t value) {
-  bytes[0] = (unsigned char)(value & 0xFFu);
-  bytes[1] = (unsigned char)((value >> 8) & 0xFFu);
-  bytes[2] = (unsigned char)((value >> 16) & 0xFFu);
-  bytes[3] = (unsigned char)((value >> 24) & 0xFFu);
-  bytes[4] = (unsigned char)((value >> 32) & 0xFFu);
-  bytes[5] = (unsigned char)((value >> 40) & 0xFFu);
-  bytes[6] = (unsigned char)((value >> 48) & 0xFFu);
-  bytes[7] = (unsigned char)((value >> 56) & 0xFFu);
 }
 
 static int relocation_section_is_debug_only(const CoffSection *section) {
@@ -139,8 +112,6 @@ int link_apply_relocations(LinkResolution *resolution,
   if (options) {
     image_base = options->image_base;
   }
-  (void)image_base;
-
   for (object_index = 0; object_index < resolution->object_count;
        object_index++) {
     const LinkedInputObject *input = &resolution->objects[object_index];
@@ -156,9 +127,7 @@ int link_apply_relocations(LinkResolution *resolution,
       size_t merged_section_index = LINKED_SECTION_INDEX_NONE;
       size_t relocation_index = 0;
 
-      if (section_index < input->object->section_count) {
-        merged_section_index = input->section_merged_indices[section_index];
-      }
+      merged_section_index = input->section_merged_indices[section_index];
       if (source_section->relocation_count == 0u) {
         continue;
       }
@@ -221,7 +190,7 @@ int link_apply_relocations(LinkResolution *resolution,
         if (width == 8u) {
           addend = (int64_t)relocation_read_u64(merged->data + patch_offset);
         } else {
-          addend = (int64_t)(int32_t)relocation_read_u32(merged->data + patch_offset);
+          addend = (int64_t)(int32_t)linker_read_u32(merged->data + patch_offset);
         }
 
         switch (relocation->type) {
@@ -234,7 +203,7 @@ int link_apply_relocations(LinkResolution *resolution,
                                  target.name);
             return 0;
           }
-          relocation_write_u32(merged->data + patch_offset, (uint32_t)(int32_t)value);
+          linker_write_u32(merged->data + patch_offset, (uint32_t)(int32_t)value);
           break;
         case COFF_RELOC_AMD64_ADDR64:
           value = (int64_t)target.virtual_address + addend;
@@ -244,7 +213,7 @@ int link_apply_relocations(LinkResolution *resolution,
                                  target.name);
             return 0;
           }
-          relocation_write_u64(merged->data + patch_offset, (uint64_t)value);
+          linker_write_u64(merged->data + patch_offset, (uint64_t)value);
           break;
         case COFF_RELOC_AMD64_ADDR32NB:
           if (image_base != 0u && target.virtual_address >= image_base) {
@@ -258,7 +227,7 @@ int link_apply_relocations(LinkResolution *resolution,
                                  target.name);
             return 0;
           }
-          relocation_write_u32(merged->data + patch_offset, (uint32_t)value);
+          linker_write_u32(merged->data + patch_offset, (uint32_t)value);
           break;
         case COFF_RELOC_AMD64_SECREL:
           value = (int64_t)target.merged_offset + addend;
@@ -268,9 +237,7 @@ int link_apply_relocations(LinkResolution *resolution,
                                  target.name);
             return 0;
           }
-          relocation_write_u32(merged->data + patch_offset, (uint32_t)value);
-          break;
-        default:
+          linker_write_u32(merged->data + patch_offset, (uint32_t)value);
           break;
         }
       }

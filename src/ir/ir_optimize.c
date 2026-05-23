@@ -1589,25 +1589,6 @@ static IRFunction *ir_program_find_function(IRProgram *program,
   return NULL;
 }
 
-static int ir_instruction_is_errdefer_epilogue(const IRInstruction *instruction) {
-  if (!instruction || !instruction->text) {
-    return 0;
-  }
-
-  if (instruction->op == IR_OP_LABEL &&
-      (strstr(instruction->text, "errdefer_ok") != NULL ||
-       strstr(instruction->text, "errdefer_end") != NULL)) {
-    return 1;
-  }
-
-  if (instruction->op == IR_OP_BRANCH_ZERO &&
-      strstr(instruction->text, "errdefer_end") != NULL) {
-    return 1;
-  }
-
-  return 0;
-}
-
 static int ir_function_name_is_inline_denylisted(const char *name) {
   if (!name) {
     return 0;
@@ -1671,7 +1652,6 @@ static int ir_function_is_inline_candidate(const IRFunction *function) {
    * (notably pattern_matches inside the grep loop). The labels and branches
    * inline correctly via the generic label-rename map; the cap was just
    * working around a latent bug elsewhere in the optimizer. */
-  (void)ir_instruction_is_errdefer_epilogue;
   return has_return;
 }
 

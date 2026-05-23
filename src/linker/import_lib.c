@@ -1,4 +1,5 @@
 #include "linker/import_lib.h"
+#include "linker/linker_common.h"
 #include "../common.h"
 
 #include "linker/coff_reader.h"
@@ -88,14 +89,6 @@ static int import_library_read_file(const char *path,
   return 1;
 }
 
-static uint16_t import_library_read_u16(const unsigned char *bytes) {
-  return (uint16_t)(bytes[0] | ((uint16_t)bytes[1] << 8));
-}
-
-static uint32_t import_library_read_u32(const unsigned char *bytes) {
-  return (uint32_t)(bytes[0] | ((uint32_t)bytes[1] << 8) |
-                    ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24));
-}
 
 static int import_library_reserve_symbols(ImportLibrary *library,
                                           size_t minimum_count,
@@ -186,14 +179,14 @@ static int import_library_parse_import_header(const unsigned char *member_data,
     return 0;
   }
 
-  header_out->sig1 = import_library_read_u16(member_data);
-  header_out->sig2 = import_library_read_u16(member_data + 2u);
-  header_out->version = import_library_read_u16(member_data + 4u);
-  header_out->machine = import_library_read_u16(member_data + 6u);
-  header_out->time_date_stamp = import_library_read_u32(member_data + 8u);
-  header_out->size_of_data = import_library_read_u32(member_data + 12u);
-  header_out->ordinal_or_hint = import_library_read_u16(member_data + 16u);
-  header_out->type_info = import_library_read_u16(member_data + 18u);
+  header_out->sig1 = linker_read_u16(member_data);
+  header_out->sig2 = linker_read_u16(member_data + 2u);
+  header_out->version = linker_read_u16(member_data + 4u);
+  header_out->machine = linker_read_u16(member_data + 6u);
+  header_out->time_date_stamp = linker_read_u32(member_data + 8u);
+  header_out->size_of_data = linker_read_u32(member_data + 12u);
+  header_out->ordinal_or_hint = linker_read_u16(member_data + 16u);
+  header_out->type_info = linker_read_u16(member_data + 18u);
   return 1;
 }
 

@@ -700,12 +700,11 @@ static int ir_format_instruction_line(const IRInstruction *instruction,
   return written > 0 && (size_t)written < buffer_size;
 }
 
-int ir_instruction_dump(const IRInstruction *instruction, size_t index,
+int ir_instruction_dump(const IRInstruction *instruction,
                         char *buffer, size_t capacity) {
   if (!instruction || !buffer || capacity == 0) {
     return 0;
   }
-  (void)index;
   return ir_format_instruction_line(instruction, buffer, capacity);
 }
 

@@ -195,7 +195,7 @@ void mettle_compiler_ctx_write_report(FILE *output, const char *reason,
   if (ctx->ir_instruction_index != (size_t)-1) {
     fprintf(output, "IR instruction: #%zu\n", ctx->ir_instruction_index);
     if (ctx->ir_instruction &&
-        ir_instruction_dump(ctx->ir_instruction, ctx->ir_instruction_index,
+        ir_instruction_dump(ctx->ir_instruction,
                             instruction_buffer, sizeof(instruction_buffer))) {
       fprintf(output, "  %s\n", instruction_buffer);
     }

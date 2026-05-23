@@ -101,7 +101,6 @@ typedef struct {
   int current_fn_returns_indirect;
   size_t current_fn_indirect_return_size;
   int profile_runtime;
-  uint32_t profile_next_id;
   char **profile_function_names;
   size_t profile_function_count;
   size_t profile_function_capacity;
@@ -207,14 +206,7 @@ void code_generator_generate_parameter_passing(CodeGenerator *generator,
 void code_generator_generate_parameter(CodeGenerator *generator,
                                        ASTNode *argument, int param_index,
                                        Type *param_type, Symbol *func_symbol);
-void code_generator_save_caller_saved_registers(CodeGenerator *generator);
-void code_generator_restore_caller_saved_registers(CodeGenerator *generator);
-void code_generator_save_caller_saved_registers_selective(
-    CodeGenerator *generator);
-void code_generator_restore_caller_saved_registers_selective(
-    CodeGenerator *generator);
-void code_generator_align_stack_for_call(CodeGenerator *generator,
-                                         int param_count);
+void code_generator_align_stack_for_call(CodeGenerator *generator);
 void code_generator_cleanup_stack_after_call(CodeGenerator *generator,
                                              ASTNode **arguments,
                                              size_t argument_count);

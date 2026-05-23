@@ -1,19 +1,10 @@
 #include "linker/coff_reader.h"
+#include "linker/linker_common.h"
+#include "test_helpers.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define COFF_RELOC_AMD64_REL32 0x0004u
-
-static int report_failure(const char *message, const char *detail) {
-  if (detail && detail[0] != '\0') {
-    fprintf(stderr, "%s: %s\n", message, detail);
-  } else {
-    fprintf(stderr, "%s\n", message);
-  }
-  return 1;
-}
 
 static const CoffSection *find_section_with_relocations(const CoffObject *object) {
   size_t i = 0;

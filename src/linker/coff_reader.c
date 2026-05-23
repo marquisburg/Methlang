@@ -1,4 +1,5 @@
 #include "linker/coff_reader.h"
+#include "linker/linker_common.h"
 #include "../common.h"
 
 #include <ctype.h>
@@ -12,11 +13,6 @@
 #define COFF_SECTION_HEADER_SIZE 40u
 #define COFF_SYMBOL_SIZE 18u
 #define COFF_RELOCATION_SIZE 10u
-
-#define COFF_RELOC_AMD64_ADDR64 0x0001u
-#define COFF_RELOC_AMD64_ADDR32NB 0x0003u
-#define COFF_RELOC_AMD64_REL32 0x0004u
-#define COFF_RELOC_AMD64_SECREL 0x000Bu
 
 static char *coff_reader_dup_bytes_trimmed(const unsigned char *bytes,
                                            size_t byte_count) {
@@ -63,17 +59,8 @@ static char *coff_reader_dup_cstring_range(const unsigned char *bytes,
   return copy;
 }
 
-static uint16_t coff_reader_u16(const unsigned char *data) {
-  return (uint16_t)(data[0] | ((uint16_t)data[1] << 8));
-}
-
 static int16_t coff_reader_i16(const unsigned char *data) {
-  return (int16_t)coff_reader_u16(data);
-}
-
-static uint32_t coff_reader_u32(const unsigned char *data) {
-  return (uint32_t)(data[0] | ((uint32_t)data[1] << 8) |
-                    ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24));
+  return (int16_t)linker_read_u16(data);
 }
 
 static int coff_reader_read_file(const char *filename, unsigned char **data_out,
@@ -190,8 +177,8 @@ static char *coff_reader_parse_section_name(const unsigned char field[8],
 
 static char *coff_reader_parse_symbol_name(const unsigned char field[8],
                                            const CoffObject *object) {
-  uint32_t zero_prefix = coff_reader_u32(field);
-  uint32_t offset = coff_reader_u32(field + 4);
+  uint32_t zero_prefix = linker_read_u32(field);
+  uint32_t offset = linker_read_u32(field + 4);
 
   if (zero_prefix == 0u && offset != 0u) {
     return coff_reader_string_from_table(object, offset);
@@ -228,7 +215,7 @@ static int coff_reader_parse_string_table(CoffObject *object,
     return 0;
   }
 
-  string_table_size = coff_reader_u32(file_data + string_table_offset);
+  string_table_size = linker_read_u32(file_data + string_table_offset);
   if (string_table_size == 0u) {
     return 1;
   }
@@ -298,15 +285,15 @@ static int coff_reader_parse_sections(CoffObject *object,
     }
 
     section->kind = coff_section_kind_from_name(section->name);
-    section->virtual_size = coff_reader_u32(header + 8);
-    section->virtual_address = coff_reader_u32(header + 12);
-    section->size_of_raw_data = coff_reader_u32(header + 16);
-    section->pointer_to_raw_data = coff_reader_u32(header + 20);
-    section->pointer_to_relocations = coff_reader_u32(header + 24);
-    section->pointer_to_line_numbers = coff_reader_u32(header + 28);
-    section->number_of_relocations = coff_reader_u16(header + 32);
-    section->number_of_line_numbers = coff_reader_u16(header + 34);
-    section->characteristics = coff_reader_u32(header + 36);
+    section->virtual_size = linker_read_u32(header + 8);
+    section->virtual_address = linker_read_u32(header + 12);
+    section->size_of_raw_data = linker_read_u32(header + 16);
+    section->pointer_to_raw_data = linker_read_u32(header + 20);
+    section->pointer_to_relocations = linker_read_u32(header + 24);
+    section->pointer_to_line_numbers = linker_read_u32(header + 28);
+    section->number_of_relocations = linker_read_u16(header + 32);
+    section->number_of_line_numbers = linker_read_u16(header + 34);
+    section->characteristics = linker_read_u32(header + 36);
 
     if (section->size_of_raw_data > 0u) {
       if (!coff_reader_range_ok(file_size, section->pointer_to_raw_data,
@@ -358,10 +345,10 @@ static int coff_reader_parse_sections(CoffObject *object,
             file_data + section->pointer_to_relocations +
             (r * COFF_RELOCATION_SIZE);
 
-        section->relocations[r].virtual_address = coff_reader_u32(relocation);
+        section->relocations[r].virtual_address = linker_read_u32(relocation);
         section->relocations[r].symbol_table_index =
-            coff_reader_u32(relocation + 4);
-        section->relocations[r].type = coff_reader_u16(relocation + 8);
+            linker_read_u32(relocation + 4);
+        section->relocations[r].type = linker_read_u16(relocation + 8);
       }
     }
   }
@@ -425,9 +412,9 @@ static int coff_reader_parse_symbols(CoffObject *object,
       return 0;
     }
 
-    symbol->value = coff_reader_u32(entry + 8);
+    symbol->value = linker_read_u32(entry + 8);
     symbol->section_number = coff_reader_i16(entry + 12);
-    symbol->type = coff_reader_u16(entry + 14);
+    symbol->type = linker_read_u16(entry + 14);
     symbol->storage_class = entry[16];
     symbol->auxiliary_count = entry[17];
 
@@ -442,9 +429,9 @@ static int coff_reader_parse_symbols(CoffObject *object,
       const unsigned char *aux_entry = entry + COFF_SYMBOL_SIZE;
 
       symbol->has_auxiliary_record = 1;
-      symbol->aux_section_length = coff_reader_u32(aux_entry);
-      symbol->aux_section_relocation_count = coff_reader_u16(aux_entry + 4);
-      symbol->aux_section_line_number_count = coff_reader_u16(aux_entry + 6);
+      symbol->aux_section_length = linker_read_u32(aux_entry);
+      symbol->aux_section_relocation_count = linker_read_u16(aux_entry + 4);
+      symbol->aux_section_line_number_count = linker_read_u16(aux_entry + 6);
       aux_remaining = symbol->auxiliary_count;
       primary_symbol_index = (uint32_t)i;
     }
@@ -493,13 +480,13 @@ int coff_object_read(const char *filename, CoffObject **object_out,
     goto cleanup;
   }
 
-  object->machine = coff_reader_u16(file_data);
-  object->section_count = coff_reader_u16(file_data + 2);
-  object->time_date_stamp = coff_reader_u32(file_data + 4);
-  object->pointer_to_symbol_table = coff_reader_u32(file_data + 8);
-  object->symbol_count = coff_reader_u32(file_data + 12);
-  object->size_of_optional_header = coff_reader_u16(file_data + 16);
-  object->characteristics = coff_reader_u16(file_data + 18);
+  object->machine = linker_read_u16(file_data);
+  object->section_count = linker_read_u16(file_data + 2);
+  object->time_date_stamp = linker_read_u32(file_data + 4);
+  object->pointer_to_symbol_table = linker_read_u32(file_data + 8);
+  object->symbol_count = linker_read_u32(file_data + 12);
+  object->size_of_optional_header = linker_read_u16(file_data + 16);
+  object->characteristics = linker_read_u16(file_data + 18);
 
   if (object->machine != COFF_MACHINE_AMD64) {
     mettle_set_error(error_message_out,

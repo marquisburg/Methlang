@@ -20,8 +20,6 @@
 
 static int g_compiler_crash_installed = 0;
 static int g_compiler_in_ice_handler = 0;
-static char **g_compiler_argv = NULL;
-static int g_compiler_argc = 0;
 
 static void mettle_compiler_write_backtrace(FILE *output) {
   if (!output) {
@@ -152,8 +150,8 @@ void mettle_compiler_crash_install(int argc, char **argv) {
     return;
   }
   g_compiler_crash_installed = 1;
-  g_compiler_argc = argc;
-  g_compiler_argv = argv;
+  (void)argc;
+  (void)argv;
 
 #if defined(_WIN32) || defined(_WIN64)
   SetUnhandledExceptionFilter(mettle_compiler_unhandled_exception_filter);

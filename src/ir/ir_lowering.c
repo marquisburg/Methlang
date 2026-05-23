@@ -2058,7 +2058,6 @@ static int ir_emit_condition_false_branch(IRLoweringContext *context,
       if (strcmp(binary->operator, "||") == 0) {
         char *done_label = ir_new_label_name(context, "cond_done");
         if (!done_label) {
-          free(done_label);
           ir_set_error(context, "Out of memory while allocating condition labels");
           return 0;
         }

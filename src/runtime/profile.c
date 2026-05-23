@@ -165,13 +165,9 @@ static void mettle_profile_write_location(uint32_t fn_id, size_t width) {
     size_t digit_count = 0;
 
     buffer[index++] = ':';
-    if (remaining == 0) {
-      digits[digit_count++] = '0';
-    } else {
-      while (remaining > 0 && digit_count < sizeof(digits)) {
-        digits[digit_count++] = (char)('0' + (remaining % 10u));
-        remaining /= 10u;
-      }
+    while (remaining > 0 && digit_count < sizeof(digits)) {
+      digits[digit_count++] = (char)('0' + (remaining % 10u));
+      remaining /= 10u;
     }
     while (digit_count > 0 && index + 1 < sizeof(buffer)) {
       buffer[index++] = digits[--digit_count];

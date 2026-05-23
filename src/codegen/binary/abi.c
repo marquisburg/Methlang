@@ -1063,9 +1063,6 @@ int code_generator_binary_prepare_function_context(
   memset(context, 0, sizeof(*context));
   context->function_data = function_data;
   context->function_name = function_data->name;
-  context->return_is_float64 = code_generator_binary_resolved_type_is_float64(
-      code_generator_binary_get_resolved_type(generator,
-                                              function_data->return_type, 1));
   context->return_float_bits = code_generator_binary_resolved_type_float_bits(
       code_generator_binary_get_resolved_type(generator,
                                               function_data->return_type, 1));

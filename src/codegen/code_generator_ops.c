@@ -124,7 +124,6 @@ static void code_generator_emit_runtime_trap(CodeGenerator *generator,
 
   char *message_label = code_generator_generate_label(generator, "runtime_msg");
   if (!message_label) {
-    free(message_label);
     code_generator_set_error(
         generator, "Out of memory while creating runtime trap labels");
     return;

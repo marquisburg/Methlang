@@ -127,7 +127,6 @@ typedef struct {
   size_t saved_register_count;
   int raw_frame_size;
   int frame_size;
-  int return_is_float64;
   /* IEEE-754 width of the function's float return (0/32/64). 0 = not float. */
   int return_float_bits;
   /* Set when the function's return type classifies INDIRECT (struct >8B or
@@ -479,7 +478,6 @@ int code_generator_binary_try_emit_binary_compare_branch_chain( CodeGenerator *g
 int code_generator_binary_try_emit_binary_expression_chain( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_compare_assign_diamond( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_compare_update_pair_diamond( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
-int code_generator_binary_try_emit_lower_bound_loop( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_compare_branch_zero( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_scaled_address_load( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_scaled_address_store( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);

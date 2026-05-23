@@ -170,7 +170,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
                             SymbolTable *symbol_table, char **error_message,
                             int emit_runtime_checks);
 int ir_program_dump(IRProgram *program, FILE *output);
-int ir_instruction_dump(const IRInstruction *instruction, size_t index,
+int ir_instruction_dump(const IRInstruction *instruction,
                         char *buffer, size_t capacity);
 
 #endif // IR_H

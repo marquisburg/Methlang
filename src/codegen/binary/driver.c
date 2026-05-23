@@ -53,15 +53,6 @@ int code_generator_emit_binary_function(CodeGenerator *generator,
       continue;
     }
 
-    /* Temporarily disabled: can miscompile lower_bound-style loops by relying
-     * on condition flags across value materialization. */
-
-    if (code_generator_binary_try_emit_lower_bound_loop(
-            generator, &context, ir_function, i, &consumed)) {
-      i += consumed;
-      continue;
-    }
-
     if (code_generator_binary_try_emit_address_add_load(
             generator, &context, ir_function, i, &consumed)) {
       i += consumed;

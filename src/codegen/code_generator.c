@@ -60,7 +60,6 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->current_fn_returns_indirect = 0;
   generator->current_fn_indirect_return_size = 0;
   generator->profile_runtime = 0;
-  generator->profile_next_id = 0;
   generator->profile_function_names = NULL;
   generator->profile_function_count = 0;
   generator->profile_function_capacity = 0;
@@ -236,7 +235,6 @@ int code_generator_register_profile_function(CodeGenerator *generator,
 
   generator->profile_function_names[new_index] = name_copy;
   generator->profile_function_count = new_index + 1u;
-  generator->profile_next_id = (uint32_t)generator->profile_function_count;
   *id_out = (uint32_t)new_index;
   return 1;
 }

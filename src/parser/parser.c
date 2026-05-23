@@ -2074,9 +2074,6 @@ ASTNode *parser_parse_binary_expression(Parser *parser, int min_precedence) {
   return left;
 }
 
-// Placeholder implementations for specific parsing functions
-// These will be implemented in subsequent tasks
-
 ASTNode *parser_parse_import_declaration(Parser *parser) {
   if (!parser)
     return NULL;
@@ -3241,9 +3238,6 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   }
   parser_free_type_param_list(type_params, type_param_traits, type_param_count);
 
-  // Keep a stable copy for debug output before freeing temporary buffers.
-  char *debug_struct_name = strdup(struct_name);
-  // Clean up temporary strings
   free(struct_name);
   for (size_t i = 0; i < field_count; i++) {
     free(field_names[i]);
@@ -3253,7 +3247,6 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   free(field_types);
   // Note: methods array is now owned by the AST node, don't free it
 
-  free(debug_struct_name);
   return struct_decl;
 }
 
@@ -3336,35 +3329,6 @@ ASTNode *parser_parse_inline_asm(Parser *parser) {
 
   free(assembly_code);
   return inline_asm;
-}
-
-ASTNode *parser_parse_assignment(Parser *parser) {
-  if (!parser)
-    return NULL;
-
-  SourceLocation location = parser_current_location(parser);
-  if (parser->current_token.type != TOKEN_IDENTIFIER) {
-    parser_set_error(parser, "Expected identifier in assignment");
-    return NULL;
-  }
-
-  char *var_name = strdup(parser->current_token.value);
-  parser_advance(parser);
-
-  if (!parser_expect(parser, TOKEN_EQUALS)) {
-    free(var_name);
-    return NULL;
-  }
-
-  ASTNode *value = parser_parse_expression(parser);
-  if (!value) {
-    free(var_name);
-    return NULL;
-  }
-
-  ASTNode *assignment = ast_create_assignment(var_name, value, location);
-  free(var_name);
-  return assignment;
 }
 
 ASTNode *parser_parse_return_statement(Parser *parser) {

@@ -1,4 +1,5 @@
 #include "linker/pe_emitter.h"
+#include "linker/linker_common.h"
 #include "../common.h"
 
 #include "linker/import_lib.h"
@@ -164,57 +165,9 @@ static int pe_text_ends_with_ignore_case(const char *text, const char *suffix) {
   return 1;
 }
 
-static uint32_t pe_align_up_u32(uint32_t value, uint32_t alignment) {
-  uint32_t remainder = 0u;
-
-  if (alignment <= 1u) {
-    return value;
-  }
-
-  remainder = value % alignment;
-  if (remainder == 0u) {
-    return value;
-  }
-
-  return value + (alignment - remainder);
-}
-
-static size_t pe_align_up_size(size_t value, size_t alignment) {
-  size_t remainder = 0u;
-
-  if (alignment <= 1u) {
-    return value;
-  }
-
-  remainder = value % alignment;
-  if (remainder == 0u) {
-    return value;
-  }
-
-  return value + (alignment - remainder);
-}
-
 static void pe_write_u16_to_memory(unsigned char *bytes, uint16_t value) {
   bytes[0] = (unsigned char)(value & 0xFFu);
   bytes[1] = (unsigned char)((value >> 8) & 0xFFu);
-}
-
-static void pe_write_u32_to_memory(unsigned char *bytes, uint32_t value) {
-  bytes[0] = (unsigned char)(value & 0xFFu);
-  bytes[1] = (unsigned char)((value >> 8) & 0xFFu);
-  bytes[2] = (unsigned char)((value >> 16) & 0xFFu);
-  bytes[3] = (unsigned char)((value >> 24) & 0xFFu);
-}
-
-static void pe_write_u64_to_memory(unsigned char *bytes, uint64_t value) {
-  bytes[0] = (unsigned char)(value & 0xFFu);
-  bytes[1] = (unsigned char)((value >> 8) & 0xFFu);
-  bytes[2] = (unsigned char)((value >> 16) & 0xFFu);
-  bytes[3] = (unsigned char)((value >> 24) & 0xFFu);
-  bytes[4] = (unsigned char)((value >> 32) & 0xFFu);
-  bytes[5] = (unsigned char)((value >> 40) & 0xFFu);
-  bytes[6] = (unsigned char)((value >> 48) & 0xFFu);
-  bytes[7] = (unsigned char)((value >> 56) & 0xFFu);
 }
 
 static int pe_write_u16(FILE *file, uint16_t value) {
@@ -227,14 +180,14 @@ static int pe_write_u16(FILE *file, uint16_t value) {
 static int pe_write_u32(FILE *file, uint32_t value) {
   unsigned char bytes[4];
 
-  pe_write_u32_to_memory(bytes, value);
+  linker_write_u32(bytes, value);
   return fwrite(bytes, 1u, sizeof(bytes), file) == sizeof(bytes);
 }
 
 static int pe_write_u64(FILE *file, uint64_t value) {
   unsigned char bytes[8];
 
-  pe_write_u64_to_memory(bytes, value);
+  linker_write_u64(bytes, value);
   return fwrite(bytes, 1u, sizeof(bytes), file) == sizeof(bytes);
 }
 
@@ -346,7 +299,7 @@ static int pe_section_align(LinkedSection *section, size_t alignment,
     return 1;
   }
 
-  aligned_size = pe_align_up_size(section->size, alignment);
+  aligned_size = linker_align_up(section->size, alignment);
   if (aligned_size == section->size) {
     return 1;
   }
@@ -490,8 +443,8 @@ static int pe_layout_sections(PeSectionLayout *layouts, size_t layout_count,
     return 0;
   }
 
-  current_rva = pe_align_up_u32(size_of_headers, section_alignment);
-  current_raw = pe_align_up_u32(size_of_headers, file_alignment);
+  current_rva = (uint32_t)linker_align_up(size_of_headers, section_alignment);
+  current_raw = (uint32_t)linker_align_up(size_of_headers, file_alignment);
 
   for (i = 0u; i < layout_count; i++) {
     uint32_t aligned_virtual_size = 0u;
@@ -500,11 +453,11 @@ static int pe_layout_sections(PeSectionLayout *layouts, size_t layout_count,
     layouts[i].virtual_address = current_rva;
     layouts[i].raw_offset = layouts[i].raw_size == 0u ? 0u : current_raw;
     if (layouts[i].raw_size != 0u) {
-      layouts[i].raw_size = pe_align_up_u32(layouts[i].raw_size, file_alignment);
+      layouts[i].raw_size = (uint32_t)linker_align_up(layouts[i].raw_size, file_alignment);
     }
 
     aligned_virtual_size =
-        pe_align_up_u32(layouts[i].virtual_size, section_alignment);
+        (uint32_t)linker_align_up(layouts[i].virtual_size, section_alignment);
     current_rva += aligned_virtual_size;
     if (layouts[i].raw_size != 0u) {
       current_raw += layouts[i].raw_size;
@@ -532,7 +485,7 @@ static int pe_layout_sections(PeSectionLayout *layouts, size_t layout_count,
     }
   }
 
-  *size_of_image_out = pe_align_up_u32(current_rva, section_alignment);
+  *size_of_image_out = (uint32_t)linker_align_up(current_rva, section_alignment);
   *size_of_code_out = size_of_code;
   *size_of_init_data_out = size_of_init_data;
   *size_of_uninit_data_out = size_of_uninit_data;
@@ -1351,8 +1304,8 @@ static int pe_finalize_imports(LinkResolution *resolution, PeImportPlan *plan,
       thunk_value = 0x8000000000000000ull | symbol->ordinal_or_hint;
     }
 
-    pe_write_u64_to_memory(rdata->data + ilt_offset, thunk_value);
-    pe_write_u64_to_memory(rdata->data + iat_offset, thunk_value);
+    linker_write_u64(rdata->data + ilt_offset, thunk_value);
+    linker_write_u64(rdata->data + iat_offset, thunk_value);
 
     if (symbol->needs_thunk) {
       uint64_t thunk_va = text_layout->virtual_address + (uint32_t)symbol->thunk_offset +
@@ -1371,7 +1324,7 @@ static int pe_finalize_imports(LinkResolution *resolution, PeImportPlan *plan,
 
       stub[0] = 0xFFu;
       stub[1] = 0x25u;
-      pe_write_u32_to_memory(stub + 2u, (uint32_t)(int32_t)displacement);
+      linker_write_u32(stub + 2u, (uint32_t)(int32_t)displacement);
     }
 
   }
@@ -1388,11 +1341,11 @@ static int pe_finalize_imports(LinkResolution *resolution, PeImportPlan *plan,
     uint32_t iat_rva =
         rdata_layout->virtual_address + (uint32_t)dll->iat_offset;
 
-    pe_write_u32_to_memory(descriptor, ilt_rva);
-    pe_write_u32_to_memory(descriptor + 4u, 0u);
-    pe_write_u32_to_memory(descriptor + 8u, 0u);
-    pe_write_u32_to_memory(descriptor + 12u, dll_name_rva);
-    pe_write_u32_to_memory(descriptor + 16u, iat_rva);
+    linker_write_u32(descriptor, ilt_rva);
+    linker_write_u32(descriptor + 4u, 0u);
+    linker_write_u32(descriptor + 8u, 0u);
+    linker_write_u32(descriptor + 12u, dll_name_rva);
+    linker_write_u32(descriptor + 16u, iat_rva);
 
     if (dll->iat_offset + ((dll->symbol_count + 1u) * PE_IMPORT_THUNK_SIZE) >
         iat_end) {
@@ -1695,7 +1648,7 @@ int pe_emit_executable(LinkResolution *resolution, const char *output_path,
     goto cleanup;
   }
 
-  size_of_headers = pe_align_up_u32(
+  size_of_headers = (uint32_t)linker_align_up(
       PE_DOS_STUB_SIZE + 4u + PE_FILE_HEADER_SIZE + PE_OPTIONAL_HEADER64_SIZE +
           ((uint32_t)layout_count * PE_SECTION_HEADER_SIZE),
       file_alignment);
