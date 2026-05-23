@@ -127,7 +127,6 @@ typedef struct {
   size_t saved_register_count;
   int raw_frame_size;
   int frame_size;
-  int return_is_float64;
   /* IEEE-754 width of the function's float return (0/32/64). 0 = not float. */
   int return_float_bits;
   /* Set when the function's return type classifies INDIRECT (struct >8B or
@@ -331,7 +330,6 @@ void binary_global_const_table_reset(void);
 int binary_immediate_positive_power_of_two_i32(int32_t value, unsigned char *shift_out);
 int binary_indirect_temp_add(BinaryFunctionContext *context, const char *name, size_t size);
 size_t binary_indirect_temp_get(BinaryFunctionContext *context, const char *name);
-size_t binary_ir_function_hash(const char *name);
 int binary_ir_function_index_ensure(const IRProgram *program);
 void binary_ir_function_index_insert(BinaryIRFunctionIndex *index, IRFunction *function);
 void binary_ir_function_index_reset(void);
@@ -344,7 +342,6 @@ void binary_named_slot_table_destroy(BinaryNamedSlotTable *table);
 int binary_named_slot_table_get_offset(const BinaryNamedSlotTable *table, const char *name);
 int binary_offset_table_add(BinaryOffsetTable *table, size_t offset);
 void binary_offset_table_destroy(BinaryOffsetTable *table);
-size_t binary_string_hash(const char *name);
 int binary_symbol_alias_table_add(BinarySymbolAliasTable *table, const char *name, const char *target);
 void binary_symbol_alias_table_destroy(BinarySymbolAliasTable *table);
 const char * binary_symbol_alias_table_get(const BinarySymbolAliasTable *table, const char *name);
@@ -481,7 +478,6 @@ int code_generator_binary_try_emit_binary_compare_branch_chain( CodeGenerator *g
 int code_generator_binary_try_emit_binary_expression_chain( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_compare_assign_diamond( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_compare_update_pair_diamond( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
-int code_generator_binary_try_emit_lower_bound_loop( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_compare_branch_zero( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_scaled_address_load( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_scaled_address_store( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);

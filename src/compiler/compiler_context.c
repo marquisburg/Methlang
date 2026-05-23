@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define IR_INSTRUCTION_INDEX_NONE ((size_t)-1)
+
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
 #else
@@ -32,7 +34,7 @@ static MettleCompilerContext *mettle_compiler_ctx_storage(void) {
       return &g_default_compiler_context;
     }
     ctx->phase = METTLE_COMPILER_PHASE_UNKNOWN;
-    ctx->ir_instruction_index = (size_t)-1;
+    ctx->ir_instruction_index = IR_INSTRUCTION_INDEX_NONE;
     TlsSetValue(g_compiler_context_tls_index, ctx);
   }
   return ctx;
@@ -56,7 +58,7 @@ static MettleCompilerContext *mettle_compiler_ctx_storage(void) {
       return &g_default_compiler_context;
     }
     ctx->phase = METTLE_COMPILER_PHASE_UNKNOWN;
-    ctx->ir_instruction_index = (size_t)-1;
+    ctx->ir_instruction_index = IR_INSTRUCTION_INDEX_NONE;
     (void)pthread_setspecific(g_compiler_context_key, ctx);
   }
   return ctx;
@@ -90,7 +92,7 @@ void mettle_compiler_ctx_reset(void) {
 
   memset(ctx, 0, sizeof(*ctx));
   ctx->phase = METTLE_COMPILER_PHASE_UNKNOWN;
-  ctx->ir_instruction_index = (size_t)-1;
+  ctx->ir_instruction_index = IR_INSTRUCTION_INDEX_NONE;
   ctx->input_filename = input;
   ctx->debug_compiler = debug_compiler;
   ctx->dump_ir = dump_ir;
@@ -129,7 +131,7 @@ void mettle_compiler_ctx_set_ir_instruction(size_t index,
 
 void mettle_compiler_ctx_clear_ir_instruction(void) {
   MettleCompilerContext *ctx = mettle_compiler_ctx();
-  ctx->ir_instruction_index = (size_t)-1;
+  ctx->ir_instruction_index = IR_INSTRUCTION_INDEX_NONE;
   ctx->ir_instruction = NULL;
 }
 
@@ -192,10 +194,10 @@ void mettle_compiler_ctx_write_report(FILE *output, const char *reason,
     fprintf(output, "Function: %s\n", ctx->function_name);
   }
 
-  if (ctx->ir_instruction_index != (size_t)-1) {
+  if (ctx->ir_instruction_index != IR_INSTRUCTION_INDEX_NONE) {
     fprintf(output, "IR instruction: #%zu\n", ctx->ir_instruction_index);
     if (ctx->ir_instruction &&
-        ir_instruction_dump(ctx->ir_instruction, ctx->ir_instruction_index,
+        ir_instruction_dump(ctx->ir_instruction,
                             instruction_buffer, sizeof(instruction_buffer))) {
       fprintf(output, "  %s\n", instruction_buffer);
     }

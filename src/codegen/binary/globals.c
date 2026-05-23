@@ -1,4 +1,5 @@
 #include "codegen/binary/internal.h"
+#include "../../common.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -37,7 +38,7 @@ int binary_global_const_table_rebuild(size_t needed_count) {
     if (!entry->name) {
       continue;
     }
-    size_t slot = binary_string_hash(entry->name) & (slot_count - 1);
+    size_t slot = mettle_fnv1a_hash(entry->name) & (slot_count - 1);
     while (slots[slot] != 0) {
       slot = (slot + 1) & (slot_count - 1);
     }
@@ -58,7 +59,7 @@ binary_global_const_table_find_entry(const char *name) {
 
   if (g_binary_global_consts.slots && g_binary_global_consts.slot_count > 0) {
     size_t mask = g_binary_global_consts.slot_count - 1;
-    size_t slot = binary_string_hash(name) & mask;
+    size_t slot = mettle_fnv1a_hash(name) & mask;
     while (g_binary_global_consts.slots[slot] != 0) {
       size_t index = g_binary_global_consts.slots[slot] - 1;
       BinaryGlobalConstEntry *entry = &g_binary_global_consts.items[index];
@@ -145,7 +146,7 @@ int binary_global_const_table_add(const char *name, long long int_value,
       can_inline_load ? 1 : 0;
   g_binary_global_consts.count++;
 
-  size_t slot = binary_string_hash(name_copy) & (g_binary_global_consts.slot_count - 1);
+  size_t slot = mettle_fnv1a_hash(name_copy) & (g_binary_global_consts.slot_count - 1);
   while (g_binary_global_consts.slots[slot] != 0) {
     slot = (slot + 1) & (g_binary_global_consts.slot_count - 1);
   }
@@ -193,20 +194,10 @@ void binary_ir_function_index_reset(void) {
   g_binary_ir_function_index.function_count = 0;
 }
 
-size_t binary_ir_function_hash(const char *name) {
-  /* FNV-1a */
-  size_t hash = (size_t)1469598103934665603ULL;
-  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
-    hash ^= (size_t)*p;
-    hash *= (size_t)1099511628211ULL;
-  }
-  return hash;
-}
-
 void binary_ir_function_index_insert(BinaryIRFunctionIndex *index,
                                             IRFunction *function) {
   size_t mask = index->slot_count - 1;
-  size_t i = binary_ir_function_hash(function->name) & mask;
+  size_t i = mettle_fnv1a_hash(function->name) & mask;
   while (index->slots[i].name) {
     /* First definition of a given name wins, matching the old linear scan
      * which returned the earliest matching function. */
@@ -269,7 +260,7 @@ IRFunction *code_generator_find_ir_function_binary(CodeGenerator *generator,
   if (binary_ir_function_index_ensure(program)) {
     const BinaryIRFunctionIndex *index = &g_binary_ir_function_index;
     size_t mask = index->slot_count - 1;
-    size_t i = binary_ir_function_hash(name) & mask;
+    size_t i = mettle_fnv1a_hash(name) & mask;
     while (index->slots[i].name) {
       if (strcmp(index->slots[i].name, name) == 0) {
         return index->slots[i].function;

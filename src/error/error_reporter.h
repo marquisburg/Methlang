@@ -72,7 +72,6 @@ typedef struct {
   const char *current_source_code;
 } ErrorReporter;
 
-// Function declarations
 ErrorReporter *error_reporter_create(const char *filename,
                                      const char *source_code);
 void error_reporter_destroy(ErrorReporter *reporter);
@@ -85,7 +84,6 @@ int error_reporter_set_source_context(ErrorReporter *reporter,
 const char *error_reporter_current_filename(ErrorReporter *reporter);
 const char *error_reporter_current_source_code(ErrorReporter *reporter);
 
-// Error reporting functions
 void error_reporter_add_error(ErrorReporter *reporter, ErrorType type,
                               SourceLocation location, const char *message);
 void error_reporter_add_error_with_suggestion(ErrorReporter *reporter,
@@ -103,14 +101,12 @@ void error_reporter_add_warning(ErrorReporter *reporter, ErrorType type,
 void error_reporter_add_warning_with_span(ErrorReporter *reporter, ErrorType type,
                                           SourceSpan span, const char *message);
 
-// Error display functions
 void error_reporter_print_errors(ErrorReporter *reporter);
 void error_reporter_print_error(ErrorReporter *reporter,
                                 const ErrorReport *error);
 int error_reporter_has_errors(ErrorReporter *reporter);
 int error_reporter_get_error_count(ErrorReporter *reporter);
 
-// Utility functions
 SourceLocation source_location_create(size_t line, size_t column);
 SourceSpan source_span_create(size_t line, size_t column, size_t length);
 SourceSpan source_span_from_location(SourceLocation location, size_t length);

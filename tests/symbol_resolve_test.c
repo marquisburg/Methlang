@@ -1,48 +1,16 @@
 #include "binary_emitter.h"
 #include "linker/symbol_resolve.h"
+#include "test_helpers.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static int report_failure(const char *message, const char *detail) {
-  if (detail && detail[0] != '\0') {
-    fprintf(stderr, "%s: %s\n", message, detail);
-  } else {
-    fprintf(stderr, "%s\n", message);
-  }
-  return 1;
-}
 
 static int contains_text(const char *text, const char *needle) {
   if (!text || !needle) {
     return 0;
   }
   return strstr(text, needle) != NULL;
-}
-
-static char *join_path(const char *dir, const char *name) {
-  size_t dir_length = 0u;
-  size_t name_length = 0u;
-  char *path = NULL;
-
-  if (!dir || !name) {
-    return NULL;
-  }
-
-  dir_length = strlen(dir);
-  name_length = strlen(name);
-  path = malloc(dir_length + name_length + 2u);
-  if (!path) {
-    return NULL;
-  }
-
-  memcpy(path, dir, dir_length);
-  if (dir_length > 0u && dir[dir_length - 1] != '\\' && dir[dir_length - 1] != '/') {
-    path[dir_length++] = '\\';
-  }
-  memcpy(path + dir_length, name, name_length + 1u);
-  return path;
 }
 
 static int write_object(BinaryEmitter *emitter, const char *path) {
@@ -72,7 +40,7 @@ static int create_imp_symbol_object(const char *path) {
                                               0, 16u);
   if (text == (size_t)-1 ||
       !binary_emitter_append_bytes(emitter, text, code, sizeof(code), NULL) ||
-      !binary_emitter_define_symbol(emitter, "mainCRTStartup", BINARY_SYMBOL_GLOBAL,
+      !binary_emitter_define_symbol(emitter, TEST_ENTRY_SYMBOL, BINARY_SYMBOL_GLOBAL,
                                     text, 0u, sizeof(code)) ||
       !binary_emitter_declare_external(emitter, "GetCurrentProcessId") ||
       !binary_emitter_declare_external(emitter, "__imp_GetCurrentProcessId")) {
@@ -88,7 +56,7 @@ cleanup:
 
 static int expect_function_merge(const char *entry_obj, const char *provider_obj) {
   const char *paths[2] = {entry_obj, provider_obj};
-  LinkResolutionOptions options = {"mainCRTStartup", 16u, 0};
+  LinkResolutionOptions options = {TEST_ENTRY_SYMBOL, 16u, 0};
   LinkResolution *resolution = NULL;
   char *error_message = NULL;
   const LinkedSection *text = NULL;
@@ -108,7 +76,7 @@ static int expect_function_merge(const char *entry_obj, const char *provider_obj
     goto cleanup;
   }
 
-  entry = link_resolution_find_symbol(resolution, "mainCRTStartup");
+  entry = link_resolution_find_symbol(resolution, TEST_ENTRY_SYMBOL);
   callee = link_resolution_find_symbol(resolution, "add_one");
   if (!entry || !entry->is_defined || !callee || !callee->is_defined) {
     result = report_failure("Merged function symbols were not resolved",
@@ -141,7 +109,7 @@ cleanup:
 
 static int expect_data_merge(const char *entry_obj, const char *provider_obj) {
   const char *paths[2] = {entry_obj, provider_obj};
-  LinkResolutionOptions options = {"mainCRTStartup", 16u, 0};
+  LinkResolutionOptions options = {TEST_ENTRY_SYMBOL, 16u, 0};
   LinkResolution *resolution = NULL;
   char *error_message = NULL;
   const LinkedSection *text = NULL;
@@ -164,7 +132,7 @@ static int expect_data_merge(const char *entry_obj, const char *provider_obj) {
     goto cleanup;
   }
 
-  entry = link_resolution_find_symbol(resolution, "mainCRTStartup");
+  entry = link_resolution_find_symbol(resolution, TEST_ENTRY_SYMBOL);
   shared = link_resolution_find_symbol(resolution, "shared_counter");
   if (!entry || !entry->is_defined || !shared || !shared->is_defined) {
     result = report_failure("Merged data symbols were not resolved",
@@ -188,7 +156,7 @@ cleanup:
 
 static int expect_bss_merge(const char *entry_obj, const char *provider_obj) {
   const char *paths[2] = {entry_obj, provider_obj};
-  LinkResolutionOptions options = {"mainCRTStartup", 16u, 0};
+  LinkResolutionOptions options = {TEST_ENTRY_SYMBOL, 16u, 0};
   LinkResolution *resolution = NULL;
   char *error_message = NULL;
   const LinkedSection *bss = NULL;
@@ -248,7 +216,7 @@ cleanup:
 
 static int expect_unresolved_failure(const char *path) {
   const char *paths[1] = {path};
-  LinkResolutionOptions options = {"mainCRTStartup", 16u, 0};
+  LinkResolutionOptions options = {TEST_ENTRY_SYMBOL, 16u, 0};
   LinkResolution *resolution = NULL;
   char *error_message = NULL;
   int result = 1;
@@ -273,7 +241,7 @@ cleanup:
 }
 
 static int expect_imp_symbol_passthrough(const char *temp_dir) {
-  LinkResolutionOptions options = {"mainCRTStartup", 16u, 1};
+  LinkResolutionOptions options = {TEST_ENTRY_SYMBOL, 16u, 1};
   LinkResolution *resolution = NULL;
   char *error_message = NULL;
   char *object_path = NULL;
@@ -300,7 +268,7 @@ static int expect_imp_symbol_passthrough(const char *temp_dir) {
   direct = link_resolution_find_symbol(resolution, "GetCurrentProcessId");
   iat = link_resolution_find_symbol(resolution, "__imp_GetCurrentProcessId");
   if (!resolution->entry_symbol ||
-      strcmp(resolution->entry_symbol->name, "mainCRTStartup") != 0 ||
+      strcmp(resolution->entry_symbol->name, TEST_ENTRY_SYMBOL) != 0 ||
       !direct || !direct->is_external || direct->is_defined ||
       !iat || !iat->is_external || iat->is_defined) {
     result = report_failure("__imp_ symbols were not preserved as unresolved externals",

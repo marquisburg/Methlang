@@ -88,7 +88,7 @@ void code_generator_generate_function_call(CodeGenerator *generator,
   }
 
   // 1. Align stack for function call (x86-64 requires 16-byte alignment)
-  code_generator_align_stack_for_call(generator, call_data->argument_count);
+  code_generator_align_stack_for_call(generator);
 
   // 2. Pass parameters according to calling convention
   code_generator_generate_parameter_passing(
@@ -356,40 +356,12 @@ void code_generator_generate_parameter(CodeGenerator *generator,
       int_reg_index++;
     } else {
       // Parameter goes on stack
-      if (param_type && param_type->size <= 4) {
-        // 32-bit or smaller - push as 64-bit for alignment
-        code_generator_emit(
-            generator,
-            "    push rax          ; Integer parameter %d on stack\n",
-            param_index + 1);
-      } else {
-        // 64-bit parameter
-        code_generator_emit(
-            generator,
-            "    push rax          ; Integer parameter %d on stack\n",
-            param_index + 1);
-      }
+      code_generator_emit(
+          generator,
+          "    push rax          ; Integer parameter %d on stack\n",
+          param_index + 1);
     }
   }
-}
-
-void code_generator_save_caller_saved_registers(CodeGenerator *generator) {
-  (void)generator;
-}
-
-void code_generator_restore_caller_saved_registers(CodeGenerator *generator) {
-  (void)generator;
-}
-
-// Selective register saving - only save registers that are actually in use
-void code_generator_save_caller_saved_registers_selective(
-    CodeGenerator *generator) {
-  (void)generator;
-}
-
-void code_generator_restore_caller_saved_registers_selective(
-    CodeGenerator *generator) {
-  (void)generator;
 }
 
 // Clean up stack after function call
@@ -492,8 +464,7 @@ void code_generator_handle_return_value(CodeGenerator *generator,
     // 64-bit values are already in full RAX
   }
 }
-void code_generator_align_stack_for_call(CodeGenerator *generator,
-                                         int param_count) {
+void code_generator_align_stack_for_call(CodeGenerator *generator) {
   if (!generator) {
     return;
   }
@@ -503,8 +474,6 @@ void code_generator_align_stack_for_call(CodeGenerator *generator,
   if (!conv_spec) {
     return;
   }
-
-  (void)param_count;
 
   // Add shadow space for Microsoft x64 calling convention
   if (conv_spec->convention == CALLING_CONV_MS_X64 &&

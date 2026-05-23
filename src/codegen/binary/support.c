@@ -1,18 +1,10 @@
 #include "codegen/binary/internal.h"
+#include "../../common.h"
 
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-size_t binary_string_hash(const char *name) {
-  size_t hash = (size_t)1469598103934665603ULL;
-  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
-    hash ^= (size_t)*p;
-    hash *= (size_t)1099511628211ULL;
-  }
-  return hash;
-}
 
 char *binary_codegen_strdup(const char *value) {
   if (!value) {

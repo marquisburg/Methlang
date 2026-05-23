@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Helper function for string duplication
 static char* string_duplicate(const char* s) {
     if (!s) return NULL;
     size_t len = strlen(s) + 1;
@@ -71,7 +70,6 @@ DebugInfo* debug_info_create(const char* source_filename, const char* assembly_f
 void debug_info_destroy(DebugInfo* debug_info) {
     if (!debug_info) return;
     
-    // Clean up symbols
     for (size_t i = 0; i < debug_info->symbol_count; i++) {
         free(debug_info->symbols[i].name);
         free(debug_info->symbols[i].type_name);
@@ -79,7 +77,6 @@ void debug_info_destroy(DebugInfo* debug_info) {
     }
     free(debug_info->symbols);
     
-    // Clean up line mappings
     for (size_t i = 0; i < debug_info->mapping_count; i++) {
         free(debug_info->line_mappings[i].filename);
     }
@@ -283,7 +280,6 @@ void debug_info_add_runtime_location_mapping(DebugInfo* debug_info,
     debug_info->runtime_location_count++;
 }
 
-// Debug output generation functions
 
 void debug_info_generate_dwarf(DebugInfo* debug_info, const char* output_filename) {
     if (!debug_info || !output_filename) return;
@@ -304,7 +300,6 @@ void debug_info_generate_dwarf(DebugInfo* debug_info, const char* output_filenam
     fprintf(file, ".long .debug_abbrev  # Abbreviation table offset\n");
     fprintf(file, ".byte 8  # Address size\n\n");
     
-    // Generate debug symbols
     for (size_t i = 0; i < debug_info->symbol_count; i++) {
         DebugSymbol* symbol = &debug_info->symbols[i];
         

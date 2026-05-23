@@ -1,20 +1,10 @@
 #include "ir.h"
+#include "../common.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
-static char *ir_strdup(const char *text) {
-  if (!text) {
-    return NULL;
-  }
-  size_t length = strlen(text) + 1;
-  char *copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-  memcpy(copy, text, length);
-  return copy;
-}
+#define IR_OPERAND_FMT_BUFSIZE 128
 
 IROperand ir_operand_none(void) {
   IROperand operand = {0};
@@ -25,14 +15,14 @@ IROperand ir_operand_none(void) {
 IROperand ir_operand_temp(const char *name) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_TEMP;
-  operand.name = ir_strdup(name);
+  operand.name = mettle_strdup(name);
   return operand;
 }
 
 IROperand ir_operand_symbol(const char *name) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_SYMBOL;
-  operand.name = ir_strdup(name);
+  operand.name = mettle_strdup(name);
   return operand;
 }
 
@@ -60,14 +50,14 @@ IROperand ir_operand_float_sized(double value, int float_bits) {
 IROperand ir_operand_string(const char *value) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_STRING;
-  operand.name = ir_strdup(value);
+  operand.name = mettle_strdup(value);
   return operand;
 }
 
 IROperand ir_operand_label(const char *name) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_LABEL;
-  operand.name = ir_strdup(name);
+  operand.name = mettle_strdup(name);
   return operand;
 }
 
@@ -171,7 +161,7 @@ IRFunction *ir_function_create(const char *name) {
     return NULL;
   }
 
-  function->name = ir_strdup(name ? name : "<anonymous>");
+  function->name = mettle_strdup(name ? name : "<anonymous>");
   function->profile_id = IR_PROFILE_ID_NONE;
   function->parameter_names = NULL;
   function->parameter_types = NULL;
@@ -208,13 +198,13 @@ int ir_function_set_parameters(IRFunction *function, const char **parameter_name
       goto fail;
     }
 
-    name_copies[i] = ir_strdup(parameter_names[i]);
+    name_copies[i] = mettle_strdup(parameter_names[i]);
     if (!name_copies[i]) {
       goto fail;
     }
 
     if (parameter_types && parameter_types[i]) {
-      type_copies[i] = ir_strdup(parameter_types[i]);
+      type_copies[i] = mettle_strdup(parameter_types[i]);
       if (!type_copies[i]) {
         goto fail;
       }
@@ -275,7 +265,7 @@ int ir_function_append_instruction(IRFunction *function,
   slot->dest = ir_operand_clone(&instruction->dest);
   slot->lhs = ir_operand_clone(&instruction->lhs);
   slot->rhs = ir_operand_clone(&instruction->rhs);
-  slot->text = ir_strdup(instruction->text);
+  slot->text = mettle_strdup(instruction->text);
   slot->is_float = instruction->is_float;
   slot->arguments = NULL;
   slot->argument_count = instruction->argument_count;
@@ -329,7 +319,7 @@ int ir_function_insert_instruction(IRFunction *function, size_t index,
   slot->dest = ir_operand_clone(&instruction->dest);
   slot->lhs = ir_operand_clone(&instruction->lhs);
   slot->rhs = ir_operand_clone(&instruction->rhs);
-  slot->text = ir_strdup(instruction->text);
+  slot->text = mettle_strdup(instruction->text);
   slot->argument_count = instruction->argument_count;
   slot->arguments = NULL;
 
@@ -435,6 +425,8 @@ static const char *ir_opcode_name(IROpcode op) {
     return "unary";
   case IR_OP_CALL:
     return "call";
+  case IR_OP_CALL_INDIRECT:
+    return "call_indirect";
   case IR_OP_NEW:
     return "new";
   case IR_OP_RETURN:
@@ -501,9 +493,9 @@ static void ir_format_operand(const IROperand *operand, char *buffer,
 
 static int ir_format_instruction_line(const IRInstruction *instruction,
                                       char *buffer, size_t buffer_size) {
-  char dest[128];
-  char lhs[128];
-  char rhs[128];
+  char dest[IR_OPERAND_FMT_BUFSIZE];
+  char lhs[IR_OPERAND_FMT_BUFSIZE];
+  char rhs[IR_OPERAND_FMT_BUFSIZE];
   int written = 0;
 
   if (!instruction || !buffer || buffer_size == 0) {
@@ -712,12 +704,11 @@ static int ir_format_instruction_line(const IRInstruction *instruction,
   return written > 0 && (size_t)written < buffer_size;
 }
 
-int ir_instruction_dump(const IRInstruction *instruction, size_t index,
+int ir_instruction_dump(const IRInstruction *instruction,
                         char *buffer, size_t capacity) {
   if (!instruction || !buffer || capacity == 0) {
     return 0;
   }
-  (void)index;
   return ir_format_instruction_line(instruction, buffer, capacity);
 }
 
@@ -737,176 +728,9 @@ int ir_program_dump(IRProgram *program, FILE *output) {
 
     for (size_t j = 0; j < function->instruction_count; j++) {
       IRInstruction *instruction = &function->instructions[j];
-      char dest[128];
-      char lhs[128];
-      char rhs[128];
-      ir_format_operand(&instruction->dest, dest, sizeof(dest));
-      ir_format_operand(&instruction->lhs, lhs, sizeof(lhs));
-      ir_format_operand(&instruction->rhs, rhs, sizeof(rhs));
-
-      fprintf(output, "  %4zu: ", j);
-      switch (instruction->op) {
-      case IR_OP_LABEL:
-        fprintf(output, "%s %s\n", ir_opcode_name(instruction->op),
-                instruction->text ? instruction->text : "<label>");
-        break;
-      case IR_OP_JUMP:
-        fprintf(output, "%s %s\n", ir_opcode_name(instruction->op),
-                instruction->text ? instruction->text : "<target>");
-        break;
-      case IR_OP_BRANCH_ZERO:
-        fprintf(output, "%s %s -> %s\n", ir_opcode_name(instruction->op), lhs,
-                instruction->text ? instruction->text : "<target>");
-        break;
-      case IR_OP_BRANCH_EQ:
-        fprintf(output, "%s %s, %s -> %s\n", ir_opcode_name(instruction->op),
-                lhs, rhs, instruction->text ? instruction->text : "<target>");
-        break;
-      case IR_OP_DECLARE_LOCAL:
-        fprintf(output, "%s %s : %s\n", ir_opcode_name(instruction->op), dest,
-                instruction->text ? instruction->text : "<unknown>");
-        break;
-      case IR_OP_ASSIGN:
-        fprintf(output, "%s %s <- %s\n", ir_opcode_name(instruction->op), dest,
-                lhs);
-        break;
-      case IR_OP_ADDRESS_OF:
-        fprintf(output, "%s %s <- &%s\n", ir_opcode_name(instruction->op), dest,
-                lhs);
-        break;
-      case IR_OP_LOAD:
-        fprintf(output, "%s %s <- *%s [%s]\n", ir_opcode_name(instruction->op),
-                dest, lhs, rhs);
-        break;
-      case IR_OP_STORE:
-        fprintf(output, "%s *%s <- %s [%s]\n", ir_opcode_name(instruction->op),
-                dest, lhs, rhs);
-        break;
-      case IR_OP_BINARY:
-        fprintf(output, "%s %s = %s %s%s %s\n", ir_opcode_name(instruction->op),
-                dest, lhs, instruction->text ? instruction->text : "?",
-                instruction->is_float ? " (float)" : "", rhs);
-        break;
-      case IR_OP_ROTATE_ADD:
-        fprintf(output, "%s %s = rotate_add(%s, %s)\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs);
-        break;
-      case IR_OP_UNARY:
-        fprintf(output, "%s %s = %s%s%s\n", ir_opcode_name(instruction->op),
-                dest, instruction->text ? instruction->text : "?", lhs,
-                instruction->is_float ? " (float)" : "");
-        break;
-      case IR_OP_CALL:
-        fprintf(output, "%s %s = %s(", ir_opcode_name(instruction->op), dest,
-                instruction->text ? instruction->text : "<callee>");
-        for (size_t arg_i = 0; arg_i < instruction->argument_count; arg_i++) {
-          char arg_buffer[128];
-          ir_format_operand(&instruction->arguments[arg_i], arg_buffer,
-                            sizeof(arg_buffer));
-          fprintf(output, "%s%s", arg_i == 0 ? "" : ", ", arg_buffer);
-        }
-        fprintf(output, ")\n");
-        break;
-      case IR_OP_NEW:
-        fprintf(output, "%s %s = %s [%s]\n", ir_opcode_name(instruction->op),
-                dest, instruction->text ? instruction->text : "<type>", rhs);
-        break;
-      case IR_OP_RETURN:
-        fprintf(output, "%s %s\n", ir_opcode_name(instruction->op), lhs);
-        break;
-      case IR_OP_INLINE_ASM:
-        fprintf(output, "%s \"%s\"\n", ir_opcode_name(instruction->op),
-                instruction->text ? instruction->text : "");
-        break;
-      case IR_OP_CAST:
-        fprintf(output, "%s %s = (%s)%s%s\n", ir_opcode_name(instruction->op),
-                dest, instruction->text ? instruction->text : "<type>", lhs,
-                instruction->is_float ? " (float)" : "");
-        break;
-      case IR_OP_COUNT_WORD_STARTS:
-        fprintf(output, "%s %s = count_word_starts(buf=%s, len=%s)\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs);
-        break;
-      case IR_OP_MEMCPY_INLINE:
-        fprintf(output, "%s dst=%s src=%s size=%s\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs);
-        break;
-      case IR_OP_SIMD_SUM_I32:
-        fprintf(output, "%s %s += simd_sum_i32(base=%s, len=%s)\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs);
-        break;
-      case IR_OP_SIMD_MATMUL_N32:
-        fprintf(output, "%s c=%s a=%s b=%s\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs);
-        break;
-      case IR_OP_SIMD_INSERTION_SORT_I32:
-        fprintf(output, "%s base=%s len=%s\n",
-                ir_opcode_name(instruction->op), dest, rhs);
-        break;
-      case IR_OP_SIMD_DOT_I32: {
-        char len[128];
-        ir_format_operand(instruction->argument_count > 0
-                              ? &instruction->arguments[0]
-                              : NULL,
-                          len, sizeof(len));
-        fprintf(output, "%s %s = dot_i32(a=%s, b=%s, len=%s)\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs, len);
-        break;
-      }
-      case IR_OP_SIMD_SCALE_I32: {
-        char len[128], mul[128], add[128];
-        ir_format_operand(instruction->argument_count > 0
-                              ? &instruction->arguments[0]
-                              : NULL,
-                          len, sizeof(len));
-        ir_format_operand(instruction->argument_count > 1
-                              ? &instruction->arguments[1]
-                              : NULL,
-                          mul, sizeof(mul));
-        ir_format_operand(instruction->argument_count > 2
-                              ? &instruction->arguments[2]
-                              : NULL,
-                          add, sizeof(add));
-        fprintf(output,
-                "%s %s = scale_i32(src=%s, dst=%s, len=%s, mul=%s, add=%s)\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs, len, mul,
-                add);
-        break;
-      }
-      case IR_OP_SIMD_CLAMP_I32: {
-        char len[128], lo[128], hi[128];
-        ir_format_operand(instruction->argument_count > 0
-                              ? &instruction->arguments[0]
-                              : NULL,
-                          len, sizeof(len));
-        ir_format_operand(instruction->argument_count > 1
-                              ? &instruction->arguments[1]
-                              : NULL,
-                          lo, sizeof(lo));
-        ir_format_operand(instruction->argument_count > 2
-                              ? &instruction->arguments[2]
-                              : NULL,
-                          hi, sizeof(hi));
-        fprintf(output,
-                "%s %s = clamp_i32(src=%s, dst=%s, len=%s, lo=%s, hi=%s)\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs, len, lo, hi);
-        break;
-      }
-      case IR_OP_SIMD_REVERSE_COPY_I32: {
-        char len[128];
-        ir_format_operand(instruction->argument_count > 0
-                              ? &instruction->arguments[0]
-                              : NULL,
-                          len, sizeof(len));
-        fprintf(output, "%s %s = reverse_copy_i32(src=%s, dst=%s, len=%s)\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs, len);
-        break;
-      }
-      case IR_OP_NOP:
-      default:
-        fprintf(output, "%s\n", ir_opcode_name(instruction->op));
-        break;
-      }
+      char buffer[1024];
+      ir_format_instruction_line(instruction, buffer, sizeof(buffer));
+      fprintf(output, "  %4zu: %s\n", j, buffer);
     }
 
     fprintf(output, "}\n\n");

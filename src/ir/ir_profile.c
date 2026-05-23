@@ -1,26 +1,10 @@
 #include "ir_profile.h"
+#include "../common.h"
 
 #include "../runtime/profile.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static char *ir_profile_strdup(const char *text) {
-  size_t length = 0;
-  char *copy = NULL;
-
-  if (!text) {
-    return NULL;
-  }
-
-  length = strlen(text) + 1u;
-  copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-  memcpy(copy, text, length);
-  return copy;
-}
 
 uint32_t ir_profile_registry_add(IRProgram *program, const char *name,
                                  const char *filename, uint64_t line) {
@@ -45,9 +29,9 @@ uint32_t ir_profile_registry_add(IRProgram *program, const char *name,
     program->profile_entry_capacity = new_capacity;
   }
 
-  program->profile_entries[new_index].name = ir_profile_strdup(name);
+  program->profile_entries[new_index].name = mettle_strdup(name);
   program->profile_entries[new_index].filename =
-      filename ? ir_profile_strdup(filename) : NULL;
+      filename ? mettle_strdup(filename) : NULL;
   program->profile_entries[new_index].line = line;
   if (!program->profile_entries[new_index].name) {
     free(program->profile_entries[new_index].filename);
@@ -135,7 +119,7 @@ int ir_profile_build_enter_instruction(IRInstruction *instruction,
   memset(instruction, 0, sizeof(*instruction));
   instruction->op = IR_OP_CALL;
   instruction->location = location;
-  instruction->text = ir_profile_strdup("mettle_profile_enter");
+  instruction->text = mettle_strdup("mettle_profile_enter");
   if (!instruction->text) {
     return 0;
   }
@@ -152,7 +136,7 @@ static IRInstruction ir_profile_make_exit(SourceLocation location) {
   IRInstruction instruction = {0};
   instruction.op = IR_OP_CALL;
   instruction.location = location;
-  instruction.text = ir_profile_strdup("mettle_profile_exit");
+  instruction.text = mettle_strdup("mettle_profile_exit");
   return instruction;
 }
 
@@ -167,7 +151,7 @@ static int ir_profile_build_op_instruction(IRInstruction *instruction,
   memset(instruction, 0, sizeof(*instruction));
   instruction->op = IR_OP_CALL;
   instruction->location = location;
-  instruction->text = ir_profile_strdup("mettle_profile_op");
+  instruction->text = mettle_strdup("mettle_profile_op");
   if (!instruction->text) {
     return 0;
   }

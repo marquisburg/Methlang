@@ -1,6 +1,7 @@
 #include "binary_emitter.h"
 #include "linker/pe_emitter.h"
 #include "linker/symbol_resolve.h"
+#include "test_helpers.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -20,53 +21,8 @@ typedef struct {
   uint32_t characteristics;
 } ParsedSection;
 
-static int report_failure(const char *message, const char *detail) {
-  if (detail && detail[0] != '\0') {
-    fprintf(stderr, "%s: %s\n", message, detail);
-  } else {
-    fprintf(stderr, "%s\n", message);
-  }
-  return 1;
-}
-
-static char *join_path(const char *dir, const char *name) {
-  size_t dir_length = 0u;
-  size_t name_length = 0u;
-  char *path = NULL;
-
-  if (!dir || !name) {
-    return NULL;
-  }
-
-  dir_length = strlen(dir);
-  name_length = strlen(name);
-  path = malloc(dir_length + name_length + 2u);
-  if (!path) {
-    return NULL;
-  }
-
-  memcpy(path, dir, dir_length);
-  if (dir_length > 0u && dir[dir_length - 1] != '\\' && dir[dir_length - 1] != '/') {
-    path[dir_length++] = '\\';
-  }
-  memcpy(path + dir_length, name, name_length + 1u);
-  return path;
-}
-
 static uint16_t read_u16(const unsigned char *bytes) {
   return (uint16_t)(bytes[0] | ((uint16_t)bytes[1] << 8));
-}
-
-static uint32_t read_u32(const unsigned char *bytes) {
-  return (uint32_t)(bytes[0] | ((uint32_t)bytes[1] << 8) |
-                    ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24));
-}
-
-static uint64_t read_u64(const unsigned char *bytes) {
-  return (uint64_t)bytes[0] | ((uint64_t)bytes[1] << 8) |
-         ((uint64_t)bytes[2] << 16) | ((uint64_t)bytes[3] << 24) |
-         ((uint64_t)bytes[4] << 32) | ((uint64_t)bytes[5] << 40) |
-         ((uint64_t)bytes[6] << 48) | ((uint64_t)bytes[7] << 56);
 }
 
 static void write_u16(unsigned char *bytes, uint16_t value) {
@@ -236,7 +192,7 @@ static int write_short_import_member(FILE *file, const char *member_name,
   write_u16(member_data, 0u);
   write_u16(member_data + 2u, 0xFFFFu);
   write_u16(member_data + 4u, 0u);
-  write_u16(member_data + 6u, 0x8664u);
+  write_u16(member_data + 6u, PE_MACHINE_AMD64);
   write_u32(member_data + 8u, 0u);
   write_u32(member_data + 12u, (uint32_t)size_of_data);
   write_u16(member_data + 16u, ordinal_hint);
@@ -290,7 +246,7 @@ static int create_minimal_program_object(const char *path) {
       !binary_emitter_append_bytes(emitter, rdata, rodata, sizeof(rodata), NULL) ||
       !binary_emitter_append_bytes(emitter, data, init_data, sizeof(init_data), NULL) ||
       !binary_emitter_set_section_virtual_size(emitter, bss, 16u) ||
-      !binary_emitter_define_symbol(emitter, "mainCRTStartup", BINARY_SYMBOL_GLOBAL,
+      !binary_emitter_define_symbol(emitter, TEST_ENTRY_SYMBOL, BINARY_SYMBOL_GLOBAL,
                                     text, 0u, sizeof(code)) ||
       !binary_emitter_define_symbol(emitter, "test_message", BINARY_SYMBOL_LOCAL,
                                     rdata, 0u, sizeof(rodata)) ||
@@ -326,7 +282,7 @@ static int create_import_program_object(const char *path) {
                                               0, 16u);
   if (text == (size_t)-1 ||
       !binary_emitter_append_bytes(emitter, text, code, sizeof(code), NULL) ||
-      !binary_emitter_define_symbol(emitter, "mainCRTStartup", BINARY_SYMBOL_GLOBAL,
+      !binary_emitter_define_symbol(emitter, TEST_ENTRY_SYMBOL, BINARY_SYMBOL_GLOBAL,
                                     text, 0u, sizeof(code)) ||
       !binary_emitter_declare_external(emitter, "__imp_GetCurrentProcessId") ||
       !binary_emitter_declare_external(emitter, "ExitProcess") ||
@@ -381,11 +337,11 @@ static int parse_section(const unsigned char *bytes, size_t file_size,
   memset(section_out, 0, sizeof(*section_out));
   memcpy(section_out->name, bytes + section_offset, 8u);
   section_out->name[8] = '\0';
-  section_out->virtual_size = read_u32(bytes + section_offset + 8u);
-  section_out->virtual_address = read_u32(bytes + section_offset + 12u);
-  section_out->raw_size = read_u32(bytes + section_offset + 16u);
-  section_out->raw_offset = read_u32(bytes + section_offset + 20u);
-  section_out->characteristics = read_u32(bytes + section_offset + 36u);
+  section_out->virtual_size = test_read_u32(bytes + section_offset + 8u);
+  section_out->virtual_address = test_read_u32(bytes + section_offset + 12u);
+  section_out->raw_size = test_read_u32(bytes + section_offset + 16u);
+  section_out->raw_offset = test_read_u32(bytes + section_offset + 20u);
+  section_out->characteristics = test_read_u32(bytes + section_offset + 36u);
   return 1;
 }
 
@@ -461,13 +417,13 @@ static int verify_pe_image(const char *exe_path) {
     goto cleanup;
   }
 
-  pe_offset = read_u32(data + 0x3Cu);
+  pe_offset = test_read_u32(data + 0x3Cu);
   if (pe_offset + 24u > size || memcmp(data + pe_offset, "PE\0\0", 4u) != 0) {
     result = report_failure("PE signature is missing or out of range", exe_path);
     goto cleanup;
   }
 
-  if (read_u16(data + pe_offset + 4u) != 0x8664u) {
+  if (read_u16(data + pe_offset + 4u) != PE_MACHINE_AMD64) {
     result = report_failure("PE machine type is not AMD64", exe_path);
     goto cleanup;
   }
@@ -486,20 +442,20 @@ static int verify_pe_image(const char *exe_path) {
     goto cleanup;
   }
 
-  if (read_u16(data + pe_offset + 24u) != 0x020Bu) {
+  if (read_u16(data + pe_offset + 24u) != PE_OPTIONAL_MAGIC_PE32PLUS) {
     result = report_failure("PE optional header is not PE32+", exe_path);
     goto cleanup;
   }
 
-  entry_rva = read_u32(data + pe_offset + 40u);
-  base_of_code = read_u32(data + pe_offset + 44u);
-  image_base = read_u64(data + pe_offset + 48u);
-  section_alignment = read_u32(data + pe_offset + 56u);
-  file_alignment = read_u32(data + pe_offset + 60u);
-  size_of_image = read_u32(data + pe_offset + 80u);
-  size_of_headers = read_u32(data + pe_offset + 84u);
+  entry_rva = test_read_u32(data + pe_offset + 40u);
+  base_of_code = test_read_u32(data + pe_offset + 44u);
+  image_base = test_read_u64(data + pe_offset + 48u);
+  section_alignment = test_read_u32(data + pe_offset + 56u);
+  file_alignment = test_read_u32(data + pe_offset + 60u);
+  size_of_image = test_read_u32(data + pe_offset + 80u);
+  size_of_headers = test_read_u32(data + pe_offset + 84u);
   subsystem = read_u16(data + pe_offset + 92u);
-  number_of_directories = read_u32(data + pe_offset + 132u);
+  number_of_directories = test_read_u32(data + pe_offset + 132u);
   if (image_base != 0x140000000ull || section_alignment != 0x1000u ||
       file_alignment != 0x200u || subsystem != 3u ||
       number_of_directories != 16u) {
@@ -507,10 +463,10 @@ static int verify_pe_image(const char *exe_path) {
                             exe_path);
     goto cleanup;
   }
-  if (read_u32(data + pe_offset + 136u) != 0u ||
-      read_u32(data + pe_offset + 140u) != 0u ||
-      read_u32(data + pe_offset + 144u) != 0u ||
-      read_u32(data + pe_offset + 148u) != 0u) {
+  if (test_read_u32(data + pe_offset + 136u) != 0u ||
+      test_read_u32(data + pe_offset + 140u) != 0u ||
+      test_read_u32(data + pe_offset + 144u) != 0u ||
+      test_read_u32(data + pe_offset + 148u) != 0u) {
     result = report_failure("PE data directories were expected to be empty",
                             exe_path);
     goto cleanup;
@@ -636,7 +592,7 @@ static int verify_import_pe_image(const char *exe_path) {
     goto cleanup;
   }
 
-  pe_offset = read_u32(data + 0x3Cu);
+  pe_offset = test_read_u32(data + 0x3Cu);
   if (pe_offset + 24u > size || memcmp(data + pe_offset, "PE\0\0", 4u) != 0) {
     result = report_failure("Imported PE image is missing the PE signature",
                             exe_path);
@@ -646,16 +602,16 @@ static int verify_import_pe_image(const char *exe_path) {
   section_count = read_u16(data + pe_offset + 6u);
   optional_header_size = read_u16(data + pe_offset + 20u);
   if (section_count != 2u || optional_header_size != 240u ||
-      read_u16(data + pe_offset + 24u) != 0x020Bu) {
+      read_u16(data + pe_offset + 24u) != PE_OPTIONAL_MAGIC_PE32PLUS) {
     result = report_failure("Imported PE image headers were not emitted as expected",
                             exe_path);
     goto cleanup;
   }
 
-  import_rva = read_u32(data + pe_offset + 144u);
-  import_size = read_u32(data + pe_offset + 148u);
-  iat_rva = read_u32(data + pe_offset + 232u);
-  iat_size = read_u32(data + pe_offset + 236u);
+  import_rva = test_read_u32(data + pe_offset + 144u);
+  import_size = test_read_u32(data + pe_offset + 148u);
+  iat_rva = test_read_u32(data + pe_offset + 232u);
+  iat_size = test_read_u32(data + pe_offset + 236u);
   if (import_rva == 0u || import_size != 40u || iat_rva == 0u || iat_size != 24u) {
     result = report_failure("Imported PE data directories were not emitted correctly",
                             exe_path);
@@ -704,16 +660,16 @@ static int verify_import_pe_image(const char *exe_path) {
     goto cleanup;
   }
 
-  if (read_u32(data + import_offset) == 0u ||
-      read_u32(data + import_offset + 12u) == 0u ||
-      read_u32(data + import_offset + 16u) != iat_rva ||
+  if (test_read_u32(data + import_offset) == 0u ||
+      test_read_u32(data + import_offset + 12u) == 0u ||
+      test_read_u32(data + import_offset + 16u) != iat_rva ||
       memcmp(data + import_offset + 20u,
              "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20u) != 0) {
     result = report_failure("Imported PE descriptor table is malformed", exe_path);
     goto cleanup;
   }
 
-  if (!rva_to_file_offset(read_u32(data + import_offset + 12u), sections,
+  if (!rva_to_file_offset(test_read_u32(data + import_offset + 12u), sections,
                           section_count, size, &dll_name_offset) ||
       strcmp((const char *)(data + dll_name_offset), "kernel32.dll") != 0) {
     result = report_failure("Imported PE descriptor did not point at kernel32.dll",
@@ -721,15 +677,15 @@ static int verify_import_pe_image(const char *exe_path) {
     goto cleanup;
   }
 
-  if (!rva_to_file_offset(read_u32(data + import_offset), sections, section_count,
+  if (!rva_to_file_offset(test_read_u32(data + import_offset), sections, section_count,
                           size, &ilt_offset)) {
     result = report_failure("Imported PE ILT did not map into the file", exe_path);
     goto cleanup;
   }
 
   for (i = 0u; i < 2u; i++) {
-    uint64_t ilt_entry = read_u64(data + ilt_offset + (i * 8u));
-    uint64_t iat_entry = read_u64(data + iat_offset + (i * 8u));
+    uint64_t ilt_entry = test_read_u64(data + ilt_offset + (i * 8u));
+    uint64_t iat_entry = test_read_u64(data + iat_offset + (i * 8u));
     const char *import_name = NULL;
 
     if (ilt_entry == 0u || ilt_entry != iat_entry ||
@@ -750,8 +706,8 @@ static int verify_import_pe_image(const char *exe_path) {
     }
   }
 
-  if (read_u64(data + ilt_offset + 16u) != 0u ||
-      read_u64(data + iat_offset + 16u) != 0u ||
+  if (test_read_u64(data + ilt_offset + 16u) != 0u ||
+      test_read_u64(data + iat_offset + 16u) != 0u ||
       !saw_exit_process || !saw_get_current_process_id) {
     result = report_failure("Imported PE thunk names were not emitted as expected",
                             exe_path);
@@ -811,7 +767,7 @@ static int run_executable_and_expect_zero(const char *path) {
 
 static int expect_pe_emission(const char *object_path, const char *exe_path) {
   const char *paths[1] = {object_path};
-  LinkResolutionOptions options = {"mainCRTStartup", 16u, 0};
+  LinkResolutionOptions options = {TEST_ENTRY_SYMBOL, 16u, 0};
   LinkResolution *resolution = NULL;
   char *error_message = NULL;
   int result = 1;
@@ -844,7 +800,7 @@ static int expect_import_pe_emission(const char *object_path,
                                      const char *exe_path) {
   const char *object_paths[1] = {object_path};
   const char *import_library_paths[1] = {import_library_path};
-  LinkResolutionOptions resolution_options = {"mainCRTStartup", 16u, 1};
+  LinkResolutionOptions resolution_options = {TEST_ENTRY_SYMBOL, 16u, 1};
   PeEmissionOptions emission_options;
   LinkResolution *resolution = NULL;
   char *error_message = NULL;
@@ -885,7 +841,7 @@ static int expect_dll_probe_pe_emission(const char *object_path,
                                         const char *exe_path) {
   const char *object_paths[1] = {object_path};
   const char *import_dll_names[1] = {dll_name};
-  LinkResolutionOptions resolution_options = {"mainCRTStartup", 16u, 1};
+  LinkResolutionOptions resolution_options = {TEST_ENTRY_SYMBOL, 16u, 1};
   PeEmissionOptions emission_options;
   LinkResolution *resolution = NULL;
   char *error_message = NULL;

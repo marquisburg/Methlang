@@ -124,7 +124,6 @@ static void code_generator_emit_runtime_trap(CodeGenerator *generator,
 
   char *message_label = code_generator_generate_label(generator, "runtime_msg");
   if (!message_label) {
-    free(message_label);
     code_generator_set_error(
         generator, "Out of memory while creating runtime trap labels");
     return;
@@ -223,6 +222,147 @@ static void code_generator_emit_bounds_check(CodeGenerator *generator,
   free(continue_label);
 }
 
+static void code_generator_emit_string_concat(CodeGenerator *generator,
+                                               ASTNode *left,
+                                               ASTNode *right) {
+  code_generator_emit(generator, "    ; String concatenation (+)\n");
+  code_generator_generate_expression(generator, left);
+  code_generator_emit(generator,
+                      "    push rax           ; Save left string ptr\n");
+
+  code_generator_generate_expression(generator, right);
+  code_generator_emit(generator,
+                      "    mov r10, rax       ; right string ptr -> r10\n");
+  code_generator_emit(generator,
+                      "    pop rax            ; left string ptr -> rax\n");
+
+  code_generator_emit(generator, "    mov rcx, [rax + 8] ; len1\n");
+  code_generator_emit(generator, "    add rcx, [r10 + 8] ; len1 + len2\n");
+
+  code_generator_emit(generator,
+                      "    sub rsp, 24        ; Save concat state\n");
+  code_generator_emit(generator, "    mov [rsp], r10     ; right ptr\n");
+  code_generator_emit(generator, "    mov [rsp + 8], rax ; left ptr\n");
+  code_generator_emit(generator, "    mov [rsp + 16], rcx ; total_len\n");
+
+  const char *size_register = "rdi";
+  CallingConventionSpec *conv_spec =
+      generator->register_allocator
+          ? generator->register_allocator->calling_convention
+          : NULL;
+  if (conv_spec && conv_spec->int_param_count > 0) {
+    const char *cand =
+        code_generator_get_register_name(conv_spec->int_param_registers[0]);
+    if (cand)
+      size_register = cand;
+  }
+  code_generator_emit(generator, "    mov %s, rcx\n", size_register);
+  code_generator_emit(generator, "    add %s, 17\n", size_register);
+
+  code_generator_emit_calloc_call(generator, size_register);
+
+  code_generator_emit(generator, "    mov rcx, [rsp + 16] ; total_len\n");
+  code_generator_emit(generator, "    mov rdx, [rsp + 8] ; left ptr\n");
+  code_generator_emit(generator, "    mov rsi, [rsp]    ; right ptr\n");
+  code_generator_emit(generator, "    add rsp, 24\n");
+
+  code_generator_emit(generator, "    lea r8, [rax + 16]\n");
+  code_generator_emit(generator, "    mov [rax], r8\n");
+  code_generator_emit(generator, "    mov [rax + 8], rcx\n");
+
+  char *label_left_done =
+      code_generator_generate_label(generator, "concat_left_done");
+  char *label_left_loop =
+      code_generator_generate_label(generator, "concat_left_loop");
+  char *label_right_done =
+      code_generator_generate_label(generator, "concat_right_done");
+  char *label_right_loop =
+      code_generator_generate_label(generator, "concat_right_loop");
+
+  code_generator_emit(generator, "    mov r9, [rdx + 8]  ; left len\n");
+  code_generator_emit(generator, "    mov rdi, [rdx]     ; left chars\n");
+  code_generator_emit(generator, "    test r9, r9\n");
+  code_generator_emit(generator, "    jz %s\n", label_left_done);
+  code_generator_emit(generator, "%s:\n", label_left_loop);
+  code_generator_emit(generator, "    mov r11b, [rdi]\n");
+  code_generator_emit(generator, "    mov [r8], r11b\n");
+  code_generator_emit(generator, "    inc rdi\n    inc r8\n    dec r9\n");
+  code_generator_emit(generator, "    jnz %s\n", label_left_loop);
+  code_generator_emit(generator, "%s:\n", label_left_done);
+
+  code_generator_emit(generator, "    mov r9, [rsi + 8]  ; right len\n");
+  code_generator_emit(generator, "    mov rdi, [rsi]     ; right chars\n");
+  code_generator_emit(generator, "    test r9, r9\n");
+  code_generator_emit(generator, "    jz %s\n", label_right_done);
+  code_generator_emit(generator, "%s:\n", label_right_loop);
+  code_generator_emit(generator, "    mov r11b, [rdi]\n");
+  code_generator_emit(generator, "    mov [r8], r11b\n");
+  code_generator_emit(generator, "    inc rdi\n    inc r8\n    dec r9\n");
+  code_generator_emit(generator, "    jnz %s\n", label_right_loop);
+  code_generator_emit(generator, "%s:\n", label_right_done);
+
+  code_generator_emit(generator, "    mov byte [r8], 0\n");
+
+  free(label_left_done);
+  free(label_left_loop);
+  free(label_right_done);
+  free(label_right_loop);
+}
+
+static void code_generator_emit_float_binary(CodeGenerator *generator,
+                                             ASTNode *left, const char *op,
+                                             ASTNode *right) {
+  code_generator_generate_expression(generator, left);
+  code_generator_emit(
+      generator, "    sub rsp, 8          ; Make space for float on stack\n");
+  code_generator_emit(generator,
+                      "    movsd [rsp], xmm0  ; Save left operand (float)\n");
+
+  code_generator_generate_expression(generator, right);
+
+  code_generator_emit(
+      generator, "    movsd xmm1, [rsp]  ; Restore left operand (float)\n");
+  code_generator_emit(generator,
+                      "    add rsp, 8          ; Clean up stack\n");
+
+  const char *instruction = code_generator_get_arithmetic_instruction(op, 1);
+  if (instruction) {
+    code_generator_emit(generator, "    %s xmm1, xmm0      ; %s operation\n",
+                        instruction, op);
+    code_generator_emit(generator,
+                        "    movsd xmm0, xmm1   ; Move result to xmm0\n");
+  } else {
+    if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+        strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+        strcmp(op, ">") == 0 || strcmp(op, ">=") == 0) {
+      code_generator_emit(generator,
+                          "    ucomisd xmm1, xmm0 ; Compare floats\n");
+      const char *set_instruction = "nop";
+      if (strcmp(op, "==") == 0)
+        set_instruction = "sete";
+      else if (strcmp(op, "!=") == 0)
+        set_instruction = "setne";
+      else if (strcmp(op, "<") == 0)
+        set_instruction = "setb";
+      else if (strcmp(op, "<=") == 0)
+        set_instruction = "setbe";
+      else if (strcmp(op, ">") == 0)
+        set_instruction = "seta";
+      else if (strcmp(op, ">=") == 0)
+        set_instruction = "setae";
+
+      code_generator_emit(generator,
+                          "    %s al             ; Set AL on condition\n",
+                          set_instruction);
+      code_generator_emit(generator,
+                          "    movzx rax, al     ; Zero-extend AL to RAX\n");
+    } else {
+      code_generator_set_error(
+          generator, "Unsupported floating-point operator '%s'", op);
+    }
+  }
+}
+
 // Expression and assignment implementation functions
 void code_generator_generate_binary_operation(CodeGenerator *generator,
                                               ASTNode *left, const char *op,
@@ -240,98 +380,7 @@ void code_generator_generate_binary_operation(CodeGenerator *generator,
   if (left_type == generator->type_checker->builtin_string &&
       right_type == generator->type_checker->builtin_string &&
       strcmp(op, "+") == 0) {
-
-    code_generator_emit(generator, "    ; String concatenation (+)\n");
-    code_generator_generate_expression(generator, left);
-    code_generator_emit(generator,
-                        "    push rax           ; Save left string ptr\n");
-
-    code_generator_generate_expression(generator, right);
-    code_generator_emit(generator,
-                        "    mov r10, rax       ; right string ptr -> r10\n");
-    code_generator_emit(generator,
-                        "    pop rax            ; left string ptr -> rax\n");
-
-    // Calculate total length
-    code_generator_emit(generator, "    mov rcx, [rax + 8] ; len1\n");
-    code_generator_emit(generator, "    add rcx, [r10 + 8] ; len1 + len2\n");
-
-    // Save ptrs and length
-    code_generator_emit(generator,
-                        "    sub rsp, 24        ; Save concat state\n");
-    code_generator_emit(generator, "    mov [rsp], r10     ; right ptr\n");
-    code_generator_emit(generator, "    mov [rsp + 8], rax ; left ptr\n");
-    code_generator_emit(generator, "    mov [rsp + 16], rcx ; total_len\n");
-
-    // calloc(1, total_len + 17)
-    const char *size_register = "rdi";
-    CallingConventionSpec *conv_spec =
-        generator->register_allocator
-            ? generator->register_allocator->calling_convention
-            : NULL;
-    if (conv_spec && conv_spec->int_param_count > 0) {
-      const char *cand =
-          code_generator_get_register_name(conv_spec->int_param_registers[0]);
-      if (cand)
-        size_register = cand;
-    }
-    code_generator_emit(generator, "    mov %s, rcx\n", size_register);
-    code_generator_emit(generator, "    add %s, 17\n", size_register);
-
-    code_generator_emit_calloc_call(generator, size_register);
-
-    // Restore values
-    code_generator_emit(generator, "    mov rcx, [rsp + 16] ; total_len\n");
-    code_generator_emit(generator, "    mov rdx, [rsp + 8] ; left ptr\n");
-    code_generator_emit(generator, "    mov rsi, [rsp]    ; right ptr\n");
-    code_generator_emit(generator, "    add rsp, 24\n");
-
-    // Populate struct
-    code_generator_emit(generator, "    lea r8, [rax + 16]\n");
-    code_generator_emit(generator, "    mov [rax], r8\n");
-    code_generator_emit(generator, "    mov [rax + 8], rcx\n");
-
-    // Generate labels
-    char *label_left_done =
-        code_generator_generate_label(generator, "concat_left_done");
-    char *label_left_loop =
-        code_generator_generate_label(generator, "concat_left_loop");
-    char *label_right_done =
-        code_generator_generate_label(generator, "concat_right_done");
-    char *label_right_loop =
-        code_generator_generate_label(generator, "concat_right_loop");
-
-    // Copy left
-    code_generator_emit(generator, "    mov r9, [rdx + 8]  ; left len\n");
-    code_generator_emit(generator, "    mov rdi, [rdx]     ; left chars\n");
-    code_generator_emit(generator, "    test r9, r9\n");
-    code_generator_emit(generator, "    jz %s\n", label_left_done);
-    code_generator_emit(generator, "%s:\n", label_left_loop);
-    code_generator_emit(generator, "    mov r11b, [rdi]\n");
-    code_generator_emit(generator, "    mov [r8], r11b\n");
-    code_generator_emit(generator, "    inc rdi\n    inc r8\n    dec r9\n");
-    code_generator_emit(generator, "    jnz %s\n", label_left_loop);
-    code_generator_emit(generator, "%s:\n", label_left_done);
-
-    // Copy right
-    code_generator_emit(generator, "    mov r9, [rsi + 8]  ; right len\n");
-    code_generator_emit(generator, "    mov rdi, [rsi]     ; right chars\n");
-    code_generator_emit(generator, "    test r9, r9\n");
-    code_generator_emit(generator, "    jz %s\n", label_right_done);
-    code_generator_emit(generator, "%s:\n", label_right_loop);
-    code_generator_emit(generator, "    mov r11b, [rdi]\n");
-    code_generator_emit(generator, "    mov [r8], r11b\n");
-    code_generator_emit(generator, "    inc rdi\n    inc r8\n    dec r9\n");
-    code_generator_emit(generator, "    jnz %s\n", label_right_loop);
-    code_generator_emit(generator, "%s:\n", label_right_done);
-
-    // null term
-    code_generator_emit(generator, "    mov byte [r8], 0\n");
-
-    free(label_left_done);
-    free(label_left_loop);
-    free(label_right_done);
-    free(label_right_loop);
+    code_generator_emit_string_concat(generator, left, right);
     return;
   }
 
@@ -339,59 +388,7 @@ void code_generator_generate_binary_operation(CodeGenerator *generator,
                  code_generator_is_floating_point_type(right_type);
 
   if (is_float) {
-    // Generate and push left operand (float)
-    code_generator_generate_expression(generator, left); // result in xmm0
-    code_generator_emit(
-        generator, "    sub rsp, 8          ; Make space for float on stack\n");
-    code_generator_emit(generator,
-                        "    movsd [rsp], xmm0  ; Save left operand (float)\n");
-
-    // Generate right operand (float)
-    code_generator_generate_expression(generator, right); // result in xmm0
-
-    // Pop left operand into xmm1
-    code_generator_emit(
-        generator, "    movsd xmm1, [rsp]  ; Restore left operand (float)\n");
-    code_generator_emit(generator,
-                        "    add rsp, 8          ; Clean up stack\n");
-
-    const char *instruction = code_generator_get_arithmetic_instruction(op, 1);
-    if (instruction) {
-      code_generator_emit(generator, "    %s xmm1, xmm0      ; %s operation\n",
-                          instruction, op);
-      code_generator_emit(generator,
-                          "    movsd xmm0, xmm1   ; Move result to xmm0\n");
-    } else {
-      // Handle float comparisons
-      if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
-          strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
-          strcmp(op, ">") == 0 || strcmp(op, ">=") == 0) {
-        code_generator_emit(generator,
-                            "    ucomisd xmm1, xmm0 ; Compare floats\n");
-        const char *set_instruction = "nop";
-        if (strcmp(op, "==") == 0)
-          set_instruction = "sete";
-        else if (strcmp(op, "!=") == 0)
-          set_instruction = "setne";
-        else if (strcmp(op, "<") == 0)
-          set_instruction = "setb";
-        else if (strcmp(op, "<=") == 0)
-          set_instruction = "setbe";
-        else if (strcmp(op, ">") == 0)
-          set_instruction = "seta";
-        else if (strcmp(op, ">=") == 0)
-          set_instruction = "setae";
-
-        code_generator_emit(generator,
-                            "    %s al             ; Set AL on condition\n",
-                            set_instruction);
-        code_generator_emit(generator,
-                            "    movzx rax, al     ; Zero-extend AL to RAX\n");
-      } else {
-        code_generator_set_error(
-            generator, "Unsupported floating-point operator '%s'", op);
-      }
-    }
+    code_generator_emit_float_binary(generator, left, op, right);
   } else {
     // Integer operations
     code_generator_generate_expression(generator, left);

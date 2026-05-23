@@ -45,7 +45,6 @@ typedef struct {
   LinkerMode linker_mode;
 } CompilerOptions;
 
-// Function declarations
 int compile_file(const char *input_filename, const char *output_filename,
                  CompilerOptions *options);
 void print_usage(const char *program_name);

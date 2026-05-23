@@ -1,6 +1,8 @@
 @echo off
 REM Windows build script for Mettle
 
+set CFLAGS=-Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc
+
 REM Check if gcc is available
 where gcc >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
@@ -29,93 +31,97 @@ if not exist obj\runtime mkdir obj\runtime
 if not exist bin mkdir bin
 
 REM Compile source files
+echo Compiling common utilities...
+gcc %CFLAGS% -c src\common.c -o obj\common.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+
 echo Compiling lexer...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\lexer\lexer.c -o obj\lexer\lexer.o
+gcc %CFLAGS% -c src\lexer\lexer.c -o obj\lexer\lexer.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling parser...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\parser\ast.c -o obj\parser\ast.o
+gcc %CFLAGS% -c src\parser\ast.c -o obj\parser\ast.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\parser\parser.c -o obj\parser\parser.o
+gcc %CFLAGS% -c src\parser\parser.c -o obj\parser\parser.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling semantic analysis...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\semantic\symbol_table.c -o obj\semantic\symbol_table.o
+gcc %CFLAGS% -c src\semantic\symbol_table.c -o obj\semantic\symbol_table.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\semantic\type_checker.c -o obj\semantic\type_checker.o
+gcc %CFLAGS% -c src\semantic\type_checker.c -o obj\semantic\type_checker.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\semantic\register_allocator.c -o obj\semantic\register_allocator.o
+gcc %CFLAGS% -c src\semantic\register_allocator.c -o obj\semantic\register_allocator.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\semantic\import_resolver.c -o obj\semantic\import_resolver.o
+gcc %CFLAGS% -c src\semantic\import_resolver.c -o obj\semantic\import_resolver.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\semantic\monomorphize.c -o obj\semantic\monomorphize.o
+gcc %CFLAGS% -c src\semantic\monomorphize.c -o obj\semantic\monomorphize.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling IR...
 for %%f in (src\ir\*.c) do (
     echo   %%~nxf
-    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c %%f -o obj\ir\%%~nf.o
+    gcc %CFLAGS% -c %%f -o obj\ir\%%~nf.o
     if errorlevel 1 exit /b 1
 )
 
 echo Compiling code generator modules...
 for %%f in (src\\codegen\\*.c) do (
     echo   %%~nxf
-    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c %%f -o obj\\codegen\\%%~nf.o
+    gcc %CFLAGS% -c %%f -o obj\\codegen\\%%~nf.o
     if errorlevel 1 exit /b 1
 )
 
 echo Compiling binary object backend...
 for %%f in (src\\codegen\\binary\\*.c) do (
     echo   binary\\%%~nxf
-    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c %%f -o obj\\codegen\\binary\\%%~nf.o
+    gcc %CFLAGS% -c %%f -o obj\\codegen\\binary\\%%~nf.o
     if errorlevel 1 exit /b 1
 )
 
 echo Compiling linker modules...
 for %%f in (src\\linker\\*.c) do (
     echo   %%~nxf
-    gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c %%f -o obj\\linker\\%%~nf.o
+    gcc %CFLAGS% -c %%f -o obj\\linker\\%%~nf.o
     if errorlevel 1 exit /b 1
 )
 
 echo Compiling debug info...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\debug\debug_info.c -o obj\debug\debug_info.o
+gcc %CFLAGS% -c src\debug\debug_info.c -o obj\debug\debug_info.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling crash-handler runtime (opt-in: -d / -s / -g / IR trap)...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\runtime\crash_handler.c -o obj\runtime\crash_handler.o
+gcc %CFLAGS% -c src\runtime\crash_handler.c -o obj\runtime\crash_handler.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling atomics helpers (opt-in: std/thread)...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\runtime\atomics.c -o obj\runtime\atomics.o
+gcc %CFLAGS% -c src\runtime\atomics.c -o obj\runtime\atomics.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling profile runtime (opt-in: --profile-runtime)...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\runtime\profile.c -o obj\runtime\profile.o
+gcc %CFLAGS% -c src\runtime\profile.c -o obj\runtime\profile.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling error reporter...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -c src\error\error_reporter.c -o obj\error\error_reporter.o
+gcc %CFLAGS% -c src\error\error_reporter.c -o obj\error\error_reporter.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling compiler diagnostics...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\compiler\compiler_context.c -o obj\compiler\compiler_context.o
+gcc %CFLAGS% -c src\compiler\compiler_context.c -o obj\compiler\compiler_context.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\compiler\compiler_crash.c -o obj\compiler\compiler_crash.o
+gcc %CFLAGS% -c src\compiler\compiler_crash.c -o obj\compiler\compiler_crash.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Compiling main...
-gcc -Wall -Wextra -std=c99 -g -O3 -D_GNU_SOURCE -Isrc -c src\main.c -o obj\main.o
+gcc %CFLAGS% -c src\main.c -o obj\main.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Linking...
-gcc obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\\codegen\\binary\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\error\error_reporter.o obj\compiler\compiler_context.o obj\compiler\compiler_crash.o obj\main.o -o bin\mettle.exe -ldbghelp
+gcc obj\common.o obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\\codegen\\binary\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\error\error_reporter.o obj\compiler\compiler_context.o obj\compiler\compiler_crash.o obj\main.o -o bin\mettle.exe -ldbghelp
 
 if %ERRORLEVEL% NEQ 0 (
     echo Build failed!

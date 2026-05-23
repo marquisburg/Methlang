@@ -1,4 +1,5 @@
 #include "ir.h"
+#include "../common.h"
 #include "compiler/compiler_context.h"
 #include <limits.h>
 #include <stdarg.h>
@@ -128,19 +129,6 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
                                                  ASTNode *expression,
                                                  Symbol *constructor_symbol,
                                                  IROperand *out_value);
-static char *ir_strdup_local(const char *text) {
-  if (!text) {
-    return NULL;
-  }
-  size_t length = strlen(text) + 1;
-  char *copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-  memcpy(copy, text, length);
-  return copy;
-}
-
 static int ir_emit_jump_instruction(IRLoweringContext *context,
                                     IRFunction *function, const char *label,
                                     SourceLocation location) {
@@ -419,7 +407,6 @@ static int ir_lower_switch_statement(IRLoweringContext *context,
     return 0;
   }
 
-  // Evaluate the switch expression once.
   IROperand switch_value = ir_operand_none();
   if (!ir_lower_expression(context, function, switch_data->expression,
                            &switch_value)) {
@@ -427,7 +414,6 @@ static int ir_lower_switch_statement(IRLoweringContext *context,
     return 0;
   }
 
-  // Precompute labels for each case.
   char **case_labels = NULL;
   if (switch_data->case_count > 0) {
     case_labels = calloc(switch_data->case_count, sizeof(char *));
@@ -1470,14 +1456,14 @@ static void ir_set_error(IRLoweringContext *context, const char *format, ...) {
 static char *ir_new_temp_name(IRLoweringContext *context) {
   char buffer[64];
   snprintf(buffer, sizeof(buffer), "t%d", context->next_temp_id++);
-  return ir_strdup_local(buffer);
+  return mettle_strdup(buffer);
 }
 
 static char *ir_new_label_name(IRLoweringContext *context, const char *prefix) {
   char buffer[64];
   snprintf(buffer, sizeof(buffer), "ir_%s_%d", prefix ? prefix : "label",
            context->next_label_id++);
-  return ir_strdup_local(buffer);
+  return mettle_strdup(buffer);
 }
 
 static int ir_emit(IRLoweringContext *context, IRFunction *function,
@@ -1696,9 +1682,9 @@ static int ir_push_labeled_control_frame(IRLoweringContext *context,
   }
 
   IRControlFrame *frame = &context->control_stack[context->control_count++];
-  frame->break_label = ir_strdup_local(break_label);
-  frame->continue_label = ir_strdup_local(continue_label);
-  frame->user_label = ir_strdup_local(user_label);
+  frame->break_label = mettle_strdup(break_label);
+  frame->continue_label = mettle_strdup(continue_label);
+  frame->user_label = mettle_strdup(user_label);
   return 1;
 }
 
@@ -2070,7 +2056,6 @@ static int ir_emit_condition_false_branch(IRLoweringContext *context,
       if (strcmp(binary->operator, "||") == 0) {
         char *done_label = ir_new_label_name(context, "cond_done");
         if (!done_label) {
-          free(done_label);
           ir_set_error(context, "Out of memory while allocating condition labels");
           return 0;
         }
@@ -3281,14 +3266,12 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       return 0;
     }
 
-    // Lower the function pointer expression
     IROperand func_ptr = ir_operand_none();
     if (!ir_lower_expression(context, function, fp_call->function, &func_ptr)) {
       ir_operand_destroy(&destination);
       return 0;
     }
 
-    // Lower arguments
     IROperand *arguments = NULL;
     if (fp_call->argument_count > 0) {
       arguments = calloc(fp_call->argument_count, sizeof(IROperand));
@@ -3995,7 +3978,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
   if (!program || program->type != AST_PROGRAM) {
     if (error_message) {
       *error_message =
-          ir_strdup_local("Expected AST_PROGRAM root for IR lowering");
+          mettle_strdup("Expected AST_PROGRAM root for IR lowering");
     }
     return NULL;
   }
@@ -4003,7 +3986,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
   IRProgram *ir_program = ir_program_create();
   if (!ir_program) {
     if (error_message) {
-      *error_message = ir_strdup_local("Failed to allocate IR program");
+      *error_message = mettle_strdup("Failed to allocate IR program");
     }
     return NULL;
   }
@@ -4037,7 +4020,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       if (error_message) {
         *error_message = context.error_message
                              ? context.error_message
-                             : ir_strdup_local("Unknown IR lowering error");
+                             : mettle_strdup("Unknown IR lowering error");
       } else {
         free(context.error_message);
       }
@@ -4062,7 +4045,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       if (error_message) {
         *error_message = context.error_message
                              ? context.error_message
-                             : ir_strdup_local("Unknown IR lowering error");
+                             : mettle_strdup("Unknown IR lowering error");
       } else {
         free(context.error_message);
       }
@@ -4082,7 +4065,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       if (error_message) {
         *error_message = context.error_message
                              ? context.error_message
-                             : ir_strdup_local("Unknown IR lowering error");
+                             : mettle_strdup("Unknown IR lowering error");
       } else {
         free(context.error_message);
       }

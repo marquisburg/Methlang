@@ -1052,21 +1052,6 @@ int code_generator_binary_try_emit_compare_update_pair_diamond(
   return 1;
 }
 
-int code_generator_binary_try_emit_lower_bound_loop(
-    CodeGenerator *generator, BinaryFunctionContext *context,
-    const IRFunction *function, size_t instruction_index,
-    size_t *consumed_out) {
-  (void)generator;
-  (void)context;
-  (void)function;
-  (void)instruction_index;
-  if (consumed_out) {
-    *consumed_out = 0;
-  }
-  /* Lower-bound is now handled by IR fusion to IR_OP_LOWER_BOUND_I32. */
-  return 0;
-}
-
 int code_generator_binary_emit_address_add_to_rax(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IRInstruction *address) {

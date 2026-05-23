@@ -60,7 +60,6 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->current_fn_returns_indirect = 0;
   generator->current_fn_indirect_return_size = 0;
   generator->profile_runtime = 0;
-  generator->profile_next_id = 0;
   generator->profile_function_names = NULL;
   generator->profile_function_count = 0;
   generator->profile_function_capacity = 0;
@@ -236,7 +235,6 @@ int code_generator_register_profile_function(CodeGenerator *generator,
 
   generator->profile_function_names[new_index] = name_copy;
   generator->profile_function_count = new_index + 1u;
-  generator->profile_next_id = (uint32_t)generator->profile_function_count;
   *id_out = (uint32_t)new_index;
   return 1;
 }
@@ -380,6 +378,24 @@ void code_generator_flush_pending_spill(CodeGenerator *generator) {
   generator->flushing_pending = 0;
 }
 
+static char *code_generator_vformat(const char *format, va_list args) {
+  va_list args_copy;
+  va_copy(args_copy, args);
+  int required_size = vsnprintf(NULL, 0, format, args_copy);
+  va_end(args_copy);
+  if (required_size < 0) {
+    return NULL;
+  }
+
+  char *rendered = malloc((size_t)required_size + 1);
+  if (!rendered) {
+    return NULL;
+  }
+
+  vsnprintf(rendered, (size_t)required_size + 1, format, args);
+  return rendered;
+}
+
 void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
   if (!generator || !format || generator->has_error) {
     return;
@@ -394,28 +410,14 @@ void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
   va_list args;
   va_start(args, format);
 
-  // Calculate required size
-  va_list args_copy;
-  va_copy(args_copy, args);
-  int required_size = vsnprintf(NULL, 0, format, args_copy);
-  va_end(args_copy);
-  if (required_size < 0) {
-    va_end(args);
+  char *rendered = code_generator_vformat(format, args);
+
+  va_end(args);
+
+  if (!rendered) {
     code_generator_set_error(generator, "Failed to format assembly output");
     return;
   }
-
-  char *rendered = malloc((size_t)required_size + 1);
-  if (!rendered) {
-    va_end(args);
-    code_generator_set_error(generator,
-                             "Out of memory while formatting assembly output");
-    return;
-  }
-
-  vsnprintf(rendered, (size_t)required_size + 1, format, args);
-
-  va_end(args);
 
   const char *to_append = rendered;
   char *cleaned = NULL;
@@ -659,31 +661,15 @@ void code_generator_emit_to_global_buffer(CodeGenerator *generator, const char *
   va_list args;
   va_start(args, format);
 
-  // Calculate required size
-  va_list args_copy;
-  va_copy(args_copy, args);
-  int required_size = vsnprintf(NULL, 0, format, args_copy);
-  va_end(args_copy);
-  if (required_size < 0) {
-    va_end(args);
+  char *rendered = code_generator_vformat(format, args);
+
+  va_end(args);
+
+  if (!rendered) {
     code_generator_set_error(generator, "Failed to format global output");
     return;
   }
 
-  char *rendered = malloc((size_t)required_size + 1);
-  if (!rendered) {
-    va_end(args);
-    code_generator_set_error(generator,
-                             "Out of memory while formatting global output");
-    return;
-  }
-  vsnprintf(rendered, (size_t)required_size + 1, format, args);
-
-  va_end(args);
-
-  // Global data (db/dq payloads) is emitted incrementally in small chunks.
-  // Do not strip comments here; filtering at chunk granularity can corrupt
-  // literal ';' bytes inside quoted data (for example URLs).
   code_generator_append_text(generator, rendered, strlen(rendered), 1);
 
   free(rendered);

@@ -186,14 +186,21 @@ static char *directory_from_path(const char *path) {
 }
 
 static char *get_executable_path(const char *argv0) {
+  static char *cached_path = NULL;
+  static int cached = 0;
+  if (cached) return cached_path ? strdup(cached_path) : NULL;
+  cached = 1;
+
 #ifdef _WIN32
   char *program_path = NULL;
   if (_get_pgmptr(&program_path) == 0 && program_path &&
       program_path[0] != '\0') {
-    return strdup(program_path);
+    cached_path = strdup(program_path);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   if (argv0 && argv0[0] != '\0') {
-    return strdup(argv0);
+    cached_path = strdup(argv0);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   return NULL;
 #elif defined(__APPLE__)
@@ -210,16 +217,19 @@ static char *get_executable_path(const char *argv0) {
     return NULL;
   }
   buffer[size] = '\0';
-  return buffer;
+  cached_path = buffer;
+  return strdup(cached_path);
 #else
   char buffer[PATH_MAX + 1];
   ssize_t len = readlink("/proc/self/exe", buffer, PATH_MAX);
   if (len > 0) {
     buffer[len] = '\0';
-    return strdup(buffer);
+    cached_path = strdup(buffer);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   if (argv0 && argv0[0] != '\0') {
-    return strdup(argv0);
+    cached_path = strdup(argv0);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   return NULL;
 #endif
@@ -725,7 +735,8 @@ static int resolve_import_library_path(const char *library_name,
     }
   }
 
-  env_copy = getenv("LIB") ? strdup(getenv("LIB")) : NULL;
+  const char *lib_env = getenv("LIB");
+  env_copy = lib_env ? strdup(lib_env) : NULL;
   token = env_copy ? strtok(env_copy, ";") : NULL;
   while (token) {
     candidate = join_paths(token, library_name);
@@ -2307,6 +2318,117 @@ int main(int argc, char *argv[]) {
   return result;
 }
 
+static int compile_read_source(const char *filename, char **out_source) {
+  *out_source = read_file(filename);
+  if (!*out_source) {
+    fprintf(stderr, "Error: Could not read file '%s'\n", filename);
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_lex_and_parse(Parser *parser, ErrorReporter *error_reporter,
+                                 ASTNode **out_program) {
+  *out_program = parser_parse_program(parser);
+  if (!*out_program || parser->had_error ||
+      error_reporter_has_errors(error_reporter)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Parse error: %s\n",
+              parser->error_message ? parser->error_message : "Unknown error");
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_resolve_imports(ASTNode *program, const char *input_filename,
+                                   ErrorReporter *error_reporter,
+                                   ImportResolverOptions *import_options) {
+  if (!resolve_imports_with_options(program, input_filename, error_reporter,
+                                    import_options)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Import resolution error\n");
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_monomorphize(ASTNode *program,
+                                ErrorReporter *error_reporter) {
+  if (!monomorphize_program(program, error_reporter)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Generic monomorphization error\n");
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_type_check(TypeChecker *type_checker, ASTNode *program,
+                              ErrorReporter *error_reporter) {
+  if (!type_checker_check_program(type_checker, program)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Type error: %s\n",
+              type_checker->error_message ? type_checker->error_message
+                                          : "Unknown error");
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_lower_to_ir(ASTNode *program, TypeChecker *type_checker,
+                               SymbolTable *symbol_table,
+                               int emit_runtime_checks,
+                               IRProgram **out_ir_program,
+                               char **out_ir_error) {
+  *out_ir_program = ir_lower_program(program, type_checker, symbol_table,
+                                     out_ir_error, emit_runtime_checks);
+  if (!*out_ir_program) {
+    mettle_compiler_ice_report("IR lowering failed",
+                               *out_ir_error ? *out_ir_error : NULL);
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_optimize_ir(IRProgram *ir_program,
+                               CompilerOptions *options) {
+  IROptimizeOptions ir_optimize_options = {0};
+  ir_optimize_options.preserve_function_boundaries =
+      options->profile_runtime ? 1 : 0;
+  if (!ir_optimize_program(ir_program, &ir_optimize_options)) {
+    mettle_compiler_ice_report("IR optimization failed", NULL);
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_generate_code(CodeGenerator *code_generator,
+                                 ASTNode *program) {
+  if (!code_generator_generate_program(code_generator, program)) {
+    fprintf(stderr, "Code generation error: %s\n",
+            (code_generator && code_generator->error_message)
+                ? code_generator->error_message
+                : "Unknown error");
+    mettle_compiler_ice_report("Code generation failed",
+                               code_generator && code_generator->error_message
+                                   ? code_generator->error_message
+                                   : NULL);
+    return 0;
+  }
+  return 1;
+}
+
 int compile_file(const char *input_filename, const char *output_filename,
                  CompilerOptions *options) {
   CompilerProfile profile;
@@ -2321,13 +2443,12 @@ int compile_file(const char *input_filename, const char *output_filename,
     mettle_compiler_ctx_set_options(options->debug_compiler, options->dump_ir);
   }
 
-  // Read input file
   compiler_set_phase(PROFILE_PHASE_READ_INPUT);
   phase_start = compiler_profile_begin(&profile);
-  char *source = read_file(input_filename);
+  char *source = NULL;
+  int read_ok = compile_read_source(input_filename, &source);
   compiler_profile_add(&profile, PROFILE_PHASE_READ_INPUT, phase_start);
-  if (!source) {
-    fprintf(stderr, "Error: Could not read file '%s'\n", input_filename);
+  if (!read_ok) {
     compiler_profile_print_compile(&profile, input_filename, 1);
     return 1;
   }
@@ -2500,19 +2621,11 @@ int compile_file(const char *input_filename, const char *output_filename,
     goto cleanup;
   }
 
-  // Parse the source code
   compiler_set_phase(PROFILE_PHASE_PARSE);
   phase_start = compiler_profile_begin(&profile);
-  program = parser_parse_program(parser);
+  int parse_ok = compile_lex_and_parse(parser, error_reporter, &program);
   compiler_profile_add(&profile, PROFILE_PHASE_PARSE, phase_start);
-  if (!program || parser->had_error ||
-      error_reporter_has_errors(error_reporter)) {
-    if (error_reporter_has_errors(error_reporter)) {
-      error_reporter_print_errors(error_reporter);
-    } else {
-      fprintf(stderr, "Parse error: %s\n",
-              parser->error_message ? parser->error_message : "Unknown error");
-    }
+  if (!parse_ok) {
     result = 1;
     goto cleanup;
   }
@@ -2559,62 +2672,40 @@ int compile_file(const char *input_filename, const char *output_filename,
 
   compiler_set_phase(PROFILE_PHASE_IMPORTS);
   phase_start = compiler_profile_begin(&profile);
-  if (!resolve_imports_with_options(program, input_filename, error_reporter,
-                                    &import_options)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_IMPORTS, phase_start);
-    if (error_reporter_has_errors(error_reporter)) {
-      error_reporter_print_errors(error_reporter);
-    } else {
-      fprintf(stderr, "Import resolution error\n");
-    }
+  int imports_ok = compile_resolve_imports(program, input_filename,
+                                           error_reporter, &import_options);
+  compiler_profile_add(&profile, PROFILE_PHASE_IMPORTS, phase_start);
+  if (!imports_ok) {
     result = 1;
     goto cleanup;
   }
-  compiler_profile_add(&profile, PROFILE_PHASE_IMPORTS, phase_start);
 
-  // Monomorphize generics (before type checking)
   compiler_set_phase(PROFILE_PHASE_MONOMORPHIZE);
   phase_start = compiler_profile_begin(&profile);
-  if (!monomorphize_program(program, error_reporter)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_MONOMORPHIZE, phase_start);
-    if (error_reporter_has_errors(error_reporter)) {
-      error_reporter_print_errors(error_reporter);
-    } else {
-      fprintf(stderr, "Generic monomorphization error\n");
-    }
+  int mono_ok = compile_monomorphize(program, error_reporter);
+  compiler_profile_add(&profile, PROFILE_PHASE_MONOMORPHIZE, phase_start);
+  if (!mono_ok) {
     result = 1;
     goto cleanup;
   }
-  compiler_profile_add(&profile, PROFILE_PHASE_MONOMORPHIZE, phase_start);
 
-  // Type checking
   compiler_set_phase(PROFILE_PHASE_TYPE_CHECK);
   phase_start = compiler_profile_begin(&profile);
-  if (!type_checker_check_program(type_checker, program)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_TYPE_CHECK, phase_start);
-    if (error_reporter_has_errors(error_reporter)) {
-      error_reporter_print_errors(error_reporter);
-    } else {
-      fprintf(stderr, "Type error: %s\n",
-              type_checker->error_message ? type_checker->error_message
-                                          : "Unknown error");
-    }
+  int tc_ok = compile_type_check(type_checker, program, error_reporter);
+  compiler_profile_add(&profile, PROFILE_PHASE_TYPE_CHECK, phase_start);
+  if (!tc_ok) {
     result = 1;
     goto cleanup;
   }
-  compiler_profile_add(&profile, PROFILE_PHASE_TYPE_CHECK, phase_start);
 
-  // Lower to the compiler IR before backend code generation.
   int emit_runtime_checks = options->release ? 0 : 1;
   compiler_set_phase(PROFILE_PHASE_IR_LOWERING);
   phase_start = compiler_profile_begin(&profile);
-  ir_program =
-      ir_lower_program(program, type_checker, symbol_table, &ir_error_message,
-                       emit_runtime_checks);
+  int ir_ok = compile_lower_to_ir(program, type_checker, symbol_table,
+                                   emit_runtime_checks, &ir_program,
+                                   &ir_error_message);
   compiler_profile_add(&profile, PROFILE_PHASE_IR_LOWERING, phase_start);
-  if (!ir_program) {
-    mettle_compiler_ice_report("IR lowering failed",
-                             ir_error_message ? ir_error_message : NULL);
+  if (!ir_ok) {
     result = 1;
     goto cleanup;
   }
@@ -2632,20 +2723,12 @@ int compile_file(const char *input_filename, const char *output_filename,
   if (options->optimize) {
     compiler_set_phase(PROFILE_PHASE_IR_OPTIMIZATION);
     phase_start = compiler_profile_begin(&profile);
-    IROptimizeOptions ir_optimize_options = {0};
-    /* Function timing needs stable call boundaries; op counters are injected
-     * after optimization and can attribute to inlined/optimized IR. */
-    ir_optimize_options.preserve_function_boundaries =
-        options->profile_runtime ? 1 : 0;
-    if (!ir_optimize_program(ir_program, &ir_optimize_options)) {
-      compiler_profile_add(&profile, PROFILE_PHASE_IR_OPTIMIZATION,
-                           phase_start);
-      mettle_compiler_ice_report("IR optimization failed", NULL);
+    int opt_ok = compile_optimize_ir(ir_program, options);
+    compiler_profile_add(&profile, PROFILE_PHASE_IR_OPTIMIZATION, phase_start);
+    if (!opt_ok) {
       result = 1;
       goto cleanup;
     }
-    compiler_profile_add(&profile, PROFILE_PHASE_IR_OPTIMIZATION,
-                         phase_start);
   }
 
   if (options->profile_runtime_ops) {
@@ -2687,23 +2770,14 @@ int compile_file(const char *input_filename, const char *output_filename,
     compiler_profile_add(&profile, PROFILE_PHASE_IR_DUMP, phase_start);
   }
 
-  // Generate code
   compiler_set_phase(PROFILE_PHASE_CODEGEN);
   phase_start = compiler_profile_begin(&profile);
-  if (!code_generator_generate_program(code_generator, program)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_CODEGEN, phase_start);
-    fprintf(stderr, "Code generation error: %s\n",
-            (code_generator && code_generator->error_message)
-                ? code_generator->error_message
-                : "Unknown error");
-    mettle_compiler_ice_report("Code generation failed",
-                               code_generator && code_generator->error_message
-                                   ? code_generator->error_message
-                                   : NULL);
+  int codegen_ok = compile_generate_code(code_generator, program);
+  compiler_profile_add(&profile, PROFILE_PHASE_CODEGEN, phase_start);
+  if (!codegen_ok) {
     result = 1;
     goto cleanup;
   }
-  compiler_profile_add(&profile, PROFILE_PHASE_CODEGEN, phase_start);
 
   compiler_set_phase(PROFILE_PHASE_WRITE_OUTPUT);
   phase_start = compiler_profile_begin(&profile);

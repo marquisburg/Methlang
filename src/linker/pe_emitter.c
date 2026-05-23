@@ -1,4 +1,6 @@
 #include "linker/pe_emitter.h"
+#include "linker/linker_common.h"
+#include "../common.h"
 
 #include "linker/import_lib.h"
 #include "linker/relocation.h"
@@ -80,6 +82,9 @@
 #define PE_SECTION_INDEX_PDATA 4u
 #define PE_SECTION_INDEX_XDATA 5u
 
+#define PE_IMP_PREFIX "__imp_"
+#define PE_IMP_PREFIX_LEN 6u
+
 typedef struct {
   size_t merged_section_index;
   const char *name;
@@ -136,46 +141,6 @@ pe_find_import_symbol(ImportLibrary **libraries, size_t library_count,
                       const char *canonical_name);
 static int pe_is_imp_symbol_name(const char *symbol_name);
 
-static char *pe_strdup(const char *value) {
-  size_t length = 0u;
-  char *copy = NULL;
-
-  if (!value) {
-    return NULL;
-  }
-
-  length = strlen(value);
-  copy = malloc(length + 1u);
-  if (!copy) {
-    return NULL;
-  }
-
-  memcpy(copy, value, length + 1u);
-  return copy;
-}
-
-static void pe_set_error(char **error_message_out, const char *format, ...) {
-  char buffer[512];
-  va_list args;
-  char *copy = NULL;
-
-  if (!error_message_out) {
-    return;
-  }
-
-  va_start(args, format);
-  vsnprintf(buffer, sizeof(buffer), format, args);
-  va_end(args);
-
-  copy = pe_strdup(buffer);
-  if (!copy) {
-    return;
-  }
-
-  free(*error_message_out);
-  *error_message_out = copy;
-}
-
 static int pe_text_ends_with_ignore_case(const char *text, const char *suffix) {
   size_t text_length = 0u;
   size_t suffix_length = 0u;
@@ -203,57 +168,9 @@ static int pe_text_ends_with_ignore_case(const char *text, const char *suffix) {
   return 1;
 }
 
-static uint32_t pe_align_up_u32(uint32_t value, uint32_t alignment) {
-  uint32_t remainder = 0u;
-
-  if (alignment <= 1u) {
-    return value;
-  }
-
-  remainder = value % alignment;
-  if (remainder == 0u) {
-    return value;
-  }
-
-  return value + (alignment - remainder);
-}
-
-static size_t pe_align_up_size(size_t value, size_t alignment) {
-  size_t remainder = 0u;
-
-  if (alignment <= 1u) {
-    return value;
-  }
-
-  remainder = value % alignment;
-  if (remainder == 0u) {
-    return value;
-  }
-
-  return value + (alignment - remainder);
-}
-
 static void pe_write_u16_to_memory(unsigned char *bytes, uint16_t value) {
   bytes[0] = (unsigned char)(value & 0xFFu);
   bytes[1] = (unsigned char)((value >> 8) & 0xFFu);
-}
-
-static void pe_write_u32_to_memory(unsigned char *bytes, uint32_t value) {
-  bytes[0] = (unsigned char)(value & 0xFFu);
-  bytes[1] = (unsigned char)((value >> 8) & 0xFFu);
-  bytes[2] = (unsigned char)((value >> 16) & 0xFFu);
-  bytes[3] = (unsigned char)((value >> 24) & 0xFFu);
-}
-
-static void pe_write_u64_to_memory(unsigned char *bytes, uint64_t value) {
-  bytes[0] = (unsigned char)(value & 0xFFu);
-  bytes[1] = (unsigned char)((value >> 8) & 0xFFu);
-  bytes[2] = (unsigned char)((value >> 16) & 0xFFu);
-  bytes[3] = (unsigned char)((value >> 24) & 0xFFu);
-  bytes[4] = (unsigned char)((value >> 32) & 0xFFu);
-  bytes[5] = (unsigned char)((value >> 40) & 0xFFu);
-  bytes[6] = (unsigned char)((value >> 48) & 0xFFu);
-  bytes[7] = (unsigned char)((value >> 56) & 0xFFu);
 }
 
 static int pe_write_u16(FILE *file, uint16_t value) {
@@ -266,14 +183,14 @@ static int pe_write_u16(FILE *file, uint16_t value) {
 static int pe_write_u32(FILE *file, uint32_t value) {
   unsigned char bytes[4];
 
-  pe_write_u32_to_memory(bytes, value);
+  linker_write_u32(bytes, value);
   return fwrite(bytes, 1u, sizeof(bytes), file) == sizeof(bytes);
 }
 
 static int pe_write_u64(FILE *file, uint64_t value) {
   unsigned char bytes[8];
 
-  pe_write_u64_to_memory(bytes, value);
+  linker_write_u64(bytes, value);
   return fwrite(bytes, 1u, sizeof(bytes), file) == sizeof(bytes);
 }
 
@@ -366,7 +283,7 @@ static int pe_section_reserve(LinkedSection *section, size_t minimum_size,
 
   grown = realloc(section->data, new_capacity);
   if (!grown) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "Out of memory while growing synthetic section '%s'",
                  section->name ? section->name : "<unknown>");
     return 0;
@@ -385,7 +302,7 @@ static int pe_section_align(LinkedSection *section, size_t alignment,
     return 1;
   }
 
-  aligned_size = pe_align_up_size(section->size, alignment);
+  aligned_size = linker_align_up(section->size, alignment);
   if (aligned_size == section->size) {
     return 1;
   }
@@ -461,7 +378,7 @@ static int pe_collect_sections(const LinkResolution *resolution,
   size_t layout_count = 0u;
 
   if (!resolution || !layouts || !layout_count_out) {
-    pe_set_error(error_message_out, "Invalid PE emitter section state");
+    mettle_set_error(error_message_out, "Invalid PE emitter section state");
     return 0;
   }
 
@@ -473,13 +390,13 @@ static int pe_collect_sections(const LinkResolution *resolution,
     }
 
     if (section->kind != COFF_SECTION_KIND_BSS && section->size > UINT32_MAX) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Section '%s' exceeds PE raw-size limits",
                    section->name ? section->name : "<unknown>");
       return 0;
     }
     if (section->virtual_size > UINT32_MAX) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Section '%s' exceeds PE virtual-size limits",
                    section->name ? section->name : "<unknown>");
       return 0;
@@ -497,7 +414,7 @@ static int pe_collect_sections(const LinkResolution *resolution,
   }
 
   if (layout_count == 0u) {
-    pe_set_error(error_message_out, "No merged sections are available to emit");
+    mettle_set_error(error_message_out, "No merged sections are available to emit");
     return 0;
   }
 
@@ -525,12 +442,12 @@ static int pe_layout_sections(PeSectionLayout *layouts, size_t layout_count,
 
   if (!layouts || !size_of_image_out || !size_of_code_out ||
       !size_of_init_data_out || !size_of_uninit_data_out || !base_of_code_out) {
-    pe_set_error(error_message_out, "Invalid PE layout output");
+    mettle_set_error(error_message_out, "Invalid PE layout output");
     return 0;
   }
 
-  current_rva = pe_align_up_u32(size_of_headers, section_alignment);
-  current_raw = pe_align_up_u32(size_of_headers, file_alignment);
+  current_rva = (uint32_t)linker_align_up(size_of_headers, section_alignment);
+  current_raw = (uint32_t)linker_align_up(size_of_headers, file_alignment);
 
   for (i = 0u; i < layout_count; i++) {
     uint32_t aligned_virtual_size = 0u;
@@ -539,11 +456,11 @@ static int pe_layout_sections(PeSectionLayout *layouts, size_t layout_count,
     layouts[i].virtual_address = current_rva;
     layouts[i].raw_offset = layouts[i].raw_size == 0u ? 0u : current_raw;
     if (layouts[i].raw_size != 0u) {
-      layouts[i].raw_size = pe_align_up_u32(layouts[i].raw_size, file_alignment);
+      layouts[i].raw_size = (uint32_t)linker_align_up(layouts[i].raw_size, file_alignment);
     }
 
     aligned_virtual_size =
-        pe_align_up_u32(layouts[i].virtual_size, section_alignment);
+        (uint32_t)linker_align_up(layouts[i].virtual_size, section_alignment);
     current_rva += aligned_virtual_size;
     if (layouts[i].raw_size != 0u) {
       current_raw += layouts[i].raw_size;
@@ -571,7 +488,7 @@ static int pe_layout_sections(PeSectionLayout *layouts, size_t layout_count,
     }
   }
 
-  *size_of_image_out = pe_align_up_u32(current_rva, section_alignment);
+  *size_of_image_out = (uint32_t)linker_align_up(current_rva, section_alignment);
   *size_of_code_out = size_of_code;
   *size_of_init_data_out = size_of_init_data;
   *size_of_uninit_data_out = size_of_uninit_data;
@@ -589,7 +506,7 @@ static int pe_apply_layout_to_resolution(LinkResolution *resolution,
   size_t section_index = 0u;
 
   if (!resolution || !layouts) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "Invalid resolution while laying out PE image");
     return 0;
   }
@@ -655,7 +572,7 @@ static int pe_import_plan_reserve_dlls(PeImportPlan *plan, size_t minimum_count,
 
   grown = realloc(plan->dlls, new_capacity * sizeof(PeImportDll));
   if (!grown) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "Out of memory while growing import DLL table");
     return 0;
   }
@@ -687,7 +604,7 @@ static int pe_import_plan_reserve_symbols(PeImportPlan *plan,
 
   grown = realloc(plan->symbols, new_capacity * sizeof(PeImportSymbol));
   if (!grown) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "Out of memory while growing import symbol table");
     return 0;
   }
@@ -785,7 +702,7 @@ static int pe_import_libraries_append(ImportLibrary ***libraries_in_out,
   grown = realloc(*libraries_in_out,
                   (*library_count_in_out + 1u) * sizeof(ImportLibrary *));
   if (!grown) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "Out of memory while growing import library list");
     return 0;
   }
@@ -816,14 +733,14 @@ static int pe_load_import_libraries(const char **paths, size_t path_count,
 
   libraries = calloc(path_count, sizeof(ImportLibrary *));
   if (!libraries) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "Out of memory while loading import libraries");
     return 0;
   }
 
   for (i = 0u; i < path_count; i++) {
     if (!paths[i] || paths[i][0] == '\0') {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "An import library path was empty");
       goto cleanup;
     }
@@ -866,7 +783,7 @@ static int pe_import_library_append_symbol(ImportLibrary *library,
     new_capacity = library->symbol_capacity ? library->symbol_capacity * 2u : 8u;
     grown = realloc(library->symbols, new_capacity * sizeof(ImportLibrarySymbol));
     if (!grown) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Out of memory while growing synthetic import symbols");
       return 0;
     }
@@ -879,14 +796,14 @@ static int pe_import_library_append_symbol(ImportLibrary *library,
 
   symbol = &library->symbols[library->symbol_count++];
   memset(symbol, 0, sizeof(*symbol));
-  symbol->symbol_name = pe_strdup(symbol_name);
-  symbol->dll_name = pe_strdup(dll_name);
+  symbol->symbol_name = mettle_strdup(symbol_name);
+  symbol->dll_name = mettle_strdup(dll_name);
   if (!symbol->symbol_name || !symbol->dll_name) {
     free(symbol->symbol_name);
     free(symbol->dll_name);
     memset(symbol, 0, sizeof(*symbol));
     library->symbol_count--;
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "Out of memory while storing synthetic import symbol '%s'",
                  symbol_name);
     return 0;
@@ -910,7 +827,7 @@ static char *pe_normalize_dll_name(const char *dll_name) {
 
   length = strlen(dll_name);
   if (length >= 4u && pe_text_ends_with_ignore_case(dll_name, ".dll")) {
-    return pe_strdup(dll_name);
+    return mettle_strdup(dll_name);
   }
 
   normalized = malloc(length + 5u);
@@ -947,7 +864,7 @@ static int pe_append_imports_from_dlls(LinkResolution *resolution,
 
     normalized_dll_name = pe_normalize_dll_name(dll_names[dll_index]);
     if (!normalized_dll_name) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Out of memory while normalizing import DLL '%s'",
                    dll_names[dll_index]);
       return 0;
@@ -963,17 +880,17 @@ static int pe_append_imports_from_dlls(LinkResolution *resolution,
     if (!library) {
       FreeLibrary(module);
       free(normalized_dll_name);
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Out of memory while creating synthetic import library");
       return 0;
     }
 
-    library->path = pe_strdup(normalized_dll_name);
+    library->path = mettle_strdup(normalized_dll_name);
     if (!library->path) {
       FreeLibrary(module);
       free(normalized_dll_name);
       import_library_destroy(library);
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Out of memory while storing synthetic import DLL name");
       return 0;
     }
@@ -1036,7 +953,7 @@ static int pe_append_imports_from_dlls(LinkResolution *resolution,
   (void)library_count_in_out;
 
   if (dll_count > 0u) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "DLL export probing for PE imports requires Windows");
     return 0;
   }
@@ -1066,7 +983,7 @@ pe_find_import_symbol(ImportLibrary **libraries, size_t library_count,
 }
 
 static int pe_is_imp_symbol_name(const char *symbol_name) {
-  return symbol_name && strncmp(symbol_name, "__imp_", 6u) == 0;
+  return symbol_name && strncmp(symbol_name, PE_IMP_PREFIX, PE_IMP_PREFIX_LEN) == 0;
 }
 
 static int pe_bind_import_symbol(LinkResolution *resolution, PeImportPlan *plan,
@@ -1083,7 +1000,7 @@ static int pe_bind_import_symbol(LinkResolution *resolution, PeImportPlan *plan,
 
   if (!needs_iat_symbol &&
       library_symbol->import_type != IMPORT_OBJECT_TYPE_CODE) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "Direct imported data symbol '%s' is not supported",
                  canonical_name);
     return 0;
@@ -1099,9 +1016,9 @@ static int pe_bind_import_symbol(LinkResolution *resolution, PeImportPlan *plan,
     dll_index = (ssize_t)plan->dll_count++;
     memset(&plan->dlls[(size_t)dll_index], 0, sizeof(plan->dlls[0]));
     plan->dlls[(size_t)dll_index].dll_name =
-        pe_strdup(library_symbol->dll_name);
+        mettle_strdup(library_symbol->dll_name);
     if (!plan->dlls[(size_t)dll_index].dll_name) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Out of memory while storing import DLL name");
       return 0;
     }
@@ -1118,10 +1035,10 @@ static int pe_bind_import_symbol(LinkResolution *resolution, PeImportPlan *plan,
     symbol_index = (ssize_t)plan->symbol_count++;
     symbol = &plan->symbols[(size_t)symbol_index];
     memset(symbol, 0, sizeof(*symbol));
-    symbol->canonical_name = pe_strdup(canonical_name);
-    symbol->dll_name = pe_strdup(library_symbol->dll_name);
+    symbol->canonical_name = mettle_strdup(canonical_name);
+    symbol->dll_name = mettle_strdup(library_symbol->dll_name);
     if (!symbol->canonical_name || !symbol->dll_name) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Out of memory while storing import symbol '%s'",
                    canonical_name);
       return 0;
@@ -1288,7 +1205,7 @@ static int pe_emit_import_storage(LinkResolution *resolution,
 
       if (snprintf(imp_name, sizeof(imp_name), "__imp_%s",
                    symbol->canonical_name) >= (int)sizeof(imp_name)) {
-        pe_set_error(error_message_out,
+        mettle_set_error(error_message_out,
                      "Imported symbol name '%s' is too long",
                      symbol->canonical_name);
         return 0;
@@ -1355,7 +1272,7 @@ static int pe_finalize_imports(LinkResolution *resolution, PeImportPlan *plan,
     return 1;
   }
   if (!resolution || !layouts) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "Invalid layout while finalizing import tables");
     return 0;
   }
@@ -1363,7 +1280,7 @@ static int pe_finalize_imports(LinkResolution *resolution, PeImportPlan *plan,
   text_layout = pe_find_layout(layouts, layout_count, PE_SECTION_INDEX_TEXT);
   rdata_layout = pe_find_layout(layouts, layout_count, PE_SECTION_INDEX_RDATA);
   if (!text_layout || !rdata_layout) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "Imported images require both .text and .rdata sections");
     return 0;
   }
@@ -1390,8 +1307,8 @@ static int pe_finalize_imports(LinkResolution *resolution, PeImportPlan *plan,
       thunk_value = 0x8000000000000000ull | symbol->ordinal_or_hint;
     }
 
-    pe_write_u64_to_memory(rdata->data + ilt_offset, thunk_value);
-    pe_write_u64_to_memory(rdata->data + iat_offset, thunk_value);
+    linker_write_u64(rdata->data + ilt_offset, thunk_value);
+    linker_write_u64(rdata->data + iat_offset, thunk_value);
 
     if (symbol->needs_thunk) {
       uint64_t thunk_va = text_layout->virtual_address + (uint32_t)symbol->thunk_offset +
@@ -1402,7 +1319,7 @@ static int pe_finalize_imports(LinkResolution *resolution, PeImportPlan *plan,
       unsigned char *stub = text->data + symbol->thunk_offset;
 
       if (displacement < INT32_MIN || displacement > INT32_MAX) {
-        pe_set_error(error_message_out,
+        mettle_set_error(error_message_out,
                      "Import thunk for '%s' is out of range",
                      symbol->canonical_name);
         return 0;
@@ -1410,7 +1327,7 @@ static int pe_finalize_imports(LinkResolution *resolution, PeImportPlan *plan,
 
       stub[0] = 0xFFu;
       stub[1] = 0x25u;
-      pe_write_u32_to_memory(stub + 2u, (uint32_t)(int32_t)displacement);
+      linker_write_u32(stub + 2u, (uint32_t)(int32_t)displacement);
     }
 
   }
@@ -1427,11 +1344,11 @@ static int pe_finalize_imports(LinkResolution *resolution, PeImportPlan *plan,
     uint32_t iat_rva =
         rdata_layout->virtual_address + (uint32_t)dll->iat_offset;
 
-    pe_write_u32_to_memory(descriptor, ilt_rva);
-    pe_write_u32_to_memory(descriptor + 4u, 0u);
-    pe_write_u32_to_memory(descriptor + 8u, 0u);
-    pe_write_u32_to_memory(descriptor + 12u, dll_name_rva);
-    pe_write_u32_to_memory(descriptor + 16u, iat_rva);
+    linker_write_u32(descriptor, ilt_rva);
+    linker_write_u32(descriptor + 4u, 0u);
+    linker_write_u32(descriptor + 8u, 0u);
+    linker_write_u32(descriptor + 12u, dll_name_rva);
+    linker_write_u32(descriptor + 16u, iat_rva);
 
     if (dll->iat_offset + ((dll->symbol_count + 1u) * PE_IMPORT_THUNK_SIZE) >
         iat_end) {
@@ -1460,7 +1377,7 @@ static int pe_validate_unresolved_externals(const LinkResolution *resolution,
   for (i = 0u; i < resolution->symbol_count; i++) {
     const LinkedSymbol *symbol = &resolution->symbols[i];
     if (symbol->is_external && !symbol->is_defined) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Unresolved external symbol '%s'",
                    symbol->name ? symbol->name : "<unnamed>");
       return 0;
@@ -1514,7 +1431,7 @@ static int pe_write_headers(FILE *file, const PeSectionLayout *layouts,
   long header_end = 0;
 
   if (!file || !layouts) {
-    pe_set_error(error_message_out, "Invalid PE header state");
+    mettle_set_error(error_message_out, "Invalid PE header state");
     return 0;
   }
 
@@ -1543,7 +1460,7 @@ static int pe_write_headers(FILE *file, const PeSectionLayout *layouts,
       !pe_write_u64(file, 0x100000u) || !pe_write_u64(file, 0x1000u) ||
       !pe_write_u32(file, 0u) ||
       !pe_write_u32(file, PE_DATA_DIRECTORY_COUNT)) {
-    pe_set_error(error_message_out, "Failed while writing PE headers");
+    mettle_set_error(error_message_out, "Failed while writing PE headers");
     return 0;
   }
 
@@ -1564,7 +1481,7 @@ static int pe_write_headers(FILE *file, const PeSectionLayout *layouts,
 
     if (!pe_write_u32(file, directory_rva) ||
         !pe_write_u32(file, directory_size)) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Failed while writing PE data directories");
       return 0;
     }
@@ -1579,7 +1496,7 @@ static int pe_write_headers(FILE *file, const PeSectionLayout *layouts,
         !pe_write_u32(file, 0u) || !pe_write_u32(file, 0u) ||
         !pe_write_u16(file, 0u) || !pe_write_u16(file, 0u) ||
         !pe_write_u32(file, layouts[i].characteristics)) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Failed while writing PE section headers");
       return 0;
     }
@@ -1588,7 +1505,7 @@ static int pe_write_headers(FILE *file, const PeSectionLayout *layouts,
   header_end = ftell(file);
   if (header_end < 0 || (uint32_t)header_end > size_of_headers ||
       !pe_write_zeros(file, size_of_headers - (uint32_t)header_end)) {
-    pe_set_error(error_message_out, "Failed while padding PE headers");
+    mettle_set_error(error_message_out, "Failed while padding PE headers");
     return 0;
   }
 
@@ -1600,7 +1517,7 @@ static int pe_write_payloads(FILE *file, const PeSectionLayout *layouts,
   size_t i = 0u;
 
   if (!file || !layouts) {
-    pe_set_error(error_message_out, "Invalid PE payload state");
+    mettle_set_error(error_message_out, "Invalid PE payload state");
     return 0;
   }
 
@@ -1613,7 +1530,7 @@ static int pe_write_payloads(FILE *file, const PeSectionLayout *layouts,
       continue;
     }
     if (position < 0) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Failed to measure PE payload position");
       return 0;
     }
@@ -1621,7 +1538,7 @@ static int pe_write_payloads(FILE *file, const PeSectionLayout *layouts,
 
     if (file_offset > layouts[i].raw_offset ||
         !pe_write_zeros(file, layouts[i].raw_offset - file_offset)) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Failed while aligning section payload '%s'",
                    layouts[i].name ? layouts[i].name : "<unknown>");
       return 0;
@@ -1629,7 +1546,7 @@ static int pe_write_payloads(FILE *file, const PeSectionLayout *layouts,
 
     if (section->size > 0u &&
         fwrite(section->data, 1u, section->size, file) != section->size) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Failed while writing section payload '%s'",
                    layouts[i].name ? layouts[i].name : "<unknown>");
       return 0;
@@ -1637,7 +1554,7 @@ static int pe_write_payloads(FILE *file, const PeSectionLayout *layouts,
 
     if (layouts[i].raw_size < section->size ||
         !pe_write_zeros(file, layouts[i].raw_size - (uint32_t)section->size)) {
-      pe_set_error(error_message_out,
+      mettle_set_error(error_message_out,
                    "Failed while padding section payload '%s'",
                    layouts[i].name ? layouts[i].name : "<unknown>");
       return 0;
@@ -1680,13 +1597,13 @@ int pe_emit_executable(LinkResolution *resolution, const char *output_path,
   }
 
   if (!resolution || !output_path || output_path[0] == '\0') {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "A link resolution and output path are required");
     return 0;
   }
   if (!resolution->entry_symbol || !resolution->entry_symbol->is_defined ||
       resolution->entry_symbol->merged_section_index == LINKED_SECTION_INDEX_NONE) {
-    pe_set_error(error_message_out, "PE emission requires a resolved entry point");
+    mettle_set_error(error_message_out, "PE emission requires a resolved entry point");
     return 0;
   }
 
@@ -1706,7 +1623,7 @@ int pe_emit_executable(LinkResolution *resolution, const char *output_path,
   }
 
   if (section_alignment < file_alignment) {
-    pe_set_error(error_message_out,
+    mettle_set_error(error_message_out,
                  "PE section alignment must be at least the file alignment");
     return 0;
   }
@@ -1734,7 +1651,7 @@ int pe_emit_executable(LinkResolution *resolution, const char *output_path,
     goto cleanup;
   }
 
-  size_of_headers = pe_align_up_u32(
+  size_of_headers = (uint32_t)linker_align_up(
       PE_DOS_STUB_SIZE + 4u + PE_FILE_HEADER_SIZE + PE_OPTIONAL_HEADER64_SIZE +
           ((uint32_t)layout_count * PE_SECTION_HEADER_SIZE),
       file_alignment);
@@ -1766,7 +1683,7 @@ int pe_emit_executable(LinkResolution *resolution, const char *output_path,
 
   file = fopen(output_path, "wb");
   if (!file) {
-    pe_set_error(error_message_out, "Failed to open PE output file '%s'",
+    mettle_set_error(error_message_out, "Failed to open PE output file '%s'",
                  output_path);
     goto cleanup;
   }

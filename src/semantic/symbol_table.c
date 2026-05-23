@@ -4,6 +4,7 @@
 #include "symbol_table.h"
 #include "../error/error_reporter.h"
 #include "../string_intern.h"
+#include "../common.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,16 +24,6 @@ static int symbol_table_names_equal(const char *lhs, const char *rhs) {
  * symbols across all modules) is what the index exists for. */
 #define SYMBOL_NAME_INDEX_MIN_SYMBOLS 24
 
-static size_t symbol_name_hash(const char *name) {
-  /* FNV-1a over size_t, matching the string interner's hash width. */
-  size_t hash = (size_t)1469598103934665603ULL;
-  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
-    hash ^= (size_t)*p;
-    hash *= (size_t)1099511628211ULL;
-  }
-  return hash;
-}
-
 /* Rebuilds a scope's hash index from its current symbol array. */
 static int scope_name_index_rebuild(Scope *scope, size_t bucket_count) {
   size_t *buckets = calloc(bucket_count, sizeof(size_t));
@@ -44,7 +35,7 @@ static int scope_name_index_rebuild(Scope *scope, size_t bucket_count) {
     if (!scope->symbols[i] || !scope->symbols[i]->name) {
       continue;
     }
-    size_t pos = symbol_name_hash(scope->symbols[i]->name) & mask;
+    size_t pos = mettle_fnv1a_hash(scope->symbols[i]->name) & mask;
     while (buckets[pos] != 0) {
       pos = (pos + 1) & mask;
     }
@@ -83,7 +74,7 @@ static void scope_name_index_insert(Scope *scope, size_t symbol_index) {
   }
   size_t mask = scope->name_index_bucket_count - 1;
   const char *name = scope->symbols[symbol_index]->name;
-  size_t pos = symbol_name_hash(name) & mask;
+  size_t pos = mettle_fnv1a_hash(name) & mask;
   while (scope->name_index[pos] != 0) {
     pos = (pos + 1) & mask;
   }
@@ -106,7 +97,7 @@ static void scope_register_appended_symbol(Scope *scope, size_t new_index) {
   /* If a rebuild ran inside ensure() it already placed this symbol; detect
    * that so we don't insert a duplicate bucket entry. */
   size_t mask = scope->name_index_bucket_count - 1;
-  size_t pos = symbol_name_hash(scope->symbols[new_index]->name) & mask;
+  size_t pos = mettle_fnv1a_hash(scope->symbols[new_index]->name) & mask;
   while (scope->name_index[pos] != 0) {
     if (scope->name_index[pos] == new_index + 1) {
       return; /* already indexed by the rebuild */
@@ -121,7 +112,7 @@ static void scope_register_appended_symbol(Scope *scope, size_t new_index) {
 static Symbol *scope_lookup_symbol(Scope *scope, const char *name) {
   if (scope->name_index && scope->name_index_bucket_count > 0) {
     size_t mask = scope->name_index_bucket_count - 1;
-    size_t pos = symbol_name_hash(name) & mask;
+    size_t pos = mettle_fnv1a_hash(name) & mask;
     while (scope->name_index[pos] != 0) {
       size_t idx = scope->name_index[pos] - 1;
       if (scope->symbols[idx] &&
@@ -140,15 +131,6 @@ static Symbol *scope_lookup_symbol(Scope *scope, const char *name) {
     }
   }
   return NULL;
-}
-
-static void symbol_table_free_string(char *value) {
-  if (!value) {
-    return;
-  }
-  if (!string_is_interned(value)) {
-    free(value);
-  }
 }
 
 static const char *symbol_table_effective_link_name(const Symbol *symbol) {
@@ -289,8 +271,8 @@ static void scope_destroy(Scope *scope) {
   for (size_t i = 0; i < scope->symbol_count; i++) {
     Symbol *symbol = scope->symbols[i];
     if (symbol) {
-      symbol_table_free_string(symbol->name);
-      symbol_table_free_string(symbol->link_name);
+      mettle_free_string(symbol->name);
+      mettle_free_string(symbol->link_name);
       if (symbol->kind == SYMBOL_FUNCTION) {
         // Free function parameter names (strings we own)
         for (size_t j = 0; j < symbol->data.function.parameter_count; j++) {
@@ -504,7 +486,7 @@ void type_destroy(Type *type) {
     // Clean up struct-specific fields
     if (type->field_names) {
       for (size_t i = 0; i < type->field_count; i++) {
-        symbol_table_free_string(type->field_names[i]);
+        mettle_free_string(type->field_names[i]);
       }
       free(type->field_names);
     }
@@ -523,7 +505,7 @@ void type_destroy(Type *type) {
     }
     if (type->tagged_variant_names) {
       for (size_t i = 0; i < type->tagged_variant_count; i++) {
-        symbol_table_free_string(type->tagged_variant_names[i]);
+        mettle_free_string(type->tagged_variant_names[i]);
       }
       free(type->tagged_variant_names);
     }
@@ -534,10 +516,10 @@ void type_destroy(Type *type) {
       free(type->tagged_variant_payloads);
     }
     if (type->generic_template_name) {
-      symbol_table_free_string(type->generic_template_name);
+      mettle_free_string(type->generic_template_name);
     }
 
-    symbol_table_free_string(type->name);
+    mettle_free_string(type->name);
     free(type);
   }
 }
@@ -685,8 +667,8 @@ void symbol_destroy(Symbol *symbol) {
   if (!symbol)
     return;
 
-  symbol_table_free_string(symbol->name);
-  symbol_table_free_string(symbol->link_name);
+  mettle_free_string(symbol->name);
+  mettle_free_string(symbol->link_name);
 
   if (symbol->kind == SYMBOL_FUNCTION) {
     // Free function parameter names (strings we own)

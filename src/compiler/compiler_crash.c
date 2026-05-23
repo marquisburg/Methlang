@@ -1,5 +1,6 @@
 #include "compiler_crash.h"
 #include "compiler_context.h"
+#include "../runtime/crash_handler.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,10 +18,10 @@
 #include <unistd.h>
 #endif
 
+#define MAX_BACKTRACE_FRAMES 64
+
 static int g_compiler_crash_installed = 0;
 static int g_compiler_in_ice_handler = 0;
-static char **g_compiler_argv = NULL;
-static int g_compiler_argc = 0;
 
 static void mettle_compiler_write_backtrace(FILE *output) {
   if (!output) {
@@ -30,14 +31,14 @@ static void mettle_compiler_write_backtrace(FILE *output) {
   fprintf(output, "\nCompiler backtrace:\n");
 
 #if defined(_WIN32) || defined(_WIN64)
-  void *frames[64];
+  void *frames[MAX_BACKTRACE_FRAMES];
   USHORT frame_count = 0;
   HANDLE process = GetCurrentProcess();
   char symbol_buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
   SYMBOL_INFO *symbol = (SYMBOL_INFO *)symbol_buffer;
 
   SymInitialize(process, NULL, TRUE);
-  frame_count = CaptureStackBackTrace(0, 64, frames, NULL);
+  frame_count = CaptureStackBackTrace(0, MAX_BACKTRACE_FRAMES, frames, NULL);
   symbol->MaxNameLen = MAX_SYM_NAME;
   symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
 
@@ -52,8 +53,8 @@ static void mettle_compiler_write_backtrace(FILE *output) {
   }
   SymCleanup(process);
 #else
-  void *frames[64];
-  int frame_count = backtrace(frames, 64);
+  void *frames[MAX_BACKTRACE_FRAMES];
+  int frame_count = backtrace(frames, MAX_BACKTRACE_FRAMES);
   char **symbols = backtrace_symbols(frames, frame_count);
   if (symbols) {
     for (int i = 0; i < frame_count; i++) {
@@ -83,23 +84,6 @@ void mettle_compiler_ice(const char *reason) {
 }
 
 #if defined(_WIN32) || defined(_WIN64)
-static const char *mettle_compiler_exception_reason(DWORD code) {
-  switch (code) {
-  case EXCEPTION_ACCESS_VIOLATION:
-    return "access violation";
-  case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
-    return "array bounds exceeded";
-  case EXCEPTION_STACK_OVERFLOW:
-    return "stack overflow";
-  case EXCEPTION_INT_DIVIDE_BY_ZERO:
-    return "integer divide by zero";
-  case EXCEPTION_ILLEGAL_INSTRUCTION:
-    return "illegal instruction";
-  default:
-    return "fatal exception";
-  }
-}
-
 static LONG WINAPI mettle_compiler_unhandled_exception_filter(
     EXCEPTION_POINTERS *info) {
   char detail[64];
@@ -116,7 +100,7 @@ static LONG WINAPI mettle_compiler_unhandled_exception_filter(
   snprintf(detail, sizeof(detail), "0x%08lX",
            (unsigned long)info->ExceptionRecord->ExceptionCode);
   mettle_compiler_ice_report(
-      mettle_compiler_exception_reason(info->ExceptionRecord->ExceptionCode),
+      mettle_crash_exception_name(info->ExceptionRecord->ExceptionCode),
       detail);
   ExitProcess(3);
   return EXCEPTION_EXECUTE_HANDLER;
@@ -168,8 +152,8 @@ void mettle_compiler_crash_install(int argc, char **argv) {
     return;
   }
   g_compiler_crash_installed = 1;
-  g_compiler_argc = argc;
-  g_compiler_argv = argv;
+  (void)argc;
+  (void)argv;
 
 #if defined(_WIN32) || defined(_WIN64)
   SetUnhandledExceptionFilter(mettle_compiler_unhandled_exception_filter);
