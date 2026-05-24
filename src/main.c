@@ -25,7 +25,10 @@
 #include <io.h>
 #include <sys/stat.h>
 #if !defined(__MINGW32__)
-#include <windows.h>
+/* Avoid windows.h here: winnt.h defines TokenType, which clashes with lexer.h. */
+typedef long long MettleQpcTicks;
+__declspec(dllimport) int __stdcall QueryPerformanceFrequency(MettleQpcTicks *frequency);
+__declspec(dllimport) int __stdcall QueryPerformanceCounter(MettleQpcTicks *counter);
 #endif
 #else
 #include <limits.h>
@@ -65,17 +68,17 @@ typedef struct {
 
 static double compiler_profile_now_ms(void) {
 #if defined(_WIN32) && !defined(__MINGW32__)
-  static LARGE_INTEGER frequency = {0};
-  LARGE_INTEGER counter;
+  static MettleQpcTicks frequency = 0;
+  MettleQpcTicks counter = 0;
 
-  if (frequency.QuadPart == 0) {
+  if (frequency == 0) {
     QueryPerformanceFrequency(&frequency);
   }
-  if (frequency.QuadPart == 0) {
+  if (frequency == 0) {
     return 0.0;
   }
   QueryPerformanceCounter(&counter);
-  return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
+  return (double)counter * 1000.0 / (double)frequency;
 #else
   struct timeval tv;
 
