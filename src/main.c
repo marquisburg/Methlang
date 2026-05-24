@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "main.h"
+#include "common.h"
 #include "codegen/binary_emitter.h"
 #include "linker/pe_emitter.h"
 #include "string_intern.h"
@@ -16,11 +17,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32) || defined(__MINGW32__)
 #include <sys/time.h>
+#endif
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
 #include <sys/stat.h>
+#if !defined(__MINGW32__)
+#include <windows.h>
+#endif
 #else
 #include <limits.h>
 #include <sys/stat.h>
@@ -58,10 +64,24 @@ typedef struct {
 } CompilerProfile;
 
 static double compiler_profile_now_ms(void) {
+#if defined(_WIN32) && !defined(__MINGW32__)
+  static LARGE_INTEGER frequency = {0};
+  LARGE_INTEGER counter;
+
+  if (frequency.QuadPart == 0) {
+    QueryPerformanceFrequency(&frequency);
+  }
+  if (frequency.QuadPart == 0) {
+    return 0.0;
+  }
+  QueryPerformanceCounter(&counter);
+  return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
+#else
   struct timeval tv;
 
   gettimeofday(&tv, NULL);
   return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
+#endif
 }
 
 static void compiler_profile_init(CompilerProfile *profile, int enabled) {

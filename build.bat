@@ -11,6 +11,7 @@ if /I "%~1"=="gcc" set "CC=gcc"
 if not defined CC set "CC=gcc"
 
 set CFLAGS=-Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc
+if /I "%CC%"=="clang" set "CFLAGS=%CFLAGS% -D_CRT_NONSTDC_NO_DEPRECATE -D_CRT_SECURE_NO_WARNINGS"
 
 REM Check if selected compiler is available
 where %CC% >nul 2>&1
