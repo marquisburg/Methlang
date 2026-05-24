@@ -13,6 +13,10 @@
 #ifndef strncasecmp
 #define strncasecmp _strnicmp
 #endif
+#ifndef _SSIZE_T_DEFINED
+#define _SSIZE_T_DEFINED
+typedef ptrdiff_t ssize_t;
+#endif
 #endif
 
 #define METTLE_FNV1A_OFFSET_BASIS ((size_t)1469598103934665603ULL)
