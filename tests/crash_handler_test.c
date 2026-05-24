@@ -125,6 +125,10 @@ static int test_debug_trap_emits_message(void) {
   TEST_ASSERT(n > 0, "debug_trap produced no output");
   TEST_ASSERT(strstr(buf, "Fatal error: Null pointer dereference") != NULL,
               "debug_trap output missing the trap message");
+  TEST_ASSERT(strstr(buf, "Stack trace:") != NULL,
+              "debug_trap output missing stack trace header");
+  TEST_ASSERT(strstr(buf, "victim_function") != NULL,
+              "debug_trap output missing registered function name");
   TEST_ASSERT(WIFEXITED(status) && WEXITSTATUS(status) == 1,
               "debug_trap child should exit with code 1");
   return 1;

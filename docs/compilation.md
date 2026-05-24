@@ -196,6 +196,21 @@ names never produce a misleading suggestion.
 
 Compile with `-s` or `-d` to embed runtime crash traceback support in the generated program. This adds failure-path-only metadata for Mettle function names and source locations and installs a crash handler at program startup. The crash handler is **cross-platform**: Windows uses a Structured Exception Handler, and POSIX (Linux/macOS) uses a `sigaction` handler running on an alternate signal stack. Both produce the same symbolized stack-trace format from the same embedded debug-info tables.
 
+On the default **`--build` (direct COFF) path**, `-s` works without NASM: the compiler embeds `mettle_debug_functions` / `mettle_debug_locations` in the object, emits a `mettle_crash_startup` helper that calls `mettle_crash_install` and `mettle_crash_register_image`, and the internal linker's `mainCRTStartup` calls `mettle_crash_startup` before `main`. IR null/bounds traps call `mettle_crash_trap` when `-s` is active (otherwise they use `puts`/`exit` with no backtrace). Example:
+
+```powershell
+mettle --build -s tests\test_runtime_null_deref_check.mettle -o demo.exe
+.\demo.exe
+```
+
+```text
+Fatal error: Null pointer dereference
+Stack trace:
+  #0 main at tests\test_runtime_null_deref_check.mettle:9:10 (0x000000014000106A)
+```
+
+The assembly path (`--emit-asm` or default `-o` without `--build`) wires the same tables and startup hooks through NASM `_start` / `mainCRTStartup` text emission instead.
+
 - `-s` enables embedded runtime crash tracebacks without the rest of debug mode.
 - `-d` enables debug output and also implies embedded runtime crash tracebacks.
 - `--release` still disables generated null/bounds runtime checks, so only native crashes remain traceable there.
@@ -280,8 +295,7 @@ sections (`.debug_info`, `.debug_abbrev`, `.debug_line`, `.debug_str`,
 parameters kept in GP registers by the optimizer (for example `r12`–`r15`) are
 described with `DW_OP_regN` location expressions; stack-homed symbols use
 `DW_OP_fbreg`. The assembly path still writes a human-readable `.dwarf` sidecar
-when `-g` is used without `--emit-obj`. Runtime stack-trace tables (`-s`) are not
-yet supported on the object path.
+when `-g` is used without `--emit-obj`. Runtime stack-trace tables (`-s`) are embedded in COFF objects on the default `--build` / `--emit-obj` path (`.rdata` symbols `mettle_debug_functions`, `mettle_debug_locations`, plus `mettle_crash_startup`). They are separate from `-g` DWARF sidecar/embedded debug sections: `-s` alone enables tracebacks without emitting `.debug_*`.
 
 ## Testing
 

@@ -1,8 +1,0 @@
-﻿bin\mettle.exe : Note: transitional runtime objects detected at 'G:\Projects\Mettle\bin\runtime'. Use --build to 
-assemble and link them automatically when needed (most programs link nothing from this directory).
-At C:\Users\Marquis\AppData\Local\Temp\ps-script-91b957b4-6fc6-455b-92da-57bfd758f625.ps1:87 char:1
-+ bin\mettle.exe -O --dump-ir tests\test_opt_collatz_odd_fold.mettle -o ...
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (Note: transitio...his directory).:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 

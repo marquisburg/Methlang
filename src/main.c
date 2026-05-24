@@ -1157,11 +1157,13 @@ static int mettle_build_with_link(const char *object_filename,
   return 0;
 }
 
-static int write_internal_startup_object(const char *path, int profile_runtime) {
+static int write_internal_startup_object(const char *path, int profile_runtime,
+                                         int stack_trace_init) {
   BinaryEmitter *emitter = NULL;
   size_t text = 0u;
-  unsigned char code[64];
+  unsigned char code[128];
   size_t len = 0u;
+  size_t crash_startup_call_offset = 0u;
   size_t main_call_offset = 0u;
   size_t report_call_offset = 0u;
   size_t exit_call_offset = 0u;
@@ -1176,6 +1178,16 @@ static int write_internal_startup_object(const char *path, int profile_runtime) 
   code[len++] = 0x83u;
   code[len++] = 0xECu;
   code[len++] = 0x28u;
+
+  if (stack_trace_init) {
+    code[len++] = 0xE8u;
+    crash_startup_call_offset = len;
+    code[len++] = 0x00u;
+    code[len++] = 0x00u;
+    code[len++] = 0x00u;
+    code[len++] = 0x00u;
+  }
+
   code[len++] = 0xE8u;
   main_call_offset = len;
   code[len++] = 0x00u;
@@ -1223,6 +1235,14 @@ static int write_internal_startup_object(const char *path, int profile_runtime) 
                                      BINARY_RELOCATION_REL32, "main", 0) ||
       !binary_emitter_add_relocation(emitter, text, exit_call_offset,
                                      BINARY_RELOCATION_REL32, "ExitProcess", 0)) {
+    goto cleanup;
+  }
+
+  if (stack_trace_init &&
+      (!binary_emitter_declare_external(emitter, "mettle_crash_startup") ||
+       !binary_emitter_add_relocation(
+           emitter, text, crash_startup_call_offset, BINARY_RELOCATION_REL32,
+           "mettle_crash_startup", 0))) {
     goto cleanup;
   }
 
@@ -1775,7 +1795,10 @@ static int mettle_link_object_file(const char *object_filename,
       fprintf(stderr,
               "Warning: Failed to allocate internal-linker startup object path, "
               "falling back to external linkers\n");
-    } else if (write_internal_startup_object(startup_object, profile_runtime) != 0) {
+    } else if (write_internal_startup_object(
+                   startup_object, profile_runtime,
+                   options && options->generate_stack_trace_support ? 1 : 0) !=
+               0) {
       if (linker_mode == LINKER_MODE_INTERNAL || (!has_gcc && !has_link)) {
         fprintf(stderr,
                 "Error: Failed to generate internal-linker startup object\n");
@@ -2539,6 +2562,14 @@ int compile_file(const char *input_filename, const char *output_filename,
 
   code_generator_set_emit_asm_comments(code_generator,
                                        options->strip_asm_comments ? 0 : 1);
+  if (debug_info) {
+    code_generator_set_debug_sidecar_emission(
+        code_generator,
+        (options->debug_mode || options->generate_debug_symbols ||
+         options->generate_line_mapping)
+            ? 1
+            : 0);
+  }
   code_generator_set_stack_trace_support(
       code_generator, options->generate_stack_trace_support ? 1 : 0);
   code_generator_set_eliminate_unreachable_functions(
@@ -2553,12 +2584,11 @@ int compile_file(const char *input_filename, const char *output_filename,
 
   if (options->emit_object) {
     if ((options->debug_mode || options->generate_debug_symbols ||
-         options->generate_line_mapping ||
-         options->generate_stack_trace_support) &&
+         options->generate_line_mapping) &&
         !compiler_options_use_profile_runtime(options)) {
       fprintf(stderr,
               "Error: direct object emission does not yet support debug "
-              "metadata or runtime trace instrumentation\n");
+              "metadata sidecars (DWARF/stabs/debug-map)\n");
       result = 1;
       goto cleanup;
     }

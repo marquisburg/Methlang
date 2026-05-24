@@ -6,7 +6,8 @@
 
 int code_generator_emit_binary_function(CodeGenerator *generator,
                                                FunctionDeclaration *function_data,
-                                               IRFunction *ir_function) {
+                                               IRFunction *ir_function,
+                                               ASTNode *function_declaration) {
   BinaryEmitter *emitter = NULL;
   BinaryFunctionContext context = {0};
   size_t text_section = 0;
@@ -26,6 +27,40 @@ int code_generator_emit_binary_function(CodeGenerator *generator,
   if (!code_generator_binary_prepare_function_context(generator, function_data,
                                                       ir_function, &context)) {
     return 0;
+  }
+
+  free(generator->current_function_name);
+  if (function_data->name) {
+    generator->current_function_name = strdup(function_data->name);
+    if (!generator->current_function_name) {
+      code_generator_set_error(generator,
+                               "Out of memory while tracking function name");
+      binary_function_context_destroy(&context);
+      return 0;
+    }
+  } else {
+    generator->current_function_name = NULL;
+  }
+  generator->last_runtime_location_line = 0;
+  generator->last_runtime_location_column = 0;
+
+  if (generator->debug_info && generator->generate_stack_trace_support) {
+    context.runtime_end_label =
+        code_generator_generate_label(generator, "mettledbg_func_end");
+    if (!context.runtime_end_label) {
+      code_generator_set_error(generator,
+                               "Out of memory while tracking function debug "
+                               "range in '%s'",
+                               function_data->name);
+      binary_function_context_destroy(&context);
+      return 0;
+    }
+    code_generator_add_runtime_function_mapping(
+        generator, function_data->name, function_data->name,
+        context.runtime_end_label,
+        function_declaration ? function_declaration->location.line : 0,
+        function_declaration ? function_declaration->location.column : 0,
+        generator->debug_info->source_filename);
   }
 
   if (!code_generator_binary_emit_prologue(generator, &context, function_data)) {
@@ -95,6 +130,20 @@ int code_generator_emit_binary_function(CodeGenerator *generator,
       continue;
     }
 
+    {
+      const IRInstruction *instruction = &ir_function->instructions[i];
+      if (generator->debug_info && generator->generate_stack_trace_support &&
+          instruction->location.line > 0) {
+        if (!code_generator_binary_emit_runtime_location_marker(
+                generator, &context, instruction->location.line,
+                instruction->location.column,
+                generator->debug_info->source_filename)) {
+          binary_function_context_destroy(&context);
+          return 0;
+        }
+      }
+    }
+
     if (!code_generator_binary_emit_instruction(
             generator, &context, &ir_function->instructions[i])) {
       binary_function_context_destroy(&context);
@@ -104,8 +153,17 @@ int code_generator_emit_binary_function(CodeGenerator *generator,
   }
 
   return_offset = context.code.size;
-  /* Win64 returns floating values in XMM0. The function body leaves the raw
-   * return bits in RAX; transfer at the return type's precision. */
+  if (context.runtime_end_label &&
+      !binary_label_table_define(&context.labels, context.runtime_end_label,
+                                 return_offset)) {
+    code_generator_set_error(
+        generator,
+        "Failed to define runtime function end label in function '%s'",
+        context.function_name);
+    binary_function_context_destroy(&context);
+    return 0;
+  }
+
   for (size_t i = context.saved_register_count; i > 0; i--) {
     size_t slot = i - 1;
     if (!binary_emit_mov_reg_mem(&context.code, context.saved_registers[slot],
@@ -202,6 +260,13 @@ int code_generator_emit_binary_function(CodeGenerator *generator,
     }
   }
 
+  if (!code_generator_binary_export_debug_symbols(generator, &context,
+                                                  text_section, function_offset,
+                                                  return_offset)) {
+    binary_function_context_destroy(&context);
+    return 0;
+  }
+
   binary_function_context_destroy(&context);
   return 1;
 }
@@ -221,10 +286,11 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
                              "IR program not attached to code generator");
     return 0;
   }
-  if (generator->debug_info || generator->generate_debug_info) {
+  if (generator->generate_debug_info) {
     code_generator_set_error(
         generator,
-        "Direct object backend does not yet support debug info emission");
+        "Direct object backend does not yet support debug info sidecar "
+        "emission (DWARF/stabs/debug-map)");
     return 0;
   }
 
@@ -276,7 +342,7 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
       }
 
       if (!code_generator_emit_binary_function(generator, function_data,
-                                               ir_function)) {
+                                               ir_function, declaration)) {
         return 0;
       }
     } break;
@@ -314,6 +380,16 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
 
   if (generator->profile_runtime &&
       !code_generator_binary_emit_profile_tables(generator)) {
+    return 0;
+  }
+
+  if (generator->generate_stack_trace_support &&
+      !code_generator_binary_emit_runtime_debug_tables(generator)) {
+    return 0;
+  }
+
+  if (generator->generate_stack_trace_support &&
+      !code_generator_binary_emit_crash_startup(generator)) {
     return 0;
   }
 

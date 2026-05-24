@@ -233,8 +233,8 @@ $cases = @(
       "call mettle_crash_install",
       "extern mettle_crash_register_image",
       "extern mettle_crash_trap",
-      "meth_debug_functions:",
-      "meth_debug_locations:"
+      "mettle_debug_functions:",
+      "mettle_debug_locations:"
     )
   },
   @{ Name = "pointer_param_address"; Path = "tests/test_pointer_param_address.mettle"; ShouldSucceed = $true },
@@ -1151,7 +1151,7 @@ catch {
 $total++
 try {
   $compilerFullPath = (Resolve-Path $CompilerPath).Path
-  $depsProjectDir = Join-Path $tmpDir "meth-deps-project"
+  $depsProjectDir = Join-Path $tmpDir "mettle-deps-project"
   if (Test-Path $depsProjectDir) {
     Remove-Item -Path $depsProjectDir -Recurse -Force
   }
@@ -1187,11 +1187,11 @@ function main() -> int32 {
     throw "mettle.deps package compile did not produce an assembly output"
   }
 
-  Write-CaseResult -Name "meth_deps_package_resolution" -Passed $true
+  Write-CaseResult -Name "mettle_deps_package_resolution" -Passed $true
 }
 catch {
   $failed++
-  Write-CaseResult -Name "meth_deps_package_resolution" -Passed $false -Reason $_.Exception.Message
+  Write-CaseResult -Name "mettle_deps_package_resolution" -Passed $false -Reason $_.Exception.Message
 }
 
 # Function pointer test: compile, assemble, link, and run
@@ -2857,6 +2857,73 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "direct_object_runtime_null_deref" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend stack-trace metadata: -s emits embedded debug tables and crash startup.
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_stack_trace_support.obj"
+
+  $objOut = & $CompilerPath --emit-obj -s tests\test_runtime_null_deref_check.mettle -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object stack-trace compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object stack-trace compile did not produce an object file"
+  }
+
+  $symbols = & objdump -t $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object stack-trace symbol dump failed"
+  }
+  foreach ($sym in @("mettle_debug_functions", "mettle_debug_locations", "mettle_crash_startup")) {
+    if ($symbols -notmatch [regex]::Escape($sym)) {
+      throw "Direct object stack-trace object is missing symbol '$sym'"
+    }
+  }
+  if ($symbols -notmatch "mettle_crash_trap") {
+    throw "Direct object stack-trace object is missing undefined 'mettle_crash_trap' reference"
+  }
+
+  Write-CaseResult -Name "stack_trace_support_coff" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "stack_trace_support_coff" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend runtime null trace: --build -s produces symbolized backtraces.
+$total++
+try {
+  $exePath = Join-Path $tmpDir "test_runtime_null_trace_coff.exe"
+
+  $buildOut = & $CompilerPath --build -s tests\test_runtime_null_deref_check.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object runtime null trace build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object runtime null trace build did not produce an executable"
+  }
+
+  $runtimeOut = & $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object runtime null trace exited with $LASTEXITCODE (expected 1)"
+  }
+  if ($runtimeOut -notmatch "Fatal error: Null pointer dereference") {
+    throw "Direct object runtime null trace output missing null-deref message"
+  }
+  if ($runtimeOut -notmatch "Stack trace:") {
+    throw "Direct object runtime null trace output missing stack trace header"
+  }
+  if ($runtimeOut -notmatch "main") {
+    throw "Direct object runtime null trace output missing Mettle frame names"
+  }
+
+  Write-CaseResult -Name "runtime_null_trace_coff" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "runtime_null_trace_coff" -Passed $false -Reason $_.Exception.Message
 }
 
 # main(argc, argv) test: emitted startup calls CRT __getmainargs directly.

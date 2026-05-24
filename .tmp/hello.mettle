@@ -1,4 +1,0 @@
-﻿function main() -> int32 {
-  println(cstr("hello"));
-  return 0;
-}

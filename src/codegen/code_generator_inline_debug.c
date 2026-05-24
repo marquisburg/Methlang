@@ -148,7 +148,7 @@ void code_generator_emit_runtime_location_marker(CodeGenerator *generator,
     return;
   }
 
-  char *label = code_generator_generate_label(generator, "methdbg_loc");
+  char *label = code_generator_generate_label(generator, "mettledbg_loc");
   if (!label) {
     return;
   }
@@ -226,9 +226,9 @@ void code_generator_emit_runtime_debug_tables(CodeGenerator *generator) {
   for (size_t i = 0; i < debug_info->runtime_function_count; i++) {
     RuntimeFunctionMapping *mapping = &debug_info->runtime_functions[i];
     function_name_labels[i] =
-        code_generator_generate_label(generator, "methdbg_func_name");
+        code_generator_generate_label(generator, "mettledbg_func_name");
     function_file_labels[i] =
-        code_generator_generate_label(generator, "methdbg_func_file");
+        code_generator_generate_label(generator, "mettledbg_func_file");
     if (!function_name_labels[i] || !function_file_labels[i]) {
       goto cleanup;
     }
@@ -242,9 +242,9 @@ void code_generator_emit_runtime_debug_tables(CodeGenerator *generator) {
   for (size_t i = 0; i < debug_info->runtime_location_count; i++) {
     RuntimeLocationMapping *mapping = &debug_info->runtime_locations[i];
     location_name_labels[i] =
-        code_generator_generate_label(generator, "methdbg_loc_name");
+        code_generator_generate_label(generator, "mettledbg_loc_name");
     location_file_labels[i] =
-        code_generator_generate_label(generator, "methdbg_loc_file");
+        code_generator_generate_label(generator, "mettledbg_loc_file");
     if (!location_name_labels[i] || !location_file_labels[i]) {
       goto cleanup;
     }
@@ -255,7 +255,7 @@ void code_generator_emit_runtime_debug_tables(CodeGenerator *generator) {
                                      mapping->filename);
   }
 
-  code_generator_emit_to_global_buffer(generator, "meth_debug_functions:\n");
+  code_generator_emit_to_global_buffer(generator, "mettle_debug_functions:\n");
   for (size_t i = 0; i < debug_info->runtime_function_count; i++) {
     RuntimeFunctionMapping *mapping = &debug_info->runtime_functions[i];
     code_generator_emit_to_global_buffer(
@@ -265,7 +265,7 @@ void code_generator_emit_runtime_debug_tables(CodeGenerator *generator) {
         function_file_labels[i], mapping->line, mapping->column);
   }
 
-  code_generator_emit_to_global_buffer(generator, "meth_debug_locations:\n");
+  code_generator_emit_to_global_buffer(generator, "mettle_debug_locations:\n");
   for (size_t i = 0; i < debug_info->runtime_location_count; i++) {
     RuntimeLocationMapping *mapping = &debug_info->runtime_locations[i];
     code_generator_emit_to_global_buffer(

@@ -1711,7 +1711,7 @@ int code_generator_binary_emit_runtime_trap_call(
     return 1;
   }
 
-  trap_pc_label = code_generator_generate_label(generator, "methdbg_trap_pc");
+  trap_pc_label = code_generator_generate_label(generator, "mettledbg_trap_pc");
   if (!trap_pc_label) {
     code_generator_set_error(generator,
                              "Out of memory while creating runtime trap label");

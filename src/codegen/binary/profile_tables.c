@@ -30,7 +30,7 @@ static int code_generator_binary_emit_profile_cstring_table(
     unsigned char terminator = 0;
     int written = 0;
 
-    written = snprintf(NULL, 0, "methprof_%s_%zu", table_symbol, i);
+    written = snprintf(NULL, 0, "mettleprof_%s_%zu", table_symbol, i);
     if (written <= 0) {
       return 0;
     }
@@ -39,7 +39,7 @@ static int code_generator_binary_emit_profile_cstring_table(
     if (!out_name_symbols[i]) {
       return 0;
     }
-    snprintf(out_name_symbols[i], (size_t)written + 1u, "methprof_%s_%zu",
+    snprintf(out_name_symbols[i], (size_t)written + 1u, "mettleprof_%s_%zu",
              table_symbol, i);
 
     if (!binary_emitter_append_bytes(emitter, rdata_section, value, length,

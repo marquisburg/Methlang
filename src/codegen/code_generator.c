@@ -91,7 +91,7 @@ CodeGenerator *code_generator_create_with_debug(SymbolTable *symbol_table,
     return NULL;
 
   generator->debug_info = debug_info;
-  generator->generate_debug_info = 1;
+  generator->generate_debug_info = 0;
 
   return generator;
 }
@@ -193,6 +193,14 @@ void code_generator_set_stack_trace_support(CodeGenerator *generator,
     return;
   }
   generator->generate_stack_trace_support = enable ? 1 : 0;
+}
+
+void code_generator_set_debug_sidecar_emission(CodeGenerator *generator,
+                                               int enable) {
+  if (!generator) {
+    return;
+  }
+  generator->generate_debug_info = enable ? 1 : 0;
 }
 
 void code_generator_set_eliminate_unreachable_functions(

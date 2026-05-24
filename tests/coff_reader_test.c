@@ -22,7 +22,7 @@ static const CoffSection *find_section_with_relocations(const CoffObject *object
   return NULL;
 }
 
-static int expect_basic_meth_object(const char *path) {
+static int expect_basic_mettle_object(const char *path) {
   CoffObject *object = NULL;
   char *error_message = NULL;
   const CoffSection *text = NULL;
@@ -209,7 +209,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (expect_basic_meth_object(argv[1]) != 0 ||
+  if (expect_basic_mettle_object(argv[1]) != 0 ||
       expect_rel32_call(argv[2], "callee") != 0 ||
       expect_long_symbol(argv[3],
                          "reader_target_symbol_long_name") != 0 ||

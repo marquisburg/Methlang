@@ -1,5 +1,0 @@
-vk: GPU NVIDIA GeForce RTX 5060 Ti
-vk: core bring-up OK (instance/device/queue)
-vk: surface + swapchain + image views OK
-vk: render pass + framebuffers + commands + sync OK
-vk: graphics pipeline + vertex buffer OK

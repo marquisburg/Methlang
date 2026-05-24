@@ -1,8 +1,0 @@
-import "std/mem";
-function main() -> int32 {
-  var b: cstring = malloc(16);
-  var i: int64 = 1;
-  var v: int64 = (int64)(uint8)b[i];
-  b[i] = (uint8)1;
-  return (int32)v;
-}

@@ -89,10 +89,6 @@ function Get-BenchmarkMettleExe {
         return Normalize-Path ([string]$Bench.mettle_exe)
     }
 
-    if ($null -ne $Bench.meth_exe -and -not [string]::IsNullOrWhiteSpace([string]$Bench.meth_exe)) {
-        return Normalize-Path ([string]$Bench.meth_exe)
-    }
-
     throw "Benchmark '$($Bench.name)' does not define mettle_exe."
 }
 
@@ -101,10 +97,6 @@ function Get-BenchmarkMettleSource {
 
     if ($null -ne $Bench.mettle_source -and -not [string]::IsNullOrWhiteSpace([string]$Bench.mettle_source)) {
         return Normalize-Path ([string]$Bench.mettle_source)
-    }
-
-    if ($null -ne $Bench.meth_source -and -not [string]::IsNullOrWhiteSpace([string]$Bench.meth_source)) {
-        return Normalize-Path ([string]$Bench.meth_source)
     }
 
     return [System.IO.Path]::ChangeExtension((Get-BenchmarkMettleExe -Bench $Bench), ".mettle")

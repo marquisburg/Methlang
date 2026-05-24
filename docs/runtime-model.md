@@ -14,8 +14,9 @@ This page covers what gets emitted, the two optional helper objects in `src/runt
 | `new T`, array literals, `string + string` | `extern calloc`; `call calloc` with `(1, size)` | libc `calloc` |
 | `std/win32` / `std/net` / `std/thread` | `extern` to DLL symbols (`CreateFileA`, etc.) | Win32 DLLs |
 | `std/thread` interlocked atomics | `extern mettle_atomic_*`; `call mettle_atomic_*` | `atomics.o` |
-| Null/bounds traps (normal build), `-d` / `-s` / `-g` | `extern mettle_crash_trap`, `mettle_crash_install` at entry | `crash_handler.o` |
-| `--release` | Traps off; entry stub skips `mettle_crash_install` | nothing extra |
+| Null/bounds traps (normal build), `-d` / `-s` | `extern mettle_crash_trap`; startup via `mettle_crash_startup` (COFF `--build`) or `mettle_crash_install` at `_start` (NASM path) | `crash_handler.o` |
+| `-g` / `--debug-symbols` alone | No crash hooks unless `-s`/`-d` or IR traps reference `mettle_crash_*` | usually nothing extra |
+| `--release` | Traps off; startup skips crash-handler init | nothing extra |
 
 Older Mettle shipped a large runtime (GC, async executor, coroutine scheduler, channels, tracked heap). That code is removed. What remains are two small helper objects, linked only when referenced.
 
@@ -29,13 +30,12 @@ Linked when the object references `mettle_crash_*`. That happens if you pass:
 
 - `-d` / `--debug`
 - `-s` / `--stack-trace`
-- `-g` / `--debug-symbols`
-- or you build without `--release` and IR null/bounds checks are enabled (they call `mettle_crash_trap` on failure)
+- or you build without `--release` and IR null/bounds checks are enabled **and** you also pass `-s` or `-d` so trap sites call `mettle_crash_trap` (without `-s`, dev builds still trap but use `puts`/`exit` with no symbolized backtrace)
 
 Provides:
 
 - Windows: vectored SEH handler. POSIX: `sigaction` on an alternate stack. Both catch access violations and similar faults.
-- Frame-pointer walk plus compiler-embedded debug tables (`MettleCrashFunctionInfo`, `MettleCrashLocationInfo`) for symbolized backtraces.
+- Frame-pointer walk plus compiler-embedded debug tables (`MettleCrashFunctionInfo`, `MettleCrashLocationInfo`) for symbolized backtraces. On `--build`, these live in COFF `.rdata` as `mettle_debug_functions` / `mettle_debug_locations`.
 - `mettle_crash_trap(msg, pc, fp)`: trap sites call this with the message and saved frame pointer; prints and exits with status 1.
 
 Example:

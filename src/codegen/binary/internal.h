@@ -110,6 +110,17 @@ typedef struct {
 } BinarySymbolAliasTable;
 
 typedef struct {
+  char *name;
+  size_t offset;
+} BinaryDebugLabelExport;
+
+typedef struct {
+  BinaryDebugLabelExport *items;
+  size_t count;
+  size_t capacity;
+} BinaryDebugLabelExportTable;
+
+typedef struct {
   BinaryCodeBuffer code;
   BinaryNamedSlotTable parameter_slots;
   BinaryNamedSlotTable local_slots;
@@ -152,6 +163,8 @@ typedef struct {
   size_t indirect_temp_capacity;
   FunctionDeclaration *function_data;
   const char *function_name;
+  char *runtime_end_label;
+  BinaryDebugLabelExportTable debug_export_labels;
 } BinaryFunctionContext;
 
 typedef struct {
@@ -393,6 +406,14 @@ int code_generator_binary_emit_profile_op(CodeGenerator *generator,
 int code_generator_binary_emit_profile_exit(CodeGenerator *generator,
                                             BinaryFunctionContext *context);
 int code_generator_binary_emit_profile_tables(CodeGenerator *generator);
+int code_generator_binary_emit_runtime_debug_tables(CodeGenerator *generator);
+int code_generator_binary_emit_crash_startup(CodeGenerator *generator);
+int code_generator_binary_emit_runtime_location_marker(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    size_t source_line, size_t source_column, const char *filename);
+int code_generator_binary_export_debug_symbols(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    size_t text_section, size_t function_offset, size_t end_offset);
 int code_generator_binary_emit_rax_binary_rhs( CodeGenerator *generator, BinaryFunctionContext *context, const char *op, const IROperand *rhs);
 int code_generator_binary_emit_rep_movsb( CodeGenerator *generator, BinaryFunctionContext *context, BinaryGpRegister src_addr_reg, BinaryGpRegister dst_addr_reg, size_t size);
 int code_generator_binary_emit_rep_movsq( CodeGenerator *generator, BinaryFunctionContext *context, BinaryGpRegister src_addr_reg, BinaryGpRegister dst_addr_reg, size_t qword_count);
@@ -493,7 +514,10 @@ int code_generator_binary_validate_indirect_call( CodeGenerator *generator, Bina
 int code_generator_binary_validate_signature(CodeGenerator *generator, FunctionDeclaration *function_data, IRFunction *ir_function);
 int code_generator_binary_x86_to_gp_register(x86Register source, BinaryGpRegister *out);
 int code_generator_declare_binary_externs(CodeGenerator *generator, Program *program_data);
-int code_generator_emit_binary_function(CodeGenerator *generator, FunctionDeclaration *function_data, IRFunction *ir_function);
+int code_generator_emit_binary_function(CodeGenerator *generator,
+                                        FunctionDeclaration *function_data,
+                                        IRFunction *ir_function,
+                                        ASTNode *function_declaration);
 int code_generator_emit_binary_global_variable(CodeGenerator *generator, VarDeclaration *var_data);
 int code_generator_generate_program_binary_object(CodeGenerator *generator, ASTNode *program);
 int simd_emit_xmm_mem_disp(BinaryCodeBuffer *b, unsigned char opcode, int xmm, int gpr, int displacement);

@@ -3109,7 +3109,7 @@ static int code_generator_emit_ir_runtime_trap_call(
     return 0;
   }
 
-  char *trap_pc_label = code_generator_generate_label(generator, "methdbg_trap_pc");
+  char *trap_pc_label = code_generator_generate_label(generator, "mettledbg_trap_pc");
   if (!trap_pc_label) {
     code_generator_set_error(generator,
                              "Out of memory while creating runtime trap label");
@@ -4488,7 +4488,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   }
   char *runtime_end_label = NULL;
   if (generator->debug_info) {
-    runtime_end_label = code_generator_generate_label(generator, "methdbg_func_end");
+    runtime_end_label = code_generator_generate_label(generator, "mettledbg_func_end");
     if (!runtime_end_label) {
       code_generator_set_error(generator,
                                "Out of memory while tracking function debug range");

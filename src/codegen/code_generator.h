@@ -129,6 +129,8 @@ void code_generator_generate_expression(CodeGenerator *generator,
 void code_generator_set_emit_asm_comments(CodeGenerator *generator, int enable);
 void code_generator_set_stack_trace_support(CodeGenerator *generator,
                                             int enable);
+void code_generator_set_debug_sidecar_emission(CodeGenerator *generator,
+                                               int enable);
 void code_generator_set_eliminate_unreachable_functions(CodeGenerator *generator,
                                                         int enable);
 void code_generator_set_profile_runtime(CodeGenerator *generator, int enable);

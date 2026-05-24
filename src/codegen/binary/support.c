@@ -409,5 +409,10 @@ void binary_function_context_destroy(BinaryFunctionContext *context) {
   free(context->indirect_return_slot_offsets);
   free(context->indirect_temp_names);
   free(context->indirect_temp_sizes);
+  free(context->runtime_end_label);
+  for (size_t i = 0; i < context->debug_export_labels.count; i++) {
+    free(context->debug_export_labels.items[i].name);
+  }
+  free(context->debug_export_labels.items);
 }
 

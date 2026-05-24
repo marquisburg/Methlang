@@ -660,11 +660,11 @@ static int code_generator_emit_entry_point(CodeGenerator *generator,
       generator->debug_info->runtime_function_count > 0) {
     code_generator_emit(generator,
                         "    extern mettle_crash_register_image\n");
-    code_generator_emit(generator, "    lea %s, [rel meth_debug_functions]\n",
+    code_generator_emit(generator, "    lea %s, [rel mettle_debug_functions]\n",
                         first_param_reg);
     code_generator_emit(generator, "    mov %s, %zu\n", second_param_reg,
                         generator->debug_info->runtime_function_count);
-    code_generator_emit(generator, "    lea %s, [rel meth_debug_locations]\n",
+    code_generator_emit(generator, "    lea %s, [rel mettle_debug_locations]\n",
                         third_param_reg);
     code_generator_emit(generator, "    mov %s, %zu\n", fourth_param_reg,
                         generator->debug_info->runtime_location_count);
@@ -1013,7 +1013,7 @@ void code_generator_generate_function(CodeGenerator *generator,
   }
   char *runtime_end_label = NULL;
   if (generator->debug_info) {
-    runtime_end_label = code_generator_generate_label(generator, "methdbg_func_end");
+    runtime_end_label = code_generator_generate_label(generator, "mettledbg_func_end");
     if (!runtime_end_label) {
       return;
     }
