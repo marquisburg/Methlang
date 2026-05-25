@@ -261,6 +261,16 @@ void code_generator_generate_variable_initialization(CodeGenerator *generator,
 
   // Generate the initializer expression
   code_generator_generate_expression(generator, initializer);
+  if (symbol->type && symbol->type->kind == TYPE_POINTER &&
+      symbol->type->name && strcmp(symbol->type->name, "cstring") == 0) {
+    Type *initializer_type =
+        code_generator_infer_expression_type(generator, initializer);
+    if (initializer_type && initializer_type->kind == TYPE_STRING) {
+      code_generator_emit(
+          generator,
+          "    mov rax, qword [rax]  ; Implicit string -> cstring init\n");
+    }
+  }
 
   // Store the result (in rax) to the variable's memory location
   if (symbol->data.variable.is_in_register) {

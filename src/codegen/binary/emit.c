@@ -1217,6 +1217,12 @@ int code_generator_binary_emit_operand_load(
                                                      &aliased,
                                                      target_register);
     }
+    if (offset > 0 &&
+        binary_named_slot_table_get_offset(&context->string_symbols,
+                                           operand->name) >= 0) {
+      return binary_emit_lea_reg_mem(&context->code, target_register,
+                                     BINARY_GP_RBP, -offset);
+    }
     if (symbol && symbol->type && symbol->type->kind == TYPE_STRING) {
       return code_generator_binary_emit_string_symbol_load(
           generator, context, operand->name, symbol, target_register);
@@ -1473,6 +1479,12 @@ int code_generator_binary_emit_destination_store(
     int offset =
         code_generator_binary_get_symbol_offset(context, destination->name);
     BinaryGpRegister assigned_register = BINARY_GP_RAX;
+    if (offset > 0 &&
+        binary_named_slot_table_get_offset(&context->string_symbols,
+                                           destination->name) >= 0) {
+      return code_generator_binary_emit_local_string_store(
+          generator, context, offset, source_register);
+    }
     if (symbol && symbol->type && symbol->type->kind == TYPE_STRING) {
       if (offset <= 0) {
         if (symbol->scope && symbol->scope->type == SCOPE_GLOBAL) {
@@ -3994,9 +4006,26 @@ int code_generator_binary_emit_instruction(
       BinaryGpRegister assign_dest_reg = BINARY_GP_RAX;
       if (code_generator_binary_symbol_assigned_register(
               generator, context, instruction->dest.name, &assign_dest_reg)) {
-        if (!code_generator_binary_emit_operand_load(generator, context,
-                                                     &instruction->lhs,
-                                                     assign_dest_reg)) {
+        Type *assign_dest_type =
+            code_generator_binary_get_operand_type(generator,
+                                                   &instruction->dest);
+        int dest_is_cstring =
+            code_generator_binary_type_is_cstring(assign_dest_type) ||
+            binary_named_slot_table_get_offset(&context->cstring_symbols,
+                                               instruction->dest.name) >= 0;
+        Type *effective_dest_type =
+            assign_dest_type ? assign_dest_type
+                             : (generator->type_checker
+                                    ? generator->type_checker->builtin_cstring
+                                    : NULL);
+        int assign_ok = dest_is_cstring
+                            ? code_generator_binary_emit_call_argument_load(
+                                  generator, context, &instruction->lhs,
+                                  effective_dest_type, assign_dest_reg)
+                            : code_generator_binary_emit_operand_load(
+                                  generator, context, &instruction->lhs,
+                                  assign_dest_reg);
+        if (!assign_ok) {
           if (!generator->has_error) {
             code_generator_set_error(generator,
                                      "Out of memory while emitting assign");
@@ -4007,9 +4036,31 @@ int code_generator_binary_emit_instruction(
       }
     }
 
-    if (!code_generator_binary_emit_operand_load(generator, context,
-                                                 &instruction->lhs,
-                                                 BINARY_GP_RAX)) {
+    Type *assign_dest_type =
+        code_generator_binary_get_operand_type(generator, &instruction->dest);
+    int dest_is_cstring =
+        code_generator_binary_type_is_cstring(assign_dest_type) ||
+        (instruction->dest.kind == IR_OPERAND_SYMBOL && instruction->dest.name &&
+         binary_named_slot_table_get_offset(&context->cstring_symbols,
+                                            instruction->dest.name) >= 0);
+    if (dest_is_cstring) {
+      Type *effective_dest_type =
+          assign_dest_type ? assign_dest_type
+                           : (generator->type_checker
+                                  ? generator->type_checker->builtin_cstring
+                                  : NULL);
+      if (!code_generator_binary_emit_call_argument_load(
+              generator, context, &instruction->lhs, effective_dest_type,
+              BINARY_GP_RAX)) {
+        if (!generator->has_error) {
+          code_generator_set_error(generator,
+                                   "Out of memory while emitting cstring assign");
+        }
+        return 0;
+      }
+    } else if (!code_generator_binary_emit_operand_load(generator, context,
+                                                        &instruction->lhs,
+                                                        BINARY_GP_RAX)) {
       if (!generator->has_error) {
         code_generator_set_error(generator,
                                  "Out of memory while emitting assign");

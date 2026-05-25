@@ -192,6 +192,11 @@ static int type_checker_types_equal(const Type *lhs, const Type *rhs) {
   }
 }
 
+static int type_checker_is_cstring_type(const Type *type) {
+  return type && type->kind == TYPE_POINTER && type->name &&
+         strcmp(type->name, "cstring") == 0;
+}
+
 static int type_checker_is_lvalue_expression(ASTNode *expression) {
   if (!expression) {
     return 0;
@@ -1751,14 +1756,8 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       int is_null_pointer_arg =
           (param_type && param_type->kind == TYPE_POINTER &&
            type_checker_is_null_pointer_constant(call->arguments[i]));
-      // Allow implicit string -> cstring coercion on extern calls.
-      // Strings are backed by a null-terminated chars pointer suitable for C.
-      int is_string_to_cstring =
-          (func_symbol->is_extern && param_type && param_type->name &&
-           strcmp(param_type->name, "cstring") == 0 && arg_type &&
-           arg_type->kind == TYPE_STRING);
-      if (!is_null_pointer_arg && !is_string_to_cstring &&
-          !type_checker_is_assignable(checker, param_type, arg_type)) {
+      if (!is_null_pointer_arg &&
+           !type_checker_is_assignable(checker, param_type, arg_type)) {
         type_checker_report_type_mismatch(checker, call->arguments[i]->location,
                                           param_type->name, arg_type->name);
         return NULL;
@@ -2646,6 +2645,12 @@ int type_checker_is_assignable(TypeChecker *checker, Type *dest_type,
     return 0;
 
   if (type_checker_types_equal(dest_type, src_type)) {
+    return 1;
+  }
+
+  /* A Mettle string can flow to a cstring by exposing its chars pointer. */
+  if (type_checker_is_cstring_type(dest_type) &&
+      src_type->kind == TYPE_STRING) {
     return 1;
   }
 
@@ -4015,10 +4020,11 @@ int type_checker_process_declaration(TypeChecker *checker,
           return 0;
         }
 
-        if (object_type->kind != TYPE_STRUCT) {
+        if (object_type->kind != TYPE_STRUCT &&
+            object_type->kind != TYPE_STRING) {
           char error_msg[512];
           snprintf(error_msg, sizeof(error_msg),
-                   "Cannot assign field '%s' on non-struct type '%s'",
+                   "Cannot assign field '%s' on non-struct/string type '%s'",
                    member->member, object_type->name);
           type_checker_set_error_at_location(
               checker, assignment->target->location, error_msg);
@@ -4029,7 +4035,7 @@ int type_checker_process_declaration(TypeChecker *checker,
         if (!field_type) {
           char error_msg[512];
           snprintf(error_msg, sizeof(error_msg),
-                   "Field '%s' not found in struct '%s'", member->member,
+                   "Field '%s' not found in type '%s'", member->member,
                    object_type->name);
           type_checker_set_error_at_location(
               checker, assignment->target->location, error_msg);

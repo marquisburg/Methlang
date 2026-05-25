@@ -247,10 +247,9 @@ void code_generator_generate_parameter(CodeGenerator *generator,
     return;
   }
 
-  // Extern calls may implicitly pass string.chars to cstring parameters.
+  // Calls may implicitly pass string.chars to cstring parameters.
   int is_string_to_cstring = 0;
   if (func_symbol && func_symbol->kind == SYMBOL_FUNCTION &&
-      func_symbol->is_extern &&
       param_index < (int)func_symbol->data.function.parameter_count) {
     Type *expected_type =
         func_symbol->data.function.parameter_types[param_index];

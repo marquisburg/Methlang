@@ -125,6 +125,8 @@ typedef struct {
   BinaryNamedSlotTable parameter_slots;
   BinaryNamedSlotTable local_slots;
   BinaryNamedSlotTable temp_slots;
+  BinaryNamedSlotTable string_symbols;
+  BinaryNamedSlotTable cstring_symbols;
   BinaryNamedSlotTable float64_symbols;
   BinaryNamedSlotTable address_taken_symbols;
   BinaryNamedSlotTable register_symbols;

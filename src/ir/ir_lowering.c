@@ -84,6 +84,10 @@ static int ir_emit_return_with_defers(IRLoweringContext *context,
                                       IRFunction *function,
                                       IRDeferScope *defers, IROperand *value,
                                       SourceLocation location);
+static int ir_coerce_string_operand_to_cstring(IRLoweringContext *context,
+                                               IRFunction *function,
+                                               IROperand *value,
+                                               SourceLocation location);
 static int ir_named_type_float_bits(IRLoweringContext *context,
                                     const char *type_name);
 static void ir_assign_apply_float_bits(IRInstruction *instruction,
@@ -153,6 +157,53 @@ static int ir_emit_label_instruction(IRLoweringContext *context,
   instruction.location = location;
   instruction.text = (char *)label;
   return ir_emit(context, function, &instruction);
+}
+
+static int ir_type_is_cstring(Type *type) {
+  return type && type->kind == TYPE_POINTER && type->name &&
+         strcmp(type->name, "cstring") == 0;
+}
+
+static int ir_expression_is_string(IRLoweringContext *context,
+                                   ASTNode *expression) {
+  Type *type = ir_infer_expression_type(context, expression);
+  return type && type->kind == TYPE_STRING;
+}
+
+static int ir_should_coerce_string_to_cstring(IRLoweringContext *context,
+                                              Type *target_type,
+                                              ASTNode *value_expression) {
+  return ir_type_is_cstring(target_type) &&
+         ir_expression_is_string(context, value_expression);
+}
+
+static int ir_coerce_string_operand_to_cstring(IRLoweringContext *context,
+                                               IRFunction *function,
+                                               IROperand *value,
+                                               SourceLocation location) {
+  if (!context || !function || !value || value->kind == IR_OPERAND_NONE) {
+    return 0;
+  }
+
+  IROperand destination = ir_operand_none();
+  if (!ir_make_temp_operand(context, &destination)) {
+    return 0;
+  }
+
+  IRInstruction load_chars = {0};
+  load_chars.op = IR_OP_LOAD;
+  load_chars.location = location;
+  load_chars.dest = destination;
+  load_chars.lhs = *value;
+  load_chars.rhs = ir_operand_int(8);
+  if (!ir_emit(context, function, &load_chars)) {
+    ir_operand_destroy(&destination);
+    return 0;
+  }
+
+  ir_operand_destroy(value);
+  *value = destination;
+  return 1;
 }
 
 static int ir_lower_statement_or_expression(IRLoweringContext *context,
@@ -2266,6 +2317,19 @@ static int ir_lower_call_expression(IRLoweringContext *context,
       Type *ptype = callee_symbol->data.function.parameter_types
                         ? callee_symbol->data.function.parameter_types[i]
                         : NULL;
+      if (ir_should_coerce_string_to_cstring(context, ptype,
+                                             call->arguments[i])) {
+        if (!ir_coerce_string_operand_to_cstring(
+                context, function, &arguments[i], call->arguments[i]->location)) {
+          for (size_t j = 0; j < call->argument_count; j++) {
+            ir_operand_destroy(&arguments[j]);
+          }
+          free(arguments);
+          ir_operand_destroy(&destination);
+          return 0;
+        }
+        continue;
+      }
       if (ptype && (ptype->kind == TYPE_FLOAT32 ||
                     ptype->kind == TYPE_FLOAT64)) {
         ir_operand_apply_float_bits(&arguments[i], ir_type_float_bits(ptype));
@@ -3312,6 +3376,28 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       }
     }
 
+    Type *func_type = ir_infer_expression_type(context, fp_call->function);
+    if (func_type && func_type->kind == TYPE_FUNCTION_POINTER &&
+        func_type->fn_param_types) {
+      for (size_t i = 0; i < fp_call->argument_count &&
+                         i < func_type->fn_param_count;
+           i++) {
+        if (ir_should_coerce_string_to_cstring(
+                context, func_type->fn_param_types[i], fp_call->arguments[i]) &&
+            !ir_coerce_string_operand_to_cstring(
+                context, function, &arguments[i],
+                fp_call->arguments[i]->location)) {
+          for (size_t j = 0; j < fp_call->argument_count; j++) {
+            ir_operand_destroy(&arguments[j]);
+          }
+          free(arguments);
+          ir_operand_destroy(&func_ptr);
+          ir_operand_destroy(&destination);
+          return 0;
+        }
+      }
+    }
+
     IRInstruction instruction = {0};
     instruction.op = IR_OP_CALL_INDIRECT;
     instruction.location = expression->location;
@@ -3426,6 +3512,13 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
                         ? declaration->initializer->resolved_type
                         : NULL;
       }
+      if (ir_should_coerce_string_to_cstring(context, decl_type,
+                                             declaration->initializer) &&
+          !ir_coerce_string_operand_to_cstring(
+              context, function, &value, declaration->initializer->location)) {
+        ir_operand_destroy(&value);
+        return 0;
+      }
       if (ir_try_emit_aggregate_symbol_memcpy(context, function,
                                               declaration->name, &value,
                                               decl_type, statement->location)) {
@@ -3474,6 +3567,13 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
           ir_lookup_symbol_type(context, assignment->variable_name);
       if (!assign_type && assignment->value) {
         assign_type = assignment->value->resolved_type;
+      }
+      if (ir_should_coerce_string_to_cstring(context, assign_type,
+                                             assignment->value) &&
+          !ir_coerce_string_operand_to_cstring(
+              context, function, &value, assignment->value->location)) {
+        ir_operand_destroy(&value);
+        return 0;
       }
       if (ir_try_emit_aggregate_symbol_memcpy(
               context, function, assignment->variable_name, &value,
@@ -3530,6 +3630,15 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
       return 0;
     }
 
+    if (ir_should_coerce_string_to_cstring(context, target_type,
+                                           assignment->value) &&
+        !ir_coerce_string_operand_to_cstring(
+            context, function, &value, assignment->value->location)) {
+      ir_operand_destroy(&address);
+      ir_operand_destroy(&value);
+      return 0;
+    }
+
     IRInstruction store = {0};
     store.op = IR_OP_STORE;
     store.location = statement->location;
@@ -3564,6 +3673,15 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     IROperand value = ir_operand_none();
     if (ret && ret->value) {
       if (!ir_lower_expression(context, function, ret->value, &value)) {
+        return 0;
+      }
+      Type *return_type =
+          ir_resolve_named_type(context, context->current_return_type_name);
+      if (ir_should_coerce_string_to_cstring(context, return_type,
+                                             ret->value) &&
+          !ir_coerce_string_operand_to_cstring(context, function, &value,
+                                               ret->value->location)) {
+        ir_operand_destroy(&value);
         return 0;
       }
     }

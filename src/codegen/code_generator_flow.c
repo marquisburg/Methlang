@@ -1195,6 +1195,23 @@ void code_generator_generate_statement(CodeGenerator *generator,
     if (return_data && return_data->value) {
       // Generate the return value expression
       code_generator_generate_expression(generator, return_data->value);
+      if (generator->current_function_name) {
+        Symbol *fn_symbol = symbol_table_lookup(generator->symbol_table,
+                                                generator->current_function_name);
+        Type *return_type =
+            (fn_symbol && fn_symbol->kind == SYMBOL_FUNCTION)
+                ? fn_symbol->data.function.return_type
+                : NULL;
+        Type *value_type = code_generator_infer_expression_type(
+            generator, return_data->value);
+        if (return_type && return_type->kind == TYPE_POINTER &&
+            return_type->name && strcmp(return_type->name, "cstring") == 0 &&
+            value_type && value_type->kind == TYPE_STRING) {
+          code_generator_emit(
+              generator,
+              "    mov rax, qword [rax]  ; Implicit string -> cstring return\n");
+        }
+      }
       // Result is already in RAX (the return register for integers)
       code_generator_emit(generator, "    ; Return value in rax\n");
     } else {

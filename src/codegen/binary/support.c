@@ -398,6 +398,8 @@ void binary_function_context_destroy(BinaryFunctionContext *context) {
   binary_named_slot_table_destroy(&context->parameter_slots);
   binary_named_slot_table_destroy(&context->local_slots);
   binary_named_slot_table_destroy(&context->temp_slots);
+  binary_named_slot_table_destroy(&context->string_symbols);
+  binary_named_slot_table_destroy(&context->cstring_symbols);
   binary_named_slot_table_destroy(&context->float64_symbols);
   binary_named_slot_table_destroy(&context->address_taken_symbols);
   binary_named_slot_table_destroy(&context->register_symbols);

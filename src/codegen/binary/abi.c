@@ -43,6 +43,10 @@ int code_generator_binary_resolved_type_is_stack_scalar(Type *type) {
     return 0;
   }
 
+  if (type->kind == TYPE_STRING) {
+    return 0;
+  }
+
   if (code_generator_binary_resolved_type_is_supported(type, 0)) {
     return 1;
   }
@@ -979,8 +983,14 @@ int code_generator_binary_type_is_abi_supported(CodeGenerator *generator,
 }
 
 int code_generator_binary_type_is_cstring(Type *type) {
-  return type && type->kind == TYPE_POINTER && type->name &&
-         strcmp(type->name, "cstring") == 0;
+  if (!type || type->kind != TYPE_POINTER) {
+    return 0;
+  }
+  if (type->name && strcmp(type->name, "cstring") == 0) {
+    return 1;
+  }
+  return type->base_type && type->base_type->name &&
+         strcmp(type->base_type->name, "uint8") == 0;
 }
 
 int code_generator_binary_type_is_string(Type *type) {
@@ -1146,6 +1156,16 @@ int code_generator_binary_prepare_function_context(
               ? code_generator_binary_get_resolved_type(
                     generator, function_data->parameter_types[i], 0)
               : NULL;
+      if (code_generator_binary_type_is_cstring(param_type) &&
+          !binary_named_slot_table_add(&context->cstring_symbols,
+                                       parameter_name, offset)) {
+        code_generator_set_error(
+            generator,
+            "Failed to allocate cstring parameter metadata in function '%s'",
+            function_data->name);
+        binary_function_context_destroy(context);
+        return 0;
+      }
       if (code_generator_abi_classify(param_type) == ABI_PASS_INDIRECT) {
         Symbol *param_sym =
             symbol_table_lookup(generator->symbol_table, parameter_name);
@@ -1274,6 +1294,32 @@ int code_generator_binary_prepare_function_context(
       code_generator_set_error(
           generator,
           "Failed to allocate local slot metadata in function '%s'",
+          function_data->name);
+      binary_function_context_destroy(context);
+      return 0;
+    }
+
+    if (code_generator_binary_type_is_cstring(local_type) &&
+        !binary_named_slot_table_add(&context->cstring_symbols,
+                                     instruction->dest.name,
+                                     parameter_home_size +
+                                         local_storage_size_total)) {
+      code_generator_set_error(
+          generator,
+          "Failed to allocate cstring local metadata in function '%s'",
+          function_data->name);
+      binary_function_context_destroy(context);
+      return 0;
+    }
+
+    if (local_type->kind == TYPE_STRING &&
+        !binary_named_slot_table_add(&context->string_symbols,
+                                     instruction->dest.name,
+                                     parameter_home_size +
+                                         local_storage_size_total)) {
+      code_generator_set_error(
+          generator,
+          "Failed to allocate string local metadata in function '%s'",
           function_data->name);
       binary_function_context_destroy(context);
       return 0;

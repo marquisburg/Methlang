@@ -565,6 +565,19 @@ void code_generator_generate_assignment_statement(CodeGenerator *generator,
 
     // Generate the value expression (result in RAX)
     code_generator_generate_expression(generator, assign_data->value);
+    Symbol *target_symbol =
+        symbol_table_lookup(generator->symbol_table, assign_data->variable_name);
+    if (target_symbol && target_symbol->type &&
+        target_symbol->type->kind == TYPE_POINTER && target_symbol->type->name &&
+        strcmp(target_symbol->type->name, "cstring") == 0) {
+      Type *value_type =
+          code_generator_infer_expression_type(generator, assign_data->value);
+      if (value_type && value_type->kind == TYPE_STRING) {
+        code_generator_emit(
+            generator,
+            "    mov rax, qword [rax]  ; Implicit string -> cstring assign\n");
+      }
+    }
 
     // Store the result to the variable
     code_generator_store_variable(generator, assign_data->variable_name, "rax");
@@ -595,6 +608,16 @@ void code_generator_generate_assignment_statement(CodeGenerator *generator,
 
     int element_size = code_generator_get_type_storage_size(target_type);
     code_generator_emit(generator, "    pop rcx            ; Restore value\n");
+    if (target_type->kind == TYPE_POINTER && target_type->name &&
+        strcmp(target_type->name, "cstring") == 0) {
+      Type *value_type =
+          code_generator_infer_expression_type(generator, assign_data->value);
+      if (value_type && value_type->kind == TYPE_STRING) {
+        code_generator_emit(
+            generator,
+            "    mov rcx, qword [rcx]  ; Implicit string -> cstring assign\n");
+      }
+    }
     code_generator_emit_store_value_at_address(generator, element_size);
   } else {
     code_generator_set_error(generator, "Invalid assignment target");
