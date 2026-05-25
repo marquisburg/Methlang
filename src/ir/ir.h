@@ -114,6 +114,17 @@ typedef struct {
 } IRInstruction;
 
 typedef struct {
+  const char *label;
+  IRInstruction *instructions;
+  size_t instruction_count;
+  size_t first_instruction;
+  size_t *successors;
+  size_t successor_count;
+  size_t *predecessors;
+  size_t predecessor_count;
+} IRBasicBlock;
+
+typedef struct {
   char *name;
   uint32_t profile_id;
   char **parameter_names;
@@ -122,6 +133,10 @@ typedef struct {
   IRInstruction *instructions;
   size_t instruction_count;
   size_t instruction_capacity;
+  IRBasicBlock *blocks;
+  size_t block_count;
+  size_t entry_block;
+  int cfg_valid;
 } IRFunction;
 
 typedef struct {
@@ -161,6 +176,10 @@ int ir_function_append_instruction(IRFunction *function,
                                    const IRInstruction *instruction);
 int ir_function_insert_instruction(IRFunction *function, size_t index,
                                    const IRInstruction *instruction);
+void ir_function_clear_cfg(IRFunction *function);
+int ir_function_rebuild_cfg(IRFunction *function);
+const IRBasicBlock *ir_function_blocks(IRFunction *function,
+                                       size_t *block_count);
 
 IRProgram *ir_program_create(void);
 void ir_program_destroy(IRProgram *program);

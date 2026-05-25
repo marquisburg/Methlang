@@ -155,6 +155,25 @@ static void ir_function_clear_parameters(IRFunction *function) {
   function->parameter_count = 0;
 }
 
+void ir_function_clear_cfg(IRFunction *function) {
+  if (!function) {
+    return;
+  }
+
+  if (function->blocks) {
+    for (size_t i = 0; i < function->block_count; i++) {
+      free(function->blocks[i].successors);
+      free(function->blocks[i].predecessors);
+    }
+    free(function->blocks);
+  }
+
+  function->blocks = NULL;
+  function->block_count = 0;
+  function->entry_block = 0;
+  function->cfg_valid = 0;
+}
+
 IRFunction *ir_function_create(const char *name) {
   IRFunction *function = malloc(sizeof(IRFunction));
   if (!function) {
@@ -169,6 +188,10 @@ IRFunction *ir_function_create(const char *name) {
   function->instructions = NULL;
   function->instruction_count = 0;
   function->instruction_capacity = 0;
+  function->blocks = NULL;
+  function->block_count = 0;
+  function->entry_block = 0;
+  function->cfg_valid = 0;
   return function;
 }
 
@@ -233,6 +256,7 @@ void ir_function_destroy(IRFunction *function) {
 
   free(function->name);
   ir_function_clear_parameters(function);
+  ir_function_clear_cfg(function);
   for (size_t i = 0; i < function->instruction_count; i++) {
     ir_instruction_destroy(&function->instructions[i]);
   }
@@ -282,6 +306,7 @@ int ir_function_append_instruction(IRFunction *function,
   }
 
   function->instruction_count++;
+  ir_function_clear_cfg(function);
   return 1;
 }
 
@@ -335,7 +360,248 @@ int ir_function_insert_instruction(IRFunction *function, size_t index,
   }
 
   function->instruction_count++;
+  ir_function_clear_cfg(function);
   return 1;
+}
+
+typedef struct {
+  const char *label;
+  size_t block_index;
+} IRLabelBlock;
+
+static int ir_instruction_is_terminator(const IRInstruction *instruction) {
+  return instruction &&
+         (instruction->op == IR_OP_JUMP || instruction->op == IR_OP_RETURN);
+}
+
+static int ir_instruction_is_branch(const IRInstruction *instruction) {
+  return instruction && (instruction->op == IR_OP_BRANCH_ZERO ||
+                         instruction->op == IR_OP_BRANCH_EQ);
+}
+
+static int ir_block_append_index_unique(size_t **items, size_t *count,
+                                        size_t value) {
+  if (!items || !count) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < *count; i++) {
+    if ((*items)[i] == value) {
+      return 1;
+    }
+  }
+
+  size_t *grown = realloc(*items, (*count + 1) * sizeof(size_t));
+  if (!grown) {
+    return 0;
+  }
+
+  grown[*count] = value;
+  *items = grown;
+  (*count)++;
+  return 1;
+}
+
+static int ir_cfg_append_edge(IRFunction *function, size_t from, size_t to) {
+  if (!function || from >= function->block_count || to >= function->block_count) {
+    return 0;
+  }
+
+  IRBasicBlock *source = &function->blocks[from];
+  IRBasicBlock *target = &function->blocks[to];
+  if (!ir_block_append_index_unique(&source->successors,
+                                    &source->successor_count, to)) {
+    return 0;
+  }
+  return ir_block_append_index_unique(&target->predecessors,
+                                      &target->predecessor_count, from);
+}
+
+static int ir_cfg_find_label_block(const IRLabelBlock *labels,
+                                   size_t label_count, const char *label,
+                                   size_t *out_block) {
+  if (!labels || !label || !out_block) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < label_count; i++) {
+    if (labels[i].label && strcmp(labels[i].label, label) == 0) {
+      *out_block = labels[i].block_index;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int ir_cfg_block_last_non_nop(const IRBasicBlock *block,
+                                     size_t *out_offset) {
+  if (!block || !out_offset || block->instruction_count == 0) {
+    return 0;
+  }
+
+  for (size_t remaining = block->instruction_count; remaining > 0; remaining--) {
+    size_t offset = remaining - 1;
+    if (block->instructions[offset].op != IR_OP_NOP) {
+      *out_offset = offset;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+int ir_function_rebuild_cfg(IRFunction *function) {
+  if (!function) {
+    return 0;
+  }
+
+  ir_function_clear_cfg(function);
+
+  size_t instruction_count = function->instruction_count;
+  if (instruction_count == 0) {
+    function->entry_block = 0;
+    function->cfg_valid = 1;
+    return 1;
+  }
+
+  unsigned char *block_starts = calloc(instruction_count, 1);
+  if (!block_starts) {
+    return 0;
+  }
+
+  block_starts[0] = 1;
+  for (size_t i = 0; i < instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_LABEL) {
+      block_starts[i] = 1;
+    }
+    if ((ir_instruction_is_terminator(instruction) ||
+         ir_instruction_is_branch(instruction)) &&
+        i + 1 < instruction_count) {
+      block_starts[i + 1] = 1;
+    }
+  }
+
+  size_t block_count = 0;
+  for (size_t i = 0; i < instruction_count; i++) {
+    if (block_starts[i]) {
+      block_count++;
+    }
+  }
+
+  IRBasicBlock *blocks = calloc(block_count, sizeof(IRBasicBlock));
+  IRLabelBlock *labels = calloc(block_count, sizeof(IRLabelBlock));
+  if (!blocks || !labels) {
+    free(blocks);
+    free(labels);
+    free(block_starts);
+    return 0;
+  }
+
+  size_t block_index = 0;
+  size_t label_count = 0;
+  for (size_t start = 0; start < instruction_count;) {
+    if (!block_starts[start]) {
+      start++;
+      continue;
+    }
+
+    size_t end = start + 1;
+    while (end < instruction_count && !block_starts[end]) {
+      end++;
+    }
+
+    IRBasicBlock *block = &blocks[block_index];
+    block->instructions = &function->instructions[start];
+    block->instruction_count = end - start;
+    block->first_instruction = start;
+
+    IRInstruction *first = &function->instructions[start];
+    if (first->op == IR_OP_LABEL && first->text) {
+      block->label = first->text;
+      labels[label_count].label = first->text;
+      labels[label_count].block_index = block_index;
+      label_count++;
+    }
+
+    block_index++;
+    start = end;
+  }
+
+  function->blocks = blocks;
+  function->block_count = block_count;
+  function->entry_block = 0;
+
+  for (size_t i = 0; i < block_count; i++) {
+    IRBasicBlock *block = &function->blocks[i];
+    size_t last_offset = 0;
+    if (!ir_cfg_block_last_non_nop(block, &last_offset)) {
+      if (i + 1 < block_count && !ir_cfg_append_edge(function, i, i + 1)) {
+        ir_function_clear_cfg(function);
+        free(labels);
+        free(block_starts);
+        return 0;
+      }
+      continue;
+    }
+
+    IRInstruction *last = &block->instructions[last_offset];
+    if (last->op == IR_OP_JUMP) {
+      size_t target = 0;
+      if (ir_cfg_find_label_block(labels, label_count, last->text, &target) &&
+          !ir_cfg_append_edge(function, i, target)) {
+        ir_function_clear_cfg(function);
+        free(labels);
+        free(block_starts);
+        return 0;
+      }
+    } else if (ir_instruction_is_branch(last)) {
+      size_t target = 0;
+      if (ir_cfg_find_label_block(labels, label_count, last->text, &target) &&
+          !ir_cfg_append_edge(function, i, target)) {
+        ir_function_clear_cfg(function);
+        free(labels);
+        free(block_starts);
+        return 0;
+      }
+      if (i + 1 < block_count && !ir_cfg_append_edge(function, i, i + 1)) {
+        ir_function_clear_cfg(function);
+        free(labels);
+        free(block_starts);
+        return 0;
+      }
+    } else if (last->op != IR_OP_RETURN) {
+      if (i + 1 < block_count && !ir_cfg_append_edge(function, i, i + 1)) {
+        ir_function_clear_cfg(function);
+        free(labels);
+        free(block_starts);
+        return 0;
+      }
+    }
+  }
+
+  function->cfg_valid = 1;
+  free(labels);
+  free(block_starts);
+  return 1;
+}
+
+const IRBasicBlock *ir_function_blocks(IRFunction *function,
+                                       size_t *block_count) {
+  if (block_count) {
+    *block_count = 0;
+  }
+  if (!function) {
+    return NULL;
+  }
+  if (!function->cfg_valid && !ir_function_rebuild_cfg(function)) {
+    return NULL;
+  }
+  if (block_count) {
+    *block_count = function->block_count;
+  }
+  return function->blocks;
 }
 
 IRProgram *ir_program_create(void) {
@@ -713,6 +979,19 @@ int ir_instruction_dump(const IRInstruction *instruction,
   return ir_format_instruction_line(instruction, buffer, capacity);
 }
 
+static void ir_dump_block_edges(FILE *output, const char *label,
+                                const size_t *items, size_t count) {
+  fprintf(output, " %s:", label);
+  if (count == 0) {
+    fprintf(output, " -");
+    return;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    fprintf(output, "%s%zu", i == 0 ? " " : ",", items[i]);
+  }
+}
+
 int ir_program_dump(IRProgram *program, FILE *output) {
   if (!program || !output) {
     return 0;
@@ -727,11 +1006,35 @@ int ir_program_dump(IRProgram *program, FILE *output) {
     fprintf(output, "function %s {\n",
             function->name ? function->name : "<anonymous>");
 
-    for (size_t j = 0; j < function->instruction_count; j++) {
-      IRInstruction *instruction = &function->instructions[j];
-      char buffer[1024];
-      ir_format_instruction_line(instruction, buffer, sizeof(buffer));
-      fprintf(output, "  %4zu: %s\n", j, buffer);
+    if (!ir_function_rebuild_cfg(function)) {
+      return 0;
+    }
+
+    for (size_t block_i = 0; block_i < function->block_count; block_i++) {
+      IRBasicBlock *block = &function->blocks[block_i];
+      const char *label = block->label ? block->label
+                          : block_i == function->entry_block ? "<entry>"
+                                                              : "<anon>";
+      size_t last_instruction =
+          block->instruction_count == 0
+              ? block->first_instruction
+              : block->first_instruction + block->instruction_count - 1;
+
+      fprintf(output, "  block %zu %s [%zu..%zu]", block_i, label,
+              block->first_instruction, last_instruction);
+      ir_dump_block_edges(output, "preds", block->predecessors,
+                          block->predecessor_count);
+      ir_dump_block_edges(output, "succs", block->successors,
+                          block->successor_count);
+      fprintf(output, "\n");
+
+      for (size_t j = 0; j < block->instruction_count; j++) {
+        size_t instruction_index = block->first_instruction + j;
+        IRInstruction *instruction = &block->instructions[j];
+        char buffer[1024];
+        ir_format_instruction_line(instruction, buffer, sizeof(buffer));
+        fprintf(output, "    %4zu: %s\n", instruction_index, buffer);
+      }
     }
 
     fprintf(output, "}\n\n");

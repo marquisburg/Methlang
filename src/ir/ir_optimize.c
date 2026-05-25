@@ -3501,16 +3501,6 @@ static int ir_remove_empty_conditional_diamonds_pass(IRFunction *function,
   return 1;
 }
 
-static int ir_reachable_enqueue_label(const IRFunction *function,
-                                      const char *label,
-                                      IRIndexVector *worklist) {
-  size_t label_index = 0;
-  if (!label || !ir_find_label_index(function, label, &label_index)) {
-    return 1;
-  }
-  return ir_index_vector_append(worklist, label_index);
-}
-
 static int ir_eliminate_unreachable_blocks_pass(IRFunction *function,
                                                 int *changed) {
   if (!function) {
@@ -3520,65 +3510,76 @@ static int ir_eliminate_unreachable_blocks_pass(IRFunction *function,
     return 1;
   }
 
-  unsigned char *reachable = calloc(function->instruction_count, 1);
-  if (!reachable) {
+  if (!ir_function_rebuild_cfg(function)) {
+    return 0;
+  }
+
+  size_t block_count = 0;
+  const IRBasicBlock *blocks = ir_function_blocks(function, &block_count);
+  if (!blocks || block_count == 0) {
+    return block_count == 0;
+  }
+
+  unsigned char *reachable_blocks = calloc(block_count, 1);
+  unsigned char *reachable_instructions = calloc(function->instruction_count, 1);
+  if (!reachable_blocks || !reachable_instructions) {
+    free(reachable_blocks);
+    free(reachable_instructions);
     return 0;
   }
 
   IRIndexVector worklist = {0};
-  if (!ir_index_vector_append(&worklist, 0)) {
+  if (!ir_index_vector_append(&worklist, function->entry_block)) {
     ir_index_vector_destroy(&worklist);
-    free(reachable);
+    free(reachable_blocks);
+    free(reachable_instructions);
     return 0;
   }
 
   for (size_t work_index = 0; work_index < worklist.count; work_index++) {
-    size_t i = worklist.items[work_index];
-    while (i < function->instruction_count) {
-      if (reachable[i]) {
-        break;
+    size_t block_index = worklist.items[work_index];
+    if (block_index >= block_count || reachable_blocks[block_index]) {
+      continue;
+    }
+
+    const IRBasicBlock *block = &blocks[block_index];
+    reachable_blocks[block_index] = 1;
+    for (size_t i = 0; i < block->instruction_count; i++) {
+      size_t instruction_index = block->first_instruction + i;
+      if (instruction_index < function->instruction_count) {
+        reachable_instructions[instruction_index] = 1;
       }
+    }
 
-      IRInstruction *instruction = &function->instructions[i];
-      reachable[i] = 1;
-
-      if (instruction->op == IR_OP_JUMP) {
-        if (!ir_reachable_enqueue_label(function, instruction->text,
-                                        &worklist)) {
-          ir_index_vector_destroy(&worklist);
-          free(reachable);
-          return 0;
-        }
-        break;
+    for (size_t i = 0; i < block->successor_count; i++) {
+      if (!ir_index_vector_append(&worklist, block->successors[i])) {
+        ir_index_vector_destroy(&worklist);
+        free(reachable_blocks);
+        free(reachable_instructions);
+        return 0;
       }
-
-      if (instruction->op == IR_OP_BRANCH_ZERO ||
-          instruction->op == IR_OP_BRANCH_EQ) {
-        if (!ir_reachable_enqueue_label(function, instruction->text,
-                                        &worklist)) {
-          ir_index_vector_destroy(&worklist);
-          free(reachable);
-          return 0;
-        }
-      } else if (instruction->op == IR_OP_RETURN) {
-        break;
-      }
-
-      i++;
     }
   }
 
+  int local_changed = 0;
   for (size_t i = 0; i < function->instruction_count; i++) {
-    if (!reachable[i] && function->instructions[i].op != IR_OP_NOP) {
+    if (!reachable_instructions[i] &&
+        function->instructions[i].op != IR_OP_NOP) {
       ir_instruction_make_nop(&function->instructions[i]);
+      local_changed = 1;
       if (changed) {
         *changed = 1;
       }
     }
   }
 
+  if (local_changed) {
+    ir_function_clear_cfg(function);
+  }
+
   ir_index_vector_destroy(&worklist);
-  free(reachable);
+  free(reachable_blocks);
+  free(reachable_instructions);
   return 1;
 }
 
@@ -11509,6 +11510,10 @@ static int ir_optimize_function(IRFunction *function) {
     if (!ir_detect_shift_loops_pass(function, &detect_changed)) {
       mettle_compiler_ice("IR optimization pass failed");
     }
+  }
+
+  if (!ir_function_rebuild_cfg(function)) {
+    return 0;
   }
 
   return 1;

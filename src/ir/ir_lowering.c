@@ -3979,6 +3979,11 @@ static IRFunction *ir_lower_function(IRLoweringContext *context,
   }
 
   free(defers.stack.entries);
+  if (!ir_function_rebuild_cfg(function)) {
+    ir_set_error(context, "Out of memory while building IR control-flow graph");
+    ir_function_destroy(function);
+    return NULL;
+  }
   return function;
 }
 
