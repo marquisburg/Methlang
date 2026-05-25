@@ -473,31 +473,31 @@ $cases = @(
     ShouldSucceed  = $true
     Args           = @("-O")
     AsmMustNotMatch = @("\bcall cold_path\b")
-    IrMustMatch    = @("ASSIGN .* <- 42")
-    IrMustNotMatch = @("BRANCH_ZERO 0 ->", "CALL .*cold_path\(", "ASSIGN @result <- @result", "BRANCH_EQ @same, @same")
+    IrMustMatch    = @("@.* <- 42")
+    IrMustNotMatch = @("branch_zero 0 ->", "\bcold_path\(", "@result <- @result", "branch_eq @same, @same")
   },
   @{
     Name          = "opt_dead_temp"
     Path          = "tests/test_opt_dead_temp.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustNotMatch = @("ASSIGN %t[0-9]+ <- 123456")
+    IrMustNotMatch = @("%t[0-9]+ <- 123456")
   },
   @{
     Name          = "opt_symbol_temp_forwarding"
     Path          = "tests/test_opt_symbol_temp_forwarding.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustNotMatch = @("ASSIGN %t[0-9]+ <- @x")
-    IrMustMatch   = @("BRANCH_ZERO @x ->")
+    IrMustNotMatch = @("%t[0-9]+ <- @x")
+    IrMustMatch   = @("branch_zero @x ->")
   },
   @{
     Name          = "opt_strength_cse"
     Path          = "tests/test_optimize_strength_cse.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustMatch   = @("BINARY @x = @a << 3", "ASSIGN @y <- @x")
-    IrMustNotMatch = @("BINARY @y = 8 \\* @a", "BINARY @w = @b \\+ @a")
+    IrMustMatch   = @("@x = @a << 3", "@y <- @x")
+    IrMustNotMatch = @("@y = 8 \\* @a", "@w = @b \\+ @a")
   },
   @{
     Name          = "opt_loop_unroll"
@@ -511,8 +511,8 @@ $cases = @(
     Path          = "tests/test_opt_mod_even_check.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustMatch   = @("BINARY %t[0-9]+ = @n & 1")
-    IrMustNotMatch = @("BINARY %t[0-9]+ = @n % 2")
+    IrMustMatch   = @("%t[0-9]+ = @n & 1")
+    IrMustNotMatch = @("%t[0-9]+ = @n % 2")
   },
   @{
     Name          = "opt_collatz_odd_fold"
@@ -527,7 +527,7 @@ $cases = @(
     ShouldSucceed = $true
     Args          = @("-O", "--dump-ir")
     IrMustMatch   = @(">> 1", "branch_zero @v ->")
-    IrMustNotMatch = @("jump ir_while_", "binary %t[0-9]+ = @v / 2")
+    IrMustNotMatch = @("jump ir_while_", "%t[0-9]+ = @v / 2")
   },
   @{
     Name          = "opt_popcount_buffer_fuse"
@@ -535,7 +535,7 @@ $cases = @(
     ShouldSucceed = $true
     Args          = @("--build", "--emit-obj", "--linker", "internal", "--release", "--profile-runtime-ops", "--dump-ir")
     IrMustMatch   = @("%pbf[0-9]+_raw <-", "@total = @total \+ %pbf")
-    IrMustNotMatch = @("call %t[0-9]+ = popcount_byte", "__inl_popcount_byte", "local_count")
+    IrMustNotMatch = @("%t[0-9]+ = popcount_byte", "__inl_popcount_byte", "local_count")
   },
   @{
     Name          = "opt_popcount_buffer_fuse_release"
@@ -543,23 +543,23 @@ $cases = @(
     ShouldSucceed = $true
     Args          = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
     IrMustMatch   = @("%pbf[0-9]+_raw <-", "@total = @total \+ %pbf")
-    IrMustNotMatch = @("call %t[0-9]+ = popcount_byte", "__inl_popcount_byte", "local_count")
+    IrMustNotMatch = @("%t[0-9]+ = popcount_byte", "__inl_popcount_byte", "local_count")
   },
   @{
     Name          = "opt_branch_notzero_forward"
     Path          = "tests/test_opt_branch_notzero_forward.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustMatch   = @("BRANCH_ZERO @x ->")
-    IrMustNotMatch = @("BINARY %t[0-9]+ = @x != 0")
+    IrMustMatch   = @("branch_zero @x ->")
+    IrMustNotMatch = @("%t[0-9]+ = @x != 0")
   },
   @{
     Name          = "opt_branch_eq_chain"
     Path          = "tests/test_opt_branch_eq_chain.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustMatch   = @("BRANCH_EQ @x, 1 ->", "BRANCH_EQ @x, 2 ->")
-    IrMustNotMatch = @("BINARY %t[0-9]+ = @x == 1", "BINARY %t[0-9]+ = @x == 2")
+    IrMustMatch   = @("branch_eq @x, 1 ->", "branch_eq @x, 2 ->")
+    IrMustNotMatch = @("%t[0-9]+ = @x == 1", "%t[0-9]+ = @x == 2")
   },
   @{
     Name            = "opt_cfg_cleanup"
