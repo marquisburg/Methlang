@@ -41,6 +41,8 @@ typedef struct {
   int profile;
   int profile_runtime;
   int profile_runtime_ops;
+  int tracy;
+  const char *tracy_directory;
   int debug_compiler;
   int main_wants_argc_argv;
   LinkerMode linker_mode;

@@ -3,10 +3,17 @@ obj/
 .claude/
 .cursor/
 web/
+.tmp/
+lib/
+tests/_tmp_*
+.html
 
 *.exe
 *.o
 *.obj
 *.s
 *.s.ir
+*.ir
 docs/linker-implementation-todo.md
+examples/tracy_demo/tracy_dir.local.bat
+.mettle/

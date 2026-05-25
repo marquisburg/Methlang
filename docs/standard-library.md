@@ -181,6 +181,33 @@ Windows Win32 thread primitives. Includes:
 
 pthread-based threading for Linux and macOS. Includes `pthread_create`, `pthread_join`, mutexes, and atomics. Requires linking with `stdlib/posix_helpers.c` and `-lpthread` on Linux. `pthread_create` accepts a function pointer `fn(cstring) -> cstring` for the thread entry; pass `&my_thread_proc` directly.
 
+## std/tracy
+
+[Tracy](https://github.com/wolfpld/tracy) real-time profiler bindings. Use `mettle --build --tracy` to compile and link the Tracy client automatically (see `docs/compilation.md`). Without `--tracy`, `mettle --build` still links a no-op stub from `bin/runtime/tracy_helpers.o` when the program references `std/tracy`.
+
+**Zones:** `tracy_zone`, `tracy_zone_colored`, `tracy_zone_on_demand` (respects `tracy_connected()` for on-demand builds). End with `defer tracy_scope_end(z)` (alias of `tracy_zone_end`). Zone text/name/value/color helpers available.
+
+**Ergonomics:** `tracy_color_input`, `tracy_color_update`, `tracy_color_render`, `tracy_color_load`, `tracy_color_warn`; `tracy_plot_setup_number`, `tracy_plot_setup_memory`; `tracy_malloc` / `tracy_heap_free` (tracked heap for memory timeline).
+
+**Frames, plots, messages:** `tracy_frame_mark`, `tracy_plot`, `tracy_plot_int`, `tracy_message`, `tracy_message_colored`, `tracy_app_info`. Thread names: `tracy_set_thread_name`. Connection: `tracy_connected`, `tracy_startup`, `tracy_shutdown`.
+
+Full demonstrative program: [`examples/tracy_demo/`](../examples/tracy_demo/).
+
+```powershell
+mettle --build --tracy app.mettle -o app.exe
+# or: examples\tracy_demo\build.bat
+```
+
+Set `TRACY_DIR`, pass `--tracy-dir <path>`, or create `.mettle\tracy_dir` with the Tracy repo root.
+
+Manual link (advanced, MSVC + internal linker):
+
+```powershell
+cl /c /DTRACY_ENABLE /I <tracy>\public stdlib\tracy_helpers.c
+cl /c /DTRACY_ENABLE /I <tracy>\public <tracy>\public\TracyClient.cpp /TP
+mettle --build app.mettle -o app.exe --link-arg stdlib\tracy_helpers.obj --link-arg TracyClient.obj
+```
+
 ## std/prelude
 
 The prelude re-exports `std/io`, `std/math`, `std/conv`, `std/mem`, `std/process`, and `std/net`. Use with `--prelude` to automatically import these modules without explicit `import` statements. The prelude is opt-in; it is not loaded by default. On Linux, `--prelude` will fail at link time because it pulls in `std/net` (Windows-only). Use explicit imports instead.

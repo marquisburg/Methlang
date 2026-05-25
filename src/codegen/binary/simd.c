@@ -650,20 +650,35 @@ int code_generator_binary_emit_simd_scale_i32(
 
   if (!binary_emit_mov_reg_reg(b, BINARY_GP_R9, BINARY_GP_R8) ||
       !binary_emit_alu_reg_reg(b, 0x29, BINARY_GP_R9, BINARY_GP_RCX) ||
-      !wcs_cmp_reg_imm32(b, BINARY_GP_R9, 16) ||
+      !wcs_cmp_reg_imm32(b, BINARY_GP_R9, 64) ||
       !wcs_jcc(b, 0x83 /* jae */, &j_vec) ||
       !wcs_jcc(b, 0, &j_scalar)) {
     return 0;
   }
 
   if (!wcs_patch_here(b, j_vec) ||
-      !wcs_movdqu_xmm_mem(b, 0, BINARY_GP_RCX) ||
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, 0) ||
       !wcs_pmulld(b, 0, 4) ||
       !wcs_paddd(b, 0, 5) ||
       !simd_movdqu_mem_xmm_disp(b, BINARY_GP_RDX, 0, 0) ||
       !wcs_paddd(b, 6, 0) ||
-      !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 16) ||
-      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 0, 16)) {
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, 16) ||
+      !wcs_pmulld(b, 0, 4) ||
+      !wcs_paddd(b, 0, 5) ||
+      !simd_movdqu_mem_xmm_disp(b, BINARY_GP_RDX, 16, 0) ||
+      !wcs_paddd(b, 6, 0) ||
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, 32) ||
+      !wcs_pmulld(b, 0, 4) ||
+      !wcs_paddd(b, 0, 5) ||
+      !simd_movdqu_mem_xmm_disp(b, BINARY_GP_RDX, 32, 0) ||
+      !wcs_paddd(b, 6, 0) ||
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, 48) ||
+      !wcs_pmulld(b, 0, 4) ||
+      !wcs_paddd(b, 0, 5) ||
+      !simd_movdqu_mem_xmm_disp(b, BINARY_GP_RDX, 48, 0) ||
+      !wcs_paddd(b, 6, 0) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 64) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 0, 64)) {
     return 0;
   }
   {
@@ -751,11 +766,11 @@ int code_generator_binary_emit_simd_reverse_copy_i32(
 
   if (!binary_emit_mov_reg_reg(b, BINARY_GP_R9, BINARY_GP_R8) ||
       !binary_emit_alu_reg_reg(b, 0x29, BINARY_GP_R9, BINARY_GP_RDX) ||
-      !wcs_cmp_reg_imm32(b, BINARY_GP_R9, 16) ||
+      !wcs_cmp_reg_imm32(b, BINARY_GP_R9, 64) ||
       !wcs_jcc(b, 0x82 /* jb */, &j_scalar) ||
       !binary_emit_mov_reg_reg(b, BINARY_GP_R9, BINARY_GP_RCX) ||
       !binary_emit_alu_reg_reg(b, 0x29, BINARY_GP_R9, BINARY_GP_R10) ||
-      !wcs_cmp_reg_imm32(b, BINARY_GP_R9, 12) ||
+      !wcs_cmp_reg_imm32(b, BINARY_GP_R9, 60) ||
       !wcs_jcc(b, 0x82 /* jb */, &j_scalar) ||
       !wcs_jcc(b, 0, &j_vec)) {
     return 0;
@@ -766,8 +781,20 @@ int code_generator_binary_emit_simd_reverse_copy_i32(
       !wcs_pshufd(b, 0, 0, 0x1B) ||
       !simd_movdqu_mem_xmm_disp(b, BINARY_GP_RDX, 0, 0) ||
       !wcs_paddd(b, 6, 0) ||
-      !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 1, 16) ||
-      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 0, 16)) {
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, -28) ||
+      !wcs_pshufd(b, 0, 0, 0x1B) ||
+      !simd_movdqu_mem_xmm_disp(b, BINARY_GP_RDX, 16, 0) ||
+      !wcs_paddd(b, 6, 0) ||
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, -44) ||
+      !wcs_pshufd(b, 0, 0, 0x1B) ||
+      !simd_movdqu_mem_xmm_disp(b, BINARY_GP_RDX, 32, 0) ||
+      !wcs_paddd(b, 6, 0) ||
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, -60) ||
+      !wcs_pshufd(b, 0, 0, 0x1B) ||
+      !simd_movdqu_mem_xmm_disp(b, BINARY_GP_RDX, 48, 0) ||
+      !wcs_paddd(b, 6, 0) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 1, 64) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 0, 64)) {
     return 0;
   }
   {
@@ -961,6 +988,107 @@ int wcs_pmuldq(BinaryCodeBuffer *b, int dst, int src) {
              b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src & 7)));
 }
 
+static int wcs_vex3(BinaryCodeBuffer *b, int map, int pp, int len256, int w,
+                    int reg, int rm, int vvvv) {
+  unsigned char b2 = (unsigned char)((((~(reg >> 3)) & 1) << 7) |
+                                     (1 << 6) |
+                                     (((~(rm >> 3)) & 1) << 5) |
+                                     (map & 0x1F));
+  unsigned char b3 = (unsigned char)(((w & 1) << 7) |
+                                     (((~vvvv) & 0x0F) << 3) |
+                                     ((len256 & 1) << 2) | (pp & 3));
+  return binary_code_buffer_append_u8(b, 0xC4) &&
+         binary_code_buffer_append_u8(b, b2) &&
+         binary_code_buffer_append_u8(b, b3);
+}
+
+static int wcs_avx_modrm_mem_disp(BinaryCodeBuffer *b, int reg, int base,
+                                  int displacement) {
+  int use_disp8 = displacement >= -128 && displacement <= 127;
+  unsigned char base_low = (unsigned char)(base & 7);
+  unsigned char mod = 0;
+  unsigned char rm = base_low;
+  if (displacement != 0 || base_low == 5) {
+    mod = use_disp8 ? 1 : 2;
+  }
+  if (base_low == 4) {
+    rm = 4;
+  }
+  if (!binary_code_buffer_append_u8(
+          b, (unsigned char)((mod << 6) | ((reg & 7) << 3) | rm))) {
+    return 0;
+  }
+  if (base_low == 4 &&
+      !binary_code_buffer_append_u8(
+          b, (unsigned char)((0 << 6) | (4 << 3) | base_low))) {
+    return 0;
+  }
+  if (mod == 1) {
+    return binary_code_buffer_append_u8(b,
+                                        (unsigned char)(int8_t)displacement);
+  }
+  if (mod == 2 || (mod == 0 && base_low == 5)) {
+    return binary_code_buffer_append_u32(b, (uint32_t)(int32_t)displacement);
+  }
+  return 1;
+}
+
+static int wcs_avx_vmovdqu_ymm_mem(BinaryCodeBuffer *b, int dst, int base,
+                                   int displacement) {
+  return wcs_vex3(b, 1, 2, 1, 0, dst, base, 0) &&
+         binary_code_buffer_append_u8(b, 0x6F) &&
+         wcs_avx_modrm_mem_disp(b, dst, base, displacement);
+}
+
+static int wcs_avx_vpaddq_ymm(BinaryCodeBuffer *b, int dst, int src1,
+                              int src2) {
+  return wcs_vex3(b, 1, 1, 1, 0, dst, src2, src1) &&
+         binary_code_buffer_append_u8(b, 0xD4) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src2 & 7)));
+}
+
+static int wcs_avx_vpxor_ymm(BinaryCodeBuffer *b, int dst, int src1,
+                             int src2) {
+  return wcs_vex3(b, 1, 1, 1, 0, dst, src2, src1) &&
+         binary_code_buffer_append_u8(b, 0xEF) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src2 & 7)));
+}
+
+static int wcs_avx_vpmuldq_ymm(BinaryCodeBuffer *b, int dst, int src1,
+                               int src2) {
+  return wcs_vex3(b, 2, 1, 1, 0, dst, src2, src1) &&
+         binary_code_buffer_append_u8(b, 0x28) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((dst & 7) << 3) | (src2 & 7)));
+}
+
+static int wcs_avx_vpsrlq_ymm_imm(BinaryCodeBuffer *b, int dst, int src,
+                                  unsigned char imm) {
+  return wcs_vex3(b, 1, 1, 1, 0, 2, dst, src) &&
+         binary_code_buffer_append_u8(b, 0x73) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | (2 << 3) | (dst & 7))) &&
+         binary_code_buffer_append_u8(b, imm);
+}
+
+static int wcs_avx_vextracti128(BinaryCodeBuffer *b, int dst_xmm, int src_ymm,
+                                unsigned char lane) {
+  return wcs_vex3(b, 3, 1, 1, 0, src_ymm, dst_xmm, 0) &&
+         binary_code_buffer_append_u8(b, 0x39) &&
+         binary_code_buffer_append_u8(
+             b, (unsigned char)(0xC0 | ((src_ymm & 7) << 3) |
+                                (dst_xmm & 7))) &&
+         binary_code_buffer_append_u8(b, lane);
+}
+
+static int wcs_avx_vzeroupper(BinaryCodeBuffer *b) {
+  return binary_code_buffer_append_u8(b, 0xC5) &&
+         binary_code_buffer_append_u8(b, 0xF8) &&
+         binary_code_buffer_append_u8(b, 0x77);
+}
+
 int code_generator_binary_emit_simd_dot_i32(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IRInstruction *instruction) {
@@ -986,42 +1114,66 @@ int code_generator_binary_emit_simd_dot_i32(
       !code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->arguments[0],
                                                BINARY_GP_R8) ||
-      !wcs_xor_self32(b, BINARY_GP_R9) ||
       !binary_emit_mov_reg_imm64(b, BINARY_GP_RAX, 0) ||
-      !wcs_sse_66(b, 0xEF, 2, 2)) {
+      !wcs_avx_vpxor_ymm(b, 2, 2, 2) ||
+      !wcs_avx_vpxor_ymm(b, 5, 5, 5) ||
+      !binary_emit_mov_reg_reg(b, BINARY_GP_R11, BINARY_GP_R8) ||
+      !binary_emit_shift_reg_imm8(b, 4, BINARY_GP_R11, 2) ||
+      !wcs_add_reg_reg64(b, BINARY_GP_R11, BINARY_GP_RCX)) {
     return 0;
   }
 
   loop_top = b->size;
-  if (!binary_emit_cmp_reg_reg(b, BINARY_GP_R9, BINARY_GP_R8) ||
-      !wcs_jcc(b, 0x8D /* jge */, &j_done)) {
+  if (!binary_emit_cmp_reg_reg(b, BINARY_GP_RCX, BINARY_GP_R11) ||
+      !wcs_jcc(b, 0x83 /* jae */, &j_done)) {
     return 0;
   }
 
-  if (!binary_emit_mov_reg_reg(b, BINARY_GP_R10, BINARY_GP_R8) ||
-      !binary_emit_alu_reg_reg(b, 0x29, BINARY_GP_R10, BINARY_GP_R9) ||
-      !wcs_cmp_reg_imm32(b, BINARY_GP_R10, 4) ||
+  if (!binary_emit_mov_reg_reg(b, BINARY_GP_R9, BINARY_GP_R11) ||
+      !binary_emit_alu_reg_reg(b, 0x29, BINARY_GP_R9, BINARY_GP_RCX) ||
+      !wcs_cmp_reg_imm32(b, BINARY_GP_R9, 128) ||
       !wcs_jcc(b, 0x83 /* jae */, &j_vec) ||
       !wcs_jcc(b, 0, &j_scalar)) {
     return 0;
   }
 
   if (!wcs_patch_here(b, j_vec) ||
-      !binary_emit_lea_reg_base_index_scale_disp(
-          b, BINARY_GP_R10, BINARY_GP_RCX, BINARY_GP_R9, 4, 0) ||
-      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_R10, 0) ||
-      !binary_emit_lea_reg_base_index_scale_disp(
-          b, BINARY_GP_R10, BINARY_GP_RDX, BINARY_GP_R9, 4, 0) ||
-      !simd_movdqu_xmm_mem_disp(b, 1, BINARY_GP_R10, 0) ||
-      !wcs_sse_66(b, 0x6F, 3, 0) ||
-      !wcs_sse_66(b, 0x6F, 4, 1) ||
-      !wcs_pmuldq(b, 0, 1) ||
-      !wcs_psrldq_imm(b, 3, 4) ||
-      !wcs_psrldq_imm(b, 4, 4) ||
-      !wcs_pmuldq(b, 3, 4) ||
-      !wcs_paddq(b, 2, 0) ||
-      !wcs_paddq(b, 2, 3) ||
-      !wcs_addsub_reg_imm8(b, BINARY_GP_R9, 0, 4)) {
+      !wcs_avx_vmovdqu_ymm_mem(b, 0, BINARY_GP_RCX, 0) ||
+      !wcs_avx_vmovdqu_ymm_mem(b, 1, BINARY_GP_RDX, 0) ||
+      !wcs_avx_vpmuldq_ymm(b, 3, 0, 1) ||
+      !wcs_avx_vpsrlq_ymm_imm(b, 0, 0, 32) ||
+      !wcs_avx_vpsrlq_ymm_imm(b, 1, 1, 32) ||
+      !wcs_avx_vpmuldq_ymm(b, 4, 0, 1) ||
+      !wcs_avx_vpaddq_ymm(b, 2, 2, 3) ||
+      !wcs_avx_vpaddq_ymm(b, 5, 5, 4) ||
+      !wcs_avx_vmovdqu_ymm_mem(b, 0, BINARY_GP_RCX, 32) ||
+      !wcs_avx_vmovdqu_ymm_mem(b, 1, BINARY_GP_RDX, 32) ||
+      !wcs_avx_vpmuldq_ymm(b, 3, 0, 1) ||
+      !wcs_avx_vpsrlq_ymm_imm(b, 0, 0, 32) ||
+      !wcs_avx_vpsrlq_ymm_imm(b, 1, 1, 32) ||
+      !wcs_avx_vpmuldq_ymm(b, 4, 0, 1) ||
+      !wcs_avx_vpaddq_ymm(b, 2, 2, 3) ||
+      !wcs_avx_vpaddq_ymm(b, 5, 5, 4) ||
+      !wcs_avx_vmovdqu_ymm_mem(b, 0, BINARY_GP_RCX, 64) ||
+      !wcs_avx_vmovdqu_ymm_mem(b, 1, BINARY_GP_RDX, 64) ||
+      !wcs_avx_vpmuldq_ymm(b, 3, 0, 1) ||
+      !wcs_avx_vpsrlq_ymm_imm(b, 0, 0, 32) ||
+      !wcs_avx_vpsrlq_ymm_imm(b, 1, 1, 32) ||
+      !wcs_avx_vpmuldq_ymm(b, 4, 0, 1) ||
+      !wcs_avx_vpaddq_ymm(b, 2, 2, 3) ||
+      !wcs_avx_vpaddq_ymm(b, 5, 5, 4) ||
+      !wcs_avx_vmovdqu_ymm_mem(b, 0, BINARY_GP_RCX, 96) ||
+      !wcs_avx_vmovdqu_ymm_mem(b, 1, BINARY_GP_RDX, 96) ||
+      !wcs_avx_vpmuldq_ymm(b, 3, 0, 1) ||
+      !wcs_avx_vpsrlq_ymm_imm(b, 0, 0, 32) ||
+      !wcs_avx_vpsrlq_ymm_imm(b, 1, 1, 32) ||
+      !wcs_avx_vpmuldq_ymm(b, 4, 0, 1) ||
+      !wcs_avx_vpaddq_ymm(b, 2, 2, 3) ||
+      !wcs_avx_vpaddq_ymm(b, 5, 5, 4) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 64) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 64) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 0, 64) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 0, 64)) {
     return 0;
   }
   {
@@ -1032,17 +1184,14 @@ int code_generator_binary_emit_simd_dot_i32(
   }
 
   if (!wcs_patch_here(b, j_scalar) ||
-      !binary_emit_lea_reg_base_index_scale_disp(
-          b, BINARY_GP_R10, BINARY_GP_RCX, BINARY_GP_R9, 4, 0) ||
-      !binary_emit_mov_reg_mem32(b, BINARY_GP_R10, BINARY_GP_R10, 0) ||
+      !binary_emit_mov_reg_mem32(b, BINARY_GP_R10, BINARY_GP_RCX, 0) ||
       !binary_emit_movsxd_reg_reg32(b, BINARY_GP_R10, BINARY_GP_R10) ||
-      !binary_emit_lea_reg_base_index_scale_disp(
-          b, BINARY_GP_R11, BINARY_GP_RDX, BINARY_GP_R9, 4, 0) ||
-      !binary_emit_mov_reg_mem32(b, BINARY_GP_R11, BINARY_GP_R11, 0) ||
-      !binary_emit_movsxd_reg_reg32(b, BINARY_GP_R11, BINARY_GP_R11) ||
-      !binary_emit_imul_reg_reg(b, BINARY_GP_R10, BINARY_GP_R11) ||
+      !binary_emit_mov_reg_mem32(b, BINARY_GP_R9, BINARY_GP_RDX, 0) ||
+      !binary_emit_movsxd_reg_reg32(b, BINARY_GP_R9, BINARY_GP_R9) ||
+      !binary_emit_imul_reg_reg(b, BINARY_GP_R10, BINARY_GP_R9) ||
       !wcs_add_reg_reg64(b, BINARY_GP_RAX, BINARY_GP_R10) ||
-      !wcs_addsub_reg_imm8(b, BINARY_GP_R9, 0, 1)) {
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 4) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDX, 0, 4)) {
     return 0;
   }
   {
@@ -1053,6 +1202,10 @@ int code_generator_binary_emit_simd_dot_i32(
   }
 
   if (!wcs_patch_here(b, j_done) ||
+      !wcs_avx_vpaddq_ymm(b, 2, 2, 5) ||
+      !wcs_avx_vextracti128(b, 3, 2, 1) ||
+      !wcs_avx_vzeroupper(b) ||
+      !wcs_paddq(b, 2, 3) ||
       !binary_emit_movq_reg_xmm(b, BINARY_GP_R10, BINARY_XMM2) ||
       !wcs_add_reg_reg64(b, BINARY_GP_RAX, BINARY_GP_R10) ||
       !wcs_pshufd(b, 3, 2, 0xEE) ||
@@ -1389,7 +1542,7 @@ static int wcs_horizontal_pmaxsd_to_reg(BinaryCodeBuffer *b, int xmm, int gpr) {
          wcs_pshufd(b, 1, xmm, 0x01) &&
          wcs_pmaxsd(b, xmm, 1) &&
          wcs_movd_reg_xmm(b, BINARY_GP_R9, xmm) &&
-         binary_emit_cmp_reg_reg(b, gpr, BINARY_GP_R9) &&
+         binary_emit_cmp_reg_reg(b, BINARY_GP_R9, gpr) &&
          binary_emit_cmovcc_reg_reg(b, 0x4F /* cmovg */, gpr, BINARY_GP_R9);
 }
 
@@ -1471,7 +1624,7 @@ int code_generator_binary_emit_simd_minmax_i32(
   }
   b = &context->code;
 
-  /* r10=min, r11=max, rsi=arr base, rcx=walk, r8=end, xmm4/xmm5 extrema */
+  /* r10=min, r11=max, rcx=walk, r8=end, xmm4/xmm5 extrema */
   if (!code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->dest,
                                                BINARY_GP_R10) ||
@@ -1479,14 +1632,13 @@ int code_generator_binary_emit_simd_minmax_i32(
           generator, context, &instruction->arguments[0], BINARY_GP_R11) ||
       !code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->lhs,
-                                               BINARY_GP_RSI) ||
+                                               BINARY_GP_RCX) ||
       !code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->rhs,
                                                BINARY_GP_RDX) ||
       !wcs_mov_reg_reg32(b, BINARY_GP_R8, BINARY_GP_RDX) ||
       !wcs_shift_reg_imm(b, BINARY_GP_R8, 0, 2) ||
-      !wcs_add_reg_reg64(b, BINARY_GP_R8, BINARY_GP_RSI) ||
-      !wcs_mov_reg_reg32(b, BINARY_GP_RCX, BINARY_GP_RSI) ||
+      !wcs_add_reg_reg64(b, BINARY_GP_R8, BINARY_GP_RCX) ||
       !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 4) ||
       !wcs_broadcast_i32_to_xmm(b, 4, BINARY_GP_R10) ||
       !wcs_broadcast_i32_to_xmm(b, 5, BINARY_GP_R11)) {
@@ -1501,17 +1653,26 @@ int code_generator_binary_emit_simd_minmax_i32(
 
   if (!binary_emit_mov_reg_reg(b, BINARY_GP_R9, BINARY_GP_R8) ||
       !binary_emit_alu_reg_reg(b, 0x29, BINARY_GP_R9, BINARY_GP_RCX) ||
-      !wcs_cmp_reg_imm32(b, BINARY_GP_R9, 16) ||
+      !wcs_cmp_reg_imm32(b, BINARY_GP_R9, 64) ||
       !wcs_jcc(b, 0x83 /* jae */, &j_vec) ||
       !wcs_jcc(b, 0, &j_scalar)) {
     return 0;
   }
 
   if (!wcs_patch_here(b, j_vec) ||
-      !wcs_movdqu_xmm_mem(b, 0, BINARY_GP_RCX) ||
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, 0) ||
       !wcs_pminsd(b, 4, 0) ||
       !wcs_pmaxsd(b, 5, 0) ||
-      !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 16)) {
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, 16) ||
+      !wcs_pminsd(b, 4, 0) ||
+      !wcs_pmaxsd(b, 5, 0) ||
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, 32) ||
+      !wcs_pminsd(b, 4, 0) ||
+      !wcs_pmaxsd(b, 5, 0) ||
+      !simd_movdqu_xmm_mem_disp(b, 0, BINARY_GP_RCX, 48) ||
+      !wcs_pminsd(b, 4, 0) ||
+      !wcs_pmaxsd(b, 5, 0) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 64)) {
     return 0;
   }
   {
@@ -1526,7 +1687,7 @@ int code_generator_binary_emit_simd_minmax_i32(
       !binary_emit_cmp_reg_reg(b, BINARY_GP_R14, BINARY_GP_R10) ||
       !binary_emit_cmovcc_reg_reg(b, 0x4C /* cmovl */, BINARY_GP_R10,
                                   BINARY_GP_R14) ||
-      !binary_emit_cmp_reg_reg(b, BINARY_GP_R11, BINARY_GP_R14) ||
+      !binary_emit_cmp_reg_reg(b, BINARY_GP_R14, BINARY_GP_R11) ||
       !binary_emit_cmovcc_reg_reg(b, 0x4F /* cmovg */, BINARY_GP_R11,
                                   BINARY_GP_R14) ||
       !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 0, 4)) {

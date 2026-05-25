@@ -17,7 +17,7 @@ ERROR_SOURCES = $(SRCDIR)/error/error_reporter.c
 DEBUG_SOURCES = $(SRCDIR)/debug/debug_info.c
 COMPILER_SOURCES = $(SRCDIR)/compiler/compiler_context.c $(SRCDIR)/compiler/compiler_crash.c
 COMMON_SOURCES = $(SRCDIR)/common.c
-MAIN_SOURCES = $(SRCDIR)/main.c
+MAIN_SOURCES = $(SRCDIR)/main.c $(SRCDIR)/tracy_build.c
 
 SOURCES = $(COMMON_SOURCES) $(LEXER_SOURCES) $(PARSER_SOURCES) $(SEMANTIC_SOURCES) $(IR_SOURCES) $(CODEGEN_SOURCES) $(LINKER_SOURCES) $(ERROR_SOURCES) $(DEBUG_SOURCES) $(COMPILER_SOURCES) $(MAIN_SOURCES)
 OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
@@ -38,6 +38,9 @@ bundle-stdlib: | $(BINDIR)
 bundle-runtime: | $(BINDIR)
 	rm -rf $(BINDIR)/runtime
 	cp -r $(RUNTIMEDIR) $(BINDIR)/runtime
+	$(CC) $(CFLAGS) -c $(STDLIBDIR)/tracy_helpers.c -o $(OBJDIR)/runtime/tracy_helpers.o
+	cp $(OBJDIR)/runtime/tracy_helpers.o $(BINDIR)/runtime/tracy_helpers.o
+	cp $(OBJDIR)/runtime/tracy_helpers.o $(BINDIR)/runtime/tracy_helpers.obj
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	@mkdir -p $(dir $@)

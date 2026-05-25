@@ -27,7 +27,7 @@ Available topics: `build`, `runtime` (aliases `heap`, `gc`), `interop`, `stdlib`
 
 ## Options
 
-`-o <file>` output assembly/object file (default `output.s`, or executable path when used with `--build`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`). `--build` build an executable on Windows (native COFF object + internal PE linker by default). `--emit-obj` emit a COFF object (default with `--build`). `--emit-asm` with `--build`, emit assembly and use NASM instead of native COFF. `--linker <internal|auto|gcc|msvc>` choose the Windows linker path (**default: `internal`**). `--link-arg <arg>` pass an extra linker argument in `--build` mode for additional DLLs/import libraries. `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode and embedded runtime crash traceback support. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-s`/`--stack-trace` embeds runtime crash traceback support without the rest of debug mode. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--profile-runtime` emit function-level runtime timing hooks and print a sorted report at process exit (Windows, `--emit-obj` / `--build` only). `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
+`-o <file>` output assembly/object file (default `output.s`, or executable path when used with `--build`). `-i <file>` input file (alternative to positional argument). `-I <dir>` add import search directory (repeatable). `--stdlib <dir>` set stdlib root (default auto-detects bundled stdlib near the compiler binary, then falls back to `./stdlib`). `--build` build an executable on Windows (native COFF object + internal PE linker by default). `--emit-obj` emit a COFF object (default with `--build`). `--emit-asm` with `--build`, emit assembly and use NASM instead of native COFF. `--linker <internal|auto|gcc|msvc>` choose the Windows linker path (**default: `internal`**). `--link-arg <arg>` pass an extra linker argument in `--build` mode for additional DLLs/import libraries. `--tracy` link `std/tracy` with the Tracy profiler (requires `--build`; set `TRACY_DIR` or `--tracy-dir`). `--tracy-dir <dir>` Tracy repo root for `--tracy`. `--prelude` auto-import `std/prelude` (std/io, std/math, std/conv, std/mem, std/process, std/net). `-d`/`--debug` debug mode and embedded runtime crash traceback support. `-g`/`--debug-symbols` generate debug symbols. `-l`/`--line-mapping` source line mapping. `-s`/`--stack-trace` embeds runtime crash traceback support without the rest of debug mode. `-O`/`--optimize` enable optimizations. `-r`/`--release` enables `-O`, strips assembly comments, removes unreachable functions, and disables generated runtime null/bounds checks in IR lowering. `--profile-runtime` emit function-level runtime timing hooks and print a sorted report at process exit (Windows, `--emit-obj` / `--build` only). `--strip-comments` omit emitted assembly comments. `-h`/`--help` print usage. See [Imports](imports.md) for path resolution and `-I`/`--stdlib` details.
 
 ## Compilation Pipeline
 
@@ -63,7 +63,23 @@ The AST and symbol/type metadata intern name-bearing strings (identifier names, 
 3. Legacy assembly path: `mettle --build --emit-asm main.mettle -o main.exe`
 4. External linker fallback: `mettle --build --linker auto main.mettle -o main.exe`
 
-`--build` keeps compilation inside Mettle's COFF object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. The internal linker probes common Win32 DLLs directly (`kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, `ucrtbase`, and `msvcrt`), so `std/win32`, `std/thread`, and `std/net` work without hand-written C bridge objects or default import-library flags. `--linker auto` tries the internal linker first and falls back to external linkers if needed. `--emit-asm` selects the NASM assembly path instead. Three optional helper objects ship with the Mettle installation — `crash_handler.o` (linked only for `-d`/`-s`/`-g` or IR null/bounds traps), `atomics.o` (linked only when `std/thread` interlocked atomics are referenced), and `profile.o` (linked when `--profile-runtime` is used) — and `--build` pulls them in automatically when needed.
+`--build` keeps compilation inside Mettle's COFF object emitter, bundled runtime objects, and internal PE linker. That path does not require `NASM`, `gcc`, or `link.exe` for the target executable. The internal linker probes common Win32 DLLs directly (`kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, `ucrtbase`, and `msvcrt`), so `std/win32`, `std/thread`, and `std/net` work without hand-written C bridge objects or default import-library flags. `--linker auto` tries the internal linker first and falls back to external linkers if needed. `--emit-asm` selects the NASM assembly path instead. Four optional helper objects ship with the Mettle installation — `crash_handler.o` (linked only for `-d`/`-s`/`-g` or IR null/bounds traps), `atomics.o` (linked only when `std/thread` interlocked atomics are referenced), `profile.o` (linked when `--profile-runtime` is used), and `tracy_helpers.o` (no-op stub when `std/tracy` is referenced without `--tracy`) — and `--build` pulls them in automatically when needed.
+
+### Tracy profiling (`--tracy`)
+
+Build with live Tracy instrumentation (compiles `stdlib/tracy_helpers.c` and `TracyClient.cpp` from your Tracy repo):
+
+```powershell
+mettle --build --tracy app.mettle -o app.exe
+```
+
+Tracy repo resolution order: `--tracy-dir <path>`, then `TRACY_DIR`, then `.mettle\tracy_dir` in the current directory, then `examples\tracy_demo\tracy_dir.local.bat`. The resolved path is saved to `.mettle\tracy_dir` for later builds.
+
+With MSVC (`cl`), Tracy objects link through the internal PE linker. With MinGW only (`g++`, no `cl`), Mettle uses `g++` for the final link and pulls in `secur32` / `dbghelp` automatically.
+
+Without `--tracy`, programs that import `std/tracy` still link the bundled no-op `tracy_helpers.o` stub so the same source builds for release and profiled runs.
+
+See [`examples/tracy_demo/`](../examples/tracy_demo/) for a full demo and [`stdlib/std/tracy.mettle`](../stdlib/std/tracy.mettle) for the API.
 
 ### Runtime profiling (`--profile-runtime`)
 
