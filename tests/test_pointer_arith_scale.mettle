@@ -1,0 +1,20 @@
+function main() -> int32 {
+  var arr: int32[4];
+  arr[0] = 10;
+  arr[1] = 20;
+  arr[2] = 30;
+  arr[3] = 40;
+
+  var p: int32* = &arr[0];
+  var q: int32* = p + 1;
+  if (q[0] != 20) {
+    return 1;
+  }
+
+  var diff: int64 = q - p;
+  if (diff != 1) {
+    return 2;
+  }
+
+  return 0;
+}
