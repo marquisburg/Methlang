@@ -760,6 +760,17 @@ int code_generator_binary_try_emit_binary_compare_branch_chain(
     return 0;
   }
 
+  /* Relational compares against an immediate belong to compare_branch_zero,
+   * not producer+compare fusion. Fusing them here can miscompile when a nearby
+   * db_page_size() temp is still live (e.g. cache_load's `if (n <= 0)` after
+   * db_pread). */
+  if (compare->lhs.kind == IR_OPERAND_SYMBOL &&
+      other_operand->kind == IR_OPERAND_INT &&
+      (strcmp(compare->text, "<=") == 0 || strcmp(compare->text, ">=") == 0 ||
+       strcmp(compare->text, "<") == 0 || strcmp(compare->text, ">") == 0)) {
+    return 0;
+  }
+
   if (code_generator_binary_try_emit_and_mask_compare_false_branch(
           generator, context, producer, compare, other_operand,
           branch->text)) {

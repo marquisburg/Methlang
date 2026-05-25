@@ -2886,12 +2886,45 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
 
   if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
       instruction->dest.kind == IR_OPERAND_TEMP && instruction->dest.name) {
+    Type *ret_type = function_symbol->data.function.return_type;
+    int ret_width = code_generator_binary_type_scalar_width(ret_type);
     int offset =
         code_generator_binary_get_temp_offset(context, instruction->dest.name);
     if (offset <= 0) {
       code_generator_set_error(generator, "Unknown IR temp '%s' in function '%s'",
                                instruction->dest.name, context->function_name);
       return 0;
+    }
+    /* Temp slots are 8 bytes and are loaded full-width (the load site has no
+     * type to narrow with). A sub-64-bit integer return must therefore be
+     * extended into all 8 bytes here, or the slot's upper bytes keep stale
+     * bits from a prior occupant and corrupt any later 64-bit use (e.g. a
+     * `ptr + header_size()` address computation). Widen RAX in place and store
+     * the full register. */
+    if (ret_width > 0 && ret_width < 8 &&
+        code_generator_binary_resolved_type_is_supported(ret_type, 0)) {
+      int ret_signed =
+          code_generator_binary_resolved_type_is_signed_integer(ret_type);
+      int ok = 1;
+      if (ret_width == 4) {
+        ok = ret_signed ? binary_emit_movsxd_rax_eax(&context->code)
+                        : binary_emit_mov_eax_eax(&context->code);
+      } else if (ret_width == 2) {
+        ok = ret_signed ? binary_emit_movsx_rax_ax(&context->code)
+                        : binary_emit_movzx_eax_ax(&context->code);
+      } else if (ret_width == 1) {
+        ok = ret_signed ? binary_emit_movsx_rax_al(&context->code)
+                        : binary_emit_movzx_eax_al(&context->code);
+      }
+      if (!ok) {
+        code_generator_set_error(
+            generator,
+            "Out of memory while extending call return in function '%s'",
+            context->function_name);
+        return 0;
+      }
+      return code_generator_binary_emit_temp_stack_store(
+          generator, context, offset, BINARY_GP_RAX, NULL);
     }
     if (!code_generator_binary_emit_temp_stack_store(
             generator, context, offset, BINARY_GP_RAX,
