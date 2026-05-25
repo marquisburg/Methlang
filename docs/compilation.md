@@ -152,7 +152,7 @@ Omit either object when the corresponding symbols are not referenced.
 
 For concurrency, import `std/thread` (Windows) or `std/thread_posix` and call `CreateThread`/`pthread_create` directly — Mettle no longer has built-in `async`/`spawn`/`Channel<T>` keywords.
 
-**Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, Windows startup emits a direct CRT `__getmainargs` call. No Mettle argv shim is required.
+**Programs with `main(argc, argv)`:** If your entry point has the signature `function main(argc: int32, argv: cstring*) -> int32`, Windows startup (both the emitted assembly entry stub and the internal `--build` `.startup.obj`) calls CRT `__getmainargs` before `main`. No Mettle argv shim is required.
 
 The output format depends on the target. Use `-f win64` for Windows, `-f elf64` for Linux. NASM is required for assembly; install from [https://www.nasm.us/](https://www.nasm.us/) if needed. On Linux and macOS, use `make` to build the compiler and run tests. The web server example in `web/` is Windows-only (Winsock). See [Standard Library](standard-library.md#platform-support) for Linux support details.
 

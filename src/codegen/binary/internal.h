@@ -413,6 +413,8 @@ int code_generator_binary_emit_crash_startup(CodeGenerator *generator);
 int code_generator_binary_emit_runtime_location_marker(
     CodeGenerator *generator, BinaryFunctionContext *context,
     size_t source_line, size_t source_column, const char *filename);
+int code_generator_binary_record_debug_label_export(
+    BinaryFunctionContext *context, const char *name, size_t offset);
 int code_generator_binary_export_debug_symbols(
     CodeGenerator *generator, BinaryFunctionContext *context,
     size_t text_section, size_t function_offset, size_t end_offset);

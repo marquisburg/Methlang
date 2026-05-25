@@ -209,6 +209,8 @@ $cases = @(
     AsmMustNotMatch = @("\bgc_alloc\b", "\bmettle_crash_install\b")
   },
   @{ Name = "pointers"; Path = "tests/test_pointers.mettle"; ShouldSucceed = $true },
+  @{ Name = "pointer_arith_scale"; Path = "tests/test_pointer_arith_scale.mettle"; ShouldSucceed = $true },
+  @{ Name = "cstring_pointer_arith"; Path = "tests/test_cstring_pointer_arith.mettle"; ShouldSucceed = $true },
   @{ Name = "pointer_null"; Path = "tests/test_pointer_null.mettle"; ShouldSucceed = $true },
   @{
     Name          = "runtime_null_deref_check"
@@ -2877,13 +2879,18 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "Direct object stack-trace symbol dump failed"
   }
-  foreach ($sym in @("mettle_debug_functions", "mettle_debug_locations", "mettle_crash_startup")) {
+  foreach ($sym in @("mettle_debug_functions", "mettle_debug_locations",
+      "mettle_debug_header", "mettle_debug_trap_sites", "mettle_debug_image",
+      "mettle_crash_startup")) {
     if ($symbols -notmatch [regex]::Escape($sym)) {
       throw "Direct object stack-trace object is missing symbol '$sym'"
     }
   }
   if ($symbols -notmatch "mettle_crash_trap") {
     throw "Direct object stack-trace object is missing undefined 'mettle_crash_trap' reference"
+  }
+  if ($symbols -notmatch "mettle_crash_trap_ex") {
+    throw "Direct object stack-trace object is missing undefined 'mettle_crash_trap_ex' reference"
   }
 
   Write-CaseResult -Name "stack_trace_support_coff" -Passed $true
@@ -2919,12 +2926,87 @@ try {
   if ($runtimeOut -notmatch "main") {
     throw "Direct object runtime null trace output missing Mettle frame names"
   }
+  if ($runtimeOut -notmatch "test_runtime_null_deref_check\.mettle:\d+:\d+") {
+    throw "Direct object runtime null trace output missing file:line:column"
+  }
+  if ($runtimeOut -notmatch "\|") {
+    throw "Direct object runtime null trace output missing source snippet border"
+  }
+  if ($runtimeOut -notmatch "\^") {
+    throw "Direct object runtime null trace output missing caret marker"
+  }
 
   Write-CaseResult -Name "runtime_null_trace_coff" -Passed $true
 }
 catch {
   $failed++
   Write-CaseResult -Name "runtime_null_trace_coff" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend bounds trap context: --build -s reports index and length.
+$total++
+try {
+  $boundsExe = Join-Path $tmpDir "test_runtime_bounds_trace_coff.exe"
+  $boundsBuild = & $CompilerPath --build -s tests\test_crash_bounds_context.mettle -o $boundsExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object runtime bounds trace build failed: $boundsBuild"
+  }
+
+  $boundsOut = & $boundsExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object runtime bounds trace exited with $LASTEXITCODE (expected 1)"
+  }
+  if ($boundsOut -notmatch "index 4") {
+    throw "Direct object runtime bounds trace output missing index value"
+  }
+  if ($boundsOut -notmatch "length 4") {
+    throw "Direct object runtime bounds trace output missing array length"
+  }
+  if ($boundsOut -notmatch "test_crash_bounds_context\.mettle:\d+:\d+") {
+    throw "Direct object runtime bounds trace output missing file:line:column"
+  }
+  if ($boundsOut -notmatch "\^") {
+    throw "Direct object runtime bounds trace output missing caret marker"
+  }
+
+  Write-CaseResult -Name "runtime_bounds_trace_coff" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "runtime_bounds_trace_coff" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend access-violation trace with file:line when symbolicated.
+$total++
+try {
+  $avExe = Join-Path $tmpDir "test_runtime_av_trace_coff.exe"
+  $avBuild = & $CompilerPath --build -s tests\test_runtime_av_trace_coff.mettle -o $avExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object runtime access-violation trace build failed: $avBuild"
+  }
+
+  $avOut = & $avExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object runtime access-violation trace exited with $LASTEXITCODE (expected 1)"
+  }
+  if ($avOut -notmatch "0xC0000005") {
+    throw "Direct object runtime access-violation trace output missing exception code"
+  }
+  if ($avOut -notmatch "Stack trace:") {
+    throw "Direct object runtime access-violation trace output missing stack trace header"
+  }
+  if ($avOut -notmatch "leaf_crash") {
+    throw "Direct object runtime access-violation trace output missing frame names"
+  }
+  if ($avOut -notmatch "test_runtime_av_trace_coff\.mettle:\d+:\d+") {
+    throw "Direct object runtime access-violation trace output missing file:line:column"
+  }
+
+  Write-CaseResult -Name "runtime_access_violation_trace_coff" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "runtime_access_violation_trace_coff" -Passed $false -Reason $_.Exception.Message
 }
 
 # main(argc, argv) test: emitted startup calls CRT __getmainargs directly.
@@ -2965,6 +3047,33 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "main_argc_argv" -Passed $false -Reason $_.Exception.Message
+}
+
+# main(argc, argv) via --build: internal startup must call __getmainargs.
+$total++
+try {
+  $buildArgvExe = Join-Path $tmpDir "test_main_argc_argv_build.exe"
+
+  $buildArgvOut = & $CompilerPath --build tests\test_main_argc_argv.mettle -o $buildArgvExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) --build compile failed: $buildArgvOut"
+  }
+
+  $exeImports = & objdump -p $buildArgvExe 2>&1 | Out-String
+  if ($exeImports -notmatch "__getmainargs") {
+    throw "main(argc,argv) --build executable missing __getmainargs import"
+  }
+
+  $buildArgvResult = & $buildArgvExe "dummy-arg" 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) --build test exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "main_argc_argv_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "main_argc_argv_build" -Passed $false -Reason $_.Exception.Message
 }
 
 $total++

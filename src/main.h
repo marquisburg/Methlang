@@ -42,6 +42,7 @@ typedef struct {
   int profile_runtime;
   int profile_runtime_ops;
   int debug_compiler;
+  int main_wants_argc_argv;
   LinkerMode linker_mode;
 } CompilerOptions;
 

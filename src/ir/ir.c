@@ -61,26 +61,7 @@ IROperand ir_operand_label(const char *name) {
   return operand;
 }
 
-void ir_operand_destroy(IROperand *operand) {
-  if (!operand) {
-    return;
-  }
-
-  switch (operand->kind) {
-  case IR_OPERAND_TEMP:
-  case IR_OPERAND_SYMBOL:
-  case IR_OPERAND_STRING:
-  case IR_OPERAND_LABEL:
-    free(operand->name);
-    break;
-  default:
-    break;
-  }
-
-  *operand = ir_operand_none();
-}
-
-static IROperand ir_operand_clone(const IROperand *operand) {
+IROperand ir_operand_copy(const IROperand *operand) {
   if (!operand) {
     return ir_operand_none();
   }
@@ -108,6 +89,29 @@ static IROperand ir_operand_clone(const IROperand *operand) {
   default:
     return ir_operand_none();
   }
+}
+
+void ir_operand_destroy(IROperand *operand) {
+  if (!operand) {
+    return;
+  }
+
+  switch (operand->kind) {
+  case IR_OPERAND_TEMP:
+  case IR_OPERAND_SYMBOL:
+  case IR_OPERAND_STRING:
+  case IR_OPERAND_LABEL:
+    free(operand->name);
+    break;
+  default:
+    break;
+  }
+
+  *operand = ir_operand_none();
+}
+
+static IROperand ir_operand_clone(const IROperand *operand) {
+  return ir_operand_copy(operand);
 }
 
 static void ir_instruction_destroy(IRInstruction *instruction) {

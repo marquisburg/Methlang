@@ -54,9 +54,11 @@ static void ir_set_error(IRLoweringContext *context, const char *format, ...);
 static char *ir_new_label_name(IRLoweringContext *context, const char *prefix);
 static int ir_emit(IRLoweringContext *context, IRFunction *function,
                    const IRInstruction *instruction);
-static int ir_emit_runtime_trap(IRLoweringContext *context,
-                                IRFunction *function, SourceLocation location,
-                                const char *message);
+static int ir_emit_runtime_trap_ex(IRLoweringContext *context,
+                                   IRFunction *function,
+                                   SourceLocation location, uint32_t kind,
+                                   const char *message, const IROperand *arg0,
+                                   const IROperand *arg1);
 static int ir_emit_null_check(IRLoweringContext *context, IRFunction *function,
                               SourceLocation location, const IROperand *value);
 static int ir_emit_bounds_check(IRLoweringContext *context,
@@ -1526,9 +1528,11 @@ static int ir_emit(IRLoweringContext *context, IRFunction *function,
   return 1;
 }
 
-static int ir_emit_runtime_trap(IRLoweringContext *context,
-                                IRFunction *function, SourceLocation location,
-                                const char *message) {
+static int ir_emit_runtime_trap_ex(IRLoweringContext *context,
+                                   IRFunction *function,
+                                   SourceLocation location, uint32_t kind,
+                                   const char *message, const IROperand *arg0,
+                                   const IROperand *arg1) {
   if (!context || !function || !message) {
     return 0;
   }
@@ -1536,20 +1540,29 @@ static int ir_emit_runtime_trap(IRLoweringContext *context,
   IRInstruction trap_call = {0};
   trap_call.op = IR_OP_CALL;
   trap_call.location = location;
-  trap_call.text = "mettle_crash_trap";
-  trap_call.argument_count = 1;
-  trap_call.arguments = malloc(sizeof(IROperand));
+  trap_call.text = "mettle_crash_trap_ex";
+  trap_call.argument_count = 4;
+  trap_call.arguments = calloc(4, sizeof(IROperand));
   if (!trap_call.arguments) {
     ir_set_error(context, "Out of memory while lowering runtime trap");
     return 0;
   }
-  trap_call.arguments[0] = ir_operand_string(message);
+  trap_call.arguments[0] = ir_operand_int((long long)kind);
+  trap_call.arguments[1] = ir_operand_string(message);
+  trap_call.arguments[2] = arg0 ? ir_operand_copy(arg0) : ir_operand_int(0);
+  trap_call.arguments[3] = arg1 ? ir_operand_copy(arg1) : ir_operand_int(0);
   if (!ir_emit(context, function, &trap_call)) {
     ir_operand_destroy(&trap_call.arguments[0]);
+    ir_operand_destroy(&trap_call.arguments[1]);
+    ir_operand_destroy(&trap_call.arguments[2]);
+    ir_operand_destroy(&trap_call.arguments[3]);
     free(trap_call.arguments);
     return 0;
   }
   ir_operand_destroy(&trap_call.arguments[0]);
+  ir_operand_destroy(&trap_call.arguments[1]);
+  ir_operand_destroy(&trap_call.arguments[2]);
+  ir_operand_destroy(&trap_call.arguments[3]);
   free(trap_call.arguments);
   return 1;
 }
@@ -1598,8 +1611,9 @@ static int ir_emit_null_check(IRLoweringContext *context, IRFunction *function,
   trap.location = location;
   trap.text = trap_label;
   if (!ir_emit(context, function, &trap) ||
-      !ir_emit_runtime_trap(context, function, location,
-                            "Fatal error: Null pointer dereference")) {
+      !ir_emit_runtime_trap_ex(
+          context, function, location, 1u,
+          "Fatal error: Null pointer dereference", NULL, NULL)) {
     free(trap_label);
     free(ok_label);
     return 0;
@@ -1685,8 +1699,9 @@ static int ir_emit_bounds_check(IRLoweringContext *context,
   trap.location = location;
   trap.text = trap_label;
   if (!ir_emit(context, function, &trap) ||
-      !ir_emit_runtime_trap(context, function, location,
-                            "Fatal error: Array index out of bounds")) {
+      !ir_emit_runtime_trap_ex(context, function, location, 2u,
+                               "Fatal error: Array index out of bounds", index,
+                               &compare.rhs)) {
     free(trap_label);
     free(ok_label);
     ir_operand_destroy(&in_bounds);
@@ -2076,6 +2091,225 @@ static int ir_type_array_element_stride(Type *element_type) {
     return 8;
   }
   return (int)element_type->size;
+}
+
+static int ir_type_is_pointer(Type *type) {
+  return type && type->kind == TYPE_POINTER && type->base_type;
+}
+
+static int ir_emit_binary_instruction(IRLoweringContext *context,
+                                      IRFunction *function,
+                                      SourceLocation location, const char *op,
+                                      IROperand dest, IROperand lhs,
+                                      IROperand rhs) {
+  IRInstruction instruction = {0};
+  instruction.op = IR_OP_BINARY;
+  instruction.location = location;
+  instruction.dest = dest;
+  instruction.lhs = lhs;
+  instruction.rhs = rhs;
+  instruction.text = op;
+  return ir_emit(context, function, &instruction);
+}
+
+static int ir_emit_scaled_index_offset(IRLoweringContext *context,
+                                       IRFunction *function,
+                                       SourceLocation location,
+                                       const IROperand *index, int stride,
+                                       IROperand *out_offset) {
+  if (!context || !function || !index || !out_offset) {
+    return 0;
+  }
+
+  if (stride == 1) {
+    *out_offset = ir_clone_operand_local(index);
+    return out_offset->kind != IR_OPERAND_NONE;
+  }
+
+  IROperand scaled = ir_operand_none();
+  if (!ir_make_temp_operand(context, &scaled)) {
+    return 0;
+  }
+
+  if (!ir_emit_binary_instruction(context, function, location, "*", scaled,
+                                  *index, ir_operand_int(stride))) {
+    ir_operand_destroy(&scaled);
+    return 0;
+  }
+
+  *out_offset = scaled;
+  return 1;
+}
+
+static int ir_try_lower_pointer_arithmetic(IRLoweringContext *context,
+                                           IRFunction *function,
+                                           BinaryExpression *binary,
+                                           SourceLocation location,
+                                           IROperand *out_value) {
+  const char *op = NULL;
+  Type *left_type = NULL;
+  Type *right_type = NULL;
+  int left_is_pointer = 0;
+  int right_is_pointer = 0;
+
+  if (!context || !function || !binary || !binary->operator || !out_value) {
+    return 0;
+  }
+
+  op = binary->operator;
+  if (strcmp(op, "+") != 0 && strcmp(op, "-") != 0) {
+    return 0;
+  }
+
+  left_type = ir_infer_expression_type(context, binary->left);
+  right_type = ir_infer_expression_type(context, binary->right);
+  if (!left_type || !right_type) {
+    return 0;
+  }
+
+  left_is_pointer = ir_type_is_pointer(left_type);
+  right_is_pointer = ir_type_is_pointer(right_type);
+  if (!left_is_pointer && !right_is_pointer) {
+    return 0;
+  }
+
+  if (strcmp(op, "+") == 0) {
+    Type *pointer_type = NULL;
+    ASTNode *pointer_expr = NULL;
+    ASTNode *index_expr = NULL;
+
+    if (left_is_pointer && type_checker_is_integer_type(right_type)) {
+      pointer_type = left_type;
+      pointer_expr = binary->left;
+      index_expr = binary->right;
+    } else if (right_is_pointer && type_checker_is_integer_type(left_type)) {
+      pointer_type = right_type;
+      pointer_expr = binary->right;
+      index_expr = binary->left;
+    } else {
+      return 0;
+    }
+
+    IROperand base = ir_operand_none();
+    IROperand index = ir_operand_none();
+    IROperand offset = ir_operand_none();
+    IROperand destination = ir_operand_none();
+    int stride = ir_type_array_element_stride(pointer_type->base_type);
+
+    if (!ir_lower_expression(context, function, pointer_expr, &base) ||
+        !ir_lower_expression(context, function, index_expr, &index) ||
+        !ir_emit_scaled_index_offset(context, function, location, &index,
+                                     stride, &offset) ||
+        !ir_make_temp_operand(context, &destination)) {
+      ir_operand_destroy(&offset);
+      ir_operand_destroy(&index);
+      ir_operand_destroy(&base);
+      return 0;
+    }
+
+    if (!ir_emit_binary_instruction(context, function, location, "+",
+                                    destination, base, offset)) {
+      ir_operand_destroy(&destination);
+      ir_operand_destroy(&offset);
+      ir_operand_destroy(&index);
+      ir_operand_destroy(&base);
+      return 0;
+    }
+
+    ir_operand_destroy(&offset);
+    ir_operand_destroy(&index);
+    ir_operand_destroy(&base);
+    *out_value = destination;
+    return 1;
+  }
+
+  if (left_is_pointer && type_checker_is_integer_type(right_type)) {
+    Type *pointer_type = left_type;
+    IROperand base = ir_operand_none();
+    IROperand index = ir_operand_none();
+    IROperand offset = ir_operand_none();
+    IROperand destination = ir_operand_none();
+    int stride = ir_type_array_element_stride(pointer_type->base_type);
+
+    if (!ir_lower_expression(context, function, binary->left, &base) ||
+        !ir_lower_expression(context, function, binary->right, &index) ||
+        !ir_emit_scaled_index_offset(context, function, location, &index,
+                                     stride, &offset) ||
+        !ir_make_temp_operand(context, &destination)) {
+      ir_operand_destroy(&offset);
+      ir_operand_destroy(&index);
+      ir_operand_destroy(&base);
+      return 0;
+    }
+
+    if (!ir_emit_binary_instruction(context, function, location, "-",
+                                    destination, base, offset)) {
+      ir_operand_destroy(&destination);
+      ir_operand_destroy(&offset);
+      ir_operand_destroy(&index);
+      ir_operand_destroy(&base);
+      return 0;
+    }
+
+    ir_operand_destroy(&offset);
+    ir_operand_destroy(&index);
+    ir_operand_destroy(&base);
+    *out_value = destination;
+    return 1;
+  }
+
+  if (left_is_pointer && right_is_pointer && left_type->base_type &&
+      right_type->base_type &&
+      left_type->base_type->size == right_type->base_type->size &&
+      left_type->base_type->kind == right_type->base_type->kind) {
+    IROperand lhs = ir_operand_none();
+    IROperand rhs = ir_operand_none();
+    IROperand byte_diff = ir_operand_none();
+    IROperand destination = ir_operand_none();
+    int stride = ir_type_array_element_stride(left_type->base_type);
+
+    if (!ir_lower_expression(context, function, binary->left, &lhs) ||
+        !ir_lower_expression(context, function, binary->right, &rhs) ||
+        !ir_make_temp_operand(context, &byte_diff)) {
+      ir_operand_destroy(&rhs);
+      ir_operand_destroy(&lhs);
+      return 0;
+    }
+
+    if (!ir_emit_binary_instruction(context, function, location, "-", byte_diff,
+                                    lhs, rhs)) {
+      ir_operand_destroy(&byte_diff);
+      ir_operand_destroy(&rhs);
+      ir_operand_destroy(&lhs);
+      return 0;
+    }
+
+    ir_operand_destroy(&rhs);
+    ir_operand_destroy(&lhs);
+
+    if (stride == 1) {
+      *out_value = byte_diff;
+      return 1;
+    }
+
+    if (!ir_make_temp_operand(context, &destination)) {
+      ir_operand_destroy(&byte_diff);
+      return 0;
+    }
+
+    if (!ir_emit_binary_instruction(context, function, location, "/", destination,
+                                    byte_diff, ir_operand_int(stride))) {
+      ir_operand_destroy(&destination);
+      ir_operand_destroy(&byte_diff);
+      return 0;
+    }
+
+    ir_operand_destroy(&byte_diff);
+    *out_value = destination;
+    return 1;
+  }
+
+  return 0;
 }
 
 static int ir_make_temp_operand(IRLoweringContext *context,
@@ -3035,6 +3269,11 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       ir_operand_destroy(&right);
       ir_operand_destroy(&left);
       *out_value = destination;
+      return 1;
+    }
+
+    if (ir_try_lower_pointer_arithmetic(context, function, binary,
+                                        expression->location, out_value)) {
       return 1;
     }
 

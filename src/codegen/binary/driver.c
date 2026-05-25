@@ -60,7 +60,10 @@ int code_generator_emit_binary_function(CodeGenerator *generator,
         context.runtime_end_label,
         function_declaration ? function_declaration->location.line : 0,
         function_declaration ? function_declaration->location.column : 0,
-        generator->debug_info->source_filename);
+        code_generator_runtime_filename(
+            generator, function_declaration
+                                 ? function_declaration->location.filename
+                                 : NULL));
   }
 
   if (!code_generator_binary_emit_prologue(generator, &context, function_data)) {
@@ -137,7 +140,8 @@ int code_generator_emit_binary_function(CodeGenerator *generator,
         if (!code_generator_binary_emit_runtime_location_marker(
                 generator, &context, instruction->location.line,
                 instruction->location.column,
-                generator->debug_info->source_filename)) {
+                code_generator_runtime_filename(
+                    generator, instruction->location.filename))) {
           binary_function_context_destroy(&context);
           return 0;
         }

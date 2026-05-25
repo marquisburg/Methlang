@@ -5800,7 +5800,8 @@ static int ir_match_null_trap_diamond(const IRFunction *function,
   }
   const IRInstruction *call = &function->instructions[idx];
   if (call->op != IR_OP_CALL || !call->text ||
-      strcmp(call->text, "mettle_crash_trap") != 0) {
+      (strcmp(call->text, "mettle_crash_trap") != 0 &&
+       strcmp(call->text, "mettle_crash_trap_ex") != 0)) {
     return 0;
   }
 

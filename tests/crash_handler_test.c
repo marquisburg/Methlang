@@ -12,8 +12,9 @@
  * Each scenario runs in a forked child so the parent can capture the child's
  * stderr and assert on it; the child is expected to die via the handler.
  *
- * On Windows this is a no-op (the SEH-based path already has dedicated
- * coverage in run_tests.ps1 via runtime_null_trace / access_violation_trace).
+ * On Windows this is a no-op; rich traceback output is covered by run_tests.ps1
+ * (runtime_null_trace_coff, runtime_bounds_trace_coff,
+ * runtime_access_violation_trace_coff).
  */
 
 #include "../src/runtime/crash_handler.h"
@@ -106,8 +107,9 @@ static void scenario_debug_trap(void) {
   register_fake_image();
   mettle_crash_install();
   /* Mimic a compiler-emitted runtime check firing. */
-  mettle_crash_trap("Fatal error: Null pointer dereference",
-                          (const void *)(uintptr_t)&victim_function, NULL);
+  mettle_crash_trap_ex(METTLE_CRASH_TRAP_NULL_DEREF,
+                       "Fatal error: Null pointer dereference",
+                       (const void *)(uintptr_t)&victim_function, NULL, 0, 0);
   _exit(0);
 }
 
@@ -123,12 +125,14 @@ static int test_debug_trap_emits_message(void) {
   int status = 0;
   size_t n = run_child_capture(scenario_debug_trap, buf, sizeof(buf), &status);
   TEST_ASSERT(n > 0, "debug_trap produced no output");
-  TEST_ASSERT(strstr(buf, "Fatal error: Null pointer dereference") != NULL,
-              "debug_trap output missing the trap message");
+  TEST_ASSERT(strstr(buf, "Fatal error: null pointer dereference") != NULL,
+              "debug_trap output missing the trap headline");
   TEST_ASSERT(strstr(buf, "Stack trace:") != NULL,
               "debug_trap output missing stack trace header");
   TEST_ASSERT(strstr(buf, "victim_function") != NULL,
               "debug_trap output missing registered function name");
+  TEST_ASSERT(strstr(buf, "crash_demo.mettle:7:3") != NULL,
+              "debug_trap output missing file:line:column");
   TEST_ASSERT(WIFEXITED(status) && WEXITSTATUS(status) == 1,
               "debug_trap child should exit with code 1");
   return 1;

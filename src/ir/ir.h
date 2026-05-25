@@ -165,6 +165,7 @@ IROperand ir_operand_float(double value);
 IROperand ir_operand_float_sized(double value, int float_bits);
 IROperand ir_operand_string(const char *value);
 IROperand ir_operand_label(const char *name);
+IROperand ir_operand_copy(const IROperand *operand);
 void ir_operand_destroy(IROperand *operand);
 
 IRFunction *ir_function_create(const char *name);

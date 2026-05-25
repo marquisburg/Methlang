@@ -1,4 +1,5 @@
 #include "code_generator_internal.h"
+#include "program_entry.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -570,7 +571,7 @@ static int code_generator_emit_entry_point(CodeGenerator *generator,
                                            ASTNode *program) {
   Program *program_data = (Program *)program->data;
   int has_main = 0;
-  int main_wants_argc_argv = 0;
+  int main_wants_argc_argv = program_main_wants_argc_argv(program);
   if (program_data) {
     for (size_t i = 0; i < program_data->declaration_count; i++) {
       ASTNode *declaration = program_data->declarations[i];
@@ -582,17 +583,6 @@ static int code_generator_emit_entry_point(CodeGenerator *generator,
       if (func_data && func_data->name &&
           strcmp(func_data->name, "main") == 0) {
         has_main = 1;
-        if (func_data->parameter_count == 2 && func_data->parameter_types &&
-            func_data->parameter_types[0] && func_data->parameter_types[1]) {
-          const char *p0 = func_data->parameter_types[0];
-          const char *p1 = func_data->parameter_types[1];
-          int p0_ok = (strcmp(p0, "int32") == 0 || strcmp(p0, "int64") == 0);
-          int p1_ok = (strcmp(p1, "cstring*") == 0 ||
-                      (p1[0] && strstr(p1, "*") != NULL));
-          if (p0_ok && p1_ok) {
-            main_wants_argc_argv = 1;
-          }
-        }
         break;
       }
     }
@@ -1020,7 +1010,8 @@ void code_generator_generate_function(CodeGenerator *generator,
     code_generator_add_runtime_function_mapping(
         generator, func_data->name, func_data->name, runtime_end_label,
         function->location.line, function->location.column,
-        generator->debug_info->source_filename);
+        code_generator_runtime_filename(generator,
+                                        function->location.filename));
   }
 
   // Enter a new scope for the function
@@ -1154,13 +1145,15 @@ void code_generator_generate_statement(CodeGenerator *generator,
 
   // Add line mapping for statement if debug info is enabled
   if (generator->generate_debug_info && statement->location.line > 0) {
-    code_generator_add_line_mapping(generator, statement->location.line,
-                                    statement->location.column,
-                                    generator->debug_info->source_filename);
+    code_generator_add_line_mapping(
+        generator, statement->location.line, statement->location.column,
+        code_generator_runtime_filename(generator, statement->location.filename));
     code_generator_emit_debug_label(generator, statement->location.line);
+  }
+  if (generator->generate_stack_trace_support && statement->location.line > 0) {
     code_generator_emit_runtime_location_marker(
         generator, statement->location.line, statement->location.column,
-        generator->debug_info->source_filename);
+        code_generator_runtime_filename(generator, statement->location.filename));
   }
 
   switch (statement->type) {

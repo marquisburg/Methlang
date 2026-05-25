@@ -203,6 +203,40 @@ void code_generator_set_debug_sidecar_emission(CodeGenerator *generator,
   generator->generate_debug_info = enable ? 1 : 0;
 }
 
+const char *code_generator_runtime_filename(CodeGenerator *generator,
+                                            const char *node_filename) {
+  if (node_filename && node_filename[0] != '\0') {
+    return node_filename;
+  }
+  if (generator && generator->debug_info &&
+      generator->debug_info->source_filename) {
+    return generator->debug_info->source_filename;
+  }
+  return "";
+}
+
+void code_generator_record_runtime_trap_site(
+    CodeGenerator *generator, const char *trap_pc_label, uint32_t kind,
+    size_t line, size_t column, const char *filename,
+    const char *message_template, const char *static_context) {
+  char *source_line = NULL;
+  const char *resolved_filename = NULL;
+
+  if (!generator || !generator->debug_info ||
+      !generator->generate_stack_trace_support || !trap_pc_label ||
+      !generator->current_function_name || line == 0) {
+    return;
+  }
+
+  resolved_filename = code_generator_runtime_filename(generator, filename);
+  source_line = debug_info_read_source_line(resolved_filename, line);
+  debug_info_add_runtime_trap_site_mapping(
+      generator->debug_info, trap_pc_label, kind,
+      generator->current_function_name, resolved_filename, line, column,
+      source_line, message_template, static_context);
+  free(source_line);
+}
+
 void code_generator_set_eliminate_unreachable_functions(
     CodeGenerator *generator, int enable) {
   if (!generator) {

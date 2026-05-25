@@ -188,6 +188,12 @@ void code_generator_add_runtime_function_mapping(CodeGenerator *generator,
                                                  size_t source_line,
                                                  size_t source_column,
                                                  const char *filename);
+const char *code_generator_runtime_filename(CodeGenerator *generator,
+                                              const char *node_filename);
+void code_generator_record_runtime_trap_site(
+    CodeGenerator *generator, const char *trap_pc_label, uint32_t kind,
+    size_t line, size_t column, const char *filename,
+    const char *message_template, const char *static_context);
 void code_generator_emit_runtime_debug_tables(CodeGenerator *generator);
 int code_generator_allocate_stack_space(CodeGenerator *generator, int size,
                                         int alignment);

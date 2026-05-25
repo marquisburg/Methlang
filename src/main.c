@@ -3,7 +3,9 @@
 #endif
 #include "main.h"
 #include "common.h"
+#include "codegen/binary/startup.h"
 #include "codegen/binary_emitter.h"
+#include "codegen/program_entry.h"
 #include "linker/pe_emitter.h"
 #include "string_intern.h"
 #include "compiler/compiler_context.h"
@@ -1181,111 +1183,11 @@ static int mettle_build_with_link(const char *object_filename,
 }
 
 static int write_internal_startup_object(const char *path, int profile_runtime,
-                                         int stack_trace_init) {
-  BinaryEmitter *emitter = NULL;
-  size_t text = 0u;
-  unsigned char code[128];
-  size_t len = 0u;
-  size_t crash_startup_call_offset = 0u;
-  size_t main_call_offset = 0u;
-  size_t report_call_offset = 0u;
-  size_t exit_call_offset = 0u;
-  int result = 1;
-
-  emitter = binary_emitter_create(BINARY_TARGET_FORMAT_COFF_WIN64);
-  if (!emitter) {
-    return 1;
-  }
-
-  code[len++] = 0x48u;
-  code[len++] = 0x83u;
-  code[len++] = 0xECu;
-  code[len++] = 0x28u;
-
-  if (stack_trace_init) {
-    code[len++] = 0xE8u;
-    crash_startup_call_offset = len;
-    code[len++] = 0x00u;
-    code[len++] = 0x00u;
-    code[len++] = 0x00u;
-    code[len++] = 0x00u;
-  }
-
-  code[len++] = 0xE8u;
-  main_call_offset = len;
-  code[len++] = 0x00u;
-  code[len++] = 0x00u;
-  code[len++] = 0x00u;
-  code[len++] = 0x00u;
-
-  if (profile_runtime) {
-    code[len++] = 0x50u;
-    code[len++] = 0x48u;
-    code[len++] = 0x83u;
-    code[len++] = 0xECu;
-    code[len++] = 0x28u;
-    code[len++] = 0xE8u;
-    report_call_offset = len;
-    code[len++] = 0x00u;
-    code[len++] = 0x00u;
-    code[len++] = 0x00u;
-    code[len++] = 0x00u;
-    code[len++] = 0x48u;
-    code[len++] = 0x83u;
-    code[len++] = 0xC4u;
-    code[len++] = 0x28u;
-    code[len++] = 0x58u;
-  }
-
-  code[len++] = 0x89u;
-  code[len++] = 0xC1u;
-  code[len++] = 0xE8u;
-  exit_call_offset = len;
-  code[len++] = 0x00u;
-  code[len++] = 0x00u;
-  code[len++] = 0x00u;
-  code[len++] = 0x00u;
-
-  text = binary_emitter_get_or_create_section(emitter, ".text", BINARY_SECTION_TEXT,
-                                              0, 16u);
-  if (text == (size_t)-1 ||
-      !binary_emitter_append_bytes(emitter, text, code, len, NULL) ||
-      !binary_emitter_define_symbol(emitter, "mainCRTStartup", BINARY_SYMBOL_GLOBAL,
-                                    text, 0u, len) ||
-      !binary_emitter_declare_external(emitter, "main") ||
-      !binary_emitter_declare_external(emitter, "ExitProcess") ||
-      !binary_emitter_add_relocation(emitter, text, main_call_offset,
-                                     BINARY_RELOCATION_REL32, "main", 0) ||
-      !binary_emitter_add_relocation(emitter, text, exit_call_offset,
-                                     BINARY_RELOCATION_REL32, "ExitProcess", 0)) {
-    goto cleanup;
-  }
-
-  if (stack_trace_init &&
-      (!binary_emitter_declare_external(emitter, "mettle_crash_startup") ||
-       !binary_emitter_add_relocation(
-           emitter, text, crash_startup_call_offset, BINARY_RELOCATION_REL32,
-           "mettle_crash_startup", 0))) {
-    goto cleanup;
-  }
-
-  if (profile_runtime &&
-      (!binary_emitter_declare_external(emitter, "mettle_profile_report") ||
-       !binary_emitter_add_relocation(emitter, text, report_call_offset,
-                                      BINARY_RELOCATION_REL32,
-                                      "mettle_profile_report", 0))) {
-    goto cleanup;
-  }
-
-  if (!binary_emitter_write_object_file(emitter, path)) {
-    goto cleanup;
-  }
-
-  result = 0;
-
-cleanup:
-  binary_emitter_destroy(emitter);
-  return result;
+                                         int stack_trace_init,
+                                         int main_wants_argc_argv) {
+  return binary_write_program_startup_object(path, profile_runtime,
+                                             stack_trace_init,
+                                             main_wants_argc_argv);
 }
 
 /* Build → link routing is documented in docs/linker-build-pipelines.md (asm+GCC
@@ -1820,8 +1722,8 @@ static int mettle_link_object_file(const char *object_filename,
               "falling back to external linkers\n");
     } else if (write_internal_startup_object(
                    startup_object, profile_runtime,
-                   options && options->generate_stack_trace_support ? 1 : 0) !=
-               0) {
+                   options && options->generate_stack_trace_support ? 1 : 0,
+                   options && options->main_wants_argc_argv ? 1 : 0) != 0) {
       if (linker_mode == LINKER_MODE_INTERNAL || (!has_gcc && !has_link)) {
         fprintf(stderr,
                 "Error: Failed to generate internal-linker startup object\n");
@@ -2693,6 +2595,8 @@ int compile_file(const char *input_filename, const char *output_filename,
     result = 1;
     goto cleanup;
   }
+
+  options->main_wants_argc_argv = program_main_wants_argc_argv(program);
 
   compiler_set_phase(PROFILE_PHASE_MONOMORPHIZE);
   phase_start = compiler_profile_begin(&profile);

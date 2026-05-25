@@ -2,6 +2,7 @@
 #define DEBUG_INFO_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include "../parser/ast.h"
 
 typedef enum {
@@ -50,6 +51,18 @@ typedef struct {
 } RuntimeLocationMapping;
 
 typedef struct {
+    char* address_label;
+    uint32_t kind;
+    char* function_name;
+    char* filename;
+    size_t line;
+    size_t column;
+    char* source_line;
+    char* message_template;
+    char* static_context;
+} RuntimeTrapSiteMapping;
+
+typedef struct {
     DebugSymbol* symbols;
     size_t symbol_count;
     size_t symbol_capacity;
@@ -65,6 +78,10 @@ typedef struct {
     RuntimeLocationMapping* runtime_locations;
     size_t runtime_location_count;
     size_t runtime_location_capacity;
+
+    RuntimeTrapSiteMapping* runtime_trap_sites;
+    size_t runtime_trap_site_count;
+    size_t runtime_trap_site_capacity;
     
     char* source_filename;
     char* assembly_filename;
@@ -93,6 +110,18 @@ void debug_info_add_runtime_location_mapping(DebugInfo* debug_info,
                                              const char* address_label,
                                              const char* filename,
                                              size_t line, size_t column);
+
+void debug_info_add_runtime_trap_site_mapping(DebugInfo* debug_info,
+                                              const char* address_label,
+                                              uint32_t kind,
+                                              const char* function_name,
+                                              const char* filename,
+                                              size_t line, size_t column,
+                                              const char* source_line,
+                                              const char* message_template,
+                                              const char* static_context);
+
+char* debug_info_read_source_line(const char* filename, size_t line_number);
 
 void debug_info_generate_dwarf(DebugInfo* debug_info, const char* output_filename);
 void debug_info_generate_stabs(DebugInfo* debug_info, const char* output_filename);

@@ -8,6 +8,7 @@
 #define INITIAL_MAPPING_CAPACITY 256
 #define INITIAL_RUNTIME_FUNCTION_CAPACITY 64
 #define INITIAL_RUNTIME_LOCATION_CAPACITY 256
+#define INITIAL_RUNTIME_TRAP_SITE_CAPACITY 64
 
 DebugInfo* debug_info_create(const char* source_filename, const char* assembly_filename) {
     DebugInfo* debug_info = malloc(sizeof(DebugInfo));
@@ -53,6 +54,20 @@ DebugInfo* debug_info_create(const char* source_filename, const char* assembly_f
     debug_info->runtime_function_capacity = INITIAL_RUNTIME_FUNCTION_CAPACITY;
     debug_info->runtime_location_count = 0;
     debug_info->runtime_location_capacity = INITIAL_RUNTIME_LOCATION_CAPACITY;
+
+    debug_info->runtime_trap_sites =
+        malloc(sizeof(RuntimeTrapSiteMapping) * INITIAL_RUNTIME_TRAP_SITE_CAPACITY);
+    if (!debug_info->runtime_trap_sites) {
+        free(debug_info->runtime_locations);
+        free(debug_info->runtime_functions);
+        free(debug_info->line_mappings);
+        free(debug_info->symbols);
+        free(debug_info);
+        return NULL;
+    }
+
+    debug_info->runtime_trap_site_count = 0;
+    debug_info->runtime_trap_site_capacity = INITIAL_RUNTIME_TRAP_SITE_CAPACITY;
     
     debug_info->source_filename = mettle_strdup(source_filename);
     debug_info->assembly_filename = mettle_strdup(assembly_filename);
@@ -89,6 +104,16 @@ void debug_info_destroy(DebugInfo* debug_info) {
         free(debug_info->runtime_locations[i].filename);
     }
     free(debug_info->runtime_locations);
+
+    for (size_t i = 0; i < debug_info->runtime_trap_site_count; i++) {
+        free(debug_info->runtime_trap_sites[i].address_label);
+        free(debug_info->runtime_trap_sites[i].function_name);
+        free(debug_info->runtime_trap_sites[i].filename);
+        free(debug_info->runtime_trap_sites[i].source_line);
+        free(debug_info->runtime_trap_sites[i].message_template);
+        free(debug_info->runtime_trap_sites[i].static_context);
+    }
+    free(debug_info->runtime_trap_sites);
     
     free(debug_info->source_filename);
     free(debug_info->assembly_filename);
@@ -145,6 +170,21 @@ static int debug_info_expand_runtime_locations(DebugInfo* debug_info) {
 
         debug_info->runtime_locations = new_items;
         debug_info->runtime_location_capacity = new_capacity;
+    }
+    return 1;
+}
+
+static int debug_info_expand_runtime_trap_sites(DebugInfo* debug_info) {
+    if (debug_info->runtime_trap_site_count >=
+        debug_info->runtime_trap_site_capacity) {
+        size_t new_capacity = debug_info->runtime_trap_site_capacity * 2;
+        RuntimeTrapSiteMapping* new_items = realloc(
+            debug_info->runtime_trap_sites,
+            sizeof(RuntimeTrapSiteMapping) * new_capacity);
+        if (!new_items) return 0;
+
+        debug_info->runtime_trap_sites = new_items;
+        debug_info->runtime_trap_site_capacity = new_capacity;
     }
     return 1;
 }
@@ -248,6 +288,84 @@ void debug_info_add_runtime_location_mapping(DebugInfo* debug_info,
     mapping->line = line;
     mapping->column = column;
     debug_info->runtime_location_count++;
+}
+
+char* debug_info_read_source_line(const char* filename, size_t line_number) {
+    char buffer[4096];
+    size_t current_line = 1;
+    FILE* file = NULL;
+    char* result = NULL;
+
+    if (!filename || line_number == 0) {
+        return NULL;
+    }
+
+    file = fopen(filename, "rb");
+    if (!file) {
+        return NULL;
+    }
+
+    while (fgets(buffer, (int)sizeof(buffer), file)) {
+        if (current_line == line_number) {
+            size_t length = strlen(buffer);
+            while (length > 0 &&
+                   (buffer[length - 1] == '\n' || buffer[length - 1] == '\r')) {
+                buffer[--length] = '\0';
+            }
+            result = mettle_strdup(buffer);
+            break;
+        }
+        current_line++;
+    }
+
+    fclose(file);
+    return result;
+}
+
+void debug_info_add_runtime_trap_site_mapping(
+    DebugInfo* debug_info, const char* address_label, uint32_t kind,
+    const char* function_name, const char* filename, size_t line,
+    size_t column, const char* source_line, const char* message_template,
+    const char* static_context) {
+    RuntimeTrapSiteMapping* mapping = NULL;
+
+    if (!debug_info || !address_label || !function_name) {
+        return;
+    }
+
+    if (!debug_info_expand_runtime_trap_sites(debug_info)) {
+        return;
+    }
+
+    mapping = &debug_info->runtime_trap_sites[debug_info->runtime_trap_site_count];
+    mapping->address_label = mettle_strdup(address_label);
+    mapping->kind = kind;
+    mapping->function_name = mettle_strdup(function_name);
+    mapping->filename = mettle_strdup(filename ? filename : "");
+    mapping->line = line;
+    mapping->column = column;
+    mapping->source_line = source_line ? mettle_strdup(source_line) : NULL;
+    mapping->message_template =
+        message_template ? mettle_strdup(message_template) : NULL;
+    mapping->static_context =
+        static_context ? mettle_strdup(static_context) : NULL;
+    if (!mapping->address_label || !mapping->function_name || !mapping->filename) {
+        free(mapping->address_label);
+        free(mapping->function_name);
+        free(mapping->filename);
+        free(mapping->source_line);
+        free(mapping->message_template);
+        free(mapping->static_context);
+        mapping->address_label = NULL;
+        mapping->function_name = NULL;
+        mapping->filename = NULL;
+        mapping->source_line = NULL;
+        mapping->message_template = NULL;
+        mapping->static_context = NULL;
+        return;
+    }
+
+    debug_info->runtime_trap_site_count++;
 }
 
 

@@ -1,7 +1,6 @@
 #include "code_generator_internal.h"
 
-static void code_generator_emit_debug_string(CodeGenerator *generator,
-                                             const char *label,
+static void code_generator_emit_debug_string(CodeGenerator *generator,                                             const char *label,
                                              const char *value) {
   if (!generator || !label) {
     return;
@@ -139,7 +138,8 @@ void code_generator_emit_runtime_location_marker(CodeGenerator *generator,
                                                  size_t source_line,
                                                  size_t source_column,
                                                  const char *filename) {
-  if (!generator || !generator->debug_info || source_line == 0) {
+  if (!generator || !generator->debug_info || source_line == 0 ||
+      !generator->generate_stack_trace_support) {
     return;
   }
 
@@ -288,8 +288,6 @@ cleanup:
       free(location_file_labels[i]);
     }
   }
-  free(function_name_labels);
-  free(function_file_labels);
   free(location_name_labels);
   free(location_file_labels);
 }
