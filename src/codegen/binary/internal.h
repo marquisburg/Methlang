@@ -226,6 +226,7 @@ BinaryLabelEntry *binary_label_table_get(BinaryLabelTable *table, const char *na
 size_t *code_generator_binary_build_loop_weights( const IRFunction *function);
 const IRInstruction *code_generator_binary_find_temp_producer_before( const IRFunction *function, size_t before, const char *name);
 Type *code_generator_binary_get_operand_type(CodeGenerator *generator, const IROperand *operand);
+Type *code_generator_binary_get_operand_type_in_context( CodeGenerator *generator, BinaryFunctionContext *context, const IROperand *operand);
 Type *code_generator_binary_get_resolved_type(CodeGenerator *generator, const char *type_name, int allow_void);
 IRFunction *code_generator_find_ir_function_binary(CodeGenerator *generator, const char *name);
 int binary_align_up_int(int value, int alignment, int *result_out);
@@ -251,6 +252,7 @@ int binary_emit_call_reg(BinaryCodeBuffer *buffer, BinaryGpRegister reg);
 int binary_emit_cmovcc_reg_reg(BinaryCodeBuffer *buffer, unsigned char opcode, BinaryGpRegister destination, BinaryGpRegister source);
 int binary_emit_cmp_reg_imm32(BinaryCodeBuffer *buffer, BinaryGpRegister reg, uint32_t immediate);
 int binary_emit_cmp_reg_reg(BinaryCodeBuffer *buffer, BinaryGpRegister lhs, BinaryGpRegister rhs);
+int binary_emit_cmp_reg_reg32(BinaryCodeBuffer *buffer, BinaryGpRegister lhs, BinaryGpRegister rhs);
 int binary_emit_cqo(BinaryCodeBuffer *buffer);
 int binary_emit_cvtsd2ss_xmm_xmm(BinaryCodeBuffer *buffer, BinaryXmmRegister destination, BinaryXmmRegister source);
 int binary_emit_cvtsi2sd_xmm_reg(BinaryCodeBuffer *buffer, BinaryXmmRegister destination, BinaryGpRegister source);
@@ -289,6 +291,7 @@ int binary_emit_mov_reg_imm64(BinaryCodeBuffer *buffer, BinaryGpRegister destina
 int binary_emit_mov_reg_mem(BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister base, int displacement);
 int binary_emit_mov_reg_mem32(BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister base, int displacement);
 int binary_emit_mov_reg_reg(BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister source);
+int binary_emit_mov_reg_reg32(BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister source);
 int binary_emit_mov_reg_rip_mem(BinaryCodeBuffer *buffer, BinaryGpRegister destination, size_t *displacement_offset_out);
 int binary_emit_movd_reg_xmm(BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryXmmRegister source);
 int binary_emit_movd_xmm_reg(BinaryCodeBuffer *buffer, BinaryXmmRegister destination, BinaryGpRegister source);
@@ -376,7 +379,7 @@ int code_generator_binary_emit_call_argument_load( CodeGenerator *generator, Bin
 int code_generator_binary_emit_call_indirect( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_cast(CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_compare_false_branch( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *compare, const char *target_label);
-int code_generator_binary_emit_compare_false_branch_from_rax( CodeGenerator *generator, BinaryFunctionContext *context, const char *op, const IROperand *rhs, const char *target_label);
+int code_generator_binary_emit_compare_false_branch_from_rax( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *compare, const IROperand *rhs, const char *target_label);
 int code_generator_binary_emit_compare_flags( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *compare);
 int code_generator_binary_emit_count_word_starts( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_cstring_literal_address( CodeGenerator *generator, BinaryFunctionContext *context, const char *value, BinaryGpRegister target_register);
@@ -494,6 +497,15 @@ int code_generator_binary_shift_scale(const IRInstruction *instruction, int *sca
 int code_generator_binary_symbol_already_promoted( BinaryFunctionContext *context, const char *name);
 int code_generator_binary_symbol_assigned_register( CodeGenerator *generator, BinaryFunctionContext *context, const char *name, BinaryGpRegister *register_out);
 int code_generator_binary_symbol_is_scalar_accessible( CodeGenerator *generator, const char *name);
+int code_generator_binary_symbol_move_width(Symbol *symbol);
+int code_generator_binary_type_scalar_width(Type *type);
+int code_generator_binary_emit_temp_stack_load( CodeGenerator *generator, BinaryFunctionContext *context, int stack_offset, BinaryGpRegister target_register, Type *type);
+int code_generator_binary_emit_temp_stack_store( CodeGenerator *generator, BinaryFunctionContext *context, int stack_offset, BinaryGpRegister source_register, Type *type);
+int code_generator_binary_instruction_compare_width( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
+int code_generator_binary_emit_reg_reg_compare( BinaryCodeBuffer *buffer, BinaryGpRegister lhs, BinaryGpRegister rhs, int width);
+int code_generator_binary_emit_reg_reg_move( BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister source, Type *type);
+int code_generator_binary_emit_symbol_stack_load( CodeGenerator *generator, BinaryFunctionContext *context, Symbol *symbol, int stack_offset, BinaryGpRegister target_register);
+int code_generator_binary_emit_symbol_stack_store( CodeGenerator *generator, BinaryFunctionContext *context, Symbol *symbol, int stack_offset, BinaryGpRegister source_register);
 size_t code_generator_binary_symbol_write_count( const IRFunction *function, const char *name);
 int code_generator_binary_try_emit_address_add_load( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_address_add_store( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);

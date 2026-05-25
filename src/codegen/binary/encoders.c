@@ -73,6 +73,27 @@ int binary_emit_mov_reg_reg(BinaryCodeBuffer *buffer,
   return 1;
 }
 
+int binary_emit_mov_reg_reg32(BinaryCodeBuffer *buffer,
+                                     BinaryGpRegister destination,
+                                     BinaryGpRegister source) {
+  if (!buffer) {
+    return 0;
+  }
+  if (destination == source) {
+    return 1;
+  }
+
+  if (!binary_emit_rex(buffer, 0, source >> 3, 0, destination >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x89) ||
+      !binary_code_buffer_append_u8(
+          buffer, (unsigned char)(0xC0 | ((source & 7) << 3) |
+                                  (destination & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
 int binary_emit_mov_reg_imm32_zero_extend(BinaryCodeBuffer *buffer,
                                                  BinaryGpRegister destination,
                                                  uint32_t immediate) {
@@ -623,6 +644,24 @@ int binary_emit_cmp_reg_reg(BinaryCodeBuffer *buffer,
   }
 
   if (!binary_emit_rex(buffer, 1, rhs >> 3, 0, lhs >> 3) ||
+      !binary_code_buffer_append_u8(buffer, 0x39) ||
+      !binary_code_buffer_append_u8(
+          buffer,
+          (unsigned char)(0xC0 | ((rhs & 7) << 3) | (lhs & 7)))) {
+    return 0;
+  }
+
+  return 1;
+}
+
+int binary_emit_cmp_reg_reg32(BinaryCodeBuffer *buffer,
+                                     BinaryGpRegister lhs,
+                                     BinaryGpRegister rhs) {
+  if (!buffer) {
+    return 0;
+  }
+
+  if (!binary_emit_rex(buffer, 0, rhs >> 3, 0, lhs >> 3) ||
       !binary_code_buffer_append_u8(buffer, 0x39) ||
       !binary_code_buffer_append_u8(
           buffer,

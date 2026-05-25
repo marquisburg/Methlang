@@ -250,9 +250,11 @@ int code_generator_binary_emit_compare_flags(
     return 0;
   }
 
-  return binary_emit_cmp_reg_reg(
+  return code_generator_binary_emit_reg_reg_compare(
       &context->code, lhs_has_register ? lhs_register : BINARY_GP_RAX,
-      rhs_has_register ? rhs_register : BINARY_GP_R10);
+      rhs_has_register ? rhs_register : BINARY_GP_R10,
+      code_generator_binary_instruction_compare_width(generator, context,
+                                                    compare));
 }
 
 int code_generator_binary_emit_compare_false_branch(
@@ -320,9 +322,11 @@ int code_generator_binary_emit_compare_false_branch(
                                                  BINARY_GP_RAX)) {
       return 0;
     }
-    if (!binary_emit_cmp_reg_reg(
+    if (!code_generator_binary_emit_reg_reg_compare(
             &context->code, lhs_has_register ? lhs_register : BINARY_GP_RAX,
-            rhs_has_register ? rhs_register : BINARY_GP_R10)) {
+            rhs_has_register ? rhs_register : BINARY_GP_R10,
+            code_generator_binary_instruction_compare_width(generator, context,
+                                                            compare))) {
       return 0;
     }
   }
@@ -563,13 +567,15 @@ int code_generator_binary_emit_integer_binary_to_rax(
 }
 
 int code_generator_binary_emit_compare_false_branch_from_rax(
-    CodeGenerator *generator, BinaryFunctionContext *context, const char *op,
-    const IROperand *rhs, const char *target_label) {
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *compare, const IROperand *rhs,
+    const char *target_label) {
   unsigned char branch_opcode = 0;
   size_t displacement_offset = 0;
 
-  if (!generator || !context || !op || !rhs || !target_label ||
-      !code_generator_binary_compare_false_jcc(op, &branch_opcode)) {
+  if (!generator || !context || !compare || !compare->text || !rhs ||
+      !target_label ||
+      !code_generator_binary_compare_false_jcc(compare->text, &branch_opcode)) {
     return 0;
   }
 
@@ -581,8 +587,11 @@ int code_generator_binary_emit_compare_false_branch_from_rax(
     }
   } else if (!code_generator_binary_emit_operand_load(generator, context, rhs,
                                                       BINARY_GP_R10) ||
-             !binary_emit_cmp_reg_reg(&context->code, BINARY_GP_RAX,
-                                      BINARY_GP_R10)) {
+             !code_generator_binary_emit_reg_reg_compare(
+                 &context->code, BINARY_GP_RAX, BINARY_GP_R10,
+                 code_generator_binary_instruction_compare_width(generator,
+                                                                 context,
+                                                                 compare))) {
     return 0;
   }
 
@@ -770,7 +779,7 @@ int code_generator_binary_try_emit_binary_compare_branch_chain(
   }
 
   if (!code_generator_binary_emit_compare_false_branch_from_rax(
-          generator, context, compare->text, other_operand, branch->text)) {
+          generator, context, compare, other_operand, branch->text)) {
     return 0;
   }
 

@@ -6664,6 +6664,15 @@ static int ir_find_next_significant(const IRFunction *function,
   return 0;
 }
 
+static int ir_i32_shift_stride_is_element_step(long long stride, int elem_size) {
+  return elem_size == 4 && (stride == 4 || stride == 16);
+}
+
+static int ir_i32_ptr_offset_is_element_step(const IROperand *operand) {
+  return ir_operand_is_int_value(operand, 4) ||
+         ir_operand_is_int_value(operand, 16);
+}
+
 static int ir_match_shift_loop_at(const IRFunction *function, size_t header_index,
                                   IRShiftLoopMatch *out) {
   if (!function || header_index >= function->instruction_count) {
@@ -6828,8 +6837,8 @@ static int ir_function_has_shift_loop_match(const IRFunction *function) {
     IRShiftLoopMatch match;
     if (function->instructions[i].op == IR_OP_LABEL &&
         ir_match_shift_loop_at(function, i, &match) &&
-        match.elem_size == 4 && match.stride == 4 && match.cmp_op &&
-        strcmp(match.cmp_op, "<=") == 0) {
+        ir_i32_shift_stride_is_element_step(match.stride, match.elem_size) &&
+        match.cmp_op && strcmp(match.cmp_op, "<=") == 0) {
       return 1;
     }
   }
@@ -6885,8 +6894,8 @@ static int ir_try_vectorize_insertion_sort_loop_at(IRFunction *function,
     }
     if (function->instructions[i].op == IR_OP_LABEL &&
         ir_match_shift_loop_at(function, i, &inner) &&
-        inner.elem_size == 4 && inner.stride == 4 && inner.cmp_op &&
-        strcmp(inner.cmp_op, "<=") == 0) {
+        ir_i32_shift_stride_is_element_step(inner.stride, inner.elem_size) &&
+        inner.cmp_op && strcmp(inner.cmp_op, "<=") == 0) {
       inner_header = i;
     }
     if (function->instructions[i].op == IR_OP_JUMP &&
@@ -6917,7 +6926,7 @@ static int ir_try_vectorize_insertion_sort_loop_at(IRFunction *function,
       strcmp(cur_inc->text, "+") != 0 ||
       cur_inc->dest.kind != IR_OPERAND_SYMBOL || !cur_inc->dest.name ||
       !ir_operand_is_symbol_named(&cur_inc->lhs, cur_inc->dest.name) ||
-      !ir_operand_is_int_value(&cur_inc->rhs, 4) ||
+      !ir_i32_ptr_offset_is_element_step(&cur_inc->rhs) ||
       i_inc->op != IR_OP_BINARY || i_inc->is_float || !i_inc->text ||
       strcmp(i_inc->text, "+") != 0 ||
       !ir_operand_is_symbol_named(&i_inc->dest, i_symbol) ||
@@ -6934,7 +6943,7 @@ static int ir_try_vectorize_insertion_sort_loop_at(IRFunction *function,
         !probe->is_float &&
         ir_operand_is_symbol_named(&probe->dest, cur_symbol) &&
         probe->lhs.kind == IR_OPERAND_SYMBOL && probe->lhs.name &&
-        ir_operand_is_int_value(&probe->rhs, 4)) {
+        ir_i32_ptr_offset_is_element_step(&probe->rhs)) {
       base_symbol = probe->lhs.name;
       break;
     }

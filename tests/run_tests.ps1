@@ -211,6 +211,7 @@ $cases = @(
   @{ Name = "pointers"; Path = "tests/test_pointers.mettle"; ShouldSucceed = $true },
   @{ Name = "pointer_arith_scale"; Path = "tests/test_pointer_arith_scale.mettle"; ShouldSucceed = $true },
   @{ Name = "cstring_pointer_arith"; Path = "tests/test_cstring_pointer_arith.mettle"; ShouldSucceed = $true },
+  @{ Name = "uint32_cross_lineage_eq"; Path = "tests/test_uint32_cross_lineage_eq.mettle"; ShouldSucceed = $true },
   @{ Name = "pointer_null"; Path = "tests/test_pointer_null.mettle"; ShouldSucceed = $true },
   @{
     Name          = "runtime_null_deref_check"
@@ -2479,7 +2480,8 @@ $directObjectScalarCases = @(
   @{ Name = "direct_object_abi_float_stack"; Path = "tests/test_abi_float_stack.mettle"; ExitCode = 1; Label = "float-stack" },
   @{ Name = "direct_object_cast_expression"; Path = "tests/test_cast_expression.mettle"; ExitCode = 0; Label = "cast-expression" },
   @{ Name = "direct_object_int32_load_sign_ext"; Path = "tests/test_direct_object_int32_load_sign_ext.mettle"; ExitCode = 0; Label = "int32-load-sign-ext" },
-  @{ Name = "direct_object_int32_call_return_compare"; Path = "tests/test_int32_call_return_compare.mettle"; ExitCode = 1; Label = "int32-call-return-compare" }
+  @{ Name = "direct_object_int32_call_return_compare"; Path = "tests/test_int32_call_return_compare.mettle"; ExitCode = 1; Label = "int32-call-return-compare" },
+  @{ Name = "direct_object_uint32_cross_lineage_eq"; Path = "tests/test_uint32_cross_lineage_eq.mettle"; ExitCode = 0; Label = "uint32-cross-lineage-eq" }
 )
 
 foreach ($case in $directObjectScalarCases) {

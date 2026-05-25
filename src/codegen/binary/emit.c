@@ -1197,8 +1197,8 @@ int code_generator_binary_emit_operand_load(
                                context->function_name);
       return 0;
     }
-    return binary_emit_mov_reg_mem(&context->code, target_register,
-                                   BINARY_GP_RBP, -offset);
+    return code_generator_binary_emit_temp_stack_load(
+        generator, context, offset, target_register, NULL);
   }
 
   case IR_OPERAND_SYMBOL: {
@@ -1232,8 +1232,9 @@ int code_generator_binary_emit_operand_load(
       if (target_register == assigned_register) {
         return 1;
       }
-      return binary_emit_mov_reg_reg(&context->code, target_register,
-                                     assigned_register);
+      return code_generator_binary_emit_reg_reg_move(
+          &context->code, target_register, assigned_register,
+          symbol ? symbol->type : NULL);
     }
     if (offset > 0 && symbol &&
         code_generator_binary_type_is_direct_aggregate(symbol->type)) {
@@ -1312,8 +1313,8 @@ int code_generator_binary_emit_operand_load(
           operand->name ? operand->name : "<unnamed>", context->function_name);
       return 0;
     }
-    return binary_emit_mov_reg_mem(&context->code, target_register,
-                                   BINARY_GP_RBP, -offset);
+    return code_generator_binary_emit_symbol_stack_load(
+        generator, context, symbol, offset, target_register);
   }
 
   default:
@@ -1516,8 +1517,9 @@ int code_generator_binary_emit_destination_store(
       if (assigned_register == source_register) {
         return 1;
       }
-      return binary_emit_mov_reg_reg(&context->code, assigned_register,
-                                     source_register);
+      return code_generator_binary_emit_reg_reg_move(
+          &context->code, assigned_register, source_register,
+          symbol ? symbol->type : NULL);
     }
     if (offset > 0 && symbol &&
         code_generator_binary_type_is_direct_aggregate(symbol->type)) {
@@ -1597,8 +1599,8 @@ int code_generator_binary_emit_destination_store(
           context->function_name);
       return 0;
     }
-    return binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP, -offset,
-                                   source_register);
+    return code_generator_binary_emit_symbol_stack_store(
+        generator, context, symbol, offset, source_register);
   }
 
   default:
@@ -2882,6 +2884,23 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
     }
   }
 
+  if (function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
+      instruction->dest.kind == IR_OPERAND_TEMP && instruction->dest.name) {
+    int offset =
+        code_generator_binary_get_temp_offset(context, instruction->dest.name);
+    if (offset <= 0) {
+      code_generator_set_error(generator, "Unknown IR temp '%s' in function '%s'",
+                               instruction->dest.name, context->function_name);
+      return 0;
+    }
+    if (!code_generator_binary_emit_temp_stack_store(
+            generator, context, offset, BINARY_GP_RAX,
+            function_symbol->data.function.return_type)) {
+      return 0;
+    }
+    return 1;
+  }
+
   if (!code_generator_binary_emit_destination_store(generator, context,
                                                     &instruction->dest,
                                                     BINARY_GP_RAX)) {
@@ -3817,8 +3836,10 @@ static int binary_emit_binary_integer(CodeGenerator *generator,
   }
 
   if (is_compare &&
-      (!binary_emit_cmp_reg_reg(&context->code, BINARY_GP_RAX,
-                                BINARY_GP_R10) ||
+      (!code_generator_binary_emit_reg_reg_compare(
+          &context->code, BINARY_GP_RAX, BINARY_GP_R10,
+          code_generator_binary_instruction_compare_width(generator, context,
+                                                          instruction)) ||
        !binary_emit_setcc_al(&context->code, condition_opcode) ||
        !binary_emit_movzx_eax_al(&context->code))) {
     goto emit_failure;
@@ -4058,8 +4079,10 @@ int code_generator_binary_emit_instruction(
         !code_generator_binary_emit_operand_load(generator, context,
                                                  &instruction->lhs,
                                                  BINARY_GP_RAX) ||
-        !binary_emit_cmp_reg_reg(&context->code, BINARY_GP_RAX,
-                                 BINARY_GP_R10) ||
+        !code_generator_binary_emit_reg_reg_compare(
+            &context->code, BINARY_GP_RAX, BINARY_GP_R10,
+            code_generator_binary_instruction_compare_width(generator, context,
+                                                            instruction)) ||
         !binary_emit_je_placeholder(&context->code, &displacement_offset) ||
         !binary_label_fixup_table_add(&context->label_fixups, instruction->text,
                                       displacement_offset)) {
@@ -4136,8 +4159,10 @@ int code_generator_binary_emit_instruction(
       if (code_generator_binary_symbol_assigned_register(
               generator, context, instruction->dest.name, &assign_dest_reg)) {
         Type *assign_dest_type =
-            code_generator_binary_get_operand_type(generator,
-                                                   &instruction->dest);
+            code_generator_binary_get_operand_type_in_context(
+                generator, context, &instruction->dest);
+        int dest_scalar_width =
+            code_generator_binary_type_scalar_width(assign_dest_type);
         int dest_is_cstring =
             code_generator_binary_type_is_cstring(assign_dest_type) ||
             binary_named_slot_table_get_offset(&context->cstring_symbols,
@@ -4147,13 +4172,24 @@ int code_generator_binary_emit_instruction(
                              : (generator->type_checker
                                     ? generator->type_checker->builtin_cstring
                                     : NULL);
-        int assign_ok = dest_is_cstring
-                            ? code_generator_binary_emit_call_argument_load(
-                                  generator, context, &instruction->lhs,
-                                  effective_dest_type, assign_dest_reg)
-                            : code_generator_binary_emit_operand_load(
-                                  generator, context, &instruction->lhs,
-                                  assign_dest_reg);
+        int assign_ok = 0;
+        if (instruction->lhs.kind == IR_OPERAND_TEMP &&
+            instruction->lhs.name && dest_scalar_width == 4) {
+          int offset = code_generator_binary_get_temp_offset(
+              context, instruction->lhs.name);
+          assign_ok = offset > 0 &&
+                      code_generator_binary_emit_temp_stack_load(
+                          generator, context, offset, assign_dest_reg,
+                          assign_dest_type);
+        } else {
+          assign_ok = dest_is_cstring
+                          ? code_generator_binary_emit_call_argument_load(
+                                generator, context, &instruction->lhs,
+                                effective_dest_type, assign_dest_reg)
+                          : code_generator_binary_emit_operand_load(
+                                generator, context, &instruction->lhs,
+                                assign_dest_reg);
+        }
         if (!assign_ok) {
           if (!generator->has_error) {
             code_generator_set_error(generator,

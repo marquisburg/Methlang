@@ -1022,6 +1022,38 @@ Type *code_generator_binary_get_operand_type(CodeGenerator *generator,
   }
 }
 
+Type *code_generator_binary_get_operand_type_in_context(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand) {
+  Type *type = code_generator_binary_get_operand_type(generator, operand);
+  IRFunction *ir_function = NULL;
+
+  if (type || !generator || !operand || operand->kind != IR_OPERAND_SYMBOL ||
+      !operand->name) {
+    return type;
+  }
+
+  if (context && context->function_name) {
+    ir_function =
+        code_generator_find_ir_function_binary(generator, context->function_name);
+  }
+  if (!ir_function) {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < ir_function->instruction_count; i++) {
+    const IRInstruction *instruction = &ir_function->instructions[i];
+    if (instruction->op == IR_OP_DECLARE_LOCAL && instruction->dest.name &&
+        strcmp(instruction->dest.name, operand->name) == 0 &&
+        instruction->text) {
+      return code_generator_binary_get_resolved_type(generator, instruction->text,
+                                                     0);
+    }
+  }
+
+  return NULL;
+}
+
 int code_generator_binary_validate_signature(CodeGenerator *generator,
                                                     FunctionDeclaration *function_data,
                                                     IRFunction *ir_function) {
@@ -1537,3 +1569,216 @@ int code_generator_binary_prepare_function_context(
   return 1;
 }
 
+int code_generator_binary_instruction_compare_width(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  Type *type = NULL;
+
+  if (!generator || !instruction) {
+    return 8;
+  }
+
+  if (instruction->ast_ref) {
+    type = code_generator_infer_expression_type(generator, instruction->ast_ref);
+  }
+  if (!type) {
+    Type *lhs_type = code_generator_binary_get_operand_type_in_context(
+        generator, context, &instruction->lhs);
+    Type *rhs_type = code_generator_binary_get_operand_type_in_context(
+        generator, context, &instruction->rhs);
+    if (lhs_type && rhs_type) {
+      int lhs_size = code_generator_binary_resolved_type_scalar_size(lhs_type);
+      int rhs_size = code_generator_binary_resolved_type_scalar_size(rhs_type);
+      if (lhs_size == rhs_size && lhs_size == 4) {
+        return 4;
+      }
+    }
+  }
+  if (type && !instruction->is_float) {
+    int size = code_generator_binary_resolved_type_scalar_size(type);
+    if (size == 4) {
+      return 4;
+    }
+  }
+
+  return 8;
+}
+
+int code_generator_binary_emit_reg_reg_compare(
+    BinaryCodeBuffer *buffer, BinaryGpRegister lhs, BinaryGpRegister rhs,
+    int width) {
+  if (!buffer) {
+    return 0;
+  }
+  if (width == 4) {
+    return binary_emit_cmp_reg_reg32(buffer, lhs, rhs);
+  }
+  return binary_emit_cmp_reg_reg(buffer, lhs, rhs);
+}
+
+int code_generator_binary_emit_reg_reg_move(
+    BinaryCodeBuffer *buffer, BinaryGpRegister destination,
+    BinaryGpRegister source, Type *type) {
+  int width = 8;
+  int is_signed = 0;
+
+  if (!buffer) {
+    return 0;
+  }
+  if (destination == source) {
+    return 1;
+  }
+
+  if (type) {
+    width = code_generator_binary_resolved_type_scalar_size(type);
+    is_signed = code_generator_binary_resolved_type_is_signed_integer(type);
+  }
+
+  if (width == 4) {
+    if (is_signed) {
+      return binary_emit_movsxd_reg_reg32(buffer, destination, source);
+    }
+    return binary_emit_mov_reg_reg32(buffer, destination, source);
+  }
+  return binary_emit_mov_reg_reg(buffer, destination, source);
+}
+
+int code_generator_binary_emit_temp_stack_load(
+    CodeGenerator *generator, BinaryFunctionContext *context, int stack_offset,
+    BinaryGpRegister target_register, Type *type) {
+  int width = code_generator_binary_type_scalar_width(type);
+  int is_signed = type
+                      ? code_generator_binary_resolved_type_is_signed_integer(type)
+                      : 0;
+
+  if (!generator || !context || stack_offset <= 0) {
+    return 0;
+  }
+  if (width == 4) {
+    if (!binary_emit_mov_reg_mem32(&context->code, target_register,
+                                   BINARY_GP_RBP, -stack_offset)) {
+      return 0;
+    }
+    if (is_signed) {
+      return binary_emit_movsxd_reg_reg32(&context->code, target_register,
+                                          target_register);
+    }
+    return 1;
+  }
+  return binary_emit_mov_reg_mem(&context->code, target_register,
+                                 BINARY_GP_RBP, -stack_offset);
+}
+
+int code_generator_binary_emit_temp_stack_store(
+    CodeGenerator *generator, BinaryFunctionContext *context, int stack_offset,
+    BinaryGpRegister source_register, Type *type) {
+  int width = code_generator_binary_type_scalar_width(type);
+
+  if (!generator || !context || stack_offset <= 0) {
+    return 0;
+  }
+  if (width == 4) {
+    return binary_emit_mov_mem_reg32(&context->code, BINARY_GP_RBP, -stack_offset,
+                                     source_register);
+  }
+  return binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP, -stack_offset,
+                                 source_register);
+}
+
+int code_generator_binary_emit_symbol_stack_load(
+    CodeGenerator *generator, BinaryFunctionContext *context, Symbol *symbol,
+    int stack_offset, BinaryGpRegister target_register) {
+  int size = 8;
+  int is_signed = 0;
+
+  if (!generator || !context || stack_offset <= 0) {
+    return 0;
+  }
+
+  if (symbol && symbol->type) {
+    size = code_generator_binary_resolved_type_scalar_size(symbol->type);
+    is_signed = code_generator_binary_resolved_type_is_signed_integer(symbol->type);
+  }
+
+  switch (size) {
+  case 1:
+    if (!binary_emit_movzx_reg_mem8(&context->code, target_register,
+                                    BINARY_GP_RBP, -stack_offset)) {
+      return 0;
+    }
+    if (is_signed &&
+        !binary_emit_movsx_reg_reg8(&context->code, target_register,
+                                    target_register)) {
+      return 0;
+    }
+    return 1;
+  case 2:
+    if (!binary_emit_movzx_reg_mem16(&context->code, target_register,
+                                     BINARY_GP_RBP, -stack_offset)) {
+      return 0;
+    }
+    if (is_signed &&
+        !binary_emit_movsx_reg_reg16(&context->code, target_register,
+                                     target_register)) {
+      return 0;
+    }
+    return 1;
+  case 4:
+    if (!binary_emit_mov_reg_mem32(&context->code, target_register,
+                                   BINARY_GP_RBP, -stack_offset)) {
+      return 0;
+    }
+    if (is_signed &&
+        !binary_emit_movsxd_reg_reg32(&context->code, target_register,
+                                      target_register)) {
+      return 0;
+    }
+    return 1;
+  default:
+    return binary_emit_mov_reg_mem(&context->code, target_register,
+                                   BINARY_GP_RBP, -stack_offset);
+  }
+}
+
+int code_generator_binary_emit_symbol_stack_store(
+    CodeGenerator *generator, BinaryFunctionContext *context, Symbol *symbol,
+    int stack_offset, BinaryGpRegister source_register) {
+  int size = 8;
+
+  if (!generator || !context || stack_offset <= 0) {
+    return 0;
+  }
+
+  if (symbol && symbol->type) {
+    size = code_generator_binary_resolved_type_scalar_size(symbol->type);
+  }
+
+  switch (size) {
+  case 1:
+    return binary_emit_mov_mem_reg8(&context->code, BINARY_GP_RBP, -stack_offset,
+                                    source_register);
+  case 2:
+    return binary_emit_mov_mem_reg16(&context->code, BINARY_GP_RBP, -stack_offset,
+                                     source_register);
+  case 4:
+    return binary_emit_mov_mem_reg32(&context->code, BINARY_GP_RBP, -stack_offset,
+                                     source_register);
+  default:
+    return binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP, -stack_offset,
+                                   source_register);
+  }
+}
+
+int code_generator_binary_symbol_move_width(Symbol *symbol) {
+  if (!symbol || !symbol->type) {
+    return 8;
+  }
+  return code_generator_binary_resolved_type_scalar_size(symbol->type);
+}
+
+int code_generator_binary_type_scalar_width(Type *type) {
+  if (!type) {
+    return 8;
+  }
+  return code_generator_binary_resolved_type_scalar_size(type);
+}
