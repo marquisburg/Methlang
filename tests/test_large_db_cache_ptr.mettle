@@ -1,0 +1,70 @@
+struct CacheEntry {
+  page_id: int64;
+  dirty: int32;
+  in_use: int32;
+  data: uint8[4096];
+}
+
+struct TableDef {
+  name: uint8[64];
+  name_len: int32;
+  col_count: int32;
+  pk_col: int32;
+  heap_page_id: int64;
+  index_page_id: int64;
+  row_count: int64;
+  col_name_lens: int32[16];
+  col_names: uint8[1024];
+  col_types: int32[16];
+}
+
+struct Db {
+  dir_path: uint8[512];
+  dir_len: int32;
+  data_path: uint8[512];
+  wal_path: uint8[512];
+  lock_path: uint8[512];
+  data_fp: cstring;
+  wal_fp: cstring;
+  next_page_id: int64;
+  next_row_id: int64;
+  wal_lsn: int64;
+  wal_offset: int64;
+  wal_record_count: int32;
+  table_count: int32;
+  in_txn: int32;
+  tables: TableDef[8];
+  cache: CacheEntry[32];
+}
+
+function cache_find_ptr(db: Db*, page_id: int64) -> int32 {
+  var entries: CacheEntry* = &db[0].cache[0];
+  var i: int32 = 0;
+  while (i < 32) {
+    if (entries[i].in_use != 0) {
+      if (entries[i].page_id == page_id) {
+        return i;
+      }
+    }
+    i = i + 1;
+  }
+  return -1;
+}
+
+function main() -> int32 {
+  var db: Db* = new Db;
+  var entries: CacheEntry* = &db[0].cache[0];
+  var i: int32 = 0;
+  while (i < 32) {
+    entries[i].in_use = 0;
+    entries[i].page_id = (int64)i;
+    i = i + 1;
+  }
+  entries[7].in_use = 1;
+  entries[7].page_id = 4242;
+  var found: int32 = cache_find_ptr(db, 4242);
+  if (found != 7) {
+    return found;
+  }
+  return 0;
+}

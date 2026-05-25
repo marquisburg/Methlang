@@ -1,0 +1,16 @@
+enum DbError {
+    NoError,
+    NotFound = 1
+}
+
+function main() -> int32 {
+    var e: DbError = DbError.NoError;
+    switch (e) {
+        case DbError.NoError:
+            return 0;
+        case DbError.NotFound:
+            return 1;
+        default:
+            return 2;
+    }
+}

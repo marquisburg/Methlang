@@ -1,0 +1,22 @@
+struct Db {
+    id: int32;
+}
+
+enum DbOpenResult {
+    Ok(Db*),
+    Err(int32)
+}
+
+function open_ok() -> DbOpenResult {
+    var db: Db;
+    db.id = 7;
+    return Ok(&db);
+}
+
+function main() -> int32 {
+    var r: DbOpenResult = open_ok();
+    return match (r) {
+        case Ok(p): 1
+        case Err(code): 0
+    };
+}

@@ -1,0 +1,22 @@
+enum DbOpenResult {
+    Ok(int32),
+    Err(int32)
+}
+
+enum DbExecResult {
+    Ok(int32),
+    Err(int32)
+}
+
+function main() -> int32 {
+    var opened: DbOpenResult = DbOpenResult.Ok(1);
+    var executed: DbExecResult = DbExecResult.Ok(2);
+
+    return match (opened) {
+        case Ok(code): match (executed) {
+            case Ok(run): code + run
+            case Err(e): e
+        }
+        case Err(e): e
+    };
+}

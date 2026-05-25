@@ -1,0 +1,11 @@
+import "db";
+import "std/io";
+
+function main() -> int32 {
+  var r: DbOpenResult = db_open("test_mdb_tmp");
+  if (r.err != 0) {
+    return (int32)r.err;
+  }
+  db_close(r.db);
+  return 0;
+}

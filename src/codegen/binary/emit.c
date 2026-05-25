@@ -1368,6 +1368,38 @@ int code_generator_binary_emit_memcpy_inline(
                                               dst_reg, (size_t)byte_count);
 }
 
+static int code_generator_binary_emit_memset_call_inline(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  if (!generator || !context || !instruction ||
+      instruction->argument_count != 3 || !instruction->arguments) {
+    return 0;
+  }
+
+  if (!binary_emit_push_reg(&context->code, BINARY_GP_RDI) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[0],
+                                               BINARY_GP_R10) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[1],
+                                               BINARY_GP_RAX) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[2],
+                                               BINARY_GP_RCX) ||
+      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RDI, BINARY_GP_R10) ||
+      !binary_code_buffer_append_u8(&context->code, 0xFC) ||
+      !binary_code_buffer_append_u8(&context->code, 0xF3) ||
+      !binary_code_buffer_append_u8(&context->code, 0xAA) ||
+      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX, BINARY_GP_R10) ||
+      !binary_emit_pop_reg(&context->code, BINARY_GP_RDI)) {
+    return 0;
+  }
+
+  return code_generator_binary_emit_destination_store(generator, context,
+                                                      &instruction->dest,
+                                                      BINARY_GP_RAX);
+}
+
 int code_generator_binary_emit_call_argument_load(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IROperand *operand, Type *parameter_type,
@@ -2534,6 +2566,12 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
     amount = (uint64_t)instruction->arguments[1].int_value;
     return code_generator_binary_emit_profile_op(generator, context, op_class,
                                                  amount);
+  }
+
+  if (strcmp(instruction->text, "memset") == 0 &&
+      instruction->argument_count == 3) {
+    return code_generator_binary_emit_memset_call_inline(generator, context,
+                                                        instruction);
   }
 
   if (!code_generator_binary_validate_call(generator, context, instruction)) {

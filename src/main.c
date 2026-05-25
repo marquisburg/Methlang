@@ -2204,7 +2204,8 @@ int main(int argc, char *argv[]) {
               compiler_profile_now_ms() - build_profile_start);
     }
 #endif
-  } else if (result == 0 && auto_runtime_directory && !options.debug_mode) {
+  } else if (result == 0 && auto_runtime_directory && !options.debug_mode &&
+             !options.dump_ir) {
     fprintf(stderr,
             "Note: transitional runtime objects detected at '%s'. Use --build "
             "to assemble and link them automatically when needed (most "

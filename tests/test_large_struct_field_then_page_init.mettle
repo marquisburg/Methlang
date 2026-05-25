@@ -1,0 +1,74 @@
+import "std/mem";
+import "std/io";
+
+function page_checksum(data: cstring, size: int32) -> uint32 {
+  var hash: uint32 = 2166136261;
+  var i: int32 = 0;
+  while (i < size) {
+    hash = hash ^ (uint32)(uint8)data[i];
+    hash = hash * 16777619;
+    i = i + 1;
+  }
+  return hash;
+}
+
+function page_init_buf(buf: cstring, page_id: int64, page_type: int32) {
+  memset(buf, 0, 4096);
+  var cs: uint32 = page_checksum(buf + 32, 4096 - 32);
+  if (cs == 0) {
+    buf[0] = 77;
+  }
+  if (page_id < 0) {
+    buf[1] = (uint8)page_type;
+  }
+}
+
+struct CacheEntry {
+  page_id: int64;
+  dirty: int32;
+  in_use: int32;
+  data: uint8[4096];
+}
+
+struct TableDef {
+  name: uint8[64];
+  name_len: int32;
+  col_count: int32;
+  pk_col: int32;
+  heap_page_id: int64;
+  index_page_id: int64;
+  row_count: int64;
+  col_name_lens: int32[16];
+  col_names: uint8[1024];
+  col_types: int32[16];
+}
+
+struct Db {
+  dir_path: uint8[512];
+  dir_len: int32;
+  data_path: uint8[512];
+  wal_path: uint8[512];
+  lock_path: uint8[512];
+  data_fp: cstring;
+  wal_fp: cstring;
+  next_page_id: int64;
+  next_row_id: int64;
+  wal_lsn: int64;
+  wal_offset: int64;
+  wal_record_count: int32;
+  table_count: int32;
+  in_txn: int32;
+  tables: TableDef[8];
+  cache: CacheEntry[32];
+}
+
+function cache_load(db: Db*, page_id: int64) -> int32 {
+  db[0].data_fp = fopen("nul", cstr("r+b"));
+  page_init_buf(&db[0].cache[0].data[0], page_id, 2);
+  return 0;
+}
+
+function main() -> int32 {
+  var db: Db* = new Db;
+  return cache_load(db, 0);
+}

@@ -906,6 +906,13 @@ foreach ($case in $cases) {
     if ($case.ContainsKey("Args") -and $case.Args) {
       $caseArgs = @($case.Args)
     }
+    if ((($case.ContainsKey("IrMustMatch") -and $case.IrMustMatch) -or
+         ($case.ContainsKey("IrMustNotMatch") -and $case.IrMustNotMatch)) -and
+        ($caseArgs -notcontains "--dump-ir") -and
+        ($caseArgs -notcontains "--debug") -and
+        ($caseArgs -notcontains "-d")) {
+      $caseArgs += "--dump-ir"
+    }
 
     $output = & $CompilerPath @caseArgs $case.Path -o $outFile 2>&1 | Out-String
     $exitCode = $LASTEXITCODE
