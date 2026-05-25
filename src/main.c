@@ -10,6 +10,7 @@
 #include "string_intern.h"
 #include "compiler/compiler_context.h"
 #include "compiler/compiler_crash.h"
+#include "tracy_build.h"
 #include "ir/ir.h"
 #include "ir/ir_optimize.h"
 #include "ir/ir_profile.h"
@@ -370,6 +371,8 @@ static int print_help_topic(const char *program_name, const char *argv0,
            "common Win32 DLLs directly.\n");
     printf("    --link-arg <arg> passes an extra linker argument (repeatable) "
            "for extra DLLs or import libraries.\n");
+    printf("    --tracy links std/tracy with the Tracy profiler (requires a "
+           "Tracy repo; see --tracy-dir / TRACY_DIR).\n");
     print_doc_reference(argv0, "compilation.md");
     return 0;
   }
@@ -765,6 +768,20 @@ static int collect_internal_link_imports(const CompilerOptions *options,
     }
   }
 
+  if (options && options->tracy) {
+    static const char *tracy_import_dlls[] = {"secur32.dll", "dbghelp.dll"};
+    for (i = 0u; i < sizeof(tracy_import_dlls) / sizeof(tracy_import_dlls[0]); i++) {
+      if (!string_list_append_copy(import_dll_names, tracy_import_dlls[i])) {
+        if (error_message_out) {
+          *error_message_out =
+              strdup("Out of memory while preparing Tracy linker imports");
+        }
+        string_list_destroy(&search_directories);
+        return 0;
+      }
+    }
+  }
+
   if (!options) {
     string_list_destroy(&search_directories);
     return 1;
@@ -906,6 +923,14 @@ static int object_needs_atomics(const char *object_path) {
 
 static int object_needs_profile_runtime(const char *object_path) {
   return object_needs_runtime_object(object_path, "mettle_profile_");
+}
+
+static int object_needs_tracy_helpers(const char *object_path) {
+  return object_needs_runtime_object(object_path, "mettle_tracy_");
+}
+
+static int compiler_options_use_tracy(const CompilerOptions *options) {
+  return options && options->tracy;
 }
 
 static int append_argument_text(char *buffer, size_t buffer_size, size_t *offset,
@@ -1249,6 +1274,79 @@ cleanup:
   string_list_destroy(&import_library_paths);
   string_list_destroy(&import_dll_names);
   link_resolution_destroy(resolution);
+  return result;
+}
+
+static int mettle_link_objects_with_gxx(const char **object_paths,
+                                        size_t object_count,
+                                        const char *executable_filename,
+                                        const CompilerOptions *options) {
+  size_t cmd_len = strlen(executable_filename) + 512u;
+  size_t i = 0u;
+  size_t offset = 0u;
+  char *command = NULL;
+  int result = 1;
+
+  if (!object_paths || object_count == 0u || !executable_filename) {
+    fprintf(stderr, "Error: Missing inputs for g++ Tracy link\n");
+    return 1;
+  }
+
+  for (i = 0u; i < object_count; i++) {
+    if (object_paths[i] && object_paths[i][0] != '\0') {
+      cmd_len += strlen(object_paths[i]) + 4u;
+    }
+  }
+  if (options) {
+    for (i = 0u; i < options->link_argument_count; i++) {
+      if (options->link_arguments[i]) {
+        cmd_len += strlen(options->link_arguments[i]) + 2u;
+      }
+    }
+  }
+
+  command = malloc(cmd_len);
+  if (!command) {
+    fprintf(stderr, "Error: Failed to allocate g++ Tracy link command\n");
+    return 1;
+  }
+
+  if (!append_argument_text(command, cmd_len, &offset, "g++ -o ") ||
+      !append_quoted_argument(command, cmd_len, &offset, executable_filename)) {
+    free(command);
+    fprintf(stderr, "Error: Failed to build g++ Tracy link command\n");
+    return 1;
+  }
+
+  for (i = 0u; i < object_count; i++) {
+    if (!object_paths[i] || object_paths[i][0] == '\0') {
+      continue;
+    }
+    if (!append_argument_text(command, cmd_len, &offset, " ") ||
+        !append_quoted_argument(command, cmd_len, &offset, object_paths[i])) {
+      free(command);
+      fprintf(stderr, "Error: Failed to build g++ Tracy link command\n");
+      return 1;
+    }
+  }
+
+  if (!append_argument_text(command, cmd_len, &offset,
+                            " -lkernel32 -luser32 -lgdi32 -ladvapi32 -lws2_32 "
+                            "-lsecur32 -ldbghelp") ||
+      !append_gcc_link_arguments(command, cmd_len, &offset, options)) {
+    free(command);
+    fprintf(stderr, "Error: Failed to build g++ Tracy link command\n");
+    return 1;
+  }
+
+  if (run_system_command(command) != 0) {
+    fprintf(stderr, "Warning: g++ Tracy link step failed\n");
+    result = 1;
+  } else {
+    result = 0;
+  }
+
+  free(command);
   return result;
 }
 
@@ -1692,11 +1790,155 @@ static int mettle_link_object_file(const char *object_filename,
     needs_crash = 1;
   }
 
+  int use_tracy = compiler_options_use_tracy(options);
+  int needs_tracy_helpers =
+      use_tracy || object_needs_tracy_helpers(object_filename);
+  TracyBuildArtifacts tracy_artifacts = {0};
+  char *tracy_directory = NULL;
+  char *tracy_error = NULL;
+  const char *tracy_helpers_object = NULL;
+  char *tracy_helpers_gcc_object =
+      join_paths(runtime_directory, "tracy_helpers.o");
+  char *tracy_helpers_msvc_object =
+      join_paths(runtime_directory, "tracy_helpers.obj");
+  if (!tracy_helpers_gcc_object || !tracy_helpers_msvc_object) {
+    fprintf(stderr, "Error: Failed to allocate Tracy build paths\n");
+    free(tracy_helpers_gcc_object);
+    free(tracy_helpers_msvc_object);
+    free(crash_gcc_object);
+    free(crash_msvc_object);
+    free(atomics_gcc_object);
+    free(atomics_msvc_object);
+    free(profile_gcc_object);
+    free(profile_msvc_object);
+    return 1;
+  }
+
+  if (use_tracy) {
+    TracyBuildRequest tracy_request = {
+        .tracy_directory = options ? options->tracy_directory : NULL,
+        .stdlib_directory = options ? options->stdlib_directory : NULL,
+        .executable_filename = executable_filename,
+    };
+    tracy_directory = tracy_resolve_directory(&tracy_request, &tracy_error);
+    if (!tracy_directory) {
+      fprintf(stderr, "Error: %s\n",
+              tracy_error ? tracy_error : "Failed to resolve Tracy directory");
+      free(tracy_error);
+      free(tracy_helpers_gcc_object);
+      free(tracy_helpers_msvc_object);
+      free(crash_gcc_object);
+      free(crash_msvc_object);
+      free(atomics_gcc_object);
+      free(atomics_msvc_object);
+      free(profile_gcc_object);
+      free(profile_msvc_object);
+      return 1;
+    }
+    if (!tracy_build_support_objects(&tracy_request, tracy_directory,
+                                     &tracy_artifacts, &tracy_error)) {
+      fprintf(stderr, "Error: %s\n",
+              tracy_error ? tracy_error
+                          : "Failed to build Tracy support objects");
+      free(tracy_error);
+      free(tracy_directory);
+      tracy_free_artifacts(&tracy_artifacts);
+      free(tracy_helpers_gcc_object);
+      free(tracy_helpers_msvc_object);
+      free(crash_gcc_object);
+      free(crash_msvc_object);
+      free(atomics_gcc_object);
+      free(atomics_msvc_object);
+      free(profile_gcc_object);
+      free(profile_msvc_object);
+      return 1;
+    }
+    free(tracy_error);
+    tracy_error = NULL;
+    tracy_helpers_object = tracy_artifacts.helpers_object;
+  } else if (needs_tracy_helpers) {
+    tracy_helpers_object =
+        (_access(tracy_helpers_msvc_object, 0) == 0) ? tracy_helpers_msvc_object
+                                                     : tracy_helpers_gcc_object;
+    if (_access(tracy_helpers_object, 0) != 0) {
+      fprintf(stderr,
+              "Error: Program references Tracy helpers but bundled stub "
+              "object not found in '%s'\n",
+              runtime_directory);
+      free(tracy_helpers_gcc_object);
+      free(tracy_helpers_msvc_object);
+      free(crash_gcc_object);
+      free(crash_msvc_object);
+      free(atomics_gcc_object);
+      free(atomics_msvc_object);
+      free(profile_gcc_object);
+      free(profile_msvc_object);
+      return 1;
+    }
+  }
+
   int build_result = 1;
+
+  if (use_tracy && tracy_artifacts.use_gxx_link) {
+    size_t gxx_capacity =
+        4u + (needs_crash ? 1u : 0u) + (needs_atomics ? 1u : 0u) +
+        (needs_profile ? 1u : 0u);
+    const char **gxx_objects = calloc(gxx_capacity, sizeof(const char *));
+    size_t gxx_count = 0u;
+
+    if (!gxx_objects) {
+      fprintf(stderr, "Error: Failed to allocate g++ Tracy link object list\n");
+      goto cleanup;
+    }
+
+    gxx_objects[gxx_count++] = object_filename;
+    if (needs_crash) {
+      if (_access(crash_gcc_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled crash-handler runtime object not found in '%s'\n",
+                runtime_directory);
+        free(gxx_objects);
+        goto cleanup;
+      }
+      gxx_objects[gxx_count++] = crash_gcc_object;
+    }
+    if (needs_atomics) {
+      if (_access(atomics_gcc_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled atomics runtime object not found in '%s'\n",
+                runtime_directory);
+        free(gxx_objects);
+        goto cleanup;
+      }
+      gxx_objects[gxx_count++] = atomics_gcc_object;
+    }
+    if (needs_profile) {
+      if (_access(profile_gcc_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled profile runtime object not found in '%s'\n",
+                runtime_directory);
+        free(gxx_objects);
+        goto cleanup;
+      }
+      gxx_objects[gxx_count++] = profile_gcc_object;
+    }
+    gxx_objects[gxx_count++] = tracy_artifacts.helpers_object;
+    gxx_objects[gxx_count++] = tracy_artifacts.client_object;
+
+    if (mettle_link_objects_with_gxx(gxx_objects, gxx_count, executable_filename,
+                                     options) == 0) {
+      build_result = 0;
+    } else {
+      fprintf(stderr, "Error: g++ Tracy link failed\n");
+    }
+    free(gxx_objects);
+    goto cleanup;
+  }
 
   if (linker_mode == LINKER_MODE_INTERNAL || linker_mode == LINKER_MODE_AUTO) {
     size_t object_capacity =
-        5u + (options ? options->link_argument_count : 0u);
+        5u + (use_tracy ? 2u : (needs_tracy_helpers ? 1u : 0u)) +
+        (options ? options->link_argument_count : 0u);
     const char **object_paths = calloc(object_capacity, sizeof(const char *));
     const char *crash_object = NULL;
     const char *atomics_object = NULL;
@@ -1778,6 +2020,12 @@ static int mettle_link_object_file(const char *object_filename,
       if (profile_object) {
         object_paths[object_count++] = profile_object;
       }
+      if (use_tracy) {
+        object_paths[object_count++] = tracy_artifacts.helpers_object;
+        object_paths[object_count++] = tracy_artifacts.client_object;
+      } else if (needs_tracy_helpers && tracy_helpers_object) {
+        object_paths[object_count++] = tracy_helpers_object;
+      }
       if (!append_internal_link_object_args(options, object_paths,
                                             object_capacity, &object_count)) {
         fprintf(stderr, "Error: Too many internal-linker object arguments\n");
@@ -1822,7 +2070,7 @@ static int mettle_link_object_file(const char *object_filename,
   }
 
   if (has_gcc && linker_mode != LINKER_MODE_MSVC) {
-    const char *runtime_objects[3] = {NULL, NULL, NULL};
+    const char *runtime_objects[5] = {NULL, NULL, NULL, NULL, NULL};
     size_t runtime_object_count = 0u;
     if (needs_crash) {
       if (_access(crash_gcc_object, 0) != 0) {
@@ -1851,6 +2099,9 @@ static int mettle_link_object_file(const char *object_filename,
       }
       runtime_objects[runtime_object_count++] = profile_gcc_object;
     }
+    if (!use_tracy && needs_tracy_helpers && tracy_helpers_object) {
+      runtime_objects[runtime_object_count++] = tracy_helpers_object;
+    }
     if (mettle_link_object_with_gcc(object_filename, executable_filename,
                                       runtime_objects, runtime_object_count,
                                       options) == 0) {
@@ -1860,7 +2111,7 @@ static int mettle_link_object_file(const char *object_filename,
   }
 
   if (has_link && linker_mode != LINKER_MODE_GCC) {
-    const char *runtime_objects[3] = {NULL, NULL, NULL};
+    const char *runtime_objects[5] = {NULL, NULL, NULL, NULL, NULL};
     size_t runtime_object_count = 0u;
     if (needs_crash) {
       const char *crash_object = (_access(crash_msvc_object, 0) == 0)
@@ -1898,6 +2149,12 @@ static int mettle_link_object_file(const char *object_filename,
       }
       runtime_objects[runtime_object_count++] = profile_object;
     }
+    if (!use_tracy && needs_tracy_helpers && tracy_helpers_object) {
+      const char *stub_object =
+          (_access(tracy_helpers_msvc_object, 0) == 0) ? tracy_helpers_msvc_object
+                                                       : tracy_helpers_gcc_object;
+      runtime_objects[runtime_object_count++] = stub_object;
+    }
     if (mettle_link_object_with_link(object_filename, executable_filename,
                                        runtime_objects, runtime_object_count,
                                        options) == 0) {
@@ -1910,6 +2167,11 @@ static int mettle_link_object_file(const char *object_filename,
           "Error: Failed to link executable with the available linker backends\n");
 
 cleanup:
+  tracy_free_artifacts(&tracy_artifacts);
+  free(tracy_directory);
+  free(tracy_error);
+  free(tracy_helpers_gcc_object);
+  free(tracy_helpers_msvc_object);
   free(crash_gcc_object);
   free(crash_msvc_object);
   free(atomics_gcc_object);
@@ -2069,6 +2331,13 @@ int main(int argc, char *argv[]) {
       options.profile_runtime = 1;
     } else if (strcmp(argv[i], "--profile-runtime-ops") == 0) {
       options.profile_runtime_ops = 1;
+    } else if (strcmp(argv[i], "--tracy") == 0) {
+      options.tracy = 1;
+    } else if (strcmp(argv[i], "--tracy-dir") == 0 && i + 1 < argc) {
+      options.tracy_directory = argv[++i];
+    } else if (strcmp(argv[i], "--tracy-dir") == 0) {
+      fprintf(stderr, "Error: Missing path after '--tracy-dir'\n");
+      return 1;
     } else if (strcmp(argv[i], "--debug-compiler") == 0) {
       options.debug_compiler = 1;
     } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -2086,6 +2355,13 @@ int main(int argc, char *argv[]) {
   if (!options.input_filename) {
     fprintf(stderr, "Error: No input file specified.\n");
     print_usage(argv[0]);
+    free((void *)options.import_directories);
+    free((void *)options.link_arguments);
+    return 1;
+  }
+
+  if (options.tracy && !build_executable) {
+    fprintf(stderr, "Error: --tracy requires --build\n");
     free((void *)options.import_directories);
     free((void *)options.link_arguments);
     return 1;
@@ -2841,6 +3117,10 @@ void print_usage(const char *program_name) {
          linker_mode_name(LINKER_MODE_AUTO));
   printf("  --link-arg <arg>    Pass an extra linker argument (repeatable; "
          "use with --build)\n");
+  printf("  --tracy             Link std/tracy with the Tracy profiler "
+         "(requires --build)\n");
+  printf("  --tracy-dir <dir>   Tracy repo root (default: TRACY_DIR env, then "
+         ".mettle\\tracy_dir)\n");
   printf("  -d, --debug         Enable debug output and symbols\n");
   printf("  --dump-ir           Write optimized IR sidecar (.ir) without debug metadata\n");
   printf("  -g, --debug-symbols Generate debug symbols\n");
@@ -2870,6 +3150,9 @@ void print_usage(const char *program_name) {
   printf("      Legacy build: NASM assembly + selected linker.\n");
   printf("  %s --build --release app.mettle -o app.exe\n", program_name);
   printf("      Optimized, comment-stripped release build.\n");
+  printf("  %s --build --tracy app.mettle -o app.exe\n", program_name);
+  printf("      Build with Tracy instrumentation (set TRACY_DIR or "
+         "--tracy-dir).\n");
   printf("\nHelp:\n");
   printf("  %s help <topic>     Detail on a topic (" METTLE_HELP_TOPICS ")\n",
          program_name);

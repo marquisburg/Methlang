@@ -119,6 +119,14 @@ echo Compiling profile runtime (opt-in: --profile-runtime)...
 %CC% %CFLAGS% -c src\runtime\profile.c -o obj\runtime\profile.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
+echo Compiling Tracy helper stubs (opt-in: std/tracy without --tracy)...
+%CC% %CFLAGS% -c stdlib\tracy_helpers.c -o obj\runtime\tracy_helpers.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+
+echo Compiling Tracy build support...
+%CC% %CFLAGS% -c src\tracy_build.c -o obj\tracy_build.o
+if %ERRORLEVEL% NEQ 0 exit /b 1
+
 echo Compiling error reporter...
 %CC% %CFLAGS% -c src\error\error_reporter.c -o obj\error\error_reporter.o
 if %ERRORLEVEL% NEQ 0 exit /b 1
@@ -134,7 +142,7 @@ echo Compiling main...
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Linking...
-%CC% obj\common.o obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\\codegen\\binary\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\error\error_reporter.o obj\compiler\compiler_context.o obj\compiler\compiler_crash.o obj\runtime\crash_handler.o obj\main.o -o bin\mettle.exe -ldbghelp
+%CC% obj\common.o obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\\codegen\\binary\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\error\error_reporter.o obj\compiler\compiler_context.o obj\compiler\compiler_crash.o obj\runtime\crash_handler.o obj\tracy_build.o obj\main.o -o bin\mettle.exe -ldbghelp
 
 if %ERRORLEVEL% NEQ 0 (
     echo Build failed!
@@ -154,6 +162,8 @@ copy /Y obj\runtime\atomics.o bin\runtime\atomics.o >nul
 copy /Y obj\runtime\atomics.o bin\runtime\atomics.obj >nul
 copy /Y obj\runtime\profile.o bin\runtime\profile.o >nul
 copy /Y obj\runtime\profile.o bin\runtime\profile.obj >nul
+copy /Y obj\runtime\tracy_helpers.o bin\runtime\tracy_helpers.o >nul
+copy /Y obj\runtime\tracy_helpers.o bin\runtime\tracy_helpers.obj >nul
 
 if exist installer\mettle-build.bat copy /Y installer\mettle-build.bat bin\mettle-build.bat >nul
 

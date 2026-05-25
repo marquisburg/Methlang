@@ -15,3 +15,5 @@ tests/_tmp_*
 *.s.ir
 *.ir
 docs/linker-implementation-todo.md
+examples/tracy_demo/tracy_dir.local.bat
+.mettle/
