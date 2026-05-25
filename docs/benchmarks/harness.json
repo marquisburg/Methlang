@@ -1,55 +1,262 @@
 {
-  "version": 1,
+  "version": 2,
   "mode": "mettle-vs-c",
   "outputs": {
     "primary": "docs/benchmarks/latest.json",
-    "mirror_web": "web/benchmarks.json"
+    "mirror_web": "web/benchmarks.json",
+    "report_html": "docs/benchmarks/latest.html"
+  },
+  "defaults": {
+    "c_flags": ["-O3", "-lkernel32"],
+    "mettle_flags": ["--build", "--emit-obj", "--linker", "internal", "--release"],
+    "runs": 5,
+    "warmup": 1,
+    "passes": 200
   },
   "benchmarks": [
     {
       "name": "fib",
-      "description": "Fibonacci fib(35) x 10M",
-      "build_script": "examples/fib/build.bat",
+      "kind": "runtime",
+      "description": "Fibonacci fib(35) x 10M (Mettle unrolled hot loop)",
+      "mettle_source": "examples/fib/fib.mettle",
       "mettle_exe": "examples/fib/fib.exe",
+      "c_source": "examples/fib/fib.c",
       "c_exe": "examples/fib/fib_c.exe",
+      "rust_source": "examples/fib/fib.rs",
       "rust_exe": "examples/fib/fib_rs.exe",
-      "rust_source": "examples/fib/fib.rs"
+      "build_script": "examples/fib/build.bat"
     },
     {
       "name": "word_count",
-      "description": "Word count 256 KB buffer x 500",
-      "build_script": "examples/word_count/build.bat",
+      "kind": "runtime",
+      "description": "Word count 256 KB buffer x 200",
+      "mettle_source": "examples/word_count/word_count.mettle",
       "mettle_exe": "examples/word_count/word_count.exe",
+      "c_source": "examples/word_count/word_count.c",
       "c_exe": "examples/word_count/word_count_c.exe",
+      "rust_source": "examples/word_count/word_count.rs",
       "rust_exe": "examples/word_count/word_count_rs.exe",
-      "rust_source": "examples/word_count/word_count.rs"
+      "build_script": "examples/word_count/build.bat"
     },
     {
       "name": "grep",
-      "description": "Grep ERROR 1 MiB x 2000",
-      "build_script": "examples/grep/build.bat",
+      "kind": "runtime",
+      "description": "Grep ERROR 1 MiB x 200",
+      "mettle_source": "examples/grep/grep.mettle",
       "mettle_exe": "examples/grep/grep.exe",
+      "c_source": "examples/grep/grep.c",
       "c_exe": "examples/grep/grep_c.exe",
+      "rust_source": "examples/grep/grep.rs",
       "rust_exe": "examples/grep/grep_rs.exe",
-      "rust_source": "examples/grep/grep.rs"
+      "build_script": "examples/grep/build.bat"
     },
     {
       "name": "sum_squares",
-      "description": "Sum of squares 1..100000 x 500",
-      "build_script": "examples/sum_squares/build.bat",
+      "kind": "runtime",
+      "description": "Sum of squares 1..100000 x 200",
+      "mettle_source": "examples/sum_squares/sum_squares.mettle",
       "mettle_exe": "examples/sum_squares/sum_squares.exe",
+      "c_source": "examples/sum_squares/sum_squares.c",
       "c_exe": "examples/sum_squares/sum_squares_c.exe",
+      "rust_source": "examples/sum_squares/sum_squares.rs",
       "rust_exe": "examples/sum_squares/sum_squares_rs.exe",
-      "rust_source": "examples/sum_squares/sum_squares.rs"
+      "build_script": "examples/sum_squares/build.bat"
     },
     {
       "name": "collatz",
+      "kind": "runtime",
       "description": "Collatz steps 1..100000 x 10",
-      "build_script": "examples/collatz/build.bat",
+      "mettle_source": "examples/collatz/collatz.mettle",
       "mettle_exe": "examples/collatz/collatz.exe",
+      "c_source": "examples/collatz/collatz.c",
       "c_exe": "examples/collatz/collatz_c.exe",
+      "rust_source": "examples/collatz/collatz.rs",
       "rust_exe": "examples/collatz/collatz_rs.exe",
-      "rust_source": "examples/collatz/collatz.rs"
+      "build_script": "examples/collatz/build.bat"
+    },
+    {
+      "name": "byte_hash",
+      "kind": "runtime",
+      "description": "djb2 hash 256 KB buffer x 200",
+      "mettle_source": "examples/byte_hash/byte_hash.mettle",
+      "mettle_exe": "examples/byte_hash/byte_hash.exe",
+      "c_source": "examples/byte_hash/byte_hash.c",
+      "c_exe": "examples/byte_hash/byte_hash_c.exe",
+      "rust_source": "examples/byte_hash/byte_hash.rs",
+      "rust_exe": "examples/byte_hash/byte_hash_rs.exe",
+      "build_script": "examples/byte_hash/build.bat"
+    },
+    {
+      "name": "prime_count",
+      "kind": "runtime",
+      "description": "Prime count up to 50000 x 200",
+      "mettle_source": "examples/prime_count/prime_count.mettle",
+      "mettle_exe": "examples/prime_count/prime_count.exe",
+      "c_source": "examples/prime_count/prime_count.c",
+      "c_exe": "examples/prime_count/prime_count_c.exe",
+      "rust_source": "examples/prime_count/prime_count.rs",
+      "rust_exe": "examples/prime_count/prime_count_rs.exe",
+      "build_script": "examples/prime_count/build.bat"
+    },
+    {
+      "name": "matrix_mul",
+      "kind": "runtime",
+      "description": "32x32 int32 matrix multiply x 200 (Mettle: 4-unrolled pointers; C: naive mat_idx — GCC -O3 vectorizes C heavily)",
+      "track_asm": true,
+      "mettle_source": "examples/matrix_mul/matrix_mul.mettle",
+      "mettle_exe": "examples/matrix_mul/matrix_mul.exe",
+      "c_source": "examples/matrix_mul/matrix_mul.c",
+      "c_exe": "examples/matrix_mul/matrix_mul_c.exe",
+      "rust_source": "examples/matrix_mul/matrix_mul.rs",
+      "rust_exe": "examples/matrix_mul/matrix_mul_rs.exe",
+      "build_script": "examples/matrix_mul/build.bat"
+    },
+    {
+      "name": "sort_insertion",
+      "kind": "runtime",
+      "description": "Insertion sort 512 int32 values x 200 (Mettle/C structurally similar; gap is memcpy/SIMD/codegen)",
+      "track_asm": true,
+      "mettle_source": "examples/sort_insertion/sort_insertion.mettle",
+      "mettle_exe": "examples/sort_insertion/sort_insertion.exe",
+      "c_source": "examples/sort_insertion/sort_insertion.c",
+      "c_exe": "examples/sort_insertion/sort_insertion_c.exe",
+      "rust_source": "examples/sort_insertion/sort_insertion.rs",
+      "rust_exe": "examples/sort_insertion/sort_insertion_rs.exe",
+      "build_script": "examples/sort_insertion/build.bat"
+    },
+    {
+      "name": "memcpy_bench",
+      "kind": "runtime",
+      "description": "memcpy 256 KB buffer x 200 (memory bandwidth / libc memcpy path)",
+      "mettle_source": "examples/memcpy_bench/memcpy_bench.mettle",
+      "mettle_exe": "examples/memcpy_bench/memcpy_bench.exe",
+      "c_source": "examples/memcpy_bench/memcpy_bench.c",
+      "c_exe": "examples/memcpy_bench/memcpy_bench_c.exe",
+      "build_script": "examples/memcpy_bench/build.bat"
+    },
+    {
+      "name": "memset_bench",
+      "kind": "runtime",
+      "description": "memset 256 KB buffer x 200 (fill bandwidth / libc memset path)",
+      "mettle_source": "examples/memset_bench/memset_bench.mettle",
+      "mettle_exe": "examples/memset_bench/memset_bench.exe",
+      "c_source": "examples/memset_bench/memset_bench.c",
+      "c_exe": "examples/memset_bench/memset_bench_c.exe",
+      "build_script": "examples/memset_bench/build.bat"
+    },
+    {
+      "name": "memcmp_bench",
+      "kind": "runtime",
+      "description": "Byte-compare 256 KB in 4 KB chunks x 200 (manual compare loop)",
+      "mettle_source": "examples/memcmp_bench/memcmp_bench.mettle",
+      "mettle_exe": "examples/memcmp_bench/memcmp_bench.exe",
+      "c_source": "examples/memcmp_bench/memcmp_bench.c",
+      "c_exe": "examples/memcmp_bench/memcmp_bench_c.exe",
+      "build_script": "examples/memcmp_bench/build.bat"
+    },
+    {
+      "name": "binary_search",
+      "kind": "runtime",
+      "description": "Lower-bound search in sorted 65536 int32 array, 50000 queries x 200",
+      "mettle_source": "examples/binary_search/binary_search.mettle",
+      "mettle_exe": "examples/binary_search/binary_search.exe",
+      "c_source": "examples/binary_search/binary_search.c",
+      "c_exe": "examples/binary_search/binary_search_c.exe",
+      "build_script": "examples/binary_search/build.bat"
+    },
+    {
+      "name": "dot_product",
+      "kind": "runtime",
+      "description": "int32 dot product of 65536-element vectors x 200 (SIMD reduction)",
+      "mettle_source": "examples/dot_product/dot_product.mettle",
+      "mettle_exe": "examples/dot_product/dot_product.exe",
+      "c_source": "examples/dot_product/dot_product.c",
+      "c_exe": "examples/dot_product/dot_product_c.exe",
+      "build_script": "examples/dot_product/build.bat"
+    },
+    {
+      "name": "lcg_rng",
+      "kind": "runtime",
+      "description": "LCG PRNG 1M iterations x 200 (integer mul/add hot loop)",
+      "mettle_source": "examples/lcg_rng/lcg_rng.mettle",
+      "mettle_exe": "examples/lcg_rng/lcg_rng.exe",
+      "c_source": "examples/lcg_rng/lcg_rng.c",
+      "c_exe": "examples/lcg_rng/lcg_rng_c.exe",
+      "build_script": "examples/lcg_rng/build.bat"
+    },
+    {
+      "name": "prefix_sum",
+      "kind": "runtime",
+      "description": "Inclusive prefix sum over 65536 int32 values x 200 (scan / SIMD)",
+      "mettle_source": "examples/prefix_sum/prefix_sum.mettle",
+      "mettle_exe": "examples/prefix_sum/prefix_sum.exe",
+      "c_source": "examples/prefix_sum/prefix_sum.c",
+      "c_exe": "examples/prefix_sum/prefix_sum_c.exe",
+      "build_script": "examples/prefix_sum/build.bat"
+    },
+    {
+      "name": "popcount",
+      "kind": "runtime",
+      "description": "Population count over 256 KB byte buffer x 200 (bit ops)",
+      "mettle_source": "examples/popcount/popcount.mettle",
+      "mettle_exe": "examples/popcount/popcount.exe",
+      "c_source": "examples/popcount/popcount.c",
+      "c_exe": "examples/popcount/popcount_c.exe",
+      "build_script": "examples/popcount/build.bat"
+    },
+    {
+      "name": "reverse_i32",
+      "kind": "runtime",
+      "description": "Reverse-copy 65536 int32 values x 200 (indexed memory access)",
+      "mettle_source": "examples/reverse_i32/reverse_i32.mettle",
+      "mettle_exe": "examples/reverse_i32/reverse_i32.exe",
+      "c_source": "examples/reverse_i32/reverse_i32.c",
+      "c_exe": "examples/reverse_i32/reverse_i32_c.exe",
+      "build_script": "examples/reverse_i32/build.bat"
+    },
+    {
+      "name": "minmax_scan",
+      "kind": "runtime",
+      "description": "Min/max scan over 65536 int32 values x 200 (branchy reduction)",
+      "mettle_source": "examples/minmax_scan/minmax_scan.mettle",
+      "mettle_exe": "examples/minmax_scan/minmax_scan.exe",
+      "c_source": "examples/minmax_scan/minmax_scan.c",
+      "c_exe": "examples/minmax_scan/minmax_scan_c.exe",
+      "build_script": "examples/minmax_scan/build.bat"
+    },
+    {
+      "name": "scale_i32",
+      "kind": "runtime",
+      "description": "dst[i] = src[i]*3+7 over 65536 int32 values x 200 (map / vectorize)",
+      "mettle_source": "examples/scale_i32/scale_i32.mettle",
+      "mettle_exe": "examples/scale_i32/scale_i32.exe",
+      "c_source": "examples/scale_i32/scale_i32.c",
+      "c_exe": "examples/scale_i32/scale_i32_c.exe",
+      "build_script": "examples/scale_i32/build.bat"
+    },
+    {
+      "name": "clamp_i32",
+      "kind": "runtime",
+      "description": "clamp(src[i], -100, 100) over 65536 int32 values x 200 (branchy map)",
+      "mettle_source": "examples/clamp_i32/clamp_i32.mettle",
+      "mettle_exe": "examples/clamp_i32/clamp_i32.exe",
+      "c_source": "examples/clamp_i32/clamp_i32.c",
+      "c_exe": "examples/clamp_i32/clamp_i32_c.exe",
+      "build_script": "examples/clamp_i32/build.bat"
+    }
+  ],
+  "compile_benchmarks": [
+    {
+      "name": "parse_stress",
+      "description": "Compile 200k LOC flat globals (parse/typecheck stress)",
+      "mettle_source": "tests/parse_stress_test.mettle",
+      "profile": true
+    },
+    {
+      "name": "profiler",
+      "description": "Compile 226k LOC multi-function program (full pipeline stress)",
+      "mettle_source": "tests/profiler_test.mettle",
+      "profile": true
     }
   ]
 }

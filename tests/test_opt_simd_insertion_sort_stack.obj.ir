@@ -1,0 +1,466 @@
+function insertion_sort {
+     0: nop
+     1: local @i : int32
+     2: assign @i <- 1
+     3: local @cur : int32*
+     4: binary @cur = @data + 4
+     5: nop
+     6: simd_insertion_sort_i32 base=@data len=@len
+     7: nop
+     8: nop
+     9: nop
+    10: nop
+    11: nop
+    12: nop
+    13: nop
+    14: nop
+    15: nop
+    16: nop
+    17: nop
+    18: nop
+    19: nop
+    20: nop
+    21: nop
+    22: nop
+    23: nop
+    24: nop
+    25: nop
+    26: nop
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: nop
+    33: nop
+    34: nop
+    35: nop
+    36: nop
+    37: nop
+    38: nop
+    39: nop
+    40: nop
+    41: nop
+    42: nop
+    43: nop
+    44: nop
+    45: nop
+    46: nop
+    47: nop
+    48: nop
+    49: nop
+    50: return _
+}
+
+function checksum {
+     0: nop
+     1: local @s : int64
+     2: assign @s <- 0
+     3: local @x : int64
+     4: assign @x <- 0
+     5: local @i : int32
+     6: assign @i <- 0
+     7: simd_sum_i32 @s += simd_sum_i32(base=@data, len=@len)
+     8: nop
+     9: nop
+    10: nop
+    11: nop
+    12: nop
+    13: nop
+    14: nop
+    15: nop
+    16: nop
+    17: nop
+    18: nop
+    19: nop
+    20: nop
+    21: nop
+    22: nop
+    23: nop
+    24: nop
+    25: nop
+    26: binary %t24 = @s * 1000003
+    27: binary %t25 = %t24 + @x
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: nop
+    33: return %t25
+}
+
+function is_sorted {
+     0: nop
+     1: local @i : int32
+     2: assign @i <- 1
+     3: label ir_while_15
+     4: binary %t27 = @i < @len
+     5: branch_zero %t27 -> ir_errdefer_end_22
+     6: binary %t28 = @i << 2
+     7: binary %t29 = @data + %t28
+     8: load %t30 <- *%t29 [4]
+     9: binary %t31 = @i - 1
+    10: binary %t32 = %t31 << 2
+    11: binary %t33 = @data + %t32
+    12: load %t34 <- *%t33 [4]
+    13: binary %t35 = %t30 < %t34
+    14: branch_zero %t35 -> ir_if_next_18
+    15: nop
+    16: nop
+    17: nop
+    18: nop
+    19: nop
+    20: return 0
+    21: nop
+    22: label ir_if_next_18
+    23: nop
+    24: binary @i = @i + 1
+    25: nop
+    26: jump ir_while_15
+    27: nop
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: label ir_errdefer_end_22
+    33: return 1
+}
+
+function run_case {
+     0: nop
+     1: local @data : int32[129]
+     2: local @i : int32
+     3: assign @i <- 0
+     4: local @state : int32
+     5: assign @state <- @seed
+     6: label ir_while_24
+     7: binary %t39 = @i < @len
+     8: branch_zero %t39 -> ir_while_end_25
+     9: binary %t40 = @state * 1103515245
+    10: binary @state = %t40 + 12345
+    11: nop
+    12: binary %t42 = @state % 511
+    13: binary %t43 = %t42 - 255
+    14: addr_of %t44 <- &@data
+    15: binary %t45 = @i << 2
+    16: binary %t46 = %t44 + %t45
+    17: store *%t46 <- %t43 [4]
+    18: binary @i = @i + 1
+    19: nop
+    20: jump ir_while_24
+    21: label ir_while_end_25
+    22: local @before : int64
+    23: addr_of %t49 <- &@data
+    24: nop
+    25: nop
+    26: local @__inl_checksum_0_param_data : int32*
+    27: assign @__inl_checksum_0_param_data <- %t49
+    28: local @__inl_checksum_0_param_len : int32
+    29: assign @__inl_checksum_0_param_len <- @len
+    30: nop
+    31: local @__inl_checksum_0_local_s : int64
+    32: assign @__inl_checksum_0_local_s <- 0
+    33: local @__inl_checksum_0_local_x : int64
+    34: assign @__inl_checksum_0_local_x <- 0
+    35: local @__inl_checksum_0_local_i : int32
+    36: assign @__inl_checksum_0_local_i <- 0
+    37: simd_sum_i32 @__inl_checksum_0_local_s += simd_sum_i32(base=@__inl_checksum_0_param_data, len=@__inl_checksum_0_param_len)
+    38: nop
+    39: nop
+    40: nop
+    41: nop
+    42: nop
+    43: nop
+    44: nop
+    45: nop
+    46: nop
+    47: nop
+    48: nop
+    49: nop
+    50: nop
+    51: nop
+    52: nop
+    53: nop
+    54: nop
+    55: nop
+    56: binary %__inl_checksum_0_tmp_t24 = @__inl_checksum_0_local_s * 1000003
+    57: binary @before = %__inl_checksum_0_tmp_t24 + @__inl_checksum_0_local_x
+    58: nop
+    59: nop
+    60: nop
+    61: nop
+    62: nop
+    63: nop
+    64: nop
+    65: nop
+    66: nop
+    67: nop
+    68: nop
+    69: nop
+    70: local @__inl_insertion_sort_1_param_data : int32*
+    71: assign @__inl_insertion_sort_1_param_data <- %t49
+    72: local @__inl_insertion_sort_1_param_len : int32
+    73: assign @__inl_insertion_sort_1_param_len <- @len
+    74: nop
+    75: local @__inl_insertion_sort_1_local_i : int32
+    76: assign @__inl_insertion_sort_1_local_i <- 1
+    77: local @__inl_insertion_sort_1_local_cur : int32*
+    78: binary @__inl_insertion_sort_1_local_cur = @__inl_insertion_sort_1_param_data + 4
+    79: nop
+    80: simd_insertion_sort_i32 base=@__inl_insertion_sort_1_param_data len=@__inl_insertion_sort_1_param_len
+    81: nop
+    82: nop
+    83: nop
+    84: nop
+    85: nop
+    86: nop
+    87: nop
+    88: nop
+    89: nop
+    90: nop
+    91: nop
+    92: nop
+    93: nop
+    94: nop
+    95: nop
+    96: nop
+    97: nop
+    98: nop
+    99: nop
+   100: nop
+   101: nop
+   102: nop
+   103: nop
+   104: nop
+   105: nop
+   106: nop
+   107: nop
+   108: nop
+   109: nop
+   110: nop
+   111: nop
+   112: nop
+   113: nop
+   114: nop
+   115: nop
+   116: nop
+   117: nop
+   118: nop
+   119: nop
+   120: nop
+   121: nop
+   122: nop
+   123: nop
+   124: nop
+   125: nop
+   126: nop
+   127: nop
+   128: nop
+   129: local @__inl_is_sorted_2_param_data : int32*
+   130: assign @__inl_is_sorted_2_param_data <- %t49
+   131: local @__inl_is_sorted_2_param_len : int32
+   132: assign @__inl_is_sorted_2_param_len <- @len
+   133: nop
+   134: local @__inl_is_sorted_2_local_i : int32
+   135: assign @__inl_is_sorted_2_local_i <- 1
+   136: label __inl_is_sorted_2_lbl_ir_while_15
+   137: binary %__inl_is_sorted_2_tmp_t27 = @__inl_is_sorted_2_local_i < @__inl_is_sorted_2_param_len
+   138: branch_zero %__inl_is_sorted_2_tmp_t27 -> __inl_is_sorted_2_lbl_ir_errdefer_end_22
+   139: binary %__inl_is_sorted_2_tmp_t28 = @__inl_is_sorted_2_local_i << 2
+   140: binary %__inl_is_sorted_2_tmp_t29 = @__inl_is_sorted_2_param_data + %__inl_is_sorted_2_tmp_t28
+   141: load %__inl_is_sorted_2_tmp_t30 <- *%__inl_is_sorted_2_tmp_t29 [4]
+   142: binary %__inl_is_sorted_2_tmp_t31 = @__inl_is_sorted_2_local_i - 1
+   143: binary %__inl_is_sorted_2_tmp_t32 = %__inl_is_sorted_2_tmp_t31 << 2
+   144: binary %__inl_is_sorted_2_tmp_t33 = @__inl_is_sorted_2_param_data + %__inl_is_sorted_2_tmp_t32
+   145: load %__inl_is_sorted_2_tmp_t34 <- *%__inl_is_sorted_2_tmp_t33 [4]
+   146: binary %__inl_is_sorted_2_tmp_t35 = %__inl_is_sorted_2_tmp_t30 < %__inl_is_sorted_2_tmp_t34
+   147: branch_zero %__inl_is_sorted_2_tmp_t35 -> __inl_is_sorted_2_lbl_ir_if_next_18
+   148: nop
+   149: nop
+   150: nop
+   151: nop
+   152: nop
+   153: assign %t56 <- 0
+   154: jump __inl_is_sorted_2_label_end
+   155: nop
+   156: label __inl_is_sorted_2_lbl_ir_if_next_18
+   157: nop
+   158: binary @__inl_is_sorted_2_local_i = @__inl_is_sorted_2_local_i + 1
+   159: nop
+   160: jump __inl_is_sorted_2_lbl_ir_while_15
+   161: nop
+   162: nop
+   163: nop
+   164: nop
+   165: nop
+   166: label __inl_is_sorted_2_lbl_ir_errdefer_end_22
+   167: assign %t56 <- 1
+   168: nop
+   169: label __inl_is_sorted_2_label_end
+   170: binary %t60 = %t56 == 0
+   171: branch_zero %t60 -> ir_if_next_27
+   172: nop
+   173: nop
+   174: nop
+   175: nop
+   176: nop
+   177: return 0
+   178: nop
+   179: label ir_if_next_27
+   180: nop
+   181: addr_of %t63 <- &@data
+   182: nop
+   183: nop
+   184: local @__inl_checksum_3_param_data : int32*
+   185: assign @__inl_checksum_3_param_data <- %t63
+   186: local @__inl_checksum_3_param_len : int32
+   187: assign @__inl_checksum_3_param_len <- @len
+   188: nop
+   189: local @__inl_checksum_3_local_s : int64
+   190: assign @__inl_checksum_3_local_s <- 0
+   191: local @__inl_checksum_3_local_x : int64
+   192: assign @__inl_checksum_3_local_x <- 0
+   193: local @__inl_checksum_3_local_i : int32
+   194: assign @__inl_checksum_3_local_i <- 0
+   195: simd_sum_i32 @__inl_checksum_3_local_s += simd_sum_i32(base=@__inl_checksum_3_param_data, len=@__inl_checksum_3_param_len)
+   196: nop
+   197: nop
+   198: nop
+   199: nop
+   200: nop
+   201: nop
+   202: nop
+   203: nop
+   204: nop
+   205: nop
+   206: nop
+   207: nop
+   208: nop
+   209: nop
+   210: nop
+   211: nop
+   212: nop
+   213: nop
+   214: binary %__inl_checksum_3_tmp_t24 = @__inl_checksum_3_local_s * 1000003
+   215: binary %__inl_checksum_3_tmp_t25 = %__inl_checksum_3_tmp_t24 + @__inl_checksum_3_local_x
+   216: nop
+   217: nop
+   218: nop
+   219: nop
+   220: nop
+   221: nop
+   222: nop
+   223: nop
+   224: binary %t66 = %__inl_checksum_3_tmp_t25 != @before
+   225: branch_zero %t66 -> ir_errdefer_end_35
+   226: nop
+   227: nop
+   228: nop
+   229: nop
+   230: nop
+   231: return 0
+   232: nop
+   233: nop
+   234: nop
+   235: nop
+   236: nop
+   237: nop
+   238: nop
+   239: label ir_errdefer_end_35
+   240: return 1
+}
+
+function main {
+     0: nop
+     1: call %t69 = run_case(0, 11)
+     2: binary %t70 = %t69 == 0
+     3: branch_zero %t70 -> ir_if_next_38
+     4: nop
+     5: nop
+     6: nop
+     7: nop
+     8: nop
+     9: return 10
+    10: nop
+    11: label ir_if_next_38
+    12: nop
+    13: call %t72 = run_case(1, 13)
+    14: binary %t73 = %t72 == 0
+    15: branch_zero %t73 -> ir_if_next_42
+    16: nop
+    17: nop
+    18: nop
+    19: nop
+    20: nop
+    21: return 11
+    22: nop
+    23: label ir_if_next_42
+    24: nop
+    25: call %t75 = run_case(2, 17)
+    26: binary %t76 = %t75 == 0
+    27: branch_zero %t76 -> ir_if_next_46
+    28: nop
+    29: nop
+    30: nop
+    31: nop
+    32: nop
+    33: return 12
+    34: nop
+    35: label ir_if_next_46
+    36: nop
+    37: call %t78 = run_case(7, 19)
+    38: binary %t79 = %t78 == 0
+    39: branch_zero %t79 -> ir_if_next_50
+    40: nop
+    41: nop
+    42: nop
+    43: nop
+    44: nop
+    45: return 13
+    46: nop
+    47: label ir_if_next_50
+    48: nop
+    49: call %t81 = run_case(32, 23)
+    50: binary %t82 = %t81 == 0
+    51: branch_zero %t82 -> ir_if_next_54
+    52: nop
+    53: nop
+    54: nop
+    55: nop
+    56: nop
+    57: return 14
+    58: nop
+    59: label ir_if_next_54
+    60: nop
+    61: call %t84 = run_case(65, 29)
+    62: binary %t85 = %t84 == 0
+    63: branch_zero %t85 -> ir_if_next_58
+    64: nop
+    65: nop
+    66: nop
+    67: nop
+    68: nop
+    69: return 15
+    70: nop
+    71: label ir_if_next_58
+    72: nop
+    73: call %t87 = run_case(129, 31)
+    74: binary %t88 = %t87 == 0
+    75: branch_zero %t88 -> ir_errdefer_ok_65
+    76: nop
+    77: nop
+    78: nop
+    79: nop
+    80: nop
+    81: return 16
+    82: nop
+    83: nop
+    84: nop
+    85: nop
+    86: nop
+    87: nop
+    88: label ir_errdefer_ok_65
+    89: nop
+    90: return 0
+}
+

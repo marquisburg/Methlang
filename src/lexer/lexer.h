@@ -2,7 +2,6 @@
 #define LEXER_H
 
 #include <stddef.h>
-#include <string.h>
 
 typedef enum {
   TOKEN_EOF,
@@ -185,15 +184,10 @@ Lexer *lexer_create(const char *source);
 void lexer_destroy(Lexer *lexer);
 Token lexer_next_token(Lexer *lexer);
 Token lexer_peek_token(Lexer *lexer);
-Token *lexer_tokenize(Lexer *lexer, size_t *token_count);
 void token_destroy(Token *token);
 Token token_clone(const Token *token);
-void tokens_destroy(Token *tokens, size_t count);
 
 // Error reporting functions
 void lexer_set_error(Lexer *lexer, const char *message);
-const char *lexer_get_error(Lexer *lexer);
-int lexer_has_error(Lexer *lexer);
-void lexer_clear_error(Lexer *lexer);
 
 #endif // LEXER_H

@@ -9,6 +9,7 @@
 #include "../semantic/type_checker.h"
 #include "binary_emitter.h"
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -99,6 +100,10 @@ typedef struct {
    * count is the function's return-type size. */
   int current_fn_returns_indirect;
   size_t current_fn_indirect_return_size;
+  int profile_runtime;
+  char **profile_function_names;
+  size_t profile_function_count;
+  size_t profile_function_capacity;
 } CodeGenerator;
 
 // Function declarations
@@ -124,8 +129,14 @@ void code_generator_generate_expression(CodeGenerator *generator,
 void code_generator_set_emit_asm_comments(CodeGenerator *generator, int enable);
 void code_generator_set_stack_trace_support(CodeGenerator *generator,
                                             int enable);
+void code_generator_set_debug_sidecar_emission(CodeGenerator *generator,
+                                               int enable);
 void code_generator_set_eliminate_unreachable_functions(CodeGenerator *generator,
                                                         int enable);
+void code_generator_set_profile_runtime(CodeGenerator *generator, int enable);
+int code_generator_register_profile_function(CodeGenerator *generator,
+                                             const char *name,
+                                             uint32_t *id_out);
 void code_generator_emit(CodeGenerator *generator, const char *format, ...);
 void code_generator_flush_pending_spill(CodeGenerator *generator);
 char *code_generator_get_output(CodeGenerator *generator);
@@ -141,13 +152,7 @@ char *code_generator_generate_label(CodeGenerator *generator,
                                     const char *prefix);
 
 // Assembly helpers
-void code_generator_emit_data_section(CodeGenerator *generator);
 void code_generator_emit_text_section(CodeGenerator *generator);
-void code_generator_emit_global_symbol(CodeGenerator *generator,
-                                       const char *symbol);
-void code_generator_emit_instruction(CodeGenerator *generator,
-                                     const char *mnemonic,
-                                     const char *operands);
 
 // Variable declaration helpers
 void code_generator_generate_global_variable(CodeGenerator *generator,
@@ -183,6 +188,12 @@ void code_generator_add_runtime_function_mapping(CodeGenerator *generator,
                                                  size_t source_line,
                                                  size_t source_column,
                                                  const char *filename);
+const char *code_generator_runtime_filename(CodeGenerator *generator,
+                                              const char *node_filename);
+void code_generator_record_runtime_trap_site(
+    CodeGenerator *generator, const char *trap_pc_label, uint32_t kind,
+    size_t line, size_t column, const char *filename,
+    const char *message_template, const char *static_context);
 void code_generator_emit_runtime_debug_tables(CodeGenerator *generator);
 int code_generator_allocate_stack_space(CodeGenerator *generator, int size,
                                         int alignment);
@@ -197,14 +208,7 @@ void code_generator_generate_parameter_passing(CodeGenerator *generator,
 void code_generator_generate_parameter(CodeGenerator *generator,
                                        ASTNode *argument, int param_index,
                                        Type *param_type, Symbol *func_symbol);
-void code_generator_save_caller_saved_registers(CodeGenerator *generator);
-void code_generator_restore_caller_saved_registers(CodeGenerator *generator);
-void code_generator_save_caller_saved_registers_selective(
-    CodeGenerator *generator);
-void code_generator_restore_caller_saved_registers_selective(
-    CodeGenerator *generator);
-void code_generator_align_stack_for_call(CodeGenerator *generator,
-                                         int param_count);
+void code_generator_align_stack_for_call(CodeGenerator *generator);
 void code_generator_cleanup_stack_after_call(CodeGenerator *generator,
                                              ASTNode **arguments,
                                              size_t argument_count);
@@ -234,7 +238,6 @@ void code_generator_load_string_literal(CodeGenerator *generator,
                                         const char *string_value);
 void code_generator_load_string_literal_as_cstring(CodeGenerator *generator,
                                                    const char *string_value);
-int code_generator_get_operator_precedence(const char *op);
 const char *code_generator_get_arithmetic_instruction(const char *op,
                                                       int is_float);
 

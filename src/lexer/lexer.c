@@ -1,4 +1,5 @@
 #include "lexer.h"
+#include "common.h"
 #include "../string_intern.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -13,10 +14,18 @@ typedef struct StringInternEntry {
   struct StringInternEntry *ptr_next;
 } StringInternEntry;
 
-#define STRING_INTERN_BUCKET_COUNT 4096u
+#define STRING_INTERN_INITIAL_BUCKETS 4096u
 
+/* Both tables index the same entries: g_string_intern_buckets chains by content
+ * hash (via entry->next) for interning lookups, g_string_intern_ptr_buckets
+ * chains by pointer hash (via entry->ptr_next) for string_is_interned. They
+ * share one bucket count and grow together so chains stay short -- with a fixed
+ * 4096 buckets, a program with ~200k distinct identifiers gave ~50-long chains,
+ * making both interning (parse) and string_is_interned (teardown) O(n^2). */
 static StringInternEntry **g_string_intern_buckets = NULL;
 static StringInternEntry **g_string_intern_ptr_buckets = NULL;
+static size_t g_string_intern_bucket_count = 0;
+static size_t g_string_intern_entry_count = 0;
 
 static void token_set_lexeme(Token *token, const char *data, size_t length) {
   if (!token) {
@@ -26,15 +35,47 @@ static void token_set_lexeme(Token *token, const char *data, size_t length) {
   token->lexeme.length = length;
 }
 
+/* Assign a fixed operator/punctuation spelling without heap allocation. The
+ * value points at a string literal with static lifetime, so it is flagged
+ * interned: token_destroy will not free it and token_clone will not deep-copy
+ * it. This avoids a malloc+free per operator token, which dominated lexing of
+ * punctuation-heavy source. */
+static void token_set_static_value(Token *token, const char *literal) {
+  if (!token) {
+    return;
+  }
+  token->value = (char *)literal;
+  token->is_interned = 1;
+}
+
+/* Static, nul-terminated one-character strings for every byte value, so a
+ * single-character operator token can borrow a stable spelling instead of
+ * allocating a 2-byte buffer per token. Index by (unsigned char)c. */
+static const char g_single_char_strings[256][2] = {
+#define SCS1(n) {(char)(n), '\0'}
+#define SCS4(n) SCS1(n), SCS1((n) + 1), SCS1((n) + 2), SCS1((n) + 3)
+#define SCS16(n) SCS4(n), SCS4((n) + 4), SCS4((n) + 8), SCS4((n) + 12)
+#define SCS64(n) SCS16(n), SCS16((n) + 16), SCS16((n) + 32), SCS16((n) + 48)
+    SCS64(0), SCS64(64), SCS64(128), SCS64(192)
+#undef SCS64
+#undef SCS16
+#undef SCS4
+#undef SCS1
+};
+
+static void token_set_single_char_value(Token *token, char c) {
+  token_set_static_value(token, g_single_char_strings[(unsigned char)c]);
+}
+
 static int string_intern_init(void) {
   if (g_string_intern_buckets && g_string_intern_ptr_buckets) {
     return 1;
   }
 
   g_string_intern_buckets =
-      calloc(STRING_INTERN_BUCKET_COUNT, sizeof(StringInternEntry *));
+      calloc(STRING_INTERN_INITIAL_BUCKETS, sizeof(StringInternEntry *));
   g_string_intern_ptr_buckets =
-      calloc(STRING_INTERN_BUCKET_COUNT, sizeof(StringInternEntry *));
+      calloc(STRING_INTERN_INITIAL_BUCKETS, sizeof(StringInternEntry *));
   if (!g_string_intern_buckets || !g_string_intern_ptr_buckets) {
     free(g_string_intern_buckets);
     free(g_string_intern_ptr_buckets);
@@ -42,6 +83,8 @@ static int string_intern_init(void) {
     g_string_intern_ptr_buckets = NULL;
     return 0;
   }
+  g_string_intern_bucket_count = STRING_INTERN_INITIAL_BUCKETS;
+  g_string_intern_entry_count = 0;
 
   return 1;
 }
@@ -63,6 +106,52 @@ static size_t string_intern_hash_ptr(const void *ptr) {
   return (size_t)value;
 }
 
+/* Double both bucket arrays and rehash every entry into the new buckets. Keeps
+ * average chain length ~constant as the number of interned strings grows. On
+ * allocation failure the existing (smaller) tables are left intact and lookups
+ * remain correct, just slower. */
+static void string_intern_maybe_grow(void) {
+  if (g_string_intern_entry_count <= (g_string_intern_bucket_count * 3) / 4) {
+    return;
+  }
+
+  size_t new_count = g_string_intern_bucket_count * 2;
+  StringInternEntry **new_content =
+      calloc(new_count, sizeof(StringInternEntry *));
+  StringInternEntry **new_ptr = calloc(new_count, sizeof(StringInternEntry *));
+  if (!new_content || !new_ptr) {
+    free(new_content);
+    free(new_ptr);
+    return; /* keep the old tables; correctness is unaffected */
+  }
+
+  /* Rehash via the content-bucket chains, which reach every entry exactly
+   * once, fixing up both the content (next) and pointer (ptr_next) links. */
+  for (size_t i = 0; i < g_string_intern_bucket_count; i++) {
+    StringInternEntry *entry = g_string_intern_buckets[i];
+    while (entry) {
+      StringInternEntry *next = entry->next;
+
+      size_t cb =
+          string_intern_hash_bytes(entry->value, entry->length) % new_count;
+      entry->next = new_content[cb];
+      new_content[cb] = entry;
+
+      size_t pb = string_intern_hash_ptr(entry->value) % new_count;
+      entry->ptr_next = new_ptr[pb];
+      new_ptr[pb] = entry;
+
+      entry = next;
+    }
+  }
+
+  free(g_string_intern_buckets);
+  free(g_string_intern_ptr_buckets);
+  g_string_intern_buckets = new_content;
+  g_string_intern_ptr_buckets = new_ptr;
+  g_string_intern_bucket_count = new_count;
+}
+
 const char *string_intern_n(const char *value, size_t length) {
   if (!value) {
     return NULL;
@@ -73,7 +162,7 @@ const char *string_intern_n(const char *value, size_t length) {
   }
 
   size_t hash = string_intern_hash_bytes(value, length);
-  size_t bucket = hash % STRING_INTERN_BUCKET_COUNT;
+  size_t bucket = hash % g_string_intern_bucket_count;
   StringInternEntry *entry = g_string_intern_buckets[bucket];
   while (entry) {
     if (entry->length == length && memcmp(entry->value, value, length) == 0) {
@@ -101,11 +190,14 @@ const char *string_intern_n(const char *value, size_t length) {
   g_string_intern_buckets[bucket] = entry;
 
   size_t ptr_bucket =
-      string_intern_hash_ptr(copy) % STRING_INTERN_BUCKET_COUNT;
+      string_intern_hash_ptr(copy) % g_string_intern_bucket_count;
   entry->ptr_next = g_string_intern_ptr_buckets[ptr_bucket];
   g_string_intern_ptr_buckets[ptr_bucket] = entry;
 
-  return entry->value;
+  g_string_intern_entry_count++;
+  string_intern_maybe_grow();
+
+  return copy;
 }
 
 const char *string_intern(const char *value) {
@@ -121,7 +213,7 @@ int string_is_interned(const char *value) {
   }
 
   size_t ptr_bucket =
-      string_intern_hash_ptr(value) % STRING_INTERN_BUCKET_COUNT;
+      string_intern_hash_ptr(value) % g_string_intern_bucket_count;
   StringInternEntry *entry = g_string_intern_ptr_buckets[ptr_bucket];
   while (entry) {
     if (entry->value == value) {
@@ -138,7 +230,7 @@ void string_intern_clear(void) {
     return;
   }
 
-  for (size_t i = 0; i < STRING_INTERN_BUCKET_COUNT; i++) {
+  for (size_t i = 0; i < g_string_intern_bucket_count; i++) {
     StringInternEntry *entry = g_string_intern_buckets[i];
     while (entry) {
       StringInternEntry *next = entry->next;
@@ -153,6 +245,8 @@ void string_intern_clear(void) {
   free(g_string_intern_ptr_buckets);
   g_string_intern_buckets = NULL;
   g_string_intern_ptr_buckets = NULL;
+  g_string_intern_bucket_count = 0;
+  g_string_intern_entry_count = 0;
 }
 
 Lexer *lexer_create(const char *source) {
@@ -181,10 +275,488 @@ void lexer_destroy(Lexer *lexer) {
   }
 }
 
+static Token lexer_skip_line_comment(Lexer *lexer) {
+  lexer->position += 2;
+  lexer->column += 2;
+  while (lexer->position < lexer->length &&
+         lexer->source[lexer->position] != '\n') {
+    lexer->position++;
+    lexer->column++;
+  }
+  return lexer_next_token(lexer);
+}
+
+static Token lexer_skip_block_comment(Lexer *lexer) {
+  size_t start_line = lexer->line;
+  size_t start_column = lexer->column;
+  lexer->position += 2;
+  lexer->column += 2;
+  int depth = 1;
+  while (lexer->position < lexer->length && depth > 0) {
+    char c = lexer->source[lexer->position];
+    if (c == '/' && lexer->position + 1 < lexer->length &&
+        lexer->source[lexer->position + 1] == '*') {
+      depth++;
+      lexer->position += 2;
+      lexer->column += 2;
+    } else if (c == '*' && lexer->position + 1 < lexer->length &&
+               lexer->source[lexer->position + 1] == '/') {
+      depth--;
+      lexer->position += 2;
+      lexer->column += 2;
+    } else if (c == '\n') {
+      lexer->position++;
+      lexer->line++;
+      lexer->column = 1;
+    } else {
+      lexer->position++;
+      lexer->column++;
+    }
+  }
+  if (depth != 0) {
+    Token token = {TOKEN_ERROR, NULL, {NULL, 0}, start_line, start_column, 0};
+    token.value = strdup("Unterminated block comment");
+    lexer_set_error(lexer, token.value);
+    return token;
+  }
+  return lexer_next_token(lexer);
+}
+
+static Token lexer_lex_char_literal(Lexer *lexer) {
+  Token token = {TOKEN_EOF, NULL, {NULL, 0}, lexer->line, lexer->column, 0};
+  size_t literal_start = lexer->position;
+  lexer->position++;
+  lexer->column++;
+  if (lexer->position >= lexer->length) {
+    token.type = TOKEN_ERROR;
+    token.value = strdup("Unterminated character literal");
+    lexer_set_error(lexer, token.value);
+    return token;
+  }
+
+  int value = 0;
+  char ch = lexer->source[lexer->position];
+  if (ch == '\\') {
+    lexer->position++;
+    lexer->column++;
+    if (lexer->position >= lexer->length) {
+      token.type = TOKEN_ERROR;
+      token.value = strdup("Unterminated character literal");
+      lexer_set_error(lexer, token.value);
+      return token;
+    }
+
+    char esc = lexer->source[lexer->position];
+    switch (esc) {
+    case 'n':
+      value = '\n';
+      break;
+    case 't':
+      value = '\t';
+      break;
+    case 'r':
+      value = '\r';
+      break;
+    case '\\':
+      value = '\\';
+      break;
+    case '\'':
+      value = '\'';
+      break;
+    case '0':
+      value = '\0';
+      break;
+    default:
+      token.type = TOKEN_ERROR;
+      token.value = strdup("Invalid character escape sequence");
+      lexer_set_error(lexer, token.value);
+      return token;
+    }
+  } else {
+    if (ch == '\n' || ch == '\r') {
+      token.type = TOKEN_ERROR;
+      token.value = strdup("Unterminated character literal");
+      lexer_set_error(lexer, token.value);
+      return token;
+    }
+    value = (unsigned char)ch;
+  }
+
+  lexer->position++;
+  lexer->column++;
+  if (lexer->position >= lexer->length ||
+      lexer->source[lexer->position] != '\'') {
+    token.type = TOKEN_ERROR;
+    token.value =
+        strdup("Character literal must contain exactly one character");
+    lexer_set_error(lexer, token.value);
+    return token;
+  }
+
+  lexer->position++;
+  lexer->column++;
+
+  token.type = TOKEN_NUMBER;
+  token.value = malloc(16);
+  if (!token.value) {
+    token.type = TOKEN_ERROR;
+    token.value = strdup("Memory allocation failed");
+    lexer_set_error(lexer, token.value);
+    return token;
+  }
+  snprintf(token.value, 16, "%d", value);
+  token_set_lexeme(&token, &lexer->source[literal_start],
+                   lexer->position - literal_start);
+  return token;
+}
+
+static Token lexer_lex_number(Lexer *lexer) {
+  Token token = {TOKEN_EOF, NULL, {NULL, 0}, lexer->line, lexer->column, 0};
+  size_t start = lexer->position;
+  char current = lexer->source[lexer->position];
+
+  if (current == '0' && lexer->position + 1 < lexer->length &&
+      (lexer->source[lexer->position + 1] == 'x' ||
+       lexer->source[lexer->position + 1] == 'X')) {
+    lexer->position += 2;
+    lexer->column += 2;
+    size_t digits_start = lexer->position;
+    while (lexer->position < lexer->length &&
+           isxdigit(lexer->source[lexer->position])) {
+      lexer->position++;
+      lexer->column++;
+    }
+    if (lexer->position == digits_start) {
+      token.type = TOKEN_ERROR;
+      token.value = strdup("Invalid hexadecimal literal");
+      lexer_set_error(lexer, token.value);
+      return token;
+    }
+  } else if (current == '0' && lexer->position + 1 < lexer->length &&
+             (lexer->source[lexer->position + 1] == 'b' ||
+              lexer->source[lexer->position + 1] == 'B')) {
+    lexer->position += 2;
+    lexer->column += 2;
+    size_t digits_start = lexer->position;
+    while (lexer->position < lexer->length &&
+           (lexer->source[lexer->position] == '0' ||
+            lexer->source[lexer->position] == '1')) {
+      lexer->position++;
+      lexer->column++;
+    }
+    if (lexer->position == digits_start) {
+      token.type = TOKEN_ERROR;
+      token.value = strdup("Invalid binary literal");
+      lexer_set_error(lexer, token.value);
+      return token;
+    }
+  } else {
+    while (lexer->position < lexer->length &&
+           (isdigit(lexer->source[lexer->position]) ||
+            lexer->source[lexer->position] == '.')) {
+      lexer->position++;
+      lexer->column++;
+    }
+  }
+
+  size_t length = lexer->position - start;
+  token.type = TOKEN_NUMBER;
+  token.value = malloc(length + 1);
+  if (!token.value) {
+    token.type = TOKEN_ERROR;
+    token.value = strdup("Memory allocation failed");
+    lexer_set_error(lexer, token.value);
+    return token;
+  }
+  strncpy(token.value, &lexer->source[start], length);
+  token.value[length] = '\0';
+  token_set_lexeme(&token, &lexer->source[start], length);
+  return token;
+}
+
+static Token lexer_lex_identifier_or_keyword(Lexer *lexer) {
+  Token token = {TOKEN_EOF, NULL, {NULL, 0}, lexer->line, lexer->column, 0};
+  size_t start = lexer->position;
+  while (lexer->position < lexer->length &&
+         (isalnum(lexer->source[lexer->position]) ||
+          lexer->source[lexer->position] == '_')) {
+    lexer->position++;
+    lexer->column++;
+  }
+
+  size_t length = lexer->position - start;
+  token.value = (char *)string_intern_n(&lexer->source[start], length);
+  if (!token.value) {
+    token.type = TOKEN_ERROR;
+    token.value = strdup("Memory allocation failed");
+    lexer_set_error(lexer, token.value);
+    return token;
+  }
+  token.is_interned = 1;
+  token_set_lexeme(&token, &lexer->source[start], length);
+
+  if (strcmp(token.value, "import") == 0)
+    token.type = TOKEN_IMPORT;
+  else if (strcmp(token.value, "import_str") == 0)
+    token.type = TOKEN_IMPORT_STR;
+  else if (strcmp(token.value, "extern") == 0)
+    token.type = TOKEN_EXTERN;
+  else if (strcmp(token.value, "export") == 0)
+    token.type = TOKEN_EXPORT;
+  else if (strcmp(token.value, "var") == 0)
+    token.type = TOKEN_VAR;
+  else if (strcmp(token.value, "function") == 0)
+    token.type = TOKEN_FUNCTION;
+  else if (strcmp(token.value, "struct") == 0)
+    token.type = TOKEN_STRUCT;
+  else if (strcmp(token.value, "enum") == 0)
+    token.type = TOKEN_ENUM;
+  else if (strcmp(token.value, "trait") == 0)
+    token.type = TOKEN_TRAIT;
+  else if (strcmp(token.value, "impl") == 0)
+    token.type = TOKEN_IMPL;
+  else if (strcmp(token.value, "where") == 0)
+    token.type = TOKEN_WHERE;
+  else if (strcmp(token.value, "method") == 0)
+    token.type = TOKEN_METHOD;
+  else if (strcmp(token.value, "return") == 0)
+    token.type = TOKEN_RETURN;
+  else if (strcmp(token.value, "if") == 0)
+    token.type = TOKEN_IF;
+  else if (strcmp(token.value, "else") == 0)
+    token.type = TOKEN_ELSE;
+  else if (strcmp(token.value, "while") == 0)
+    token.type = TOKEN_WHILE;
+  else if (strcmp(token.value, "for") == 0)
+    token.type = TOKEN_FOR;
+  else if (strcmp(token.value, "switch") == 0)
+    token.type = TOKEN_SWITCH;
+  else if (strcmp(token.value, "case") == 0)
+    token.type = TOKEN_CASE;
+  else if (strcmp(token.value, "default") == 0)
+    token.type = TOKEN_DEFAULT;
+  else if (strcmp(token.value, "break") == 0)
+    token.type = TOKEN_BREAK;
+  else if (strcmp(token.value, "continue") == 0)
+    token.type = TOKEN_CONTINUE;
+  else if (strcmp(token.value, "defer") == 0)
+    token.type = TOKEN_DEFER;
+  else if (strcmp(token.value, "errdefer") == 0)
+    token.type = TOKEN_ERRDEFER;
+  else if (strcmp(token.value, "asm") == 0)
+    token.type = TOKEN_ASM;
+  else if (strcmp(token.value, "this") == 0)
+    token.type = TOKEN_THIS;
+  else if (strcmp(token.value, "new") == 0)
+    token.type = TOKEN_NEW;
+  else if (strcmp(token.value, "fn") == 0)
+    token.type = TOKEN_FN;
+  else if (strcmp(token.value, "match") == 0)
+    token.type = TOKEN_MATCH;
+  else if (strcmp(token.value, "int8") == 0)
+    token.type = TOKEN_INT8;
+  else if (strcmp(token.value, "int16") == 0)
+    token.type = TOKEN_INT16;
+  else if (strcmp(token.value, "int32") == 0)
+    token.type = TOKEN_INT32;
+  else if (strcmp(token.value, "int64") == 0)
+    token.type = TOKEN_INT64;
+  else if (strcmp(token.value, "uint8") == 0)
+    token.type = TOKEN_UINT8;
+  else if (strcmp(token.value, "uint16") == 0)
+    token.type = TOKEN_UINT16;
+  else if (strcmp(token.value, "uint32") == 0)
+    token.type = TOKEN_UINT32;
+  else if (strcmp(token.value, "uint64") == 0)
+    token.type = TOKEN_UINT64;
+  else if (strcmp(token.value, "float32") == 0)
+    token.type = TOKEN_FLOAT32;
+  else if (strcmp(token.value, "float64") == 0)
+    token.type = TOKEN_FLOAT64;
+  else if (strcmp(token.value, "string") == 0)
+    token.type = TOKEN_STRING_TYPE;
+  else if (strcasecmp(token.value, "mov") == 0)
+    token.type = TOKEN_MOV;
+  else if (strcasecmp(token.value, "add") == 0)
+    token.type = TOKEN_ADD;
+  else if (strcasecmp(token.value, "sub") == 0)
+    token.type = TOKEN_SUB;
+  else if (strcasecmp(token.value, "mul") == 0)
+    token.type = TOKEN_MUL;
+  else if (strcasecmp(token.value, "div") == 0)
+    token.type = TOKEN_DIV;
+  else if (strcasecmp(token.value, "imul") == 0)
+    token.type = TOKEN_IMUL;
+  else if (strcasecmp(token.value, "idiv") == 0)
+    token.type = TOKEN_IDIV;
+  else if (strcasecmp(token.value, "inc") == 0)
+    token.type = TOKEN_INC;
+  else if (strcasecmp(token.value, "dec") == 0)
+    token.type = TOKEN_DEC;
+  else if (strcasecmp(token.value, "cmp") == 0)
+    token.type = TOKEN_CMP;
+  else if (strcasecmp(token.value, "jmp") == 0)
+    token.type = TOKEN_JMP;
+  else if (strcasecmp(token.value, "je") == 0)
+    token.type = TOKEN_JE;
+  else if (strcasecmp(token.value, "jne") == 0)
+    token.type = TOKEN_JNE;
+  else if (strcasecmp(token.value, "jl") == 0)
+    token.type = TOKEN_JL;
+  else if (strcasecmp(token.value, "jle") == 0)
+    token.type = TOKEN_JLE;
+  else if (strcasecmp(token.value, "jg") == 0)
+    token.type = TOKEN_JG;
+  else if (strcasecmp(token.value, "jge") == 0)
+    token.type = TOKEN_JGE;
+  else if (strcasecmp(token.value, "call") == 0)
+    token.type = TOKEN_CALL;
+  else if (strcasecmp(token.value, "ret") == 0)
+    token.type = TOKEN_RET;
+  else if (strcasecmp(token.value, "push") == 0)
+    token.type = TOKEN_PUSH;
+  else if (strcasecmp(token.value, "pop") == 0)
+    token.type = TOKEN_POP;
+  else if (strcasecmp(token.value, "lea") == 0)
+    token.type = TOKEN_LEA;
+  else if (strcasecmp(token.value, "nop") == 0)
+    token.type = TOKEN_NOP;
+  else if (strcasecmp(token.value, "int") == 0)
+    token.type = TOKEN_INT;
+  else if (strcasecmp(token.value, "syscall") == 0)
+    token.type = TOKEN_SYSCALL;
+  else if (strcasecmp(token.value, "eax") == 0)
+    token.type = TOKEN_EAX;
+  else if (strcasecmp(token.value, "ebx") == 0)
+    token.type = TOKEN_EBX;
+  else if (strcasecmp(token.value, "ecx") == 0)
+    token.type = TOKEN_ECX;
+  else if (strcasecmp(token.value, "edx") == 0)
+    token.type = TOKEN_EDX;
+  else if (strcasecmp(token.value, "esi") == 0)
+    token.type = TOKEN_ESI;
+  else if (strcasecmp(token.value, "edi") == 0)
+    token.type = TOKEN_EDI;
+  else if (strcasecmp(token.value, "esp") == 0)
+    token.type = TOKEN_ESP;
+  else if (strcasecmp(token.value, "ebp") == 0)
+    token.type = TOKEN_EBP;
+  else if (strcasecmp(token.value, "rax") == 0)
+    token.type = TOKEN_RAX;
+  else if (strcasecmp(token.value, "rbx") == 0)
+    token.type = TOKEN_RBX;
+  else if (strcasecmp(token.value, "rcx") == 0)
+    token.type = TOKEN_RCX;
+  else if (strcasecmp(token.value, "rdx") == 0)
+    token.type = TOKEN_RDX;
+  else if (strcasecmp(token.value, "rsi") == 0)
+    token.type = TOKEN_RSI;
+  else if (strcasecmp(token.value, "rdi") == 0)
+    token.type = TOKEN_RDI;
+  else if (strcasecmp(token.value, "rsp") == 0)
+    token.type = TOKEN_RSP;
+  else if (strcasecmp(token.value, "rbp") == 0)
+    token.type = TOKEN_RBP;
+  else if (strcasecmp(token.value, "r8") == 0)
+    token.type = TOKEN_R8;
+  else if (strcasecmp(token.value, "r9") == 0)
+    token.type = TOKEN_R9;
+  else if (strcasecmp(token.value, "r10") == 0)
+    token.type = TOKEN_R10;
+  else if (strcasecmp(token.value, "r11") == 0)
+    token.type = TOKEN_R11;
+  else if (strcasecmp(token.value, "r12") == 0)
+    token.type = TOKEN_R12;
+  else if (strcasecmp(token.value, "r13") == 0)
+    token.type = TOKEN_R13;
+  else if (strcasecmp(token.value, "r14") == 0)
+    token.type = TOKEN_R14;
+  else if (strcasecmp(token.value, "r15") == 0)
+    token.type = TOKEN_R15;
+  else
+    token.type = TOKEN_IDENTIFIER;
+
+  return token;
+}
+
+static Token lexer_lex_string_literal(Lexer *lexer) {
+  Token token = {TOKEN_EOF, NULL, {NULL, 0}, lexer->line, lexer->column, 0};
+  lexer->position++;
+  lexer->column++;
+
+  size_t buffer_size = lexer->length - lexer->position;
+  char *buffer = malloc(buffer_size + 1);
+  if (!buffer) {
+    token.type = TOKEN_ERROR;
+    token.value = strdup("Memory allocation failed");
+    lexer_set_error(lexer, token.value);
+    return token;
+  }
+
+  size_t buffer_pos = 0;
+
+  while (lexer->position < lexer->length &&
+         lexer->source[lexer->position] != '"') {
+    if (lexer->source[lexer->position] == '\\' &&
+        lexer->position + 1 < lexer->length) {
+      lexer->position++;
+      lexer->column++;
+
+      char escape_char = lexer->source[lexer->position];
+      switch (escape_char) {
+      case 'n':
+        buffer[buffer_pos++] = '\n';
+        break;
+      case 't':
+        buffer[buffer_pos++] = '\t';
+        break;
+      case 'r':
+        buffer[buffer_pos++] = '\r';
+        break;
+      case '\\':
+        buffer[buffer_pos++] = '\\';
+        break;
+      case '"':
+        buffer[buffer_pos++] = '"';
+        break;
+      case '0':
+        buffer[buffer_pos++] = '\0';
+        break;
+      default:
+        buffer[buffer_pos++] = '\\';
+        buffer[buffer_pos++] = escape_char;
+        break;
+      }
+      lexer->position++;
+      lexer->column++;
+    } else {
+      buffer[buffer_pos++] = lexer->source[lexer->position];
+      lexer->position++;
+      lexer->column++;
+    }
+  }
+
+  if (lexer->position >= lexer->length) {
+    free(buffer);
+    token.type = TOKEN_ERROR;
+    token.value = strdup("Unterminated string literal");
+    lexer_set_error(lexer, token.value);
+    return token;
+  }
+
+  buffer[buffer_pos] = '\0';
+  token.type = TOKEN_STRING;
+  token.value = buffer;
+  token_set_lexeme(&token, token.value, buffer_pos);
+
+  lexer->position++;
+  lexer->column++;
+  return token;
+}
+
 Token lexer_next_token(Lexer *lexer) {
   Token token = {TOKEN_EOF, NULL, {NULL, 0}, lexer->line, lexer->column, 0};
 
-  // Skip whitespace
   while (lexer->position < lexer->length &&
          isspace(lexer->source[lexer->position])) {
     if (lexer->source[lexer->position] == '\n') {
@@ -207,69 +779,21 @@ Token lexer_next_token(Lexer *lexer) {
   }
 
   if (lexer->position >= lexer->length) {
-    return token; // EOF
+    return token;
   }
 
   char current = lexer->source[lexer->position];
   token.line = lexer->line;
   token.column = lexer->column;
 
-  // Handle comments first
   if (current == '/' && lexer->position + 1 < lexer->length &&
       lexer->source[lexer->position + 1] == '/') {
-    // Skip line comment
-    lexer->position += 2; // Skip '//'
-    lexer->column += 2;
-
-    // Skip until end of line
-    while (lexer->position < lexer->length &&
-           lexer->source[lexer->position] != '\n') {
-      lexer->position++;
-      lexer->column++;
-    }
-
-    // Recursively get next token after comment
-    return lexer_next_token(lexer);
+    return lexer_skip_line_comment(lexer);
   }
 
-  // Block comment /* ... */ with nesting support
   if (current == '/' && lexer->position + 1 < lexer->length &&
       lexer->source[lexer->position + 1] == '*') {
-    size_t start_line = lexer->line;
-    size_t start_column = lexer->column;
-    lexer->position += 2;
-    lexer->column += 2;
-    int depth = 1;
-    while (lexer->position < lexer->length && depth > 0) {
-      char c = lexer->source[lexer->position];
-      if (c == '/' && lexer->position + 1 < lexer->length &&
-          lexer->source[lexer->position + 1] == '*') {
-        depth++;
-        lexer->position += 2;
-        lexer->column += 2;
-      } else if (c == '*' && lexer->position + 1 < lexer->length &&
-                 lexer->source[lexer->position + 1] == '/') {
-        depth--;
-        lexer->position += 2;
-        lexer->column += 2;
-      } else if (c == '\n') {
-        lexer->position++;
-        lexer->line++;
-        lexer->column = 1;
-      } else {
-        lexer->position++;
-        lexer->column++;
-      }
-    }
-    if (depth != 0) {
-      token.type = TOKEN_ERROR;
-      token.line = start_line;
-      token.column = start_column;
-      token.value = strdup("Unterminated block comment");
-      lexer_set_error(lexer, token.value);
-      return token;
-    }
-    return lexer_next_token(lexer);
+    return lexer_skip_block_comment(lexer);
   }
 
   // Single character tokens
@@ -287,7 +811,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_EQUALS_EQUALS;
-      token.value = strdup("==");
+      token_set_static_value(&token, "==");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -299,7 +823,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_NOT_EQUALS;
-      token.value = strdup("!=");
+      token_set_static_value(&token, "!=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -311,7 +835,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length) {
       if (lexer->source[lexer->position + 1] == '=') {
         token.type = TOKEN_LESS_EQUALS;
-        token.value = strdup("<=");
+        token_set_static_value(&token, "<=");
         token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
@@ -320,14 +844,14 @@ Token lexer_next_token(Lexer *lexer) {
         if (lexer->position + 2 < lexer->length &&
             lexer->source[lexer->position + 2] == '=') {
           token.type = TOKEN_LSHIFT_EQUALS;
-          token.value = strdup("<<=");
+          token_set_static_value(&token, "<<=");
           token_set_lexeme(&token, &lexer->source[lexer->position], 3);
           lexer->position += 3;
           lexer->column += 3;
           return token;
         }
         token.type = TOKEN_LSHIFT;
-        token.value = strdup("<<");
+        token_set_static_value(&token, "<<");
         token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
@@ -340,7 +864,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length) {
       if (lexer->source[lexer->position + 1] == '=') {
         token.type = TOKEN_GREATER_EQUALS;
-        token.value = strdup(">=");
+        token_set_static_value(&token, ">=");
         token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
@@ -349,14 +873,14 @@ Token lexer_next_token(Lexer *lexer) {
         if (lexer->position + 2 < lexer->length &&
             lexer->source[lexer->position + 2] == '=') {
           token.type = TOKEN_RSHIFT_EQUALS;
-          token.value = strdup(">>=");
+          token_set_static_value(&token, ">>=");
           token_set_lexeme(&token, &lexer->source[lexer->position], 3);
           lexer->position += 3;
           lexer->column += 3;
           return token;
         }
         token.type = TOKEN_RSHIFT;
-        token.value = strdup(">>");
+        token_set_static_value(&token, ">>");
         token_set_lexeme(&token, &lexer->source[lexer->position], 2);
         lexer->position += 2;
         lexer->column += 2;
@@ -393,7 +917,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_PLUS_EQUALS;
-      token.value = strdup("+=");
+      token_set_static_value(&token, "+=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -405,7 +929,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_STAR_EQUALS;
-      token.value = strdup("*=");
+      token_set_static_value(&token, "*=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -417,7 +941,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '&') {
       token.type = TOKEN_AND_AND;
-      token.value = strdup("&&");
+      token_set_static_value(&token, "&&");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -426,7 +950,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_AMP_EQUALS;
-      token.value = strdup("&=");
+      token_set_static_value(&token, "&=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -438,7 +962,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '|') {
       token.type = TOKEN_OR_OR;
-      token.value = strdup("||");
+      token_set_static_value(&token, "||");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -447,7 +971,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_PIPE_EQUALS;
-      token.value = strdup("|=");
+      token_set_static_value(&token, "|=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -459,7 +983,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_CARET_EQUALS;
-      token.value = strdup("^=");
+      token_set_static_value(&token, "^=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -475,7 +999,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_SLASH_EQUALS;
-      token.value = strdup("/=");
+      token_set_static_value(&token, "/=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -487,7 +1011,7 @@ Token lexer_next_token(Lexer *lexer) {
     if (lexer->position + 1 < lexer->length &&
         lexer->source[lexer->position + 1] == '=') {
       token.type = TOKEN_PERCENT_EQUALS;
-      token.value = strdup("%=");
+      token_set_static_value(&token, "%=");
       token_set_lexeme(&token, &lexer->source[lexer->position], 2);
       lexer->position += 2;
       lexer->column += 2;
@@ -503,9 +1027,7 @@ Token lexer_next_token(Lexer *lexer) {
   }
 
   if (token.type != TOKEN_ERROR) {
-    token.value = malloc(2);
-    token.value[0] = current;
-    token.value[1] = '\0';
+    token_set_single_char_value(&token, current);
     token_set_lexeme(&token, &lexer->source[lexer->position], 1);
     lexer->position++;
     lexer->column++;
@@ -516,8 +1038,7 @@ Token lexer_next_token(Lexer *lexer) {
   if (current == '-' && lexer->position + 1 < lexer->length &&
       lexer->source[lexer->position + 1] == '>') {
     token.type = TOKEN_ARROW;
-    token.value = malloc(3);
-    strcpy(token.value, "->");
+    token_set_static_value(&token, "->");
     token_set_lexeme(&token, &lexer->source[lexer->position], 2);
     lexer->position += 2;
     lexer->column += 2;
@@ -528,7 +1049,7 @@ Token lexer_next_token(Lexer *lexer) {
   if (current == '-' && lexer->position + 1 < lexer->length &&
       lexer->source[lexer->position + 1] == '=') {
     token.type = TOKEN_MINUS_EQUALS;
-    token.value = strdup("-=");
+    token_set_static_value(&token, "-=");
     token_set_lexeme(&token, &lexer->source[lexer->position], 2);
     lexer->position += 2;
     lexer->column += 2;
@@ -537,459 +1058,32 @@ Token lexer_next_token(Lexer *lexer) {
 
   if (current == '-') {
     token.type = TOKEN_MINUS;
-    token.value = malloc(2);
-    token.value[0] = current;
-    token.value[1] = '\0';
+    token_set_single_char_value(&token, current);
     token_set_lexeme(&token, &lexer->source[lexer->position], 1);
     lexer->position++;
     lexer->column++;
     return token;
   }
 
-  // Character literals
   if (current == '\'') {
-    size_t literal_start = lexer->position;
-    lexer->position++; // skip opening quote
-    lexer->column++;
-    if (lexer->position >= lexer->length) {
-      token.type = TOKEN_ERROR;
-      token.value = strdup("Unterminated character literal");
-      lexer_set_error(lexer, token.value);
-      return token;
-    }
-
-    int value = 0;
-    char ch = lexer->source[lexer->position];
-    if (ch == '\\') {
-      lexer->position++;
-      lexer->column++;
-      if (lexer->position >= lexer->length) {
-        token.type = TOKEN_ERROR;
-        token.value = strdup("Unterminated character literal");
-        lexer_set_error(lexer, token.value);
-        return token;
-      }
-
-      char esc = lexer->source[lexer->position];
-      switch (esc) {
-      case 'n':
-        value = '\n';
-        break;
-      case 't':
-        value = '\t';
-        break;
-      case 'r':
-        value = '\r';
-        break;
-      case '\\':
-        value = '\\';
-        break;
-      case '\'':
-        value = '\'';
-        break;
-      case '0':
-        value = '\0';
-        break;
-      default:
-        token.type = TOKEN_ERROR;
-        token.value = strdup("Invalid character escape sequence");
-        lexer_set_error(lexer, token.value);
-        return token;
-      }
-    } else {
-      if (ch == '\n' || ch == '\r') {
-        token.type = TOKEN_ERROR;
-        token.value = strdup("Unterminated character literal");
-        lexer_set_error(lexer, token.value);
-        return token;
-      }
-      value = (unsigned char)ch;
-    }
-
-    lexer->position++;
-    lexer->column++;
-    if (lexer->position >= lexer->length ||
-        lexer->source[lexer->position] != '\'') {
-      token.type = TOKEN_ERROR;
-      token.value =
-          strdup("Character literal must contain exactly one character");
-      lexer_set_error(lexer, token.value);
-      return token;
-    }
-
-    lexer->position++; // skip closing quote
-    lexer->column++;
-
-    token.type = TOKEN_NUMBER;
-    token.value = malloc(16);
-    if (!token.value) {
-      token.type = TOKEN_ERROR;
-      token.value = strdup("Memory allocation failed");
-      lexer_set_error(lexer, token.value);
-      return token;
-    }
-    snprintf(token.value, 16, "%d", value);
-    token_set_lexeme(&token, &lexer->source[literal_start],
-                     lexer->position - literal_start);
-    return token;
+    return lexer_lex_char_literal(lexer);
   }
 
-  // Numbers
   if (isdigit(current) ||
       (current == '0' && lexer->position + 1 < lexer->length &&
        (lexer->source[lexer->position + 1] == 'x' ||
         lexer->source[lexer->position + 1] == 'X' ||
         lexer->source[lexer->position + 1] == 'b' ||
         lexer->source[lexer->position + 1] == 'B'))) {
-    size_t start = lexer->position;
-
-    // Handle hexadecimal numbers (0x or 0X prefix)
-    if (current == '0' && lexer->position + 1 < lexer->length &&
-        (lexer->source[lexer->position + 1] == 'x' ||
-         lexer->source[lexer->position + 1] == 'X')) {
-      lexer->position += 2; // Skip "0x"
-      lexer->column += 2;
-      size_t digits_start = lexer->position;
-      while (lexer->position < lexer->length &&
-             isxdigit(lexer->source[lexer->position])) {
-        lexer->position++;
-        lexer->column++;
-      }
-      if (lexer->position == digits_start) {
-        token.type = TOKEN_ERROR;
-        token.value = strdup("Invalid hexadecimal literal");
-        lexer_set_error(lexer, token.value);
-        return token;
-      }
-    }
-    // Handle binary numbers (0b or 0B prefix)
-    else if (current == '0' && lexer->position + 1 < lexer->length &&
-             (lexer->source[lexer->position + 1] == 'b' ||
-              lexer->source[lexer->position + 1] == 'B')) {
-      lexer->position += 2; // Skip "0b"
-      lexer->column += 2;
-      size_t digits_start = lexer->position;
-      while (lexer->position < lexer->length &&
-             (lexer->source[lexer->position] == '0' ||
-              lexer->source[lexer->position] == '1')) {
-        lexer->position++;
-        lexer->column++;
-      }
-      if (lexer->position == digits_start) {
-        token.type = TOKEN_ERROR;
-        token.value = strdup("Invalid binary literal");
-        lexer_set_error(lexer, token.value);
-        return token;
-      }
-    }
-    // Handle decimal numbers (including floating point)
-    else {
-      while (lexer->position < lexer->length &&
-             (isdigit(lexer->source[lexer->position]) ||
-              lexer->source[lexer->position] == '.')) {
-        lexer->position++;
-        lexer->column++;
-      }
-    }
-
-    size_t length = lexer->position - start;
-    token.type = TOKEN_NUMBER;
-    token.value = malloc(length + 1);
-    strncpy(token.value, &lexer->source[start], length);
-    token.value[length] = '\0';
-    token_set_lexeme(&token, &lexer->source[start], length);
-    return token;
+    return lexer_lex_number(lexer);
   }
 
-  // Identifiers and keywords
   if (isalpha(current) || current == '_') {
-    size_t start = lexer->position;
-    while (lexer->position < lexer->length &&
-           (isalnum(lexer->source[lexer->position]) ||
-            lexer->source[lexer->position] == '_')) {
-      lexer->position++;
-      lexer->column++;
-    }
-
-    size_t length = lexer->position - start;
-    token.value = (char *)string_intern_n(&lexer->source[start], length);
-    if (!token.value) {
-      token.type = TOKEN_ERROR;
-      token.value = strdup("Memory allocation failed");
-      lexer_set_error(lexer, token.value);
-      return token;
-    }
-    token.is_interned = 1;
-    token_set_lexeme(&token, &lexer->source[start], length);
-
-    // Check for keywords
-    if (strcmp(token.value, "import") == 0)
-      token.type = TOKEN_IMPORT;
-    else if (strcmp(token.value, "import_str") == 0)
-      token.type = TOKEN_IMPORT_STR;
-    else if (strcmp(token.value, "extern") == 0)
-      token.type = TOKEN_EXTERN;
-    else if (strcmp(token.value, "export") == 0)
-      token.type = TOKEN_EXPORT;
-    else if (strcmp(token.value, "var") == 0)
-      token.type = TOKEN_VAR;
-    else if (strcmp(token.value, "function") == 0)
-      token.type = TOKEN_FUNCTION;
-    else if (strcmp(token.value, "struct") == 0)
-      token.type = TOKEN_STRUCT;
-    else if (strcmp(token.value, "enum") == 0)
-      token.type = TOKEN_ENUM;
-    else if (strcmp(token.value, "trait") == 0)
-      token.type = TOKEN_TRAIT;
-    else if (strcmp(token.value, "impl") == 0)
-      token.type = TOKEN_IMPL;
-    else if (strcmp(token.value, "where") == 0)
-      token.type = TOKEN_WHERE;
-    else if (strcmp(token.value, "method") == 0)
-      token.type = TOKEN_METHOD;
-    else if (strcmp(token.value, "return") == 0)
-      token.type = TOKEN_RETURN;
-    else if (strcmp(token.value, "if") == 0)
-      token.type = TOKEN_IF;
-    else if (strcmp(token.value, "else") == 0)
-      token.type = TOKEN_ELSE;
-    else if (strcmp(token.value, "while") == 0)
-      token.type = TOKEN_WHILE;
-    else if (strcmp(token.value, "for") == 0)
-      token.type = TOKEN_FOR;
-    else if (strcmp(token.value, "switch") == 0)
-      token.type = TOKEN_SWITCH;
-    else if (strcmp(token.value, "case") == 0)
-      token.type = TOKEN_CASE;
-    else if (strcmp(token.value, "default") == 0)
-      token.type = TOKEN_DEFAULT;
-    else if (strcmp(token.value, "break") == 0)
-      token.type = TOKEN_BREAK;
-    else if (strcmp(token.value, "continue") == 0)
-      token.type = TOKEN_CONTINUE;
-    else if (strcmp(token.value, "defer") == 0)
-      token.type = TOKEN_DEFER;
-    else if (strcmp(token.value, "errdefer") == 0)
-      token.type = TOKEN_ERRDEFER;
-    else if (strcmp(token.value, "asm") == 0)
-      token.type = TOKEN_ASM;
-    else if (strcmp(token.value, "this") == 0)
-      token.type = TOKEN_THIS;
-    else if (strcmp(token.value, "new") == 0)
-      token.type = TOKEN_NEW;
-    else if (strcmp(token.value, "fn") == 0)
-      token.type = TOKEN_FN;
-    else if (strcmp(token.value, "match") == 0)
-      token.type = TOKEN_MATCH;
-
-    // Type keywords
-    else if (strcmp(token.value, "int8") == 0)
-      token.type = TOKEN_INT8;
-    else if (strcmp(token.value, "int16") == 0)
-      token.type = TOKEN_INT16;
-    else if (strcmp(token.value, "int32") == 0)
-      token.type = TOKEN_INT32;
-    else if (strcmp(token.value, "int64") == 0)
-      token.type = TOKEN_INT64;
-    else if (strcmp(token.value, "uint8") == 0)
-      token.type = TOKEN_UINT8;
-    else if (strcmp(token.value, "uint16") == 0)
-      token.type = TOKEN_UINT16;
-    else if (strcmp(token.value, "uint32") == 0)
-      token.type = TOKEN_UINT32;
-    else if (strcmp(token.value, "uint64") == 0)
-      token.type = TOKEN_UINT64;
-    else if (strcmp(token.value, "float32") == 0)
-      token.type = TOKEN_FLOAT32;
-    else if (strcmp(token.value, "float64") == 0)
-      token.type = TOKEN_FLOAT64;
-    else if (strcmp(token.value, "string") == 0)
-      token.type = TOKEN_STRING_TYPE;
-
-    // x86 mnemonics (case insensitive)
-    else if (strcasecmp(token.value, "mov") == 0)
-      token.type = TOKEN_MOV;
-    else if (strcasecmp(token.value, "add") == 0)
-      token.type = TOKEN_ADD;
-    else if (strcasecmp(token.value, "sub") == 0)
-      token.type = TOKEN_SUB;
-    else if (strcasecmp(token.value, "mul") == 0)
-      token.type = TOKEN_MUL;
-    else if (strcasecmp(token.value, "div") == 0)
-      token.type = TOKEN_DIV;
-    else if (strcasecmp(token.value, "imul") == 0)
-      token.type = TOKEN_IMUL;
-    else if (strcasecmp(token.value, "idiv") == 0)
-      token.type = TOKEN_IDIV;
-    else if (strcasecmp(token.value, "inc") == 0)
-      token.type = TOKEN_INC;
-    else if (strcasecmp(token.value, "dec") == 0)
-      token.type = TOKEN_DEC;
-    else if (strcasecmp(token.value, "cmp") == 0)
-      token.type = TOKEN_CMP;
-    else if (strcasecmp(token.value, "jmp") == 0)
-      token.type = TOKEN_JMP;
-    else if (strcasecmp(token.value, "je") == 0)
-      token.type = TOKEN_JE;
-    else if (strcasecmp(token.value, "jne") == 0)
-      token.type = TOKEN_JNE;
-    else if (strcasecmp(token.value, "jl") == 0)
-      token.type = TOKEN_JL;
-    else if (strcasecmp(token.value, "jle") == 0)
-      token.type = TOKEN_JLE;
-    else if (strcasecmp(token.value, "jg") == 0)
-      token.type = TOKEN_JG;
-    else if (strcasecmp(token.value, "jge") == 0)
-      token.type = TOKEN_JGE;
-    else if (strcasecmp(token.value, "call") == 0)
-      token.type = TOKEN_CALL;
-    else if (strcasecmp(token.value, "ret") == 0)
-      token.type = TOKEN_RET;
-    else if (strcasecmp(token.value, "push") == 0)
-      token.type = TOKEN_PUSH;
-    else if (strcasecmp(token.value, "pop") == 0)
-      token.type = TOKEN_POP;
-    else if (strcasecmp(token.value, "lea") == 0)
-      token.type = TOKEN_LEA;
-    else if (strcasecmp(token.value, "nop") == 0)
-      token.type = TOKEN_NOP;
-    else if (strcasecmp(token.value, "int") == 0)
-      token.type = TOKEN_INT;
-    else if (strcasecmp(token.value, "syscall") == 0)
-      token.type = TOKEN_SYSCALL;
-
-    // x86 registers (case insensitive)
-    else if (strcasecmp(token.value, "eax") == 0)
-      token.type = TOKEN_EAX;
-    else if (strcasecmp(token.value, "ebx") == 0)
-      token.type = TOKEN_EBX;
-    else if (strcasecmp(token.value, "ecx") == 0)
-      token.type = TOKEN_ECX;
-    else if (strcasecmp(token.value, "edx") == 0)
-      token.type = TOKEN_EDX;
-    else if (strcasecmp(token.value, "esi") == 0)
-      token.type = TOKEN_ESI;
-    else if (strcasecmp(token.value, "edi") == 0)
-      token.type = TOKEN_EDI;
-    else if (strcasecmp(token.value, "esp") == 0)
-      token.type = TOKEN_ESP;
-    else if (strcasecmp(token.value, "ebp") == 0)
-      token.type = TOKEN_EBP;
-    else if (strcasecmp(token.value, "rax") == 0)
-      token.type = TOKEN_RAX;
-    else if (strcasecmp(token.value, "rbx") == 0)
-      token.type = TOKEN_RBX;
-    else if (strcasecmp(token.value, "rcx") == 0)
-      token.type = TOKEN_RCX;
-    else if (strcasecmp(token.value, "rdx") == 0)
-      token.type = TOKEN_RDX;
-    else if (strcasecmp(token.value, "rsi") == 0)
-      token.type = TOKEN_RSI;
-    else if (strcasecmp(token.value, "rdi") == 0)
-      token.type = TOKEN_RDI;
-    else if (strcasecmp(token.value, "rsp") == 0)
-      token.type = TOKEN_RSP;
-    else if (strcasecmp(token.value, "rbp") == 0)
-      token.type = TOKEN_RBP;
-    else if (strcasecmp(token.value, "r8") == 0)
-      token.type = TOKEN_R8;
-    else if (strcasecmp(token.value, "r9") == 0)
-      token.type = TOKEN_R9;
-    else if (strcasecmp(token.value, "r10") == 0)
-      token.type = TOKEN_R10;
-    else if (strcasecmp(token.value, "r11") == 0)
-      token.type = TOKEN_R11;
-    else if (strcasecmp(token.value, "r12") == 0)
-      token.type = TOKEN_R12;
-    else if (strcasecmp(token.value, "r13") == 0)
-      token.type = TOKEN_R13;
-    else if (strcasecmp(token.value, "r14") == 0)
-      token.type = TOKEN_R14;
-    else if (strcasecmp(token.value, "r15") == 0)
-      token.type = TOKEN_R15;
-
-    else
-      token.type = TOKEN_IDENTIFIER;
-
-    return token;
+    return lexer_lex_identifier_or_keyword(lexer);
   }
 
-  // String literals
   if (current == '"') {
-    lexer->position++; // Skip opening quote
-    lexer->column++;
-
-    // Allocate buffer for processed string (worst case: same length as input)
-    size_t buffer_size = lexer->length - lexer->position;
-    char *buffer = malloc(buffer_size + 1);
-    if (!buffer) {
-      token.type = TOKEN_ERROR;
-      token.value = strdup("Memory allocation failed");
-      lexer_set_error(lexer, token.value);
-      return token;
-    }
-
-    size_t buffer_pos = 0;
-
-    while (lexer->position < lexer->length &&
-           lexer->source[lexer->position] != '"') {
-      if (lexer->source[lexer->position] == '\\' &&
-          lexer->position + 1 < lexer->length) {
-        lexer->position++; // Skip backslash
-        lexer->column++;
-
-        // Process escape sequence
-        char escape_char = lexer->source[lexer->position];
-        switch (escape_char) {
-        case 'n':
-          buffer[buffer_pos++] = '\n';
-          break;
-        case 't':
-          buffer[buffer_pos++] = '\t';
-          break;
-        case 'r':
-          buffer[buffer_pos++] = '\r';
-          break;
-        case '\\':
-          buffer[buffer_pos++] = '\\';
-          break;
-        case '"':
-          buffer[buffer_pos++] = '"';
-          break;
-        case '0':
-          buffer[buffer_pos++] = '\0';
-          break;
-        default:
-          // Unknown escape sequence, keep both characters
-          buffer[buffer_pos++] = '\\';
-          buffer[buffer_pos++] = escape_char;
-          break;
-        }
-        lexer->position++;
-        lexer->column++;
-      } else {
-        buffer[buffer_pos++] = lexer->source[lexer->position];
-        lexer->position++;
-        lexer->column++;
-      }
-    }
-
-    if (lexer->position >= lexer->length) {
-      free(buffer);
-      token.type = TOKEN_ERROR;
-      token.value = strdup("Unterminated string literal");
-      lexer_set_error(lexer, token.value);
-      return token;
-    }
-
-    buffer[buffer_pos] = '\0';
-    token.type = TOKEN_STRING;
-    token.value = buffer;
-    token_set_lexeme(&token, token.value, buffer_pos);
-
-    lexer->position++; // Skip closing quote
-    lexer->column++;
-    return token;
+    return lexer_lex_string_literal(lexer);
   }
 
   // Unknown character
@@ -1063,63 +1157,6 @@ Token token_clone(const Token *token) {
   return clone;
 }
 
-Token *lexer_tokenize(Lexer *lexer, size_t *token_count) {
-  if (!lexer || !token_count) {
-    return NULL;
-  }
-
-  // Reset lexer position to start
-  lexer->position = 0;
-  lexer->line = 1;
-  lexer->column = 1;
-  lexer->continuation_depth = 0;
-
-  // First pass: count tokens
-  size_t count = 0;
-  size_t saved_position = lexer->position;
-  size_t saved_line = lexer->line;
-  size_t saved_column = lexer->column;
-  size_t saved_continuation_depth = lexer->continuation_depth;
-
-  Token token;
-  do {
-    token = lexer_next_token(lexer);
-    count++;
-    token_destroy(&token);
-  } while (token.type != TOKEN_EOF);
-
-  // Reset lexer position
-  lexer->position = saved_position;
-  lexer->line = saved_line;
-  lexer->column = saved_column;
-  lexer->continuation_depth = saved_continuation_depth;
-
-  // Allocate token array
-  Token *tokens = malloc(count * sizeof(Token));
-  if (!tokens) {
-    *token_count = 0;
-    return NULL;
-  }
-
-  // Second pass: collect tokens
-  for (size_t i = 0; i < count; i++) {
-    tokens[i] = lexer_next_token(lexer);
-  }
-
-  *token_count = count;
-  return tokens;
-}
-
-void tokens_destroy(Token *tokens, size_t count) {
-  if (!tokens)
-    return;
-
-  for (size_t i = 0; i < count; i++) {
-    token_destroy(&tokens[i]);
-  }
-  free(tokens);
-}
-
 // Error reporting functions
 void lexer_set_error(Lexer *lexer, const char *message) {
   if (!lexer)
@@ -1144,20 +1181,4 @@ void lexer_set_error(Lexer *lexer, const char *message) {
   }
 
   lexer->has_error = (message != NULL);
-}
-
-const char *lexer_get_error(Lexer *lexer) {
-  return lexer ? lexer->error_message : NULL;
-}
-
-int lexer_has_error(Lexer *lexer) { return lexer ? lexer->has_error : 0; }
-
-void lexer_clear_error(Lexer *lexer) {
-  if (lexer) {
-    if (lexer->error_message) {
-      free(lexer->error_message);
-      lexer->error_message = NULL;
-    }
-    lexer->has_error = 0;
-  }
 }

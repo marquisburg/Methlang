@@ -1,0 +1,21 @@
+// fib() must stay out-of-line to avoid compile-time explosion when inlined.
+function fib(n: int32) -> int64 {
+  if (n <= 1) {
+    return n;
+  }
+  var a: int64 = 0;
+  var b: int64 = 1;
+  var next: int64 = 0;
+  var i: int32 = 2;
+  while (i <= n) {
+    next = a + b;
+    a = b;
+    b = next;
+    i = i + 1;
+  }
+  return b;
+}
+
+function main() -> int32 {
+  return (int32)fib(35);
+}

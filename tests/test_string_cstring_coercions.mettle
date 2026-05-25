@@ -1,0 +1,38 @@
+import "std/io";
+
+function identity_cstring(p: cstring) -> cstring {
+  return p;
+}
+
+function literal_cstring() -> cstring {
+  return "hi";
+}
+
+function first_char(p: cstring) -> int32 {
+  return p[0];
+}
+
+function main() -> int32 {
+  var msg: string = "hello";
+  print(msg);
+  println("!");
+
+  var file: cstring = fopen("definitely_missing.txt", "r");
+  if (file != 0) {
+    fclose(file);
+  }
+
+  var returned: cstring = literal_cstring();
+  var local: cstring = msg;
+  local = "ok";
+
+  var rebuilt: string = "bad";
+  rebuilt.chars = local;
+  rebuilt.length = 2;
+  println(rebuilt);
+
+  var total: int32 = first_char(local);
+  total = total + identity_cstring("x")[0];
+  total = total + returned[0] + rebuilt.length + rebuilt.chars[1];
+  return total - (111 + 120 + 104 + 2 + 107);
+}

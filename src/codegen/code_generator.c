@@ -1,4 +1,5 @@
 #include "code_generator_internal.h"
+#include "compiler/compiler_context.h"
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -58,6 +59,10 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->indirect_return_slot_cursor = 0;
   generator->current_fn_returns_indirect = 0;
   generator->current_fn_indirect_return_size = 0;
+  generator->profile_runtime = 0;
+  generator->profile_function_names = NULL;
+  generator->profile_function_count = 0;
+  generator->profile_function_capacity = 0;
   generator->binary_emitter =
       binary_emitter_create(BINARY_TARGET_FORMAT_COFF_WIN64);
 
@@ -86,7 +91,7 @@ CodeGenerator *code_generator_create_with_debug(SymbolTable *symbol_table,
     return NULL;
 
   generator->debug_info = debug_info;
-  generator->generate_debug_info = 1;
+  generator->generate_debug_info = 0;
 
   return generator;
 }
@@ -110,6 +115,12 @@ void code_generator_destroy(CodeGenerator *generator) {
       }
     }
     free(generator->extern_symbols);
+    if (generator->profile_function_names) {
+      for (size_t i = 0; i < generator->profile_function_count; i++) {
+        free(generator->profile_function_names[i]);
+      }
+    }
+    free(generator->profile_function_names);
     free(generator->indirect_return_slot_offsets);
     free(generator);
   }
@@ -141,6 +152,11 @@ void code_generator_set_error(CodeGenerator *generator,
   if (generator->has_error) {
     return;
   }
+
+  if (generator->current_function_name) {
+    mettle_compiler_ctx_set_function_name(generator->current_function_name);
+  }
+  mettle_compiler_ctx_set_phase(METTLE_COMPILER_PHASE_CODEGEN);
 
   generator->has_error = 1;
   free(generator->error_message);
@@ -179,12 +195,97 @@ void code_generator_set_stack_trace_support(CodeGenerator *generator,
   generator->generate_stack_trace_support = enable ? 1 : 0;
 }
 
+void code_generator_set_debug_sidecar_emission(CodeGenerator *generator,
+                                               int enable) {
+  if (!generator) {
+    return;
+  }
+  generator->generate_debug_info = enable ? 1 : 0;
+}
+
+const char *code_generator_runtime_filename(CodeGenerator *generator,
+                                            const char *node_filename) {
+  if (node_filename && node_filename[0] != '\0') {
+    return node_filename;
+  }
+  if (generator && generator->debug_info &&
+      generator->debug_info->source_filename) {
+    return generator->debug_info->source_filename;
+  }
+  return "";
+}
+
+void code_generator_record_runtime_trap_site(
+    CodeGenerator *generator, const char *trap_pc_label, uint32_t kind,
+    size_t line, size_t column, const char *filename,
+    const char *message_template, const char *static_context) {
+  char *source_line = NULL;
+  const char *resolved_filename = NULL;
+
+  if (!generator || !generator->debug_info ||
+      !generator->generate_stack_trace_support || !trap_pc_label ||
+      !generator->current_function_name || line == 0) {
+    return;
+  }
+
+  resolved_filename = code_generator_runtime_filename(generator, filename);
+  source_line = debug_info_read_source_line(resolved_filename, line);
+  debug_info_add_runtime_trap_site_mapping(
+      generator->debug_info, trap_pc_label, kind,
+      generator->current_function_name, resolved_filename, line, column,
+      source_line, message_template, static_context);
+  free(source_line);
+}
+
 void code_generator_set_eliminate_unreachable_functions(
     CodeGenerator *generator, int enable) {
   if (!generator) {
     return;
   }
   generator->eliminate_unreachable_functions = enable ? 1 : 0;
+}
+
+int code_generator_register_profile_function(CodeGenerator *generator,
+                                             const char *name,
+                                             uint32_t *id_out) {
+  char *name_copy = NULL;
+  size_t new_index = 0;
+
+  if (!generator || !name || !id_out) {
+    return 0;
+  }
+
+  new_index = generator->profile_function_count;
+  if (generator->profile_function_count >= generator->profile_function_capacity) {
+    size_t new_capacity = generator->profile_function_capacity == 0
+                              ? 16u
+                              : generator->profile_function_capacity * 2u;
+    char **names =
+        realloc(generator->profile_function_names,
+                new_capacity * sizeof(char *));
+    if (!names) {
+      return 0;
+    }
+    generator->profile_function_names = names;
+    generator->profile_function_capacity = new_capacity;
+  }
+
+  name_copy = strdup(name);
+  if (!name_copy) {
+    return 0;
+  }
+
+  generator->profile_function_names[new_index] = name_copy;
+  generator->profile_function_count = new_index + 1u;
+  *id_out = (uint32_t)new_index;
+  return 1;
+}
+
+void code_generator_set_profile_runtime(CodeGenerator *generator, int enable) {
+  if (!generator) {
+    return;
+  }
+  generator->profile_runtime = enable ? 1 : 0;
 }
 
 static char *code_generator_strip_asm_comments(const char *text) {
@@ -319,6 +420,24 @@ void code_generator_flush_pending_spill(CodeGenerator *generator) {
   generator->flushing_pending = 0;
 }
 
+static char *code_generator_vformat(const char *format, va_list args) {
+  va_list args_copy;
+  va_copy(args_copy, args);
+  int required_size = vsnprintf(NULL, 0, format, args_copy);
+  va_end(args_copy);
+  if (required_size < 0) {
+    return NULL;
+  }
+
+  char *rendered = malloc((size_t)required_size + 1);
+  if (!rendered) {
+    return NULL;
+  }
+
+  vsnprintf(rendered, (size_t)required_size + 1, format, args);
+  return rendered;
+}
+
 void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
   if (!generator || !format || generator->has_error) {
     return;
@@ -333,28 +452,14 @@ void code_generator_emit(CodeGenerator *generator, const char *format, ...) {
   va_list args;
   va_start(args, format);
 
-  // Calculate required size
-  va_list args_copy;
-  va_copy(args_copy, args);
-  int required_size = vsnprintf(NULL, 0, format, args_copy);
-  va_end(args_copy);
-  if (required_size < 0) {
-    va_end(args);
+  char *rendered = code_generator_vformat(format, args);
+
+  va_end(args);
+
+  if (!rendered) {
     code_generator_set_error(generator, "Failed to format assembly output");
     return;
   }
-
-  char *rendered = malloc((size_t)required_size + 1);
-  if (!rendered) {
-    va_end(args);
-    code_generator_set_error(generator,
-                             "Out of memory while formatting assembly output");
-    return;
-  }
-
-  vsnprintf(rendered, (size_t)required_size + 1, format, args);
-
-  va_end(args);
 
   const char *to_append = rendered;
   char *cleaned = NULL;
@@ -563,29 +668,9 @@ char *code_generator_generate_label(CodeGenerator *generator,
 }
 
 // Assembly helper functions
-void code_generator_emit_data_section(CodeGenerator *generator) {
-  code_generator_emit(generator, "section .data\n");
-  code_generator_emit(generator, "; Global variables will be placed here\n\n");
-}
-
 void code_generator_emit_text_section(CodeGenerator *generator) {
   code_generator_emit(generator, "section .text\n");
   code_generator_emit(generator, "; Code section\n\n");
-}
-
-void code_generator_emit_global_symbol(CodeGenerator *generator,
-                                       const char *symbol) {
-  code_generator_emit(generator, "global %s\n", symbol);
-}
-
-void code_generator_emit_instruction(CodeGenerator *generator,
-                                     const char *mnemonic,
-                                     const char *operands) {
-  if (operands && strlen(operands) > 0) {
-    code_generator_emit(generator, "    %s %s\n", mnemonic, operands);
-  } else {
-    code_generator_emit(generator, "    %s\n", mnemonic);
-  }
 }
 
 // Helper function to emit to global variables buffer
@@ -598,31 +683,15 @@ void code_generator_emit_to_global_buffer(CodeGenerator *generator, const char *
   va_list args;
   va_start(args, format);
 
-  // Calculate required size
-  va_list args_copy;
-  va_copy(args_copy, args);
-  int required_size = vsnprintf(NULL, 0, format, args_copy);
-  va_end(args_copy);
-  if (required_size < 0) {
-    va_end(args);
+  char *rendered = code_generator_vformat(format, args);
+
+  va_end(args);
+
+  if (!rendered) {
     code_generator_set_error(generator, "Failed to format global output");
     return;
   }
 
-  char *rendered = malloc((size_t)required_size + 1);
-  if (!rendered) {
-    va_end(args);
-    code_generator_set_error(generator,
-                             "Out of memory while formatting global output");
-    return;
-  }
-  vsnprintf(rendered, (size_t)required_size + 1, format, args);
-
-  va_end(args);
-
-  // Global data (db/dq payloads) is emitted incrementally in small chunks.
-  // Do not strip comments here; filtering at chunk granularity can corrupt
-  // literal ';' bytes inside quoted data (for example URLs).
   code_generator_append_text(generator, rendered, strlen(rendered), 1);
 
   free(rendered);

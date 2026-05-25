@@ -10,12 +10,13 @@ This page covers what gets emitted, the two optional helper objects in `src/runt
 
 | Mettle feature | Compiler output | Linked at build time |
 |---|---|---|
-| `main` / `main(argc, argv)` | Entry stub calls `__getmainargs` (Windows) or reads `argc`/`argv` from the stack (Linux), then `main`, then `ExitProcess` / `sys_exit` | libc |
+| `main` / `main(argc, argv)` | Entry stub (`mainCRTStartup`) calls `__getmainargs` on Windows (assembly path and internal `--build` startup object) or reads `argc`/`argv` from the stack (Linux), then `main`, then `ExitProcess` / `sys_exit` | libc |
 | `new T`, array literals, `string + string` | `extern calloc`; `call calloc` with `(1, size)` | libc `calloc` |
 | `std/win32` / `std/net` / `std/thread` | `extern` to DLL symbols (`CreateFileA`, etc.) | Win32 DLLs |
 | `std/thread` interlocked atomics | `extern mettle_atomic_*`; `call mettle_atomic_*` | `atomics.o` |
-| Null/bounds traps (normal build), `-d` / `-s` / `-g` | `extern mettle_crash_trap`, `mettle_crash_install` at entry | `crash_handler.o` |
-| `--release` | Traps off; entry stub skips `mettle_crash_install` | nothing extra |
+| Null/bounds traps (normal build), `-d` / `-s` | `extern mettle_crash_trap_ex` (or `mettle_crash_trap`); startup via `mettle_crash_startup` (COFF `--build`) or `mettle_crash_install` at `_start` (NASM path) | `crash_handler.o` |
+| `-g` / `--debug-symbols` alone | No crash hooks unless `-s`/`-d` or IR traps reference `mettle_crash_*` | usually nothing extra |
+| `--release` | Traps off; startup skips crash-handler init | nothing extra |
 
 Older Mettle shipped a large runtime (GC, async executor, coroutine scheduler, channels, tracked heap). That code is removed. What remains are two small helper objects, linked only when referenced.
 
@@ -29,24 +30,35 @@ Linked when the object references `mettle_crash_*`. That happens if you pass:
 
 - `-d` / `--debug`
 - `-s` / `--stack-trace`
-- `-g` / `--debug-symbols`
-- or you build without `--release` and IR null/bounds checks are enabled (they call `mettle_crash_trap` on failure)
+- or you build without `--release` and IR null/bounds checks are enabled **and** you also pass `-s` or `-d` so trap sites call `mettle_crash_trap` (without `-s`, dev builds still trap but use `puts`/`exit` with no symbolized backtrace)
 
 Provides:
 
 - Windows: vectored SEH handler. POSIX: `sigaction` on an alternate stack. Both catch access violations and similar faults.
-- Frame-pointer walk plus compiler-embedded debug tables (`MettleCrashFunctionInfo`, `MettleCrashLocationInfo`) for symbolized backtraces.
-- `mettle_crash_trap(msg, pc, fp)`: trap sites call this with the message and saved frame pointer; prints and exits with status 1.
+- Frame-pointer walk plus compiler-embedded debug tables (`MettleCrashFunctionInfo`, `MettleCrashLocationInfo`, `MettleCrashTrapSiteInfo`) for symbolized backtraces. On `--build`, these live in COFF `.rdata` as `mettle_debug_header`, `mettle_debug_functions`, `mettle_debug_locations`, `mettle_debug_trap_sites`, and `mettle_debug_image`.
+- `mettle_crash_trap_ex(kind, msg, pc, fp, arg0, arg1)`: trap sites call this when `-s` is active; prints a rich report (kind, file:line:column, source snippet with caret, dynamic index/length for bounds checks) and a symbolized stack trace, then exits with status 1.
 
-Example:
+Example (`mettle --build -s`):
+
+```text
+Fatal error: null pointer dereference
+  --> app.mettle:9:10 in main
+   |
+9 |   return *p;
+   |          ^ null pointer dereference
+Stack trace:
+  #0 main at app.mettle:9:10 (0x000000014000106A)
+```
+
+Native fault example:
 
 ```text
 Unhandled runtime exception 0xC0000005 (access violation)
-Exception address: 0x00007FF7DFD71046
-write access violation at 0x0000000000000001
+Attempted to write inaccessible memory at 0x0000000000000001
+  --> app.mettle:3:3 in leaf_crash
 Stack trace:
-  #0 leaf_crash at app.mettle:2:3 (0x00007FF7DFD71046)
-  #1 main at app.mettle:8:3 (0x00007FF7DFD71080)
+  #0 leaf_crash at app.mettle:3:3 (0x0000000140001086)
+  #1 main at app.mettle:11:1 (0x0000000140001120)
 ```
 
 Without `-d`, `-s`, or `-g`, and with `--release`, this object is not linked.

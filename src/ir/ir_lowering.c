@@ -1,4 +1,6 @@
 #include "ir.h"
+#include "../common.h"
+#include "compiler/compiler_context.h"
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -25,6 +27,7 @@ typedef struct {
    * to give a width-less float literal in `return <lit>;` the correct
    * single/double precision (literals always infer to float64 otherwise). */
   const char *current_return_type_name;
+  const char *current_function_name;
 } IRLoweringContext;
 
 typedef struct {
@@ -51,9 +54,11 @@ static void ir_set_error(IRLoweringContext *context, const char *format, ...);
 static char *ir_new_label_name(IRLoweringContext *context, const char *prefix);
 static int ir_emit(IRLoweringContext *context, IRFunction *function,
                    const IRInstruction *instruction);
-static int ir_emit_runtime_trap(IRLoweringContext *context,
-                                IRFunction *function, SourceLocation location,
-                                const char *message);
+static int ir_emit_runtime_trap_ex(IRLoweringContext *context,
+                                   IRFunction *function,
+                                   SourceLocation location, uint32_t kind,
+                                   const char *message, const IROperand *arg0,
+                                   const IROperand *arg1);
 static int ir_emit_null_check(IRLoweringContext *context, IRFunction *function,
                               SourceLocation location, const IROperand *value);
 static int ir_emit_bounds_check(IRLoweringContext *context,
@@ -81,6 +86,10 @@ static int ir_emit_return_with_defers(IRLoweringContext *context,
                                       IRFunction *function,
                                       IRDeferScope *defers, IROperand *value,
                                       SourceLocation location);
+static int ir_coerce_string_operand_to_cstring(IRLoweringContext *context,
+                                               IRFunction *function,
+                                               IROperand *value,
+                                               SourceLocation location);
 static int ir_named_type_float_bits(IRLoweringContext *context,
                                     const char *type_name);
 static void ir_assign_apply_float_bits(IRInstruction *instruction,
@@ -126,19 +135,6 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
                                                  ASTNode *expression,
                                                  Symbol *constructor_symbol,
                                                  IROperand *out_value);
-static char *ir_strdup_local(const char *text) {
-  if (!text) {
-    return NULL;
-  }
-  size_t length = strlen(text) + 1;
-  char *copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-  memcpy(copy, text, length);
-  return copy;
-}
-
 static int ir_emit_jump_instruction(IRLoweringContext *context,
                                     IRFunction *function, const char *label,
                                     SourceLocation location) {
@@ -163,6 +159,53 @@ static int ir_emit_label_instruction(IRLoweringContext *context,
   instruction.location = location;
   instruction.text = (char *)label;
   return ir_emit(context, function, &instruction);
+}
+
+static int ir_type_is_cstring(Type *type) {
+  return type && type->kind == TYPE_POINTER && type->name &&
+         strcmp(type->name, "cstring") == 0;
+}
+
+static int ir_expression_is_string(IRLoweringContext *context,
+                                   ASTNode *expression) {
+  Type *type = ir_infer_expression_type(context, expression);
+  return type && type->kind == TYPE_STRING;
+}
+
+static int ir_should_coerce_string_to_cstring(IRLoweringContext *context,
+                                              Type *target_type,
+                                              ASTNode *value_expression) {
+  return ir_type_is_cstring(target_type) &&
+         ir_expression_is_string(context, value_expression);
+}
+
+static int ir_coerce_string_operand_to_cstring(IRLoweringContext *context,
+                                               IRFunction *function,
+                                               IROperand *value,
+                                               SourceLocation location) {
+  if (!context || !function || !value || value->kind == IR_OPERAND_NONE) {
+    return 0;
+  }
+
+  IROperand destination = ir_operand_none();
+  if (!ir_make_temp_operand(context, &destination)) {
+    return 0;
+  }
+
+  IRInstruction load_chars = {0};
+  load_chars.op = IR_OP_LOAD;
+  load_chars.location = location;
+  load_chars.dest = destination;
+  load_chars.lhs = *value;
+  load_chars.rhs = ir_operand_int(8);
+  if (!ir_emit(context, function, &load_chars)) {
+    ir_operand_destroy(&destination);
+    return 0;
+  }
+
+  ir_operand_destroy(value);
+  *value = destination;
+  return 1;
 }
 
 static int ir_lower_statement_or_expression(IRLoweringContext *context,
@@ -417,7 +460,6 @@ static int ir_lower_switch_statement(IRLoweringContext *context,
     return 0;
   }
 
-  // Evaluate the switch expression once.
   IROperand switch_value = ir_operand_none();
   if (!ir_lower_expression(context, function, switch_data->expression,
                            &switch_value)) {
@@ -425,7 +467,6 @@ static int ir_lower_switch_statement(IRLoweringContext *context,
     return 0;
   }
 
-  // Precompute labels for each case.
   char **case_labels = NULL;
   if (switch_data->case_count > 0) {
     case_labels = calloc(switch_data->case_count, sizeof(char *));
@@ -1444,6 +1485,11 @@ static void ir_set_error(IRLoweringContext *context, const char *format, ...) {
     return;
   }
 
+  if (context->current_function_name) {
+    mettle_compiler_ctx_set_function_name(context->current_function_name);
+  }
+  mettle_compiler_ctx_set_phase(METTLE_COMPILER_PHASE_IR_LOWERING);
+
   va_list args;
   va_start(args, format);
   va_list copy;
@@ -1463,14 +1509,14 @@ static void ir_set_error(IRLoweringContext *context, const char *format, ...) {
 static char *ir_new_temp_name(IRLoweringContext *context) {
   char buffer[64];
   snprintf(buffer, sizeof(buffer), "t%d", context->next_temp_id++);
-  return ir_strdup_local(buffer);
+  return mettle_strdup(buffer);
 }
 
 static char *ir_new_label_name(IRLoweringContext *context, const char *prefix) {
   char buffer[64];
   snprintf(buffer, sizeof(buffer), "ir_%s_%d", prefix ? prefix : "label",
            context->next_label_id++);
-  return ir_strdup_local(buffer);
+  return mettle_strdup(buffer);
 }
 
 static int ir_emit(IRLoweringContext *context, IRFunction *function,
@@ -1482,9 +1528,11 @@ static int ir_emit(IRLoweringContext *context, IRFunction *function,
   return 1;
 }
 
-static int ir_emit_runtime_trap(IRLoweringContext *context,
-                                IRFunction *function, SourceLocation location,
-                                const char *message) {
+static int ir_emit_runtime_trap_ex(IRLoweringContext *context,
+                                   IRFunction *function,
+                                   SourceLocation location, uint32_t kind,
+                                   const char *message, const IROperand *arg0,
+                                   const IROperand *arg1) {
   if (!context || !function || !message) {
     return 0;
   }
@@ -1492,20 +1540,29 @@ static int ir_emit_runtime_trap(IRLoweringContext *context,
   IRInstruction trap_call = {0};
   trap_call.op = IR_OP_CALL;
   trap_call.location = location;
-  trap_call.text = "mettle_crash_trap";
-  trap_call.argument_count = 1;
-  trap_call.arguments = malloc(sizeof(IROperand));
+  trap_call.text = "mettle_crash_trap_ex";
+  trap_call.argument_count = 4;
+  trap_call.arguments = calloc(4, sizeof(IROperand));
   if (!trap_call.arguments) {
     ir_set_error(context, "Out of memory while lowering runtime trap");
     return 0;
   }
-  trap_call.arguments[0] = ir_operand_string(message);
+  trap_call.arguments[0] = ir_operand_int((long long)kind);
+  trap_call.arguments[1] = ir_operand_string(message);
+  trap_call.arguments[2] = arg0 ? ir_operand_copy(arg0) : ir_operand_int(0);
+  trap_call.arguments[3] = arg1 ? ir_operand_copy(arg1) : ir_operand_int(0);
   if (!ir_emit(context, function, &trap_call)) {
     ir_operand_destroy(&trap_call.arguments[0]);
+    ir_operand_destroy(&trap_call.arguments[1]);
+    ir_operand_destroy(&trap_call.arguments[2]);
+    ir_operand_destroy(&trap_call.arguments[3]);
     free(trap_call.arguments);
     return 0;
   }
   ir_operand_destroy(&trap_call.arguments[0]);
+  ir_operand_destroy(&trap_call.arguments[1]);
+  ir_operand_destroy(&trap_call.arguments[2]);
+  ir_operand_destroy(&trap_call.arguments[3]);
   free(trap_call.arguments);
   return 1;
 }
@@ -1554,8 +1611,9 @@ static int ir_emit_null_check(IRLoweringContext *context, IRFunction *function,
   trap.location = location;
   trap.text = trap_label;
   if (!ir_emit(context, function, &trap) ||
-      !ir_emit_runtime_trap(context, function, location,
-                            "Fatal error: Null pointer dereference")) {
+      !ir_emit_runtime_trap_ex(
+          context, function, location, 1u,
+          "Fatal error: Null pointer dereference", NULL, NULL)) {
     free(trap_label);
     free(ok_label);
     return 0;
@@ -1641,8 +1699,9 @@ static int ir_emit_bounds_check(IRLoweringContext *context,
   trap.location = location;
   trap.text = trap_label;
   if (!ir_emit(context, function, &trap) ||
-      !ir_emit_runtime_trap(context, function, location,
-                            "Fatal error: Array index out of bounds")) {
+      !ir_emit_runtime_trap_ex(context, function, location, 2u,
+                               "Fatal error: Array index out of bounds", index,
+                               &compare.rhs)) {
     free(trap_label);
     free(ok_label);
     ir_operand_destroy(&in_bounds);
@@ -1689,9 +1748,23 @@ static int ir_push_labeled_control_frame(IRLoweringContext *context,
   }
 
   IRControlFrame *frame = &context->control_stack[context->control_count++];
-  frame->break_label = ir_strdup_local(break_label);
-  frame->continue_label = ir_strdup_local(continue_label);
-  frame->user_label = ir_strdup_local(user_label);
+  frame->break_label = break_label ? mettle_strdup(break_label) : NULL;
+  frame->continue_label =
+      continue_label ? mettle_strdup(continue_label) : NULL;
+  frame->user_label = user_label ? mettle_strdup(user_label) : NULL;
+  if ((break_label && !frame->break_label) ||
+      (continue_label && !frame->continue_label) ||
+      (user_label && !frame->user_label)) {
+    free(frame->break_label);
+    free(frame->continue_label);
+    free(frame->user_label);
+    frame->break_label = NULL;
+    frame->continue_label = NULL;
+    frame->user_label = NULL;
+    context->control_count--;
+    ir_set_error(context, "Out of memory while setting up control-flow labels");
+    return 0;
+  }
   return 1;
 }
 
@@ -2020,6 +2093,225 @@ static int ir_type_array_element_stride(Type *element_type) {
   return (int)element_type->size;
 }
 
+static int ir_type_is_pointer(Type *type) {
+  return type && type->kind == TYPE_POINTER && type->base_type;
+}
+
+static int ir_emit_binary_instruction(IRLoweringContext *context,
+                                      IRFunction *function,
+                                      SourceLocation location, const char *op,
+                                      IROperand dest, IROperand lhs,
+                                      IROperand rhs) {
+  IRInstruction instruction = {0};
+  instruction.op = IR_OP_BINARY;
+  instruction.location = location;
+  instruction.dest = dest;
+  instruction.lhs = lhs;
+  instruction.rhs = rhs;
+  instruction.text = op;
+  return ir_emit(context, function, &instruction);
+}
+
+static int ir_emit_scaled_index_offset(IRLoweringContext *context,
+                                       IRFunction *function,
+                                       SourceLocation location,
+                                       const IROperand *index, int stride,
+                                       IROperand *out_offset) {
+  if (!context || !function || !index || !out_offset) {
+    return 0;
+  }
+
+  if (stride == 1) {
+    *out_offset = ir_clone_operand_local(index);
+    return out_offset->kind != IR_OPERAND_NONE;
+  }
+
+  IROperand scaled = ir_operand_none();
+  if (!ir_make_temp_operand(context, &scaled)) {
+    return 0;
+  }
+
+  if (!ir_emit_binary_instruction(context, function, location, "*", scaled,
+                                  *index, ir_operand_int(stride))) {
+    ir_operand_destroy(&scaled);
+    return 0;
+  }
+
+  *out_offset = scaled;
+  return 1;
+}
+
+static int ir_try_lower_pointer_arithmetic(IRLoweringContext *context,
+                                           IRFunction *function,
+                                           BinaryExpression *binary,
+                                           SourceLocation location,
+                                           IROperand *out_value) {
+  const char *op = NULL;
+  Type *left_type = NULL;
+  Type *right_type = NULL;
+  int left_is_pointer = 0;
+  int right_is_pointer = 0;
+
+  if (!context || !function || !binary || !binary->operator || !out_value) {
+    return 0;
+  }
+
+  op = binary->operator;
+  if (strcmp(op, "+") != 0 && strcmp(op, "-") != 0) {
+    return 0;
+  }
+
+  left_type = ir_infer_expression_type(context, binary->left);
+  right_type = ir_infer_expression_type(context, binary->right);
+  if (!left_type || !right_type) {
+    return 0;
+  }
+
+  left_is_pointer = ir_type_is_pointer(left_type);
+  right_is_pointer = ir_type_is_pointer(right_type);
+  if (!left_is_pointer && !right_is_pointer) {
+    return 0;
+  }
+
+  if (strcmp(op, "+") == 0) {
+    Type *pointer_type = NULL;
+    ASTNode *pointer_expr = NULL;
+    ASTNode *index_expr = NULL;
+
+    if (left_is_pointer && type_checker_is_integer_type(right_type)) {
+      pointer_type = left_type;
+      pointer_expr = binary->left;
+      index_expr = binary->right;
+    } else if (right_is_pointer && type_checker_is_integer_type(left_type)) {
+      pointer_type = right_type;
+      pointer_expr = binary->right;
+      index_expr = binary->left;
+    } else {
+      return 0;
+    }
+
+    IROperand base = ir_operand_none();
+    IROperand index = ir_operand_none();
+    IROperand offset = ir_operand_none();
+    IROperand destination = ir_operand_none();
+    int stride = ir_type_array_element_stride(pointer_type->base_type);
+
+    if (!ir_lower_expression(context, function, pointer_expr, &base) ||
+        !ir_lower_expression(context, function, index_expr, &index) ||
+        !ir_emit_scaled_index_offset(context, function, location, &index,
+                                     stride, &offset) ||
+        !ir_make_temp_operand(context, &destination)) {
+      ir_operand_destroy(&offset);
+      ir_operand_destroy(&index);
+      ir_operand_destroy(&base);
+      return 0;
+    }
+
+    if (!ir_emit_binary_instruction(context, function, location, "+",
+                                    destination, base, offset)) {
+      ir_operand_destroy(&destination);
+      ir_operand_destroy(&offset);
+      ir_operand_destroy(&index);
+      ir_operand_destroy(&base);
+      return 0;
+    }
+
+    ir_operand_destroy(&offset);
+    ir_operand_destroy(&index);
+    ir_operand_destroy(&base);
+    *out_value = destination;
+    return 1;
+  }
+
+  if (left_is_pointer && type_checker_is_integer_type(right_type)) {
+    Type *pointer_type = left_type;
+    IROperand base = ir_operand_none();
+    IROperand index = ir_operand_none();
+    IROperand offset = ir_operand_none();
+    IROperand destination = ir_operand_none();
+    int stride = ir_type_array_element_stride(pointer_type->base_type);
+
+    if (!ir_lower_expression(context, function, binary->left, &base) ||
+        !ir_lower_expression(context, function, binary->right, &index) ||
+        !ir_emit_scaled_index_offset(context, function, location, &index,
+                                     stride, &offset) ||
+        !ir_make_temp_operand(context, &destination)) {
+      ir_operand_destroy(&offset);
+      ir_operand_destroy(&index);
+      ir_operand_destroy(&base);
+      return 0;
+    }
+
+    if (!ir_emit_binary_instruction(context, function, location, "-",
+                                    destination, base, offset)) {
+      ir_operand_destroy(&destination);
+      ir_operand_destroy(&offset);
+      ir_operand_destroy(&index);
+      ir_operand_destroy(&base);
+      return 0;
+    }
+
+    ir_operand_destroy(&offset);
+    ir_operand_destroy(&index);
+    ir_operand_destroy(&base);
+    *out_value = destination;
+    return 1;
+  }
+
+  if (left_is_pointer && right_is_pointer && left_type->base_type &&
+      right_type->base_type &&
+      left_type->base_type->size == right_type->base_type->size &&
+      left_type->base_type->kind == right_type->base_type->kind) {
+    IROperand lhs = ir_operand_none();
+    IROperand rhs = ir_operand_none();
+    IROperand byte_diff = ir_operand_none();
+    IROperand destination = ir_operand_none();
+    int stride = ir_type_array_element_stride(left_type->base_type);
+
+    if (!ir_lower_expression(context, function, binary->left, &lhs) ||
+        !ir_lower_expression(context, function, binary->right, &rhs) ||
+        !ir_make_temp_operand(context, &byte_diff)) {
+      ir_operand_destroy(&rhs);
+      ir_operand_destroy(&lhs);
+      return 0;
+    }
+
+    if (!ir_emit_binary_instruction(context, function, location, "-", byte_diff,
+                                    lhs, rhs)) {
+      ir_operand_destroy(&byte_diff);
+      ir_operand_destroy(&rhs);
+      ir_operand_destroy(&lhs);
+      return 0;
+    }
+
+    ir_operand_destroy(&rhs);
+    ir_operand_destroy(&lhs);
+
+    if (stride == 1) {
+      *out_value = byte_diff;
+      return 1;
+    }
+
+    if (!ir_make_temp_operand(context, &destination)) {
+      ir_operand_destroy(&byte_diff);
+      return 0;
+    }
+
+    if (!ir_emit_binary_instruction(context, function, location, "/", destination,
+                                    byte_diff, ir_operand_int(stride))) {
+      ir_operand_destroy(&destination);
+      ir_operand_destroy(&byte_diff);
+      return 0;
+    }
+
+    ir_operand_destroy(&byte_diff);
+    *out_value = destination;
+    return 1;
+  }
+
+  return 0;
+}
+
 static int ir_make_temp_operand(IRLoweringContext *context,
                                 IROperand *out_temp) {
   if (!context || !out_temp) {
@@ -2063,7 +2355,6 @@ static int ir_emit_condition_false_branch(IRLoweringContext *context,
       if (strcmp(binary->operator, "||") == 0) {
         char *done_label = ir_new_label_name(context, "cond_done");
         if (!done_label) {
-          free(done_label);
           ir_set_error(context, "Out of memory while allocating condition labels");
           return 0;
         }
@@ -2260,6 +2551,19 @@ static int ir_lower_call_expression(IRLoweringContext *context,
       Type *ptype = callee_symbol->data.function.parameter_types
                         ? callee_symbol->data.function.parameter_types[i]
                         : NULL;
+      if (ir_should_coerce_string_to_cstring(context, ptype,
+                                             call->arguments[i])) {
+        if (!ir_coerce_string_operand_to_cstring(
+                context, function, &arguments[i], call->arguments[i]->location)) {
+          for (size_t j = 0; j < call->argument_count; j++) {
+            ir_operand_destroy(&arguments[j]);
+          }
+          free(arguments);
+          ir_operand_destroy(&destination);
+          return 0;
+        }
+        continue;
+      }
       if (ptype && (ptype->kind == TYPE_FLOAT32 ||
                     ptype->kind == TYPE_FLOAT64)) {
         ir_operand_apply_float_bits(&arguments[i], ir_type_float_bits(ptype));
@@ -2968,6 +3272,11 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       return 1;
     }
 
+    if (ir_try_lower_pointer_arithmetic(context, function, binary,
+                                        expression->location, out_value)) {
+      return 1;
+    }
+
     IROperand left = ir_operand_none();
     IROperand right = ir_operand_none();
     if (!ir_lower_expression(context, function, binary->left, &left) ||
@@ -3274,14 +3583,12 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       return 0;
     }
 
-    // Lower the function pointer expression
     IROperand func_ptr = ir_operand_none();
     if (!ir_lower_expression(context, function, fp_call->function, &func_ptr)) {
       ir_operand_destroy(&destination);
       return 0;
     }
 
-    // Lower arguments
     IROperand *arguments = NULL;
     if (fp_call->argument_count > 0) {
       arguments = calloc(fp_call->argument_count, sizeof(IROperand));
@@ -3305,6 +3612,28 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
         ir_operand_destroy(&func_ptr);
         ir_operand_destroy(&destination);
         return 0;
+      }
+    }
+
+    Type *func_type = ir_infer_expression_type(context, fp_call->function);
+    if (func_type && func_type->kind == TYPE_FUNCTION_POINTER &&
+        func_type->fn_param_types) {
+      for (size_t i = 0; i < fp_call->argument_count &&
+                         i < func_type->fn_param_count;
+           i++) {
+        if (ir_should_coerce_string_to_cstring(
+                context, func_type->fn_param_types[i], fp_call->arguments[i]) &&
+            !ir_coerce_string_operand_to_cstring(
+                context, function, &arguments[i],
+                fp_call->arguments[i]->location)) {
+          for (size_t j = 0; j < fp_call->argument_count; j++) {
+            ir_operand_destroy(&arguments[j]);
+          }
+          free(arguments);
+          ir_operand_destroy(&func_ptr);
+          ir_operand_destroy(&destination);
+          return 0;
+        }
       }
     }
 
@@ -3422,6 +3751,13 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
                         ? declaration->initializer->resolved_type
                         : NULL;
       }
+      if (ir_should_coerce_string_to_cstring(context, decl_type,
+                                             declaration->initializer) &&
+          !ir_coerce_string_operand_to_cstring(
+              context, function, &value, declaration->initializer->location)) {
+        ir_operand_destroy(&value);
+        return 0;
+      }
       if (ir_try_emit_aggregate_symbol_memcpy(context, function,
                                               declaration->name, &value,
                                               decl_type, statement->location)) {
@@ -3470,6 +3806,13 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
           ir_lookup_symbol_type(context, assignment->variable_name);
       if (!assign_type && assignment->value) {
         assign_type = assignment->value->resolved_type;
+      }
+      if (ir_should_coerce_string_to_cstring(context, assign_type,
+                                             assignment->value) &&
+          !ir_coerce_string_operand_to_cstring(
+              context, function, &value, assignment->value->location)) {
+        ir_operand_destroy(&value);
+        return 0;
       }
       if (ir_try_emit_aggregate_symbol_memcpy(
               context, function, assignment->variable_name, &value,
@@ -3526,6 +3869,15 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
       return 0;
     }
 
+    if (ir_should_coerce_string_to_cstring(context, target_type,
+                                           assignment->value) &&
+        !ir_coerce_string_operand_to_cstring(
+            context, function, &value, assignment->value->location)) {
+      ir_operand_destroy(&address);
+      ir_operand_destroy(&value);
+      return 0;
+    }
+
     IRInstruction store = {0};
     store.op = IR_OP_STORE;
     store.location = statement->location;
@@ -3560,6 +3912,15 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
     IROperand value = ir_operand_none();
     if (ret && ret->value) {
       if (!ir_lower_expression(context, function, ret->value, &value)) {
+        return 0;
+      }
+      Type *return_type =
+          ir_resolve_named_type(context, context->current_return_type_name);
+      if (ir_should_coerce_string_to_cstring(context, return_type,
+                                             ret->value) &&
+          !ir_coerce_string_operand_to_cstring(context, function, &value,
+                                               ret->value->location)) {
+        ir_operand_destroy(&value);
         return 0;
       }
     }
@@ -3917,6 +4278,8 @@ static IRFunction *ir_lower_function(IRLoweringContext *context,
   }
 
   context->current_return_type_name = function_data->return_type;
+  context->current_function_name = function_data->name;
+  mettle_compiler_ctx_set_function_name(function_data->name);
 
   IRFunction *function = ir_function_create(function_data->name);
   if (!function) {
@@ -3973,6 +4336,11 @@ static IRFunction *ir_lower_function(IRLoweringContext *context,
   }
 
   free(defers.stack.entries);
+  if (!ir_function_rebuild_cfg(function)) {
+    ir_set_error(context, "Out of memory while building IR control-flow graph");
+    ir_function_destroy(function);
+    return NULL;
+  }
   return function;
 }
 
@@ -3986,7 +4354,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
   if (!program || program->type != AST_PROGRAM) {
     if (error_message) {
       *error_message =
-          ir_strdup_local("Expected AST_PROGRAM root for IR lowering");
+          mettle_strdup("Expected AST_PROGRAM root for IR lowering");
     }
     return NULL;
   }
@@ -3994,7 +4362,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
   IRProgram *ir_program = ir_program_create();
   if (!ir_program) {
     if (error_message) {
-      *error_message = ir_strdup_local("Failed to allocate IR program");
+      *error_message = mettle_strdup("Failed to allocate IR program");
     }
     return NULL;
   }
@@ -4028,7 +4396,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       if (error_message) {
         *error_message = context.error_message
                              ? context.error_message
-                             : ir_strdup_local("Unknown IR lowering error");
+                             : mettle_strdup("Unknown IR lowering error");
       } else {
         free(context.error_message);
       }
@@ -4053,7 +4421,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       if (error_message) {
         *error_message = context.error_message
                              ? context.error_message
-                             : ir_strdup_local("Unknown IR lowering error");
+                             : mettle_strdup("Unknown IR lowering error");
       } else {
         free(context.error_message);
       }
@@ -4073,7 +4441,7 @@ IRProgram *ir_lower_program(ASTNode *program, TypeChecker *type_checker,
       if (error_message) {
         *error_message = context.error_message
                              ? context.error_message
-                             : ir_strdup_local("Unknown IR lowering error");
+                             : mettle_strdup("Unknown IR lowering error");
       } else {
         free(context.error_message);
       }

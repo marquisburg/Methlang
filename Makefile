@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE -Isrc
+CFLAGS = -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc
 SRCDIR = src
 OBJDIR = obj
 BINDIR = bin
@@ -11,13 +11,15 @@ LEXER_SOURCES = $(SRCDIR)/lexer/lexer.c
 PARSER_SOURCES = $(SRCDIR)/parser/parser.c $(SRCDIR)/parser/ast.c
 SEMANTIC_SOURCES = $(SRCDIR)/semantic/symbol_table.c $(SRCDIR)/semantic/type_checker.c $(SRCDIR)/semantic/register_allocator.c $(SRCDIR)/semantic/import_resolver.c $(SRCDIR)/semantic/monomorphize.c
 IR_SOURCES = $(wildcard $(SRCDIR)/ir/*.c)
-CODEGEN_SOURCES = $(wildcard $(SRCDIR)/codegen/*.c)
+CODEGEN_SOURCES = $(wildcard $(SRCDIR)/codegen/*.c) $(wildcard $(SRCDIR)/codegen/binary/*.c)
 LINKER_SOURCES = $(wildcard $(SRCDIR)/linker/*.c)
 ERROR_SOURCES = $(SRCDIR)/error/error_reporter.c
 DEBUG_SOURCES = $(SRCDIR)/debug/debug_info.c
+COMPILER_SOURCES = $(SRCDIR)/compiler/compiler_context.c $(SRCDIR)/compiler/compiler_crash.c
+COMMON_SOURCES = $(SRCDIR)/common.c
 MAIN_SOURCES = $(SRCDIR)/main.c
 
-SOURCES = $(LEXER_SOURCES) $(PARSER_SOURCES) $(SEMANTIC_SOURCES) $(IR_SOURCES) $(CODEGEN_SOURCES) $(LINKER_SOURCES) $(ERROR_SOURCES) $(DEBUG_SOURCES) $(MAIN_SOURCES)
+SOURCES = $(COMMON_SOURCES) $(LEXER_SOURCES) $(PARSER_SOURCES) $(SEMANTIC_SOURCES) $(IR_SOURCES) $(CODEGEN_SOURCES) $(LINKER_SOURCES) $(ERROR_SOURCES) $(DEBUG_SOURCES) $(COMPILER_SOURCES) $(MAIN_SOURCES)
 OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
 TARGET = $(BINDIR)/mettle
@@ -42,7 +44,7 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR):
-	mkdir -p $(OBJDIR)/lexer $(OBJDIR)/parser $(OBJDIR)/semantic $(OBJDIR)/ir $(OBJDIR)/codegen $(OBJDIR)/linker $(OBJDIR)/error $(OBJDIR)/debug $(OBJDIR)/runtime
+	mkdir -p $(OBJDIR)/lexer $(OBJDIR)/parser $(OBJDIR)/semantic $(OBJDIR)/ir $(OBJDIR)/codegen $(OBJDIR)/codegen/binary $(OBJDIR)/linker $(OBJDIR)/error $(OBJDIR)/debug $(OBJDIR)/compiler $(OBJDIR)/runtime
 
 $(BINDIR):
 	mkdir -p $(BINDIR)

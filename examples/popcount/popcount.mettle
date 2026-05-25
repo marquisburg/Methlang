@@ -1,0 +1,70 @@
+// Mettle popcount microbenchmark
+//
+// Population count over 256 KB byte buffer, 200 passes.
+
+import "std/io";
+import "std/mem";
+import "std/bench";
+
+function popcount_byte(b: uint8) -> int32 {
+  var count: int32 = 0;
+  var v: uint8 = b;
+  while (v != 0) {
+    count = count + (int32)(v & 1);
+    v = (uint8)(v / 2);
+  }
+  return count;
+}
+
+function popcount_buffer(buf: cstring, len: int64) -> int64 {
+  var total: int64 = 0;
+  var i: int64 = 0;
+  while (i < len) {
+    total = total + (int64)popcount_byte((uint8)buf[i]);
+    i = i + 1;
+  }
+  return total;
+}
+
+function main() -> int32 {
+  var buf_size: int64 = 262144;
+  var template: string = "0123456789abcdef";
+  var template_len: int64 = 16;
+  var passes: int32 = 200;
+
+  var buf: cstring = malloc(buf_size);
+  if (buf == 0) {
+    println(cstr("malloc failed"));
+    return 1;
+  }
+
+  var pos: int64 = 0;
+  while (pos < buf_size) {
+    var chunk: int64 = template_len;
+    if (pos + chunk > buf_size) {
+      chunk = buf_size - pos;
+    }
+    memcpy(buf + pos, cstr(template), chunk);
+    pos = pos + chunk;
+  }
+
+  println(cstr("Popcount: 256 KB buffer x 200 passes"));
+
+  var t0: uint64 = bench_time_us();
+  var bench_sum: int64 = 0;
+  var p: int32 = 0;
+  while (p < passes) {
+    bench_sum = bench_sum + popcount_buffer(buf, buf_size);
+    p = p + 1;
+  }
+  var elapsed_us: uint64 = bench_time_us() - t0;
+
+  print(cstr("Bench sum = "));
+  println_int(bench_sum);
+  print(cstr("Time: "));
+  print_int(elapsed_us);
+  println(cstr(" us"));
+
+  free(buf);
+  return 0;
+}

@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define PARSER_ERROR_BUF_SIZE 512
+#define PARSER_SCRATCH_BUF_SIZE 1024
+
 static void parser_report_lexer_token_error(Parser *parser,
                                             const Token *token) {
   if (!parser || !token || token->type != TOKEN_ERROR) {
@@ -18,7 +21,7 @@ static void parser_report_lexer_token_error(Parser *parser,
   const char *message = (token->value && token->value[0] != '\0')
                             ? token->value
                             : "Invalid token";
-  char error_msg[512];
+  char error_msg[PARSER_ERROR_BUF_SIZE];
   snprintf(error_msg, sizeof(error_msg), "Lexical error: %s", message);
 
   parser->has_error = 1;
@@ -263,8 +266,7 @@ int parser_expect(Parser *parser, TokenType type) {
     return 1;
   }
 
-  // Create a helpful error message
-  char error_msg[512];
+  char error_msg[PARSER_ERROR_BUF_SIZE];
   const char *expected_str = token_type_to_string(type);
   const char *actual_str = token_type_to_string(parser->current_token.type);
 
@@ -367,7 +369,10 @@ void parser_synchronize(Parser *parser) {
       return;
     }
 
-    switch (parser->peek_token.type) {
+    // Synchronize on the current token, not peek. Using peek can return
+    // without consuming an invalid current token (e.g. current '=>', peek
+    // 'return'), causing parse/recover loops to spin forever at top level.
+    switch (parser->current_token.type) {
     case TOKEN_FUNCTION:
     case TOKEN_VAR:
     case TOKEN_STRUCT:
@@ -376,6 +381,7 @@ void parser_synchronize(Parser *parser) {
     case TOKEN_WHILE:
     case TOKEN_FOR:
     case TOKEN_SWITCH:
+    case TOKEN_MATCH:
     case TOKEN_BREAK:
     case TOKEN_CONTINUE:
     case TOKEN_RBRACE:
@@ -477,6 +483,8 @@ ASTNode *parser_parse_program(Parser *parser) {
   Program *prog_data = (Program *)program->data;
 
   while (parser->current_token.type != TOKEN_EOF) {
+    size_t token_pos_before = parser->lexer->position;
+
     // Skip empty statements/newlines at the top level
     if (parser->current_token.type == TOKEN_NEWLINE ||
         parser->current_token.type == TOKEN_SEMICOLON) {
@@ -503,6 +511,11 @@ ASTNode *parser_parse_program(Parser *parser) {
 
     if (parser->has_error) {
       parser_recover_from_error(parser);
+      // Hard guard against non-advancing recovery loops.
+      if (parser->current_token.type != TOKEN_EOF &&
+          parser->lexer->position == token_pos_before) {
+        parser_advance(parser);
+      }
     }
   }
 
@@ -721,44 +734,35 @@ ASTNode *parser_parse_statement(Parser *parser) {
   if (!parser)
     return NULL;
 
-  // Labeled loop: IDENT ':' (while | for | switch)
+  // Labeled loop: IDENT ':' (while | for)
   if (parser->current_token.type == TOKEN_IDENTIFIER &&
       parser->peek_token.type == TOKEN_COLON) {
-    char *label = strdup(parser->current_token.value);
-    Token saved_current = parser->current_token;
-    Token saved_peek = parser->peek_token;
-    parser_advance(parser); // consume IDENT
-    parser_advance(parser); // consume ':'
+    Token after_colon = lexer_peek_token(parser->lexer);
+    if (after_colon.type == TOKEN_WHILE || after_colon.type == TOKEN_FOR) {
+      char *label = strdup(parser->current_token.value);
+      parser_advance(parser); // consume IDENT
+      parser_advance(parser); // consume ':'
 
-    ASTNode *loop = NULL;
-    if (parser->current_token.type == TOKEN_WHILE) {
-      loop = parser_parse_while_statement(parser);
-      if (loop && loop->data) {
-        WhileStatement *w = (WhileStatement *)loop->data;
-        w->label = label;
-        label = NULL;
+      ASTNode *loop = NULL;
+      if (parser->current_token.type == TOKEN_WHILE) {
+        loop = parser_parse_while_statement(parser);
+        if (loop && loop->data) {
+          WhileStatement *w = (WhileStatement *)loop->data;
+          w->label = label;
+          label = NULL;
+        }
+      } else if (parser->current_token.type == TOKEN_FOR) {
+        loop = parser_parse_for_statement(parser);
+        if (loop && loop->data) {
+          ForStatement *f = (ForStatement *)loop->data;
+          f->label = label;
+          label = NULL;
+        }
       }
-    } else if (parser->current_token.type == TOKEN_FOR) {
-      loop = parser_parse_for_statement(parser);
-      if (loop && loop->data) {
-        ForStatement *f = (ForStatement *)loop->data;
-        f->label = label;
-        label = NULL;
-      }
-    } else {
-      // Not a labeled loop; rewind. Because we already consumed two tokens
-      // and the lexer is one-token-lookahead, we cannot fully unwind. Treat
-      // this as a parse error explaining the constraint.
+
       free(label);
-      (void)saved_current;
-      (void)saved_peek;
-      parser_set_error(parser,
-                       "Labels may only be applied to 'while' or 'for' loops");
-      return NULL;
+      return loop;
     }
-
-    free(label);
-    return loop;
   }
 
   switch (parser->current_token.type) {
@@ -806,62 +810,51 @@ ASTNode *parser_parse_statement(Parser *parser) {
   return expr;
 }
 
-ASTNode *parser_parse_defer_statement(Parser *parser) {
+static ASTNode *parser_parse_defer_or_errdefer(Parser *parser,
+                                               TokenType token_type) {
   if (!parser) {
     return NULL;
   }
 
   SourceLocation location = parser_current_location(parser);
+  const char *keyword =
+      (token_type == TOKEN_DEFER) ? "defer" : "errdefer";
 
-  if (!parser_expect(parser, TOKEN_DEFER)) {
+  if (!parser_expect(parser, token_type)) {
     return NULL;
   }
 
   if (parser->current_token.type == TOKEN_SEMICOLON ||
       parser->current_token.type == TOKEN_NEWLINE) {
-    parser_set_error(parser, "Expected statement after 'defer'");
+    char msg[PARSER_ERROR_BUF_SIZE];
+    snprintf(msg, sizeof(msg), "Expected statement after '%s'", keyword);
+    parser_set_error(parser, msg);
     return NULL;
   }
 
   ASTNode *stmt = parser_parse_statement(parser);
   if (!stmt) {
     if (!parser->has_error) {
-      parser_set_error(parser, "Expected statement after 'defer'");
+      char msg[PARSER_ERROR_BUF_SIZE];
+      snprintf(msg, sizeof(msg), "Expected statement after '%s'", keyword);
+      parser_set_error(parser, msg);
     }
     return NULL;
   }
 
   parser_expect_statement_end(parser);
-  return ast_create_defer_statement(stmt, location);
+  if (token_type == TOKEN_DEFER) {
+    return ast_create_defer_statement(stmt, location);
+  }
+  return ast_create_errdefer_statement(stmt, location);
+}
+
+ASTNode *parser_parse_defer_statement(Parser *parser) {
+  return parser_parse_defer_or_errdefer(parser, TOKEN_DEFER);
 }
 
 ASTNode *parser_parse_errdefer_statement(Parser *parser) {
-  if (!parser) {
-    return NULL;
-  }
-
-  SourceLocation location = parser_current_location(parser);
-
-  if (!parser_expect(parser, TOKEN_ERRDEFER)) {
-    return NULL;
-  }
-
-  if (parser->current_token.type == TOKEN_SEMICOLON ||
-      parser->current_token.type == TOKEN_NEWLINE) {
-    parser_set_error(parser, "Expected statement after 'errdefer'");
-    return NULL;
-  }
-
-  ASTNode *stmt = parser_parse_statement(parser);
-  if (!stmt) {
-    if (!parser->has_error) {
-      parser_set_error(parser, "Expected statement after 'errdefer'");
-    }
-    return NULL;
-  }
-
-  parser_expect_statement_end(parser);
-  return ast_create_errdefer_statement(stmt, location);
+  return parser_parse_defer_or_errdefer(parser, TOKEN_ERRDEFER);
 }
 
 ASTNode *parser_parse_expression(Parser *parser) {
@@ -1279,7 +1272,13 @@ static char *parser_parse_type_annotation(Parser *parser) {
 
         if (args_len + 1 >= args_cap) {
           args_cap *= 2;
-          args_buf = realloc(args_buf, args_cap);
+          char *new_args_buf = realloc(args_buf, args_cap);
+          if (!new_args_buf) {
+            free(args_buf);
+            free(type_name);
+            return NULL;
+          }
+          args_buf = new_args_buf;
         }
         args_buf[args_len++] = ',';
         args_buf[args_len] = '\0';
@@ -1298,7 +1297,14 @@ static char *parser_parse_type_annotation(Parser *parser) {
       size_t arg_len = strlen(arg);
       while (args_len + arg_len + 1 >= args_cap) {
         args_cap *= 2;
-        args_buf = realloc(args_buf, args_cap);
+        char *new_args_buf = realloc(args_buf, args_cap);
+        if (!new_args_buf) {
+          free(arg);
+          free(args_buf);
+          free(type_name);
+          return NULL;
+        }
+        args_buf = new_args_buf;
       }
       memcpy(args_buf + args_len, arg, arg_len);
       args_len += arg_len;
@@ -1496,9 +1502,10 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
   SourceLocation location = parser_current_location(parser);
 
   if (parser_is_identifier_like(parser->current_token.type)) {
-    char *name = strdup(parser->current_token.value);
+    ASTNode *result =
+        ast_create_identifier(parser->current_token.value, location);
     parser_advance(parser);
-    return ast_create_identifier(name, location);
+    return result;
   }
 
   switch (parser->current_token.type) {
@@ -1527,9 +1534,10 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
     return result;
   }
   case TOKEN_STRING: {
-    char *value = strdup(parser->current_token.value);
+    ASTNode *result =
+        ast_create_string_literal(parser->current_token.value, location);
     parser_advance(parser);
-    return ast_create_string_literal(value, location);
+    return result;
   }
   case TOKEN_IMPORT_STR: {
     parser_advance(parser); // consume 'import_str'
@@ -1581,6 +1589,64 @@ ASTNode *parser_parse_primary_expression(Parser *parser) {
   }
 }
 
+typedef struct {
+  size_t lexer_position;
+  size_t lexer_line;
+  size_t lexer_column;
+  size_t lexer_continuation_depth;
+  Token current_token;
+  Token peek_token;
+  int has_error;
+  int had_error;
+  size_t error_count;
+  char *error_message;
+  ErrorReporter *error_reporter;
+} ParserSavedState;
+
+static ParserSavedState parser_save_state(Parser *parser) {
+  ParserSavedState state;
+  state.lexer_position = parser->lexer->position;
+  state.lexer_line = parser->lexer->line;
+  state.lexer_column = parser->lexer->column;
+  state.lexer_continuation_depth = parser->lexer->continuation_depth;
+  state.current_token = token_clone(&parser->current_token);
+  state.peek_token = token_clone(&parser->peek_token);
+  state.has_error = parser->has_error;
+  state.had_error = parser->had_error;
+  state.error_count = parser->error_count;
+  state.error_message =
+      parser->error_message ? strdup(parser->error_message) : NULL;
+  state.error_reporter = parser->error_reporter;
+  return state;
+}
+
+static void parser_restore_state(Parser *parser,
+                                 const ParserSavedState *state) {
+  parser->lexer->position = state->lexer_position;
+  parser->lexer->line = state->lexer_line;
+  parser->lexer->column = state->lexer_column;
+  parser->lexer->continuation_depth = state->lexer_continuation_depth;
+
+  token_destroy(&parser->current_token);
+  parser->current_token = token_clone(&state->current_token);
+  token_destroy(&parser->peek_token);
+  parser->peek_token = token_clone(&state->peek_token);
+
+  parser->has_error = state->has_error;
+  parser->had_error = state->had_error;
+  parser->error_count = state->error_count;
+  parser->error_reporter = state->error_reporter;
+  free(parser->error_message);
+  parser->error_message =
+      state->error_message ? strdup(state->error_message) : NULL;
+}
+
+static void parser_discard_saved_state(ParserSavedState *state) {
+  token_destroy(&state->current_token);
+  token_destroy(&state->peek_token);
+  free(state->error_message);
+}
+
 ASTNode *parser_parse_cast_expression(Parser *parser) {
   if (!parser || parser->current_token.type != TOKEN_LPAREN)
     return NULL;
@@ -1592,21 +1658,9 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
     return NULL;
   }
 
-  size_t saved_pos = parser->lexer->position;
-  size_t saved_line = parser->lexer->line;
-  size_t saved_col = parser->lexer->column;
-  size_t saved_continuation_depth = parser->lexer->continuation_depth;
-  Token saved_current = token_clone(&parser->current_token);
-  Token saved_peek = token_clone(&parser->peek_token);
-  int saved_has_error = parser->has_error;
-  int saved_had_error = parser->had_error;
-  size_t saved_error_count = parser->error_count;
-  char *saved_error_msg =
-      parser->error_message ? strdup(parser->error_message) : NULL;
-  ErrorReporter *saved_error_reporter = parser->error_reporter;
+  ParserSavedState saved = parser_save_state(parser);
   parser->error_message = NULL;
-  parser->error_reporter =
-      NULL; // Disable error reporting during speculative parsing
+  parser->error_reporter = NULL;
 
   SourceLocation location = parser_current_location(parser);
 
@@ -1615,32 +1669,13 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
   char *type_name = parser_parse_type_annotation(parser);
   if (!type_name || parser->has_error ||
       parser->current_token.type != TOKEN_RPAREN) {
-    if (type_name)
-      free(type_name);
-
-    // Restore state
-    parser->lexer->position = saved_pos;
-    parser->lexer->line = saved_line;
-    parser->lexer->column = saved_col;
-    parser->lexer->continuation_depth = saved_continuation_depth;
-
-    token_destroy(&parser->current_token);
-    parser->current_token = saved_current;
-    token_destroy(&parser->peek_token);
-    parser->peek_token = saved_peek;
-
-    parser->has_error = saved_has_error;
-    parser->had_error = saved_had_error;
-    parser->error_count = saved_error_count;
-    parser->error_reporter = saved_error_reporter;
-    if (parser->error_message)
-      free(parser->error_message);
-    parser->error_message = saved_error_msg;
-
+    free(type_name);
+    parser_restore_state(parser, &saved);
+    parser_discard_saved_state(&saved);
     return NULL;
   }
 
-  parser->error_reporter = saved_error_reporter; // Restore error reporter
+  parser->error_reporter = saved.error_reporter;
 
   parser_advance(parser); // consume ')'
 
@@ -1651,37 +1686,15 @@ ASTNode *parser_parse_cast_expression(Parser *parser) {
       parser->current_token.type == TOKEN_SEMICOLON ||
       parser->current_token.type == TOKEN_EOF ||
       (is_binary && !parser_is_unary_operator(parser->current_token.type))) {
-
     free(type_name);
-
-    parser->lexer->position = saved_pos;
-    parser->lexer->line = saved_line;
-    parser->lexer->column = saved_col;
-    parser->lexer->continuation_depth = saved_continuation_depth;
-
-    token_destroy(&parser->current_token);
-    parser->current_token = saved_current;
-    token_destroy(&parser->peek_token);
-    parser->peek_token = saved_peek;
-
-    parser->has_error = saved_has_error;
-    parser->had_error = saved_had_error;
-    parser->error_count = saved_error_count;
-    parser->error_reporter = saved_error_reporter;
-    if (parser->error_message)
-      free(parser->error_message);
-    parser->error_message = saved_error_msg;
-
+    parser_restore_state(parser, &saved);
+    parser_discard_saved_state(&saved);
     return NULL;
   }
 
-  // Valid cast found, discard saved state
-  token_destroy(&saved_current);
-  token_destroy(&saved_peek);
-  free(saved_error_msg);
+  parser_discard_saved_state(&saved);
   parser->has_error = 0;
-  if (parser->error_message)
-    free(parser->error_message);
+  free(parser->error_message);
   parser->error_message = NULL;
 
   ASTNode *operand = parser_parse_unary_expression(parser);
@@ -1709,12 +1722,11 @@ ASTNode *parser_parse_unary_expression(Parser *parser) {
   }
 
   if (parser_is_unary_operator(parser->current_token.type)) {
-    char *operator = strdup(parser->current_token.value);
+    const char *operator = parser->current_token.value;
     parser_advance(parser);
 
     ASTNode *operand = parser_parse_unary_expression(parser);
     if (!operand) {
-      free(operator);
       return NULL;
     }
 
@@ -1733,16 +1745,7 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
   if (parser->current_token.type != TOKEN_LESS_THAN)
     return 0;
 
-  size_t saved_pos = parser->lexer->position;
-  size_t saved_line = parser->lexer->line;
-  size_t saved_col = parser->lexer->column;
-  size_t saved_continuation_depth = parser->lexer->continuation_depth;
-  Token saved_current = token_clone(&parser->current_token);
-  Token saved_peek = token_clone(&parser->peek_token);
-  int saved_has_error = parser->has_error;
-  int saved_had_error = parser->had_error;
-  size_t saved_error_count = parser->error_count;
-  char *saved_error_msg = parser->error_message;
+  ParserSavedState saved = parser_save_state(parser);
   parser->error_message = NULL;
 
   parser_advance(parser); // consume '<'
@@ -1777,9 +1780,7 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
     if (parser->current_token.type == TOKEN_LPAREN) {
       *out_type_args = type_args;
       *out_type_arg_count = type_arg_count;
-      token_destroy(&saved_current);
-      token_destroy(&saved_peek);
-      free(saved_error_msg);
+      parser_discard_saved_state(&saved);
       parser->has_error = 0;
       free(parser->error_message);
       parser->error_message = NULL;
@@ -1791,21 +1792,8 @@ static int parser_try_parse_generic_call_type_args(Parser *parser,
     free(type_args[i]);
   free(type_args);
 
-  parser->lexer->position = saved_pos;
-  parser->lexer->line = saved_line;
-  parser->lexer->column = saved_col;
-  parser->lexer->continuation_depth = saved_continuation_depth;
-
-  token_destroy(&parser->current_token);
-  parser->current_token = saved_current;
-  token_destroy(&parser->peek_token);
-  parser->peek_token = saved_peek;
-
-  parser->has_error = saved_has_error;
-  parser->had_error = saved_had_error;
-  parser->error_count = saved_error_count;
-  free(parser->error_message);
-  parser->error_message = saved_error_msg;
+  parser_restore_state(parser, &saved);
+  parser_discard_saved_state(&saved);
 
   return 0;
 }
@@ -2090,9 +2078,6 @@ ASTNode *parser_parse_binary_expression(Parser *parser, int min_precedence) {
 
   return left;
 }
-
-// Placeholder implementations for specific parsing functions
-// These will be implemented in subsequent tasks
 
 ASTNode *parser_parse_import_declaration(Parser *parser) {
   if (!parser)
@@ -2382,6 +2367,67 @@ ASTNode *parser_parse_var_declaration(Parser *parser) {
   return var_decl;
 }
 
+static int parser_parse_parameter_list(Parser *parser, char ***out_names,
+                                       char ***out_types,
+                                       size_t *out_count) {
+  char **param_names = NULL;
+  char **param_types = NULL;
+  size_t param_count = 0;
+
+  if (parser->current_token.type != TOKEN_RPAREN) {
+    do {
+      if (!parser_is_identifier_like(parser->current_token.type)) {
+        parser_set_error(parser, "Expected parameter name");
+        goto fail;
+      }
+
+      param_names = realloc(param_names, (param_count + 1) * sizeof(char *));
+      param_types = realloc(param_types, (param_count + 1) * sizeof(char *));
+
+      param_names[param_count] = strdup(parser->current_token.value);
+      parser_advance(parser);
+
+      if (!parser_expect(parser, TOKEN_COLON)) {
+        free(param_names[param_count]);
+        goto fail;
+      }
+
+      param_types[param_count] = parser_parse_type_annotation(parser);
+      if (!param_types[param_count]) {
+        if (!parser->has_error) {
+          parser_set_error(parser, "Expected parameter type");
+        }
+        free(param_names[param_count]);
+        goto fail;
+      }
+      param_count++;
+
+      if (parser->current_token.type == TOKEN_COMMA) {
+        parser_advance(parser);
+      } else if (parser->current_token.type == TOKEN_RPAREN) {
+        break;
+      } else {
+        parser_set_error(parser, "Expected ',' or ')' in parameter list");
+        goto fail;
+      }
+    } while (1);
+  }
+
+  *out_names = param_names;
+  *out_types = param_types;
+  *out_count = param_count;
+  return 1;
+
+fail:
+  for (size_t i = 0; i < param_count; i++) {
+    free(param_names[i]);
+    free(param_types[i]);
+  }
+  free(param_names);
+  free(param_types);
+  return 0;
+}
+
 ASTNode *parser_parse_function_declaration(Parser *parser) {
   if (!parser)
     return NULL;
@@ -2423,99 +2469,20 @@ ASTNode *parser_parse_function_declaration(Parser *parser) {
     return NULL;
   }
 
-  // Parse parameter list
   char **param_names = NULL;
   char **param_types = NULL;
   size_t param_count = 0;
 
-  if (parser->current_token.type != TOKEN_RPAREN) {
-    do {
-
-      // Parse parameter: name : type
-      if (!parser_is_identifier_like(parser->current_token.type)) {
-        parser_set_error(parser, "Expected parameter name");
-        // Clean up
-        for (size_t i = 0; i < param_count; i++) {
-          free(param_names[i]);
-          free(param_types[i]);
-        }
-        free(param_names);
-        free(param_types);
-        parser_free_type_param_list(func_type_params, func_type_param_traits,
-                                    func_type_param_count);
-        free(func_name);
-        return NULL;
-      }
-
-      // Reallocate arrays
-      param_names = realloc(param_names, (param_count + 1) * sizeof(char *));
-      param_types = realloc(param_types, (param_count + 1) * sizeof(char *));
-
-      param_names[param_count] = strdup(parser->current_token.value);
-      parser_advance(parser);
-
-      // Expect ':'
-      if (!parser_expect(parser, TOKEN_COLON)) {
-        // Clean up
-        for (size_t i = 0; i <= param_count; i++) {
-          free(param_names[i]);
-          if (i < param_count)
-            free(param_types[i]);
-        }
-        free(param_names);
-        free(param_types);
-        parser_free_type_param_list(func_type_params, func_type_param_traits,
-                                    func_type_param_count);
-        free(func_name);
-        return NULL;
-      }
-
-      // Parse parameter type
-      param_types[param_count] = parser_parse_type_annotation(parser);
-      if (!param_types[param_count]) {
-        if (!parser->has_error) {
-          parser_set_error(parser, "Expected parameter type");
-        }
-        // Clean up
-        for (size_t i = 0; i <= param_count; i++) {
-          free(param_names[i]);
-          if (i < param_count)
-            free(param_types[i]);
-        }
-        free(param_names);
-        free(param_types);
-        parser_free_type_param_list(func_type_params, func_type_param_traits,
-                                    func_type_param_count);
-        free(func_name);
-        return NULL;
-      }
-      param_count++;
-
-      // Check for comma (more parameters) or end of parameter list
-      if (parser->current_token.type == TOKEN_COMMA) {
-        parser_advance(parser);
-      } else if (parser->current_token.type == TOKEN_RPAREN) {
-        break;
-      } else {
-        parser_set_error(parser, "Expected ',' or ')' in parameter list");
-        // Clean up
-        for (size_t i = 0; i < param_count; i++) {
-          free(param_names[i]);
-          free(param_types[i]);
-        }
-        free(param_names);
-        free(param_types);
-        parser_free_type_param_list(func_type_params, func_type_param_traits,
-                                    func_type_param_count);
-        free(func_name);
-        return NULL;
-      }
-    } while (1);
+  if (!parser_parse_parameter_list(parser, &param_names, &param_types,
+                                   &param_count)) {
+    parser_free_type_param_list(func_type_params, func_type_param_traits,
+                                func_type_param_count);
+    free(func_name);
+    return NULL;
   }
 
   // Expect ')'
   if (!parser_expect(parser, TOKEN_RPAREN)) {
-    // Clean up
     for (size_t i = 0; i < param_count; i++) {
       free(param_names[i]);
       free(param_types[i]);
@@ -3276,9 +3243,6 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   }
   parser_free_type_param_list(type_params, type_param_traits, type_param_count);
 
-  // Keep a stable copy for debug output before freeing temporary buffers.
-  char *debug_struct_name = strdup(struct_name);
-  // Clean up temporary strings
   free(struct_name);
   for (size_t i = 0; i < field_count; i++) {
     free(field_names[i]);
@@ -3288,7 +3252,6 @@ ASTNode *parser_parse_struct_declaration(Parser *parser) {
   free(field_types);
   // Note: methods array is now owned by the AST node, don't free it
 
-  free(debug_struct_name);
   return struct_decl;
 }
 
@@ -3371,35 +3334,6 @@ ASTNode *parser_parse_inline_asm(Parser *parser) {
 
   free(assembly_code);
   return inline_asm;
-}
-
-ASTNode *parser_parse_assignment(Parser *parser) {
-  if (!parser)
-    return NULL;
-
-  SourceLocation location = parser_current_location(parser);
-  if (parser->current_token.type != TOKEN_IDENTIFIER) {
-    parser_set_error(parser, "Expected identifier in assignment");
-    return NULL;
-  }
-
-  char *var_name = strdup(parser->current_token.value);
-  parser_advance(parser);
-
-  if (!parser_expect(parser, TOKEN_EQUALS)) {
-    free(var_name);
-    return NULL;
-  }
-
-  ASTNode *value = parser_parse_expression(parser);
-  if (!value) {
-    free(var_name);
-    return NULL;
-  }
-
-  ASTNode *assignment = ast_create_assignment(var_name, value, location);
-  free(var_name);
-  return assignment;
 }
 
 ASTNode *parser_parse_return_statement(Parser *parser) {
@@ -3616,12 +3550,13 @@ ASTNode *parser_parse_while_statement(Parser *parser) {
   return while_node;
 }
 
-ASTNode *parser_parse_break_statement(Parser *parser) {
+static ASTNode *parser_parse_break_or_continue(Parser *parser,
+                                               TokenType token_type) {
   if (!parser)
     return NULL;
 
   SourceLocation location = parser_current_location(parser);
-  if (!parser_expect(parser, TOKEN_BREAK)) {
+  if (!parser_expect(parser, token_type)) {
     return NULL;
   }
 
@@ -3632,30 +3567,19 @@ ASTNode *parser_parse_break_statement(Parser *parser) {
   }
 
   parser_expect_statement_end(parser);
-  ASTNode *node = ast_create_labeled_break_statement(target_label, location);
+  ASTNode *node = (token_type == TOKEN_BREAK)
+                      ? ast_create_labeled_break_statement(target_label, location)
+                      : ast_create_labeled_continue_statement(target_label, location);
   free(target_label);
   return node;
 }
 
+ASTNode *parser_parse_break_statement(Parser *parser) {
+  return parser_parse_break_or_continue(parser, TOKEN_BREAK);
+}
+
 ASTNode *parser_parse_continue_statement(Parser *parser) {
-  if (!parser)
-    return NULL;
-
-  SourceLocation location = parser_current_location(parser);
-  if (!parser_expect(parser, TOKEN_CONTINUE)) {
-    return NULL;
-  }
-
-  char *target_label = NULL;
-  if (parser->current_token.type == TOKEN_IDENTIFIER) {
-    target_label = strdup(parser->current_token.value);
-    parser_advance(parser);
-  }
-
-  parser_expect_statement_end(parser);
-  ASTNode *node = ast_create_labeled_continue_statement(target_label, location);
-  free(target_label);
-  return node;
+  return parser_parse_break_or_continue(parser, TOKEN_CONTINUE);
 }
 
 ASTNode *parser_parse_for_statement(Parser *parser) {
@@ -4091,7 +4015,11 @@ ASTNode *parser_parse_block(Parser *parser) {
 
   // Parse statements until we hit '}'
   while (parser->current_token.type != TOKEN_RBRACE &&
-         parser->current_token.type != TOKEN_EOF && !parser->has_error) {
+         parser->current_token.type != TOKEN_EOF) {
+
+    if (parser->has_error) {
+      break;
+    }
 
     // Skip empty statements/newlines
     if (parser->current_token.type == TOKEN_NEWLINE ||
@@ -4120,10 +4048,10 @@ ASTNode *parser_parse_block(Parser *parser) {
         parser_expect_statement_end(parser);
       }
     } else if (parser->has_error) {
-      // Try to recover from error
-      parser_recover_from_error(parser);
+      break;
     } else {
       parser_set_error(parser, "Failed to parse statement in block");
+      break;
     }
   }
 
@@ -4161,90 +4089,18 @@ ASTNode *parser_parse_method_declaration(Parser *parser) {
     return NULL;
   }
 
-  // Parse parameter list (similar to function declaration)
   char **param_names = NULL;
   char **param_types = NULL;
   size_t param_count = 0;
 
-  if (parser->current_token.type != TOKEN_RPAREN) {
-    do {
-      // Parse parameter: name : type
-      if (!parser_is_identifier_like(parser->current_token.type)) {
-        parser_set_error(parser, "Expected parameter name");
-        // Clean up
-        for (size_t i = 0; i < param_count; i++) {
-          free(param_names[i]);
-          free(param_types[i]);
-        }
-        free(param_names);
-        free(param_types);
-        free(method_name);
-        return NULL;
-      }
-
-      // Reallocate arrays
-      param_names = realloc(param_names, (param_count + 1) * sizeof(char *));
-      param_types = realloc(param_types, (param_count + 1) * sizeof(char *));
-
-      param_names[param_count] = strdup(parser->current_token.value);
-      parser_advance(parser);
-
-      // Expect ':'
-      if (!parser_expect(parser, TOKEN_COLON)) {
-        // Clean up
-        for (size_t i = 0; i <= param_count; i++) {
-          free(param_names[i]);
-          if (i < param_count)
-            free(param_types[i]);
-        }
-        free(param_names);
-        free(param_types);
-        free(method_name);
-        return NULL;
-      }
-
-      // Parse parameter type
-      param_types[param_count] = parser_parse_type_annotation(parser);
-      if (!param_types[param_count]) {
-        if (!parser->has_error) {
-          parser_set_error(parser, "Expected parameter type");
-        }
-        // Clean up
-        for (size_t i = 0; i <= param_count; i++) {
-          free(param_names[i]);
-          if (i < param_count)
-            free(param_types[i]);
-        }
-        free(param_names);
-        free(param_types);
-        free(method_name);
-        return NULL;
-      }
-      param_count++;
-
-      // Check for comma (more parameters) or end of parameter list
-      if (parser->current_token.type == TOKEN_COMMA) {
-        parser_advance(parser);
-      } else if (parser->current_token.type == TOKEN_RPAREN) {
-        break;
-      } else {
-        parser_set_error(parser, "Expected ',' or ')' in parameter list");
-        // Clean up
-        for (size_t i = 0; i < param_count; i++) {
-          free(param_names[i]);
-          free(param_types[i]);
-        }
-        free(param_names);
-        free(param_types);
-        free(method_name);
-        return NULL;
-      }
-    } while (1);
+  if (!parser_parse_parameter_list(parser, &param_names, &param_types,
+                                   &param_count)) {
+    free(method_name);
+    return NULL;
   }
 
   // Expect ')'
   if (!parser_expect(parser, TOKEN_RPAREN)) {
-    // Clean up
     for (size_t i = 0; i < param_count; i++) {
       free(param_names[i]);
       free(param_types[i]);
@@ -4266,7 +4122,6 @@ ASTNode *parser_parse_method_declaration(Parser *parser) {
       if (!parser->has_error) {
         parser_set_error(parser, "Expected return type after return separator");
       }
-      // Clean up
       for (size_t i = 0; i < param_count; i++) {
         free(param_names[i]);
         free(param_types[i]);
@@ -4342,6 +4197,7 @@ ASTNode *parser_parse_method_declaration(Parser *parser) {
     ast_destroy_node(method_decl);
     return NULL;
   }
+  memset(method_data, 0, sizeof(FunctionDeclaration));
 
   method_data->name = (char *)string_intern(method_name);
   method_data->return_type =

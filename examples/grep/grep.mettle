@@ -1,6 +1,6 @@
 // Mettle Grep benchmark
 //
-// Counts lines containing "ERROR" in a 1 MiB log buffer, 2000 passes.
+// Counts lines containing "ERROR" in a 1 MiB log buffer, 200 passes.
 // Same algorithm as grep.c: uint64 load + 5-byte mask at 'E', memcmp in the tail.
 //
 // Build: build.bat
@@ -87,7 +87,7 @@ function main() -> int32 {
   print(cstr(result_str));
   println_int(matches);
 
-  var bench_header: string = "Benchmark: 2000 passes (grep_count)";
+  var bench_header: string = "Benchmark: 200 passes (grep_count)";
   println(cstr(bench_header));
 
   var t0: uint64 = bench_time_us();

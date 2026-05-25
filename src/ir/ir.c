@@ -1,20 +1,10 @@
 #include "ir.h"
+#include "../common.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
-static char *ir_strdup(const char *text) {
-  if (!text) {
-    return NULL;
-  }
-  size_t length = strlen(text) + 1;
-  char *copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-  memcpy(copy, text, length);
-  return copy;
-}
+#define IR_OPERAND_FMT_BUFSIZE 128
 
 IROperand ir_operand_none(void) {
   IROperand operand = {0};
@@ -25,14 +15,14 @@ IROperand ir_operand_none(void) {
 IROperand ir_operand_temp(const char *name) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_TEMP;
-  operand.name = ir_strdup(name);
+  operand.name = mettle_strdup(name);
   return operand;
 }
 
 IROperand ir_operand_symbol(const char *name) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_SYMBOL;
-  operand.name = ir_strdup(name);
+  operand.name = mettle_strdup(name);
   return operand;
 }
 
@@ -60,37 +50,18 @@ IROperand ir_operand_float_sized(double value, int float_bits) {
 IROperand ir_operand_string(const char *value) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_STRING;
-  operand.name = ir_strdup(value);
+  operand.name = mettle_strdup(value);
   return operand;
 }
 
 IROperand ir_operand_label(const char *name) {
   IROperand operand = ir_operand_none();
   operand.kind = IR_OPERAND_LABEL;
-  operand.name = ir_strdup(name);
+  operand.name = mettle_strdup(name);
   return operand;
 }
 
-void ir_operand_destroy(IROperand *operand) {
-  if (!operand) {
-    return;
-  }
-
-  switch (operand->kind) {
-  case IR_OPERAND_TEMP:
-  case IR_OPERAND_SYMBOL:
-  case IR_OPERAND_STRING:
-  case IR_OPERAND_LABEL:
-    free(operand->name);
-    break;
-  default:
-    break;
-  }
-
-  *operand = ir_operand_none();
-}
-
-static IROperand ir_operand_clone(const IROperand *operand) {
+IROperand ir_operand_copy(const IROperand *operand) {
   if (!operand) {
     return ir_operand_none();
   }
@@ -118,6 +89,29 @@ static IROperand ir_operand_clone(const IROperand *operand) {
   default:
     return ir_operand_none();
   }
+}
+
+void ir_operand_destroy(IROperand *operand) {
+  if (!operand) {
+    return;
+  }
+
+  switch (operand->kind) {
+  case IR_OPERAND_TEMP:
+  case IR_OPERAND_SYMBOL:
+  case IR_OPERAND_STRING:
+  case IR_OPERAND_LABEL:
+    free(operand->name);
+    break;
+  default:
+    break;
+  }
+
+  *operand = ir_operand_none();
+}
+
+static IROperand ir_operand_clone(const IROperand *operand) {
+  return ir_operand_copy(operand);
 }
 
 static void ir_instruction_destroy(IRInstruction *instruction) {
@@ -165,19 +159,43 @@ static void ir_function_clear_parameters(IRFunction *function) {
   function->parameter_count = 0;
 }
 
+void ir_function_clear_cfg(IRFunction *function) {
+  if (!function) {
+    return;
+  }
+
+  if (function->blocks) {
+    for (size_t i = 0; i < function->block_count; i++) {
+      free(function->blocks[i].successors);
+      free(function->blocks[i].predecessors);
+    }
+    free(function->blocks);
+  }
+
+  function->blocks = NULL;
+  function->block_count = 0;
+  function->entry_block = 0;
+  function->cfg_valid = 0;
+}
+
 IRFunction *ir_function_create(const char *name) {
   IRFunction *function = malloc(sizeof(IRFunction));
   if (!function) {
     return NULL;
   }
 
-  function->name = ir_strdup(name ? name : "<anonymous>");
+  function->name = mettle_strdup(name ? name : "<anonymous>");
+  function->profile_id = IR_PROFILE_ID_NONE;
   function->parameter_names = NULL;
   function->parameter_types = NULL;
   function->parameter_count = 0;
   function->instructions = NULL;
   function->instruction_count = 0;
   function->instruction_capacity = 0;
+  function->blocks = NULL;
+  function->block_count = 0;
+  function->entry_block = 0;
+  function->cfg_valid = 0;
   return function;
 }
 
@@ -207,13 +225,13 @@ int ir_function_set_parameters(IRFunction *function, const char **parameter_name
       goto fail;
     }
 
-    name_copies[i] = ir_strdup(parameter_names[i]);
+    name_copies[i] = mettle_strdup(parameter_names[i]);
     if (!name_copies[i]) {
       goto fail;
     }
 
     if (parameter_types && parameter_types[i]) {
-      type_copies[i] = ir_strdup(parameter_types[i]);
+      type_copies[i] = mettle_strdup(parameter_types[i]);
       if (!type_copies[i]) {
         goto fail;
       }
@@ -242,6 +260,7 @@ void ir_function_destroy(IRFunction *function) {
 
   free(function->name);
   ir_function_clear_parameters(function);
+  ir_function_clear_cfg(function);
   for (size_t i = 0; i < function->instruction_count; i++) {
     ir_instruction_destroy(&function->instructions[i]);
   }
@@ -274,7 +293,7 @@ int ir_function_append_instruction(IRFunction *function,
   slot->dest = ir_operand_clone(&instruction->dest);
   slot->lhs = ir_operand_clone(&instruction->lhs);
   slot->rhs = ir_operand_clone(&instruction->rhs);
-  slot->text = ir_strdup(instruction->text);
+  slot->text = mettle_strdup(instruction->text);
   slot->is_float = instruction->is_float;
   slot->arguments = NULL;
   slot->argument_count = instruction->argument_count;
@@ -291,7 +310,302 @@ int ir_function_append_instruction(IRFunction *function,
   }
 
   function->instruction_count++;
+  ir_function_clear_cfg(function);
   return 1;
+}
+
+int ir_function_insert_instruction(IRFunction *function, size_t index,
+                                   const IRInstruction *instruction) {
+  if (!function || !instruction || index > function->instruction_count) {
+    return 0;
+  }
+
+  if (function->instruction_count >= function->instruction_capacity) {
+    size_t new_capacity = function->instruction_capacity == 0
+                              ? 64
+                              : function->instruction_capacity * 2;
+    IRInstruction *new_instructions =
+        realloc(function->instructions, new_capacity * sizeof(IRInstruction));
+    if (!new_instructions) {
+      return 0;
+    }
+    function->instructions = new_instructions;
+    function->instruction_capacity = new_capacity;
+  }
+
+  if (index < function->instruction_count) {
+    memmove(&function->instructions[index + 1], &function->instructions[index],
+            (function->instruction_count - index) * sizeof(IRInstruction));
+  }
+
+  IRInstruction *slot = &function->instructions[index];
+  memset(slot, 0, sizeof(*slot));
+  slot->op = instruction->op;
+  slot->location = instruction->location;
+  slot->is_float = instruction->is_float;
+  slot->float_bits = instruction->float_bits;
+  slot->ast_ref = instruction->ast_ref;
+  slot->dest = ir_operand_clone(&instruction->dest);
+  slot->lhs = ir_operand_clone(&instruction->lhs);
+  slot->rhs = ir_operand_clone(&instruction->rhs);
+  slot->text = mettle_strdup(instruction->text);
+  slot->argument_count = instruction->argument_count;
+  slot->arguments = NULL;
+
+  if (instruction->argument_count > 0) {
+    slot->arguments = malloc(instruction->argument_count * sizeof(IROperand));
+    if (!slot->arguments) {
+      ir_instruction_destroy(slot);
+      return 0;
+    }
+    for (size_t i = 0; i < instruction->argument_count; i++) {
+      slot->arguments[i] = ir_operand_clone(&instruction->arguments[i]);
+    }
+  }
+
+  function->instruction_count++;
+  ir_function_clear_cfg(function);
+  return 1;
+}
+
+typedef struct {
+  const char *label;
+  size_t block_index;
+} IRLabelBlock;
+
+static int ir_instruction_is_terminator(const IRInstruction *instruction) {
+  return instruction &&
+         (instruction->op == IR_OP_JUMP || instruction->op == IR_OP_RETURN);
+}
+
+static int ir_instruction_is_branch(const IRInstruction *instruction) {
+  return instruction && (instruction->op == IR_OP_BRANCH_ZERO ||
+                         instruction->op == IR_OP_BRANCH_EQ);
+}
+
+static int ir_block_append_index_unique(size_t **items, size_t *count,
+                                        size_t value) {
+  if (!items || !count) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < *count; i++) {
+    if ((*items)[i] == value) {
+      return 1;
+    }
+  }
+
+  size_t *grown = realloc(*items, (*count + 1) * sizeof(size_t));
+  if (!grown) {
+    return 0;
+  }
+
+  grown[*count] = value;
+  *items = grown;
+  (*count)++;
+  return 1;
+}
+
+static int ir_cfg_append_edge(IRFunction *function, size_t from, size_t to) {
+  if (!function || from >= function->block_count || to >= function->block_count) {
+    return 0;
+  }
+
+  IRBasicBlock *source = &function->blocks[from];
+  IRBasicBlock *target = &function->blocks[to];
+  if (!ir_block_append_index_unique(&source->successors,
+                                    &source->successor_count, to)) {
+    return 0;
+  }
+  return ir_block_append_index_unique(&target->predecessors,
+                                      &target->predecessor_count, from);
+}
+
+static int ir_cfg_find_label_block(const IRLabelBlock *labels,
+                                   size_t label_count, const char *label,
+                                   size_t *out_block) {
+  if (!labels || !label || !out_block) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < label_count; i++) {
+    if (labels[i].label && strcmp(labels[i].label, label) == 0) {
+      *out_block = labels[i].block_index;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int ir_cfg_block_last_non_nop(const IRBasicBlock *block,
+                                     size_t *out_offset) {
+  if (!block || !out_offset || block->instruction_count == 0) {
+    return 0;
+  }
+
+  for (size_t remaining = block->instruction_count; remaining > 0; remaining--) {
+    size_t offset = remaining - 1;
+    if (block->instructions[offset].op != IR_OP_NOP) {
+      *out_offset = offset;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+int ir_function_rebuild_cfg(IRFunction *function) {
+  if (!function) {
+    return 0;
+  }
+
+  ir_function_clear_cfg(function);
+
+  size_t instruction_count = function->instruction_count;
+  if (instruction_count == 0) {
+    function->entry_block = 0;
+    function->cfg_valid = 1;
+    return 1;
+  }
+
+  unsigned char *block_starts = calloc(instruction_count, 1);
+  if (!block_starts) {
+    return 0;
+  }
+
+  block_starts[0] = 1;
+  for (size_t i = 0; i < instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_LABEL) {
+      block_starts[i] = 1;
+    }
+    if ((ir_instruction_is_terminator(instruction) ||
+         ir_instruction_is_branch(instruction)) &&
+        i + 1 < instruction_count) {
+      block_starts[i + 1] = 1;
+    }
+  }
+
+  size_t block_count = 0;
+  for (size_t i = 0; i < instruction_count; i++) {
+    if (block_starts[i]) {
+      block_count++;
+    }
+  }
+
+  IRBasicBlock *blocks = calloc(block_count, sizeof(IRBasicBlock));
+  IRLabelBlock *labels = calloc(block_count, sizeof(IRLabelBlock));
+  if (!blocks || !labels) {
+    free(blocks);
+    free(labels);
+    free(block_starts);
+    return 0;
+  }
+
+  size_t block_index = 0;
+  size_t label_count = 0;
+  for (size_t start = 0; start < instruction_count;) {
+    if (!block_starts[start]) {
+      start++;
+      continue;
+    }
+
+    size_t end = start + 1;
+    while (end < instruction_count && !block_starts[end]) {
+      end++;
+    }
+
+    IRBasicBlock *block = &blocks[block_index];
+    block->instructions = &function->instructions[start];
+    block->instruction_count = end - start;
+    block->first_instruction = start;
+
+    IRInstruction *first = &function->instructions[start];
+    if (first->op == IR_OP_LABEL && first->text) {
+      block->label = first->text;
+      labels[label_count].label = first->text;
+      labels[label_count].block_index = block_index;
+      label_count++;
+    }
+
+    block_index++;
+    start = end;
+  }
+
+  function->blocks = blocks;
+  function->block_count = block_count;
+  function->entry_block = 0;
+
+  for (size_t i = 0; i < block_count; i++) {
+    IRBasicBlock *block = &function->blocks[i];
+    size_t last_offset = 0;
+    if (!ir_cfg_block_last_non_nop(block, &last_offset)) {
+      if (i + 1 < block_count && !ir_cfg_append_edge(function, i, i + 1)) {
+        ir_function_clear_cfg(function);
+        free(labels);
+        free(block_starts);
+        return 0;
+      }
+      continue;
+    }
+
+    IRInstruction *last = &block->instructions[last_offset];
+    if (last->op == IR_OP_JUMP) {
+      size_t target = 0;
+      if (ir_cfg_find_label_block(labels, label_count, last->text, &target) &&
+          !ir_cfg_append_edge(function, i, target)) {
+        ir_function_clear_cfg(function);
+        free(labels);
+        free(block_starts);
+        return 0;
+      }
+    } else if (ir_instruction_is_branch(last)) {
+      size_t target = 0;
+      if (ir_cfg_find_label_block(labels, label_count, last->text, &target) &&
+          !ir_cfg_append_edge(function, i, target)) {
+        ir_function_clear_cfg(function);
+        free(labels);
+        free(block_starts);
+        return 0;
+      }
+      if (i + 1 < block_count && !ir_cfg_append_edge(function, i, i + 1)) {
+        ir_function_clear_cfg(function);
+        free(labels);
+        free(block_starts);
+        return 0;
+      }
+    } else if (last->op != IR_OP_RETURN) {
+      if (i + 1 < block_count && !ir_cfg_append_edge(function, i, i + 1)) {
+        ir_function_clear_cfg(function);
+        free(labels);
+        free(block_starts);
+        return 0;
+      }
+    }
+  }
+
+  function->cfg_valid = 1;
+  free(labels);
+  free(block_starts);
+  return 1;
+}
+
+const IRBasicBlock *ir_function_blocks(IRFunction *function,
+                                       size_t *block_count) {
+  if (block_count) {
+    *block_count = 0;
+  }
+  if (!function) {
+    return NULL;
+  }
+  if (!function->cfg_valid && !ir_function_rebuild_cfg(function)) {
+    return NULL;
+  }
+  if (block_count) {
+    *block_count = function->block_count;
+  }
+  return function->blocks;
 }
 
 IRProgram *ir_program_create(void) {
@@ -303,6 +617,9 @@ IRProgram *ir_program_create(void) {
   program->functions = NULL;
   program->function_count = 0;
   program->function_capacity = 0;
+  program->profile_entries = NULL;
+  program->profile_entry_count = 0;
+  program->profile_entry_capacity = 0;
   return program;
 }
 
@@ -316,6 +633,13 @@ void ir_program_destroy(IRProgram *program) {
       ir_function_destroy(program->functions[i]);
     }
     free(program->functions);
+  }
+  if (program->profile_entries) {
+    for (size_t i = 0; i < program->profile_entry_count; i++) {
+      free(program->profile_entries[i].name);
+      free(program->profile_entries[i].filename);
+    }
+    free(program->profile_entries);
   }
   free(program);
 }
@@ -371,6 +695,8 @@ static const char *ir_opcode_name(IROpcode op) {
     return "unary";
   case IR_OP_CALL:
     return "call";
+  case IR_OP_CALL_INDIRECT:
+    return "call_indirect";
   case IR_OP_NEW:
     return "new";
   case IR_OP_RETURN:
@@ -380,6 +706,17 @@ static const char *ir_opcode_name(IROpcode op) {
   case IR_OP_CAST:
     return "cast";
   case IR_OP_COUNT_WORD_STARTS: return "count_word_starts";
+  case IR_OP_MEMCPY_INLINE: return "memcpy_inline";
+  case IR_OP_SIMD_SUM_I32: return "simd_sum_i32";
+  case IR_OP_SIMD_MATMUL_N32: return "simd_matmul_n32";
+  case IR_OP_SIMD_INSERTION_SORT_I32: return "simd_insertion_sort_i32";
+  case IR_OP_SIMD_DOT_I32: return "simd_dot_i32";
+  case IR_OP_SIMD_SCALE_I32: return "simd_scale_i32";
+  case IR_OP_SIMD_CLAMP_I32: return "simd_clamp_i32";
+  case IR_OP_SIMD_REVERSE_COPY_I32: return "simd_reverse_copy_i32";
+  case IR_OP_LOWER_BOUND_I32: return "lower_bound_i32";
+  case IR_OP_PREFIX_SUM_I32: return "prefix_sum_i32";
+  case IR_OP_SIMD_MINMAX_I32: return "simd_minmax_i32";
   default:
     return "unknown";
   }
@@ -424,6 +761,241 @@ static void ir_format_operand(const IROperand *operand, char *buffer,
   }
 }
 
+static int ir_format_instruction_line(const IRInstruction *instruction,
+                                      char *buffer, size_t buffer_size) {
+  char dest[IR_OPERAND_FMT_BUFSIZE];
+  char lhs[IR_OPERAND_FMT_BUFSIZE];
+  char rhs[IR_OPERAND_FMT_BUFSIZE];
+  int written = 0;
+
+  if (!instruction || !buffer || buffer_size == 0) {
+    return 0;
+  }
+
+  ir_format_operand(&instruction->dest, dest, sizeof(dest));
+  ir_format_operand(&instruction->lhs, lhs, sizeof(lhs));
+  ir_format_operand(&instruction->rhs, rhs, sizeof(rhs));
+
+  switch (instruction->op) {
+  case IR_OP_LABEL:
+    written = snprintf(buffer, buffer_size, "%s %s", ir_opcode_name(instruction->op),
+                       instruction->text ? instruction->text : "<label>");
+    break;
+  case IR_OP_JUMP:
+    written = snprintf(buffer, buffer_size, "%s %s", ir_opcode_name(instruction->op),
+                       instruction->text ? instruction->text : "<target>");
+    break;
+  case IR_OP_BRANCH_ZERO:
+    written = snprintf(buffer, buffer_size, "%s %s -> %s",
+                       ir_opcode_name(instruction->op), lhs,
+                       instruction->text ? instruction->text : "<target>");
+    break;
+  case IR_OP_BRANCH_EQ:
+    written = snprintf(buffer, buffer_size, "%s %s, %s -> %s",
+                       ir_opcode_name(instruction->op), lhs, rhs,
+                       instruction->text ? instruction->text : "<target>");
+    break;
+  case IR_OP_DECLARE_LOCAL:
+    written = snprintf(buffer, buffer_size, "%s %s : %s",
+                       ir_opcode_name(instruction->op), dest,
+                       instruction->text ? instruction->text : "<unknown>");
+    break;
+  case IR_OP_ASSIGN:
+    written = snprintf(buffer, buffer_size, "%s <- %s", dest, lhs);
+    break;
+  case IR_OP_ADDRESS_OF:
+    written = snprintf(buffer, buffer_size, "%s <- &%s", dest, lhs);
+    break;
+  case IR_OP_LOAD:
+    written = snprintf(buffer, buffer_size, "%s <- *%s [%s]", dest, lhs, rhs);
+    break;
+  case IR_OP_STORE:
+    written = snprintf(buffer, buffer_size, "*%s <- %s [%s]", dest, lhs, rhs);
+    break;
+  case IR_OP_BINARY:
+    written = snprintf(buffer, buffer_size, "%s = %s %s%s %s", dest, lhs,
+                       instruction->text ? instruction->text : "?",
+                       instruction->is_float ? " (float)" : "", rhs);
+    break;
+  case IR_OP_ROTATE_ADD:
+    written = snprintf(buffer, buffer_size, "%s = rotate_add(%s, %s)", dest, lhs,
+                       rhs);
+    break;
+  case IR_OP_UNARY:
+    written = snprintf(buffer, buffer_size, "%s = %s%s%s", dest,
+                       instruction->text ? instruction->text : "?", lhs,
+                       instruction->is_float ? " (float)" : "");
+    break;
+  case IR_OP_CALL:
+  case IR_OP_CALL_INDIRECT: {
+    size_t offset = 0;
+    offset += (size_t)snprintf(buffer + offset, buffer_size - offset, "%s = %s(",
+                               dest, instruction->text ? instruction->text
+                                                       : "<callee>");
+    for (size_t arg_i = 0; arg_i < instruction->argument_count; arg_i++) {
+      char arg_buffer[128];
+      ir_format_operand(&instruction->arguments[arg_i], arg_buffer,
+                        sizeof(arg_buffer));
+      offset +=
+          (size_t)snprintf(buffer + offset, buffer_size - offset, "%s%s",
+                           arg_i == 0 ? "" : ", ", arg_buffer);
+      if (offset >= buffer_size) {
+        break;
+      }
+    }
+    written = (int)snprintf(buffer + offset, buffer_size - offset, ")");
+    if (written >= 0) {
+      written += (int)offset;
+    }
+    break;
+  }
+  case IR_OP_NEW:
+    written = snprintf(buffer, buffer_size, "%s = %s [%s]", dest,
+                       instruction->text ? instruction->text : "<type>", rhs);
+    break;
+  case IR_OP_RETURN:
+    written = snprintf(buffer, buffer_size, "return %s", lhs);
+    break;
+  case IR_OP_INLINE_ASM:
+    written = snprintf(buffer, buffer_size, "inline_asm \"%s\"",
+                       instruction->text ? instruction->text : "");
+    break;
+  case IR_OP_CAST:
+    written = snprintf(buffer, buffer_size, "%s = (%s)%s%s", dest,
+                       instruction->text ? instruction->text : "<type>", lhs,
+                       instruction->is_float ? " (float)" : "");
+    break;
+  case IR_OP_COUNT_WORD_STARTS:
+    written = snprintf(buffer, buffer_size, "%s = count_word_starts(buf=%s, len=%s)",
+                       dest, lhs, rhs);
+    break;
+  case IR_OP_MEMCPY_INLINE:
+    written = snprintf(buffer, buffer_size, "%s = memcpy_inline %s, %s", dest,
+                       lhs, rhs);
+    break;
+  case IR_OP_SIMD_SUM_I32:
+    written = snprintf(buffer, buffer_size, "%s += simd_sum_i32(base=%s, len=%s)",
+                       dest, lhs, rhs);
+    break;
+  case IR_OP_SIMD_MATMUL_N32:
+    written = snprintf(buffer, buffer_size, "%s = matmul_n32(c=%s, a=%s, b=%s)",
+                       dest, dest, lhs, rhs);
+    break;
+  case IR_OP_SIMD_INSERTION_SORT_I32:
+    written = snprintf(buffer, buffer_size, "simd_insertion_sort_i32(base=%s, len=%s)",
+                       dest, rhs);
+    break;
+  case IR_OP_SIMD_DOT_I32: {
+    char len[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    written = snprintf(buffer, buffer_size, "%s = dot_i32(a=%s, b=%s, len=%s)",
+                       dest, lhs, rhs, len);
+    break;
+  }
+  case IR_OP_SIMD_SCALE_I32: {
+    char len[128], mul[128], add[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    ir_format_operand(instruction->argument_count > 1 ? &instruction->arguments[1]
+                                                      : NULL,
+                      mul, sizeof(mul));
+    ir_format_operand(instruction->argument_count > 2 ? &instruction->arguments[2]
+                                                      : NULL,
+                      add, sizeof(add));
+    written = snprintf(buffer, buffer_size,
+                       "%s = scale_i32(src=%s, dst=%s, len=%s, mul=%s, add=%s)",
+                       dest, lhs, rhs, len, mul, add);
+    break;
+  }
+  case IR_OP_SIMD_CLAMP_I32: {
+    char len[128], lo[128], hi[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    ir_format_operand(instruction->argument_count > 1 ? &instruction->arguments[1]
+                                                      : NULL,
+                      lo, sizeof(lo));
+    ir_format_operand(instruction->argument_count > 2 ? &instruction->arguments[2]
+                                                      : NULL,
+                      hi, sizeof(hi));
+    written = snprintf(buffer, buffer_size,
+                       "%s = clamp_i32(src=%s, dst=%s, len=%s, lo=%s, hi=%s)",
+                       dest, lhs, rhs, len, lo, hi);
+    break;
+  }
+  case IR_OP_SIMD_REVERSE_COPY_I32: {
+    char len[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    written = snprintf(buffer, buffer_size,
+                       "%s = reverse_copy_i32(src=%s, dst=%s, len=%s)", dest,
+                       lhs, rhs, len);
+    break;
+  }
+  case IR_OP_LOWER_BOUND_I32: {
+    char key[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      key, sizeof(key));
+    written = snprintf(buffer, buffer_size,
+                       "%s = lower_bound_i32(arr=%s, n=%s, key=%s)", dest, lhs,
+                       rhs, key);
+    break;
+  }
+  case IR_OP_PREFIX_SUM_I32: {
+    char len[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    written = snprintf(buffer, buffer_size,
+                       "%s = prefix_sum_i32(src=%s, dst=%s, len=%s)", dest,
+                       lhs, rhs, len);
+    break;
+  }
+  case IR_OP_SIMD_MINMAX_I32: {
+    char maxv[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      maxv, sizeof(maxv));
+    written = snprintf(buffer, buffer_size,
+                       "%s = minmax_i32(arr=%s, n=%s, max=%s)", dest, lhs, rhs,
+                       maxv);
+    break;
+  }
+  case IR_OP_NOP:
+  default:
+    written = snprintf(buffer, buffer_size, "%s", ir_opcode_name(instruction->op));
+    break;
+  }
+
+  return written > 0 && (size_t)written < buffer_size;
+}
+
+int ir_instruction_dump(const IRInstruction *instruction,
+                        char *buffer, size_t capacity) {
+  if (!instruction || !buffer || capacity == 0) {
+    return 0;
+  }
+  return ir_format_instruction_line(instruction, buffer, capacity);
+}
+
+static void ir_dump_block_edges(FILE *output, const char *label,
+                                const size_t *items, size_t count) {
+  fprintf(output, " %s:", label);
+  if (count == 0) {
+    fprintf(output, " -");
+    return;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    fprintf(output, "%s%zu", i == 0 ? " " : ",", items[i]);
+  }
+}
+
 int ir_program_dump(IRProgram *program, FILE *output) {
   if (!program || !output) {
     return 0;
@@ -438,102 +1010,34 @@ int ir_program_dump(IRProgram *program, FILE *output) {
     fprintf(output, "function %s {\n",
             function->name ? function->name : "<anonymous>");
 
-    for (size_t j = 0; j < function->instruction_count; j++) {
-      IRInstruction *instruction = &function->instructions[j];
-      char dest[128];
-      char lhs[128];
-      char rhs[128];
-      ir_format_operand(&instruction->dest, dest, sizeof(dest));
-      ir_format_operand(&instruction->lhs, lhs, sizeof(lhs));
-      ir_format_operand(&instruction->rhs, rhs, sizeof(rhs));
+    if (!ir_function_rebuild_cfg(function)) {
+      return 0;
+    }
 
-      fprintf(output, "  %4zu: ", j);
-      switch (instruction->op) {
-      case IR_OP_LABEL:
-        fprintf(output, "%s %s\n", ir_opcode_name(instruction->op),
-                instruction->text ? instruction->text : "<label>");
-        break;
-      case IR_OP_JUMP:
-        fprintf(output, "%s %s\n", ir_opcode_name(instruction->op),
-                instruction->text ? instruction->text : "<target>");
-        break;
-      case IR_OP_BRANCH_ZERO:
-        fprintf(output, "%s %s -> %s\n", ir_opcode_name(instruction->op), lhs,
-                instruction->text ? instruction->text : "<target>");
-        break;
-      case IR_OP_BRANCH_EQ:
-        fprintf(output, "%s %s, %s -> %s\n", ir_opcode_name(instruction->op),
-                lhs, rhs, instruction->text ? instruction->text : "<target>");
-        break;
-      case IR_OP_DECLARE_LOCAL:
-        fprintf(output, "%s %s : %s\n", ir_opcode_name(instruction->op), dest,
-                instruction->text ? instruction->text : "<unknown>");
-        break;
-      case IR_OP_ASSIGN:
-        fprintf(output, "%s %s <- %s\n", ir_opcode_name(instruction->op), dest,
-                lhs);
-        break;
-      case IR_OP_ADDRESS_OF:
-        fprintf(output, "%s %s <- &%s\n", ir_opcode_name(instruction->op), dest,
-                lhs);
-        break;
-      case IR_OP_LOAD:
-        fprintf(output, "%s %s <- *%s [%s]\n", ir_opcode_name(instruction->op),
-                dest, lhs, rhs);
-        break;
-      case IR_OP_STORE:
-        fprintf(output, "%s *%s <- %s [%s]\n", ir_opcode_name(instruction->op),
-                dest, lhs, rhs);
-        break;
-      case IR_OP_BINARY:
-        fprintf(output, "%s %s = %s %s%s %s\n", ir_opcode_name(instruction->op),
-                dest, lhs, instruction->text ? instruction->text : "?",
-                instruction->is_float ? " (float)" : "", rhs);
-        break;
-      case IR_OP_ROTATE_ADD:
-        fprintf(output, "%s %s = rotate_add(%s, %s)\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs);
-        break;
-      case IR_OP_UNARY:
-        fprintf(output, "%s %s = %s%s%s\n", ir_opcode_name(instruction->op),
-                dest, instruction->text ? instruction->text : "?", lhs,
-                instruction->is_float ? " (float)" : "");
-        break;
-      case IR_OP_CALL:
-        fprintf(output, "%s %s = %s(", ir_opcode_name(instruction->op), dest,
-                instruction->text ? instruction->text : "<callee>");
-        for (size_t arg_i = 0; arg_i < instruction->argument_count; arg_i++) {
-          char arg_buffer[128];
-          ir_format_operand(&instruction->arguments[arg_i], arg_buffer,
-                            sizeof(arg_buffer));
-          fprintf(output, "%s%s", arg_i == 0 ? "" : ", ", arg_buffer);
-        }
-        fprintf(output, ")\n");
-        break;
-      case IR_OP_NEW:
-        fprintf(output, "%s %s = %s [%s]\n", ir_opcode_name(instruction->op),
-                dest, instruction->text ? instruction->text : "<type>", rhs);
-        break;
-      case IR_OP_RETURN:
-        fprintf(output, "%s %s\n", ir_opcode_name(instruction->op), lhs);
-        break;
-      case IR_OP_INLINE_ASM:
-        fprintf(output, "%s \"%s\"\n", ir_opcode_name(instruction->op),
-                instruction->text ? instruction->text : "");
-        break;
-      case IR_OP_CAST:
-        fprintf(output, "%s %s = (%s)%s%s\n", ir_opcode_name(instruction->op),
-                dest, instruction->text ? instruction->text : "<type>", lhs,
-                instruction->is_float ? " (float)" : "");
-        break;
-      case IR_OP_COUNT_WORD_STARTS:
-        fprintf(output, "%s %s = count_word_starts(buf=%s, len=%s)\n",
-                ir_opcode_name(instruction->op), dest, lhs, rhs);
-        break;
-      case IR_OP_NOP:
-      default:
-        fprintf(output, "%s\n", ir_opcode_name(instruction->op));
-        break;
+    for (size_t block_i = 0; block_i < function->block_count; block_i++) {
+      IRBasicBlock *block = &function->blocks[block_i];
+      const char *label = block->label ? block->label
+                          : block_i == function->entry_block ? "<entry>"
+                                                              : "<anon>";
+      size_t last_instruction =
+          block->instruction_count == 0
+              ? block->first_instruction
+              : block->first_instruction + block->instruction_count - 1;
+
+      fprintf(output, "  block %zu %s [%zu..%zu]", block_i, label,
+              block->first_instruction, last_instruction);
+      ir_dump_block_edges(output, "preds", block->predecessors,
+                          block->predecessor_count);
+      ir_dump_block_edges(output, "succs", block->successors,
+                          block->successor_count);
+      fprintf(output, "\n");
+
+      for (size_t j = 0; j < block->instruction_count; j++) {
+        size_t instruction_index = block->first_instruction + j;
+        IRInstruction *instruction = &block->instructions[j];
+        char buffer[1024];
+        ir_format_instruction_line(instruction, buffer, sizeof(buffer));
+        fprintf(output, "    %4zu: %s\n", instruction_index, buffer);
       }
     }
 

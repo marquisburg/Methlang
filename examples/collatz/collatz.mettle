@@ -38,7 +38,6 @@ function main() -> int32 {
   print(cstr(result_str));
   println_int(sum);
 
-  // Benchmark: 10 full passes
   var passes: int32 = 10;
   var bench_header: string = "Benchmark: 10 passes (sum steps 1..100000 each)";
   println(cstr(bench_header));

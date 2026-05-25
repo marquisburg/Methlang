@@ -2,6 +2,7 @@
 #define DEBUG_INFO_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include "../parser/ast.h"
 
 typedef enum {
@@ -50,6 +51,18 @@ typedef struct {
 } RuntimeLocationMapping;
 
 typedef struct {
+    char* address_label;
+    uint32_t kind;
+    char* function_name;
+    char* filename;
+    size_t line;
+    size_t column;
+    char* source_line;
+    char* message_template;
+    char* static_context;
+} RuntimeTrapSiteMapping;
+
+typedef struct {
     DebugSymbol* symbols;
     size_t symbol_count;
     size_t symbol_capacity;
@@ -65,27 +78,25 @@ typedef struct {
     RuntimeLocationMapping* runtime_locations;
     size_t runtime_location_count;
     size_t runtime_location_capacity;
+
+    RuntimeTrapSiteMapping* runtime_trap_sites;
+    size_t runtime_trap_site_count;
+    size_t runtime_trap_site_capacity;
     
     char* source_filename;
     char* assembly_filename;
 } DebugInfo;
 
-// Function declarations
 DebugInfo* debug_info_create(const char* source_filename, const char* assembly_filename);
 void debug_info_destroy(DebugInfo* debug_info);
 
-// Symbol management
 void debug_info_add_symbol(DebugInfo* debug_info, const char* name, DebugSymbolType type,
                           const char* type_name, size_t line, size_t column);
-void debug_info_set_symbol_address(DebugInfo* debug_info, const char* name, size_t address, size_t size);
-void debug_info_set_symbol_register(DebugInfo* debug_info, const char* name, const char* register_name);
 void debug_info_set_symbol_stack_offset(DebugInfo* debug_info, const char* name, int stack_offset);
 DebugSymbol* debug_info_find_symbol(DebugInfo* debug_info, const char* name);
 
-// Source line mapping
 void debug_info_add_line_mapping(DebugInfo* debug_info, size_t source_line, size_t source_column,
                                 size_t assembly_line, const char* filename);
-SourceLineMapping* debug_info_find_line_mapping(DebugInfo* debug_info, size_t assembly_line);
 
 // Runtime crash-trace metadata
 void debug_info_add_runtime_function_mapping(DebugInfo* debug_info,
@@ -100,32 +111,20 @@ void debug_info_add_runtime_location_mapping(DebugInfo* debug_info,
                                              const char* filename,
                                              size_t line, size_t column);
 
-// Debug output generation
+void debug_info_add_runtime_trap_site_mapping(DebugInfo* debug_info,
+                                              const char* address_label,
+                                              uint32_t kind,
+                                              const char* function_name,
+                                              const char* filename,
+                                              size_t line, size_t column,
+                                              const char* source_line,
+                                              const char* message_template,
+                                              const char* static_context);
+
+char* debug_info_read_source_line(const char* filename, size_t line_number);
+
 void debug_info_generate_dwarf(DebugInfo* debug_info, const char* output_filename);
 void debug_info_generate_stabs(DebugInfo* debug_info, const char* output_filename);
 void debug_info_generate_debug_map(DebugInfo* debug_info, const char* output_filename);
-
-// Stack trace support
-typedef struct {
-    char* function_name;
-    char* filename;
-    size_t line;
-    size_t address;
-} StackFrame;
-
-typedef struct {
-    StackFrame* frames;
-    size_t frame_count;
-    size_t frame_capacity;
-} StackTrace;
-
-StackTrace* stack_trace_create(void);
-void stack_trace_destroy(StackTrace* trace);
-void stack_trace_add_frame(StackTrace* trace, const char* function_name, 
-                          const char* filename, size_t line, size_t address);
-void stack_trace_print(StackTrace* trace);
-
-// Runtime stack trace generation (for generated code)
-void debug_info_generate_stack_trace_code(DebugInfo* debug_info, const char* output_filename);
 
 #endif // DEBUG_INFO_H

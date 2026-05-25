@@ -3,6 +3,11 @@
 
 #include "ir.h"
 
+typedef struct {
+  /* Reserved for future IR optimization controls. */
+  int preserve_function_boundaries;
+} IROptimizeOptions;
+
 // Runs optimization passes on the generated IR program.
 // Currently implements:
 // - Small-function inlining (including control flow, no calls in callee)
@@ -12,6 +17,7 @@
 // - Integer constant/algebraic folding and strength reduction
 // - CSE, dead temp elimination, branch/jump CFG cleanup
 // Returns 1 on success, 0 on error.
-int ir_optimize_program(IRProgram *program);
+int ir_optimize_program(IRProgram *program,
+                        const IROptimizeOptions *options);
 
 #endif // IR_OPTIMIZE_H

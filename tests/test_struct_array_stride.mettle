@@ -1,0 +1,40 @@
+// Match VkPipelineShaderStageCreateInfo layout in engine_vulkan.mettle
+export struct StageInfo {
+  s_type: uint32;
+  p_next: int64;
+  flags: uint32;
+  stage: uint32;
+  module_handle: int64;
+  p_name: int64;
+  p_specialization_info: int64;
+}
+
+function stage_array_stride() -> int32 {
+  var stages: StageInfo[2];
+  stages[0].s_type = (uint32)1;
+  stages[0].p_next = (int64)0;
+  stages[0].flags = (uint32)0;
+  stages[0].stage = (uint32)1;
+  stages[0].module_handle = (int64)111;
+  stages[0].p_name = (int64)222;
+  stages[0].p_specialization_info = (int64)0;
+  stages[1].s_type = (uint32)1;
+  stages[1].p_next = (int64)0;
+  stages[1].flags = (uint32)0;
+  stages[1].stage = (uint32)16;
+  stages[1].module_handle = (int64)333;
+  stages[1].p_name = (int64)444;
+  stages[1].p_specialization_info = (int64)0;
+  if (stages[0].module_handle != (int64)111) { return 1; }
+  if (stages[1].module_handle != (int64)333) { return 2; }
+  if (stages[1].p_name != (int64)444) { return 3; }
+  return 0;
+}
+
+export function main() -> int32 {
+  var r: int32 = stage_array_stride();
+  if (r != 0) {
+    return 100 + r;
+  }
+  return 1;
+}

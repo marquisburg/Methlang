@@ -1,89 +1,1010 @@
 ﻿{
-    "generated":  "2026-05-20T17:09:41Z",
+    "generated":  "2026-05-23T20:55:14Z",
+    "host":  {
+                 "machine_name":  "MARQUIS-WS",
+                 "os":  "Microsoft Windows 11 Pro",
+                 "cpu":  "12th Gen Intel(R) Core(TM) i7-12700K",
+                 "logical_processors":  20,
+                 "ram_gb":  63.7,
+                 "gcc_version":  "gcc.exe (Rev8, Built by MSYS2 project) 15.2.0",
+                 "compiler":  "G:\\Projects\\Mettle\\bin\\mettle.exe"
+             },
+    "summary":  {
+                    "runtime_wins":  5,
+                    "runtime_losses":  12,
+                    "runtime_parity":  4,
+                    "runtime_geomean":  1.208,
+                    "compile_geomean":  0.038,
+                    "size_geomean":  0.029,
+                    "fastest_win":  {
+                                        "name":  "word_count",
+                                        "relative":  0.17
+                                    },
+                    "slowest_loss":  {
+                                         "name":  "reverse_i32",
+                                         "relative":  5.57
+                                     }
+                },
     "harness":  {
                     "config":  "docs/benchmarks/harness.json",
                     "mode":  "mettle-vs-c",
                     "runs":  5,
                     "warmup":  1,
-                    "compiler":  "G:\\Projects\\Mettle\\bin\\mettle.exe"
+                    "compile_only":  false,
+                    "compiler":  "G:\\Projects\\Mettle\\bin\\mettle.exe",
+                    "mettle_flags":  [
+                                         "--build",
+                                         "--emit-obj",
+                                         "--linker",
+                                         "internal",
+                                         "--release"
+                                     ],
+                    "c_flags":  [
+                                    "-O3",
+                                    "-lkernel32"
+                                ]
                 },
     "benchmarks":  [
                        {
                            "name":  "fib",
-                           "description":  "Fibonacci fib(35) x 10M",
-                           "mettle_us":  145932,
-                           "c_us":  106212,
-                           "mettle_ms":  145.932,
-                           "c_ms":  106.212,
-                           "relative":  1.37,
-                           "mettle_compile_ms":  304,
-                           "c_compile_ms":  917,
-                           "compile_relative":  0.33,
+                           "kind":  "runtime",
+                           "description":  "Fibonacci fib(35) x 10M (Mettle unrolled hot loop)",
+                           "mettle_us":  40896,
+                           "c_us":  42713,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  40892,
+                                                  40896,
+                                                  41465,
+                                                  40101,
+                                                  41630
+                                              ],
+                           "c_runs_us":  [
+                                             44499,
+                                             42713,
+                                             41240,
+                                             43825,
+                                             41085
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  40896,
+                                                "min_us":  40101,
+                                                "max_us":  41630,
+                                                "stddev_us":  600.8,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  42713,
+                                           "min_us":  41085,
+                                           "max_us":  44499,
+                                           "stddev_us":  1519.7,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  40.896,
+                           "c_ms":  42.713,
+                           "relative":  0.96,
+                           "mettle_compile_ms":  68,
+                           "c_compile_ms":  466,
+                           "compile_relative":  0.15,
                            "mettle_exe_bytes":  9728,
                            "c_exe_bytes":  260003,
                            "size_relative":  0.04
                        },
                        {
                            "name":  "word_count",
-                           "description":  "Word count 256 KB buffer x 500",
-                           "mettle_us":  19239,
-                           "c_us":  87611,
-                           "mettle_ms":  19.239,
-                           "c_ms":  87.611,
-                           "relative":  0.22,
-                           "mettle_compile_ms":  74,
-                           "c_compile_ms":  935,
-                           "compile_relative":  0.08,
-                           "mettle_exe_bytes":  7680,
+                           "kind":  "runtime",
+                           "description":  "Word count 256 KB buffer x 200",
+                           "mettle_us":  3802,
+                           "c_us":  22995,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  3802,
+                                                  3883,
+                                                  3732,
+                                                  3858,
+                                                  3783
+                                              ],
+                           "c_runs_us":  [
+                                             23850,
+                                             22995,
+                                             23033,
+                                             22704,
+                                             22680
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  3802,
+                                                "min_us":  3732,
+                                                "max_us":  3883,
+                                                "stddev_us":  60.2,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  22995,
+                                           "min_us":  22680,
+                                           "max_us":  23850,
+                                           "stddev_us":  474.3,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  3.802,
+                           "c_ms":  22.995,
+                           "relative":  0.17,
+                           "mettle_compile_ms":  22,
+                           "c_compile_ms":  481,
+                           "compile_relative":  0.05,
+                           "mettle_exe_bytes":  8192,
                            "c_exe_bytes":  261538,
                            "size_relative":  0.03
                        },
                        {
                            "name":  "grep",
-                           "description":  "Grep ERROR 1 MiB x 2000",
-                           "mettle_us":  336179,
-                           "c_us":  235560,
-                           "mettle_ms":  336.179,
-                           "c_ms":  235.56,
-                           "relative":  1.43,
-                           "mettle_compile_ms":  108,
-                           "c_compile_ms":  1007,
-                           "compile_relative":  0.11,
+                           "kind":  "runtime",
+                           "description":  "Grep ERROR 1 MiB x 200",
+                           "mettle_us":  162334,
+                           "c_us":  153698,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  161441,
+                                                  164533,
+                                                  162334,
+                                                  167771,
+                                                  162205
+                                              ],
+                           "c_runs_us":  [
+                                             154444,
+                                             151890,
+                                             150508,
+                                             153698,
+                                             166368
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  162334,
+                                                "min_us":  161441,
+                                                "max_us":  167771,
+                                                "stddev_us":  2572,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  153698,
+                                           "min_us":  150508,
+                                           "max_us":  166368,
+                                           "stddev_us":  6331.6,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  162.334,
+                           "c_ms":  153.698,
+                           "relative":  1.06,
+                           "mettle_compile_ms":  16,
+                           "c_compile_ms":  479,
+                           "compile_relative":  0.03,
                            "mettle_exe_bytes":  8192,
                            "c_exe_bytes":  260592,
                            "size_relative":  0.03
                        },
                        {
                            "name":  "sum_squares",
-                           "description":  "Sum of squares 1..100000 x 500",
-                           "mettle_us":  45971,
-                           "c_us":  29884,
-                           "mettle_ms":  45.971,
-                           "c_ms":  29.884,
-                           "relative":  1.54,
-                           "mettle_compile_ms":  28,
-                           "c_compile_ms":  923,
-                           "compile_relative":  0.03,
-                           "mettle_exe_bytes":  6656,
+                           "kind":  "runtime",
+                           "description":  "Sum of squares 1..100000 x 200",
+                           "mettle_us":  6998,
+                           "c_us":  6624,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  7338,
+                                                  6978,
+                                                  6998,
+                                                  7063,
+                                                  6991
+                                              ],
+                           "c_runs_us":  [
+                                             6624,
+                                             6600,
+                                             6645,
+                                             6628,
+                                             6584
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  6998,
+                                                "min_us":  6978,
+                                                "max_us":  7338,
+                                                "stddev_us":  151.4,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  6624,
+                                           "min_us":  6584,
+                                           "max_us":  6645,
+                                           "stddev_us":  24.1,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  6.998,
+                           "c_ms":  6.624,
+                           "relative":  1.06,
+                           "mettle_compile_ms":  24,
+                           "c_compile_ms":  462,
+                           "compile_relative":  0.05,
+                           "mettle_exe_bytes":  7168,
                            "c_exe_bytes":  259315,
                            "size_relative":  0.03
                        },
                        {
                            "name":  "collatz",
+                           "kind":  "runtime",
                            "description":  "Collatz steps 1..100000 x 10",
-                           "mettle_us":  58663,
-                           "c_us":  170981,
-                           "mettle_ms":  58.663,
-                           "c_ms":  170.981,
-                           "relative":  0.34,
-                           "mettle_compile_ms":  42,
-                           "c_compile_ms":  938,
-                           "compile_relative":  0.04,
+                           "mettle_us":  130941,
+                           "c_us":  146970,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  131453,
+                                                  129457,
+                                                  132598,
+                                                  130042,
+                                                  130941
+                                              ],
+                           "c_runs_us":  [
+                                             148088,
+                                             147513,
+                                             144636,
+                                             146802,
+                                             146970
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  130941,
+                                                "min_us":  129457,
+                                                "max_us":  132598,
+                                                "stddev_us":  1225.7,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  146970,
+                                           "min_us":  144636,
+                                           "max_us":  148088,
+                                           "stddev_us":  1311.4,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  130.941,
+                           "c_ms":  146.97,
+                           "relative":  0.89,
+                           "mettle_compile_ms":  16,
+                           "c_compile_ms":  468,
+                           "compile_relative":  0.03,
                            "mettle_exe_bytes":  6144,
                            "c_exe_bytes":  259827,
                            "size_relative":  0.02
+                       },
+                       {
+                           "name":  "byte_hash",
+                           "kind":  "runtime",
+                           "description":  "djb2 hash 256 KB buffer x 200",
+                           "mettle_us":  50885,
+                           "c_us":  34178,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  45066,
+                                                  50885,
+                                                  53158,
+                                                  49699,
+                                                  53161
+                                              ],
+                           "c_runs_us":  [
+                                             34147,
+                                             34178,
+                                             34351,
+                                             34736,
+                                             33918
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  50885,
+                                                "min_us":  45066,
+                                                "max_us":  53161,
+                                                "stddev_us":  3332,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  34178,
+                                           "min_us":  33918,
+                                           "max_us":  34736,
+                                           "stddev_us":  304.6,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  50.885,
+                           "c_ms":  34.178,
+                           "relative":  1.49,
+                           "mettle_compile_ms":  17,
+                           "c_compile_ms":  467,
+                           "compile_relative":  0.04,
+                           "mettle_exe_bytes":  7680,
+                           "c_exe_bytes":  260033,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "prime_count",
+                           "kind":  "runtime",
+                           "description":  "Prime count up to 50000 x 200",
+                           "mettle_us":  473349,
+                           "c_us":  467468,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  471067,
+                                                  473349,
+                                                  468854,
+                                                  477058,
+                                                  476618
+                                              ],
+                           "c_runs_us":  [
+                                             467468,
+                                             466152,
+                                             470469,
+                                             466019,
+                                             468916
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  473349,
+                                                "min_us":  468854,
+                                                "max_us":  477058,
+                                                "stddev_us":  3530.1,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  467468,
+                                           "min_us":  466019,
+                                           "max_us":  470469,
+                                           "stddev_us":  1895.2,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  473.349,
+                           "c_ms":  467.468,
+                           "relative":  1.01,
+                           "mettle_compile_ms":  17,
+                           "c_compile_ms":  462,
+                           "compile_relative":  0.04,
+                           "mettle_exe_bytes":  6656,
+                           "c_exe_bytes":  259858,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "matrix_mul",
+                           "kind":  "runtime",
+                           "description":  "32x32 int32 matrix multiply x 200 (Mettle: 4-unrolled pointers; C: naive mat_idx â€” GCC -O3 vectorizes C heavily)",
+                           "mettle_us":  1266,
+                           "c_us":  1093,
+                           "c_noinline_us":  8052,
+                           "mettle_runs_us":  [
+                                                  1237,
+                                                  1305,
+                                                  1254,
+                                                  1266,
+                                                  1289
+                                              ],
+                           "c_runs_us":  [
+                                             1121,
+                                             1084,
+                                             1069,
+                                             1120,
+                                             1093
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  1266,
+                                                "min_us":  1237,
+                                                "max_us":  1305,
+                                                "stddev_us":  27.1,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  1093,
+                                           "min_us":  1069,
+                                           "max_us":  1121,
+                                           "stddev_us":  22.8,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  1.266,
+                           "c_ms":  1.093,
+                           "relative":  1.16,
+                           "mettle_compile_ms":  20,
+                           "c_compile_ms":  481,
+                           "compile_relative":  0.04,
+                           "mettle_exe_bytes":  8192,
+                           "c_exe_bytes":  264978,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "sort_insertion",
+                           "kind":  "runtime",
+                           "description":  "Insertion sort 512 int32 values x 200 (Mettle/C structurally similar; gap is memcpy/SIMD/codegen)",
+                           "mettle_us":  4198,
+                           "c_us":  3636,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  4198,
+                                                  4126,
+                                                  4242,
+                                                  4219,
+                                                  4116
+                                              ],
+                           "c_runs_us":  [
+                                             3636,
+                                             3799,
+                                             3626,
+                                             3704,
+                                             3622
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  4198,
+                                                "min_us":  4116,
+                                                "max_us":  4242,
+                                                "stddev_us":  56.3,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  3636,
+                                           "min_us":  3622,
+                                           "max_us":  3799,
+                                           "stddev_us":  75.7,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  4.198,
+                           "c_ms":  3.636,
+                           "relative":  1.15,
+                           "mettle_compile_ms":  18,
+                           "c_compile_ms":  507,
+                           "compile_relative":  0.04,
+                           "mettle_exe_bytes":  8704,
+                           "c_exe_bytes":  259858,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "memcpy_bench",
+                           "kind":  "runtime",
+                           "description":  "memcpy 256 KB buffer x 200 (memory bandwidth / libc memcpy path)",
+                           "mettle_us":  880,
+                           "c_us":  785,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  874,
+                                                  885,
+                                                  860,
+                                                  880,
+                                                  909
+                                              ],
+                           "c_runs_us":  [
+                                             833,
+                                             785,
+                                             783,
+                                             773,
+                                             796
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  880,
+                                                "min_us":  860,
+                                                "max_us":  909,
+                                                "stddev_us":  18,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  785,
+                                           "min_us":  773,
+                                           "max_us":  833,
+                                           "stddev_us":  23.3,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  0.88,
+                           "c_ms":  0.785,
+                           "relative":  1.12,
+                           "mettle_compile_ms":  14,
+                           "c_compile_ms":  453,
+                           "compile_relative":  0.03,
+                           "mettle_exe_bytes":  6656,
+                           "c_exe_bytes":  260208,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "memset_bench",
+                           "kind":  "runtime",
+                           "description":  "memset 256 KB buffer x 200 (fill bandwidth / libc memset path)",
+                           "mettle_us":  730,
+                           "c_us":  726,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  714,
+                                                  741,
+                                                  740,
+                                                  730,
+                                                  722
+                                              ],
+                           "c_runs_us":  [
+                                             720,
+                                             738,
+                                             735,
+                                             726,
+                                             724
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  730,
+                                                "min_us":  714,
+                                                "max_us":  741,
+                                                "stddev_us":  11.6,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  726,
+                                           "min_us":  720,
+                                           "max_us":  738,
+                                           "stddev_us":  7.6,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  0.73,
+                           "c_ms":  0.726,
+                           "relative":  1.01,
+                           "mettle_compile_ms":  15,
+                           "c_compile_ms":  511,
+                           "compile_relative":  0.03,
+                           "mettle_exe_bytes":  6144,
+                           "c_exe_bytes":  259696,
+                           "size_relative":  0.02
+                       },
+                       {
+                           "name":  "memcmp_bench",
+                           "kind":  "runtime",
+                           "description":  "Byte-compare 256 KB in 4 KB chunks x 200 (manual compare loop)",
+                           "mettle_us":  20743,
+                           "c_us":  5758,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  20320,
+                                                  20890,
+                                                  20839,
+                                                  20743,
+                                                  20740
+                                              ],
+                           "c_runs_us":  [
+                                             5750,
+                                             5822,
+                                             5780,
+                                             5758,
+                                             5709
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  20743,
+                                                "min_us":  20320,
+                                                "max_us":  20890,
+                                                "stddev_us":  225.3,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  5758,
+                                           "min_us":  5709,
+                                           "max_us":  5822,
+                                           "stddev_us":  41.5,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  20.743,
+                           "c_ms":  5.758,
+                           "relative":  3.6,
+                           "mettle_compile_ms":  17,
+                           "c_compile_ms":  467,
+                           "compile_relative":  0.04,
+                           "mettle_exe_bytes":  7680,
+                           "c_exe_bytes":  260033,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "binary_search",
+                           "kind":  "runtime",
+                           "description":  "Lower-bound search in sorted 65536 int32 array, 50000 queries x 200",
+                           "mettle_us":  336431,
+                           "c_us":  806764,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  343974,
+                                                  336431,
+                                                  343279,
+                                                  336065,
+                                                  334516
+                                              ],
+                           "c_runs_us":  [
+                                             810325,
+                                             803769,
+                                             804827,
+                                             810432,
+                                             806764
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  336431,
+                                                "min_us":  334516,
+                                                "max_us":  343974,
+                                                "stddev_us":  4423.3,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  806764,
+                                           "min_us":  803769,
+                                           "max_us":  810432,
+                                           "stddev_us":  3074.2,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  336.431,
+                           "c_ms":  806.764,
+                           "relative":  0.42,
+                           "mettle_compile_ms":  15,
+                           "c_compile_ms":  454,
+                           "compile_relative":  0.03,
+                           "mettle_exe_bytes":  7168,
+                           "c_exe_bytes":  259860,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "dot_product",
+                           "kind":  "runtime",
+                           "description":  "int32 dot product of 65536-element vectors x 200 (SIMD reduction)",
+                           "mettle_us":  12567,
+                           "c_us":  2882,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  14539,
+                                                  12752,
+                                                  12567,
+                                                  12522,
+                                                  12524
+                                              ],
+                           "c_runs_us":  [
+                                             2882,
+                                             2794,
+                                             3189,
+                                             3047,
+                                             2861
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  12567,
+                                                "min_us":  12522,
+                                                "max_us":  14539,
+                                                "stddev_us":  876.2,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  2882,
+                                           "min_us":  2794,
+                                           "max_us":  3189,
+                                           "stddev_us":  160.7,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  12.567,
+                           "c_ms":  2.882,
+                           "relative":  4.36,
+                           "mettle_compile_ms":  16,
+                           "c_compile_ms":  460,
+                           "compile_relative":  0.04,
+                           "mettle_exe_bytes":  7168,
+                           "c_exe_bytes":  259860,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "lcg_rng",
+                           "kind":  "runtime",
+                           "description":  "LCG PRNG 1M iterations x 200 (integer mul/add hot loop)",
+                           "mettle_us":  170844,
+                           "c_us":  178898,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  169929,
+                                                  170844,
+                                                  172631,
+                                                  172899,
+                                                  169651
+                                              ],
+                           "c_runs_us":  [
+                                             178898,
+                                             179469,
+                                             179420,
+                                             176411,
+                                             177753
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  170844,
+                                                "min_us":  169651,
+                                                "max_us":  172899,
+                                                "stddev_us":  1506.3,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  178898,
+                                           "min_us":  176411,
+                                           "max_us":  179469,
+                                           "stddev_us":  1304.4,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  170.844,
+                           "c_ms":  178.898,
+                           "relative":  0.95,
+                           "mettle_compile_ms":  14,
+                           "c_compile_ms":  454,
+                           "compile_relative":  0.03,
+                           "mettle_exe_bytes":  5120,
+                           "c_exe_bytes":  259685,
+                           "size_relative":  0.02
+                       },
+                       {
+                           "name":  "prefix_sum",
+                           "kind":  "runtime",
+                           "description":  "Inclusive prefix sum over 65536 int32 values x 200 (scan / SIMD)",
+                           "mettle_us":  3919,
+                           "c_us":  3239,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  3915,
+                                                  3940,
+                                                  3919,
+                                                  3918,
+                                                  4006
+                                              ],
+                           "c_runs_us":  [
+                                             3041,
+                                             3239,
+                                             3453,
+                                             3288,
+                                             2930
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  3919,
+                                                "min_us":  3915,
+                                                "max_us":  4006,
+                                                "stddev_us":  38.4,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  3239,
+                                           "min_us":  2930,
+                                           "max_us":  3453,
+                                           "stddev_us":  206.7,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  3.919,
+                           "c_ms":  3.239,
+                           "relative":  1.21,
+                           "mettle_compile_ms":  16,
+                           "c_compile_ms":  450,
+                           "compile_relative":  0.04,
+                           "mettle_exe_bytes":  6656,
+                           "c_exe_bytes":  259860,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "popcount",
+                           "kind":  "runtime",
+                           "description":  "Population count over 256 KB byte buffer x 200 (bit ops)",
+                           "mettle_us":  38136,
+                           "c_us":  83238,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  39867,
+                                                  37999,
+                                                  38136,
+                                                  38178,
+                                                  37358
+                                              ],
+                           "c_runs_us":  [
+                                             83193,
+                                             83238,
+                                             82077,
+                                             95052,
+                                             84610
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  38136,
+                                                "min_us":  37358,
+                                                "max_us":  39867,
+                                                "stddev_us":  932.1,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  83238,
+                                           "min_us":  82077,
+                                           "max_us":  95052,
+                                           "stddev_us":  5340.9,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  38.136,
+                           "c_ms":  83.238,
+                           "relative":  0.46,
+                           "mettle_compile_ms":  16,
+                           "c_compile_ms":  466,
+                           "compile_relative":  0.03,
+                           "mettle_exe_bytes":  6656,
+                           "c_exe_bytes":  259860,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "reverse_i32",
+                           "kind":  "runtime",
+                           "description":  "Reverse-copy 65536 int32 values x 200 (indexed memory access)",
+                           "mettle_us":  10368,
+                           "c_us":  1860,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  10368,
+                                                  10152,
+                                                  10362,
+                                                  10490,
+                                                  10399
+                                              ],
+                           "c_runs_us":  [
+                                             1999,
+                                             2618,
+                                             1860,
+                                             1793,
+                                             1734
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  10368,
+                                                "min_us":  10152,
+                                                "max_us":  10490,
+                                                "stddev_us":  124.1,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  1860,
+                                           "min_us":  1734,
+                                           "max_us":  2618,
+                                           "stddev_us":  358.9,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  10.368,
+                           "c_ms":  1.86,
+                           "relative":  5.57,
+                           "mettle_compile_ms":  14,
+                           "c_compile_ms":  459,
+                           "compile_relative":  0.03,
+                           "mettle_exe_bytes":  6656,
+                           "c_exe_bytes":  259860,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "minmax_scan",
+                           "kind":  "runtime",
+                           "description":  "Min/max scan over 65536 int32 values x 200 (branchy reduction)",
+                           "mettle_us":  10428,
+                           "c_us":  3159,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  10480,
+                                                  10755,
+                                                  10313,
+                                                  10336,
+                                                  10428
+                                              ],
+                           "c_runs_us":  [
+                                             3123,
+                                             3157,
+                                             4014,
+                                             3159,
+                                             3571
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  10428,
+                                                "min_us":  10313,
+                                                "max_us":  10755,
+                                                "stddev_us":  177.1,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  3159,
+                                           "min_us":  3123,
+                                           "max_us":  4014,
+                                           "stddev_us":  387.3,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  10.428,
+                           "c_ms":  3.159,
+                           "relative":  3.3,
+                           "mettle_compile_ms":  15,
+                           "c_compile_ms":  450,
+                           "compile_relative":  0.03,
+                           "mettle_exe_bytes":  6656,
+                           "c_exe_bytes":  259860,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "scale_i32",
+                           "kind":  "runtime",
+                           "description":  "dst[i] = src[i]*3+7 over 65536 int32 values x 200 (map / vectorize)",
+                           "mettle_us":  10919,
+                           "c_us":  2044,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  10929,
+                                                  10822,
+                                                  10919,
+                                                  10828,
+                                                  11024
+                                              ],
+                           "c_runs_us":  [
+                                             2021,
+                                             1996,
+                                             2092,
+                                             2049,
+                                             2044
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  10919,
+                                                "min_us":  10822,
+                                                "max_us":  11024,
+                                                "stddev_us":  83.3,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  2044,
+                                           "min_us":  1996,
+                                           "max_us":  2092,
+                                           "stddev_us":  35.7,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  10.919,
+                           "c_ms":  2.044,
+                           "relative":  5.34,
+                           "mettle_compile_ms":  22,
+                           "c_compile_ms":  463,
+                           "compile_relative":  0.05,
+                           "mettle_exe_bytes":  6656,
+                           "c_exe_bytes":  259860,
+                           "size_relative":  0.03
+                       },
+                       {
+                           "name":  "clamp_i32",
+                           "kind":  "runtime",
+                           "description":  "clamp(src[i], -100, 100) over 65536 int32 values x 200 (branchy map)",
+                           "mettle_us":  1478,
+                           "c_us":  3558,
+                           "c_noinline_us":  null,
+                           "mettle_runs_us":  [
+                                                  1674,
+                                                  1582,
+                                                  1470,
+                                                  1478,
+                                                  1451
+                                              ],
+                           "c_runs_us":  [
+                                             3723,
+                                             3495,
+                                             3638,
+                                             3547,
+                                             3558
+                                         ],
+                           "mettle_stats":  {
+                                                "median_us":  1478,
+                                                "min_us":  1451,
+                                                "max_us":  1674,
+                                                "stddev_us":  94.8,
+                                                "samples":  5
+                                            },
+                           "c_stats":  {
+                                           "median_us":  3558,
+                                           "min_us":  3495,
+                                           "max_us":  3723,
+                                           "stddev_us":  89.3,
+                                           "samples":  5
+                                       },
+                           "mettle_ms":  1.478,
+                           "c_ms":  3.558,
+                           "relative":  0.42,
+                           "mettle_compile_ms":  16,
+                           "c_compile_ms":  463,
+                           "compile_relative":  0.03,
+                           "mettle_exe_bytes":  6656,
+                           "c_exe_bytes":  259860,
+                           "size_relative":  0.03
                        }
                    ],
+    "compile_benchmarks":  [
+                               {
+                                   "name":  "parse_stress",
+                                   "description":  "Compile 200k LOC flat globals (parse/typecheck stress)",
+                                   "mettle_source":  "tests/parse_stress_test.mettle",
+                                   "mettle_compile_ms":  1290
+                               },
+                               {
+                                   "name":  "profiler",
+                                   "description":  "Compile 226k LOC multi-function program (full pipeline stress)",
+                                   "mettle_source":  "tests/profiler_test.mettle",
+                                   "mettle_compile_ms":  2647
+                               }
+                           ],
     "failed":  [
 
                ]

@@ -81,6 +81,43 @@ function Test-AssemblyOutput {
   return @{ Passed = $true; Reason = "" }
 }
 
+function Test-DisassemblyOutput {
+  param(
+    [string]$BinaryPath,
+    [string[]]$RequiredPatterns = @(),
+    [string[]]$ForbiddenPatterns = @()
+  )
+
+  if (-not (Test-Path $BinaryPath)) {
+    return @{ Passed = $false; Reason = "Output file not produced" }
+  }
+
+  $disasm = & objdump -d $BinaryPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    return @{ Passed = $false; Reason = "objdump failed on '$BinaryPath'" }
+  }
+
+  foreach ($pattern in $RequiredPatterns) {
+    if ([string]::IsNullOrWhiteSpace($pattern)) {
+      continue
+    }
+    if ($disasm -notmatch $pattern) {
+      return @{ Passed = $false; Reason = "Disassembly missing required pattern '$pattern'" }
+    }
+  }
+
+  foreach ($pattern in $ForbiddenPatterns) {
+    if ([string]::IsNullOrWhiteSpace($pattern)) {
+      continue
+    }
+    if ($disasm -match $pattern) {
+      return @{ Passed = $false; Reason = "Disassembly matched forbidden pattern '$pattern'" }
+    }
+  }
+
+  return @{ Passed = $true; Reason = "" }
+}
+
 if ($BuildCompiler) {
   Write-Host "Building compiler..."
   & .\build.bat
@@ -172,6 +209,9 @@ $cases = @(
     AsmMustNotMatch = @("\bgc_alloc\b", "\bmettle_crash_install\b")
   },
   @{ Name = "pointers"; Path = "tests/test_pointers.mettle"; ShouldSucceed = $true },
+  @{ Name = "pointer_arith_scale"; Path = "tests/test_pointer_arith_scale.mettle"; ShouldSucceed = $true },
+  @{ Name = "cstring_pointer_arith"; Path = "tests/test_cstring_pointer_arith.mettle"; ShouldSucceed = $true },
+  @{ Name = "uint32_cross_lineage_eq"; Path = "tests/test_uint32_cross_lineage_eq.mettle"; ShouldSucceed = $true },
   @{ Name = "pointer_null"; Path = "tests/test_pointer_null.mettle"; ShouldSucceed = $true },
   @{
     Name          = "runtime_null_deref_check"
@@ -196,8 +236,8 @@ $cases = @(
       "call mettle_crash_install",
       "extern mettle_crash_register_image",
       "extern mettle_crash_trap",
-      "meth_debug_functions:",
-      "meth_debug_locations:"
+      "mettle_debug_functions:",
+      "mettle_debug_locations:"
     )
   },
   @{ Name = "pointer_param_address"; Path = "tests/test_pointer_param_address.mettle"; ShouldSucceed = $true },
@@ -312,6 +352,7 @@ $cases = @(
   @{ Name = "extern_signed_return"; Path = "tests/test_extern_signed_return.mettle"; ShouldSucceed = $true },
   @{ Name = "extern_cstring"; Path = "tests/test_extern_cstring.mettle"; ShouldSucceed = $true },
   @{ Name = "extern_string_auto_cstring"; Path = "tests/test_extern_string_auto_cstring.mettle"; ShouldSucceed = $true },
+  @{ Name = "string_cstring_coercions"; Path = "tests/test_string_cstring_coercions.mettle"; ShouldSucceed = $true },
   @{ Name = "std_conv_format_i64"; Path = "tests/test_std_conv_format_i64.mettle"; ShouldSucceed = $true },
 
   # ABI tests (MS x64 on Windows; patterns may need adjustment for SysV/Linux)
@@ -436,31 +477,31 @@ $cases = @(
     ShouldSucceed  = $true
     Args           = @("-O")
     AsmMustNotMatch = @("\bcall cold_path\b")
-    IrMustMatch    = @("ASSIGN .* <- 42")
-    IrMustNotMatch = @("BRANCH_ZERO 0 ->", "CALL .*cold_path\(", "ASSIGN @result <- @result", "BRANCH_EQ @same, @same")
+    IrMustMatch    = @("@.* <- 42")
+    IrMustNotMatch = @("branch_zero 0 ->", "\bcold_path\(", "@result <- @result", "branch_eq @same, @same")
   },
   @{
     Name          = "opt_dead_temp"
     Path          = "tests/test_opt_dead_temp.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustNotMatch = @("ASSIGN %t[0-9]+ <- 123456")
+    IrMustNotMatch = @("%t[0-9]+ <- 123456")
   },
   @{
     Name          = "opt_symbol_temp_forwarding"
     Path          = "tests/test_opt_symbol_temp_forwarding.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustNotMatch = @("ASSIGN %t[0-9]+ <- @x")
-    IrMustMatch   = @("BRANCH_ZERO @x ->")
+    IrMustNotMatch = @("%t[0-9]+ <- @x")
+    IrMustMatch   = @("branch_zero @x ->")
   },
   @{
     Name          = "opt_strength_cse"
     Path          = "tests/test_optimize_strength_cse.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustMatch   = @("BINARY @x = @a << 3", "ASSIGN @y <- @x")
-    IrMustNotMatch = @("BINARY @y = 8 \\* @a", "BINARY @w = @b \\+ @a")
+    IrMustMatch   = @("@x = @a << 3", "@y <- @x")
+    IrMustNotMatch = @("@y = 8 \\* @a", "@w = @b \\+ @a")
   },
   @{
     Name          = "opt_loop_unroll"
@@ -474,24 +515,55 @@ $cases = @(
     Path          = "tests/test_opt_mod_even_check.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustMatch   = @("BINARY %t[0-9]+ = @n & 1")
-    IrMustNotMatch = @("BINARY %t[0-9]+ = @n % 2")
+    IrMustMatch   = @("%t[0-9]+ = @n & 1")
+    IrMustNotMatch = @("%t[0-9]+ = @n % 2")
+  },
+  @{
+    Name          = "opt_collatz_odd_fold"
+    Path          = "tests/test_opt_collatz_odd_fold.mettle"
+    ShouldSucceed = $true
+    Args          = @("-O", "--dump-ir")
+    IrMustMatch   = @("(?s)%t[0-9]+ = 3 \* @x.*@x = %t[0-9]+ \+ 1.*@x = @x >> 1.*@count = @count \+ 2.*jump ir_while_")
+  },
+  @{
+    Name          = "opt_popcount_fold"
+    Path          = "tests/test_optimize_popcount_fold.mettle"
+    ShouldSucceed = $true
+    Args          = @("-O", "--dump-ir")
+    IrMustMatch   = @(">> 1", "branch_zero @v ->")
+    IrMustNotMatch = @("jump ir_while_", "%t[0-9]+ = @v / 2")
+  },
+  @{
+    Name          = "opt_popcount_buffer_fuse"
+    Path          = "tests/test_optimize_popcount_buffer_fuse.mettle"
+    ShouldSucceed = $true
+    Args          = @("--build", "--emit-obj", "--linker", "internal", "--release", "--profile-runtime-ops", "--dump-ir")
+    IrMustMatch   = @("%pbf[0-9]+_raw <-", "@total = @total \+ %pbf")
+    IrMustNotMatch = @("%t[0-9]+ = popcount_byte", "__inl_popcount_byte", "local_count")
+  },
+  @{
+    Name          = "opt_popcount_buffer_fuse_release"
+    Path          = "tests/test_optimize_popcount_buffer_fuse.mettle"
+    ShouldSucceed = $true
+    Args          = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch   = @("%pbf[0-9]+_raw <-", "@total = @total \+ %pbf")
+    IrMustNotMatch = @("%t[0-9]+ = popcount_byte", "__inl_popcount_byte", "local_count")
   },
   @{
     Name          = "opt_branch_notzero_forward"
     Path          = "tests/test_opt_branch_notzero_forward.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustMatch   = @("BRANCH_ZERO @x ->")
-    IrMustNotMatch = @("BINARY %t[0-9]+ = @x != 0")
+    IrMustMatch   = @("branch_zero @x ->")
+    IrMustNotMatch = @("%t[0-9]+ = @x != 0")
   },
   @{
     Name          = "opt_branch_eq_chain"
     Path          = "tests/test_opt_branch_eq_chain.mettle"
     ShouldSucceed = $true
     Args          = @("-O")
-    IrMustMatch   = @("BRANCH_EQ @x, 1 ->", "BRANCH_EQ @x, 2 ->")
-    IrMustNotMatch = @("BINARY %t[0-9]+ = @x == 1", "BINARY %t[0-9]+ = @x == 2")
+    IrMustMatch   = @("branch_eq @x, 1 ->", "branch_eq @x, 2 ->")
+    IrMustNotMatch = @("%t[0-9]+ = @x == 1", "%t[0-9]+ = @x == 2")
   },
   @{
     Name            = "opt_cfg_cleanup"
@@ -500,6 +572,98 @@ $cases = @(
     Args            = @("-O")
     IrMustNotMatch  = @("1000")
     AsmMustNotMatch = @("1000")
+  },
+  @{
+    Name            = "opt_memcpy_const"
+    Path            = "tests/test_opt_memcpy_const.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release")
+    AsmMustNotMatch = @("\bcall memcpy\b")
+    AsmMustMatch    = @("\brep movs")
+  },
+  @{
+    Name            = "opt_inline_loop_fn"
+    Path            = "tests/test_opt_inline_loop_fn.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--release")
+    AsmMustNotMatch = @("\bcall sum_small\b")
+  },
+  @{
+    Name            = "opt_no_inline_fib_guard"
+    Path            = "tests/test_opt_no_inline_fib_guard.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--release")
+    AsmMustMatch    = @("\bcall fib\b")
+  },
+  @{
+    Name            = "opt_sum_i32"
+    Path            = "tests/test_opt_sum_i32.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("simd_sum_i32")
+  },
+  @{
+    Name            = "opt_ptr_induction"
+    Path            = "tests/test_opt_ptr_induction.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("@__ptr_", "<- \*@__ptr_")
+    IrMustNotMatch  = @("function map_inc[\s\S]*?@i << 2[\s\S]*?function main")
+  },
+  @{
+    Name            = "opt_prefix_sum_i32"
+    Path            = "tests/test_opt_prefix_sum_i32.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("prefix_sum_i32")
+  },
+  @{
+    Name            = "opt_simd_minmax_i32"
+    Path            = "tests/test_opt_simd_minmax.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("minmax_i32")
+  },
+  @{
+    Name            = "opt_simd_clamp_shape"
+    Path            = "tests/test_opt_simd_clamp_shape.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("clamp_i32")
+  },
+  @{
+    Name          = "opt_load_symbol_copy_branch"
+    Path          = "tests/test_opt_load_symbol_copy_branch.mettle"
+    ShouldSucceed = $true
+    Args          = @("--build", "--emit-obj", "--linker", "internal", "--release")
+  },
+  @{
+    Name            = "opt_simd_insertion_sort_i32"
+    Path            = "tests/test_opt_shift_loop.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("simd_insertion_sort_i32")
+  },
+  @{
+    Name            = "opt_simd_insertion_sort_stack"
+    Path            = "tests/test_opt_simd_insertion_sort_stack.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("simd_insertion_sort_i32")
+  },
+  @{
+    Name            = "opt_simd_dot_i32"
+    Path            = "examples/dot_product/dot_product.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("dot_i32")
+  },
+  @{
+    Name            = "opt_simd_matmul_n32"
+    Path            = "tests/test_opt_simd_matmul_n32.mettle"
+    ShouldSucceed   = $true
+    Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
+    IrMustMatch     = @("matmul_n32")
   },
   @{
     Name          = "codegen_ir_fastpaths"
@@ -685,6 +849,7 @@ $cases = @(
   @{ Name = "err_codegen_member_expr"; Path = "tests/err_codegen_member_expr.mettle"; ShouldSucceed = $false },
   @{ Name = "err_function_arg_count"; Path = "tests/err_function_arg_count.mettle"; ShouldSucceed = $false; Pattern = "expects .* arguments, got" },
   @{ Name = "err_function_arg_type"; Path = "tests/err_function_arg_type.mettle"; ShouldSucceed = $false; Pattern = "Type mismatch" },
+  @{ Name = "err_match_bad_syntax"; Path = "tests/err_match_bad_syntax.mettle"; ShouldSucceed = $false; Pattern = "Expected .* after 'match'" },
   @{ Name = "err_match_non_exhaustive"; Path = "tests/err_match_non_exhaustive.mettle"; ShouldSucceed = $false; Pattern = "Non-exhaustive match" },
   @{ Name = "err_trait_bound_missing_impl"; Path = "tests/err_trait_bound_missing_impl.mettle"; ShouldSucceed = $false; Pattern = "does not implement trait 'Addable'" },
   @{ Name = "err_trait_bound_missing_second_impl"; Path = "tests/err_trait_bound_missing_second_impl.mettle"; ShouldSucceed = $false; Pattern = "does not implement trait 'SignedNumber'" },
@@ -779,14 +944,25 @@ foreach ($case in $cases) {
           $forbiddenIrPatterns = @($case.IrMustNotMatch)
         }
 
-        $asmCheck = Test-AssemblyOutput -AsmPath $outFile `
-          -RequiredPatterns $requiredAsmPatterns `
-          -ForbiddenPatterns $forbiddenAsmPatterns
-        if (-not $asmCheck.Passed) {
-          $passed = $false
-          $reason = $asmCheck.Reason
+        $usesEmitObj = $caseArgs -contains "--emit-obj"
+        $hasAsmPatterns = ($requiredAsmPatterns.Count -gt 0) -or ($forbiddenAsmPatterns.Count -gt 0)
+        if ($hasAsmPatterns) {
+          if ($usesEmitObj) {
+            $asmCheck = Test-DisassemblyOutput -BinaryPath $outFile `
+              -RequiredPatterns $requiredAsmPatterns `
+              -ForbiddenPatterns $forbiddenAsmPatterns
+          }
+          else {
+            $asmCheck = Test-AssemblyOutput -AsmPath $outFile `
+              -RequiredPatterns $requiredAsmPatterns `
+              -ForbiddenPatterns $forbiddenAsmPatterns
+          }
+          if (-not $asmCheck.Passed) {
+            $passed = $false
+            $reason = $asmCheck.Reason
+          }
         }
-        else {
+        if ($passed) {
           foreach ($pattern in $requiredOutputPatterns) {
             if ([string]::IsNullOrWhiteSpace($pattern)) {
               continue
@@ -812,6 +988,12 @@ foreach ($case in $cases) {
         }
         if ($passed -and (($requiredIrPatterns.Count -gt 0) -or ($forbiddenIrPatterns.Count -gt 0))) {
           $irFile = "$outFile.ir"
+          if ($usesEmitObj) {
+            $objIrFile = ([System.IO.Path]::ChangeExtension($outFile, ".obj")) + ".ir"
+            if (Test-Path $objIrFile) {
+              $irFile = $objIrFile
+            }
+          }
           if (-not (Test-Path $irFile)) {
             $passed = $false
             $reason = "IR output file not produced"
@@ -973,7 +1155,7 @@ catch {
 $total++
 try {
   $compilerFullPath = (Resolve-Path $CompilerPath).Path
-  $depsProjectDir = Join-Path $tmpDir "meth-deps-project"
+  $depsProjectDir = Join-Path $tmpDir "mettle-deps-project"
   if (Test-Path $depsProjectDir) {
     Remove-Item -Path $depsProjectDir -Recurse -Force
   }
@@ -1009,11 +1191,11 @@ function main() -> int32 {
     throw "mettle.deps package compile did not produce an assembly output"
   }
 
-  Write-CaseResult -Name "meth_deps_package_resolution" -Passed $true
+  Write-CaseResult -Name "mettle_deps_package_resolution" -Passed $true
 }
 catch {
   $failed++
-  Write-CaseResult -Name "meth_deps_package_resolution" -Passed $false -Reason $_.Exception.Message
+  Write-CaseResult -Name "mettle_deps_package_resolution" -Passed $false -Reason $_.Exception.Message
 }
 
 # Function pointer test: compile, assemble, link, and run
@@ -1166,6 +1348,44 @@ catch {
   Write-CaseResult -Name "direct_object_call_return" -Passed $false -Reason $_.Exception.Message
 }
 
+# Closed-form reduction equivalence: the constant-bound loop unroller must not
+# miscompile counted polynomial sums (regression for the stale-counter bug in
+# ir_build_symbol_int_map_before). Built both with and without --release because
+# the miscompile only surfaced once the reduction-unroll + const-bound unroll
+# passes ran. The test program self-checks and returns nonzero on any mismatch.
+foreach ($relFlag in @($true, $false)) {
+  $total++
+  $variant = if ($relFlag) { "release" } else { "debug" }
+  try {
+    $exePath = Join-Path $tmpDir "test_opt_closed_form_sum_$variant.exe"
+    $buildArgs = @("--build", "--emit-obj", "--linker", "internal")
+    if ($relFlag) { $buildArgs += "--release" }
+    $buildArgs += @("tests\test_opt_closed_form_sum.mettle", "-o", $exePath)
+
+    $buildOut = & $CompilerPath @buildArgs 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "closed-form build ($variant) failed: $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "closed-form build ($variant) did not produce an executable"
+    }
+
+    $runOut = & $exePath 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "closed-form ($variant) reported a mismatch (exit $LASTEXITCODE): $runOut"
+    }
+    if ($runOut -notmatch "closed_form_sum OK") {
+      throw "closed-form ($variant) did not print OK: $runOut"
+    }
+
+    Write-CaseResult -Name "opt_closed_form_sum_$variant" -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "opt_closed_form_sum_$variant" -Passed $false -Reason $_.Exception.Message
+  }
+}
+
 # COFF reader test: parse Mettle and GCC-produced COFF objects
 $total++
 try {
@@ -1176,7 +1396,7 @@ try {
   $gccSourcePath = Join-Path $tmpDir "coff_reader_gcc_input.c"
   $gccObjPath = Join-Path $tmpDir "coff_reader_gcc_input.o"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\coff_reader_test.c src\linker\coff_reader.c -Isrc -o $coffReaderExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\coff_reader_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c -Isrc -o $coffReaderExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "COFF reader harness compile failed: $compileHarness"
   }
@@ -1237,7 +1457,7 @@ try {
   $dupBObj = Join-Path $tmpDir "linker_duplicate_b.obj"
   $unresolvedObj = Join-Path $tmpDir "linker_unresolved_entry.obj"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\symbol_resolve_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $symbolResolveExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\symbol_resolve_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $symbolResolveExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Symbol-resolve harness compile failed: $compileHarness"
   }
@@ -1281,7 +1501,7 @@ $total++
 try {
   $relocationExe = Join-Path $tmpDir "relocation_test.exe"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\relocation_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $relocationExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\relocation_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $relocationExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Relocation harness compile failed: $compileHarness"
   }
@@ -1303,7 +1523,7 @@ $total++
 try {
   $peEmitterExe = Join-Path $tmpDir "pe_emitter_test.exe"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\pe_emitter_test.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\linker\pe_emitter.c src\linker\import_lib.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $peEmitterExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\pe_emitter_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\linker\pe_emitter.c src\linker\import_lib.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $peEmitterExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "PE-emitter harness compile failed: $compileHarness"
   }
@@ -2185,8 +2405,8 @@ try {
     'cmp\s+\$0xc,%rax',
     'shl\s+\$0x2,%rax',
     '(?s)<scale_by_eight>.*shl\s+\$0x3,%rax',
-    '(?s)<zero_const>.*xor\s+%eax,%eax',
-    '(?s)<even_branch>.*and\s+\$0x1,%rax.*test\s+%rax,%rax.*jne',
+    '(?s)<zero_const>.*mov\s+\$0x0,',
+    '(?s)<even_branch>.*(?:and\s+\$0x1,%rax.*test\s+%rax,%rax|test\s+\$0x1,%rax).*(?:jne)',
     '(?s)<fused_mul_add>.*%r12'
   )
   foreach ($pattern in $requiredPatterns) {
@@ -2249,18 +2469,22 @@ catch {
   Write-CaseResult -Name "direct_object_scalar_casts" -Passed $false -Reason $_.Exception.Message
 }
 
-# Direct object backend float/scalar coverage: Win64 float ABI plus float/int casts
-$directObjectFloatCases = @(
+# Direct object backend float/scalar coverage: Win64 float ABI, casts, and
+# narrow integer load canonicalization.
+$directObjectScalarCases = @(
   @{ Name = "direct_object_abi_float_return"; Path = "tests/test_abi_float_return.mettle"; ExitCode = 1; Label = "float-return" },
   @{ Name = "direct_object_abi_float_args"; Path = "tests/test_abi_float_args.mettle"; ExitCode = 1; Label = "float-args" },
   @{ Name = "direct_object_abi_mixed_args"; Path = "tests/test_abi_mixed_args.mettle"; ExitCode = 1; Label = "mixed-args" },
   @{ Name = "direct_object_abi_float_symbol_args"; Path = "tests/test_abi_float_symbol_args.mettle"; ExitCode = 1; Label = "float-symbol-args" },
   @{ Name = "direct_object_abi_float4_args"; Path = "tests/test_abi_float4_args.mettle"; ExitCode = 1; Label = "float4-args" },
   @{ Name = "direct_object_abi_float_stack"; Path = "tests/test_abi_float_stack.mettle"; ExitCode = 1; Label = "float-stack" },
-  @{ Name = "direct_object_cast_expression"; Path = "tests/test_cast_expression.mettle"; ExitCode = 0; Label = "cast-expression" }
+  @{ Name = "direct_object_cast_expression"; Path = "tests/test_cast_expression.mettle"; ExitCode = 0; Label = "cast-expression" },
+  @{ Name = "direct_object_int32_load_sign_ext"; Path = "tests/test_direct_object_int32_load_sign_ext.mettle"; ExitCode = 0; Label = "int32-load-sign-ext" },
+  @{ Name = "direct_object_int32_call_return_compare"; Path = "tests/test_int32_call_return_compare.mettle"; ExitCode = 1; Label = "int32-call-return-compare" },
+  @{ Name = "direct_object_uint32_cross_lineage_eq"; Path = "tests/test_uint32_cross_lineage_eq.mettle"; ExitCode = 0; Label = "uint32-cross-lineage-eq" }
 )
 
-foreach ($case in $directObjectFloatCases) {
+foreach ($case in $directObjectScalarCases) {
   $total++
   try {
     $objPath = Join-Path $tmpDir ($case.Name + ".obj")
@@ -2465,6 +2689,40 @@ catch {
   Write-CaseResult -Name "direct_object_pointer_memory" -Passed $false -Reason $_.Exception.Message
 }
 
+# Direct object backend release test: a reused byte-address temp must survive load+store fusion
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_byte_load_store_alias.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_byte_load_store_alias.exe"
+
+  $objOut = & $CompilerPath --emit-obj --release tests\test_direct_object_byte_load_store_alias.mettle -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object byte-load-store-alias compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object byte-load-store-alias compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj --linker internal --release tests\test_direct_object_byte_load_store_alias.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object byte-load-store-alias build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object byte-load-store-alias build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 37) {
+    throw "Direct object byte-load-store-alias executable exited with $LASTEXITCODE (expected 37)"
+  }
+
+  Write-CaseResult -Name "direct_object_byte_load_store_alias" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_byte_load_store_alias" -Passed $false -Reason $_.Exception.Message
+}
+
 # Direct object backend aggregate-local test: stack-allocated struct addressed and passed by pointer
 $total++
 try {
@@ -2606,6 +2864,153 @@ catch {
   Write-CaseResult -Name "direct_object_runtime_null_deref" -Passed $false -Reason $_.Exception.Message
 }
 
+# Direct object backend stack-trace metadata: -s emits embedded debug tables and crash startup.
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_stack_trace_support.obj"
+
+  $objOut = & $CompilerPath --emit-obj -s tests\test_runtime_null_deref_check.mettle -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object stack-trace compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object stack-trace compile did not produce an object file"
+  }
+
+  $symbols = & objdump -t $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object stack-trace symbol dump failed"
+  }
+  foreach ($sym in @("mettle_debug_functions", "mettle_debug_locations",
+      "mettle_debug_header", "mettle_debug_trap_sites", "mettle_debug_image",
+      "mettle_crash_startup")) {
+    if ($symbols -notmatch [regex]::Escape($sym)) {
+      throw "Direct object stack-trace object is missing symbol '$sym'"
+    }
+  }
+  if ($symbols -notmatch "mettle_crash_trap") {
+    throw "Direct object stack-trace object is missing undefined 'mettle_crash_trap' reference"
+  }
+  if ($symbols -notmatch "mettle_crash_trap_ex") {
+    throw "Direct object stack-trace object is missing undefined 'mettle_crash_trap_ex' reference"
+  }
+
+  Write-CaseResult -Name "stack_trace_support_coff" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "stack_trace_support_coff" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend runtime null trace: --build -s produces symbolized backtraces.
+$total++
+try {
+  $exePath = Join-Path $tmpDir "test_runtime_null_trace_coff.exe"
+
+  $buildOut = & $CompilerPath --build -s tests\test_runtime_null_deref_check.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object runtime null trace build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object runtime null trace build did not produce an executable"
+  }
+
+  $runtimeOut = & $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object runtime null trace exited with $LASTEXITCODE (expected 1)"
+  }
+  if ($runtimeOut -notmatch "Fatal error: Null pointer dereference") {
+    throw "Direct object runtime null trace output missing null-deref message"
+  }
+  if ($runtimeOut -notmatch "Stack trace:") {
+    throw "Direct object runtime null trace output missing stack trace header"
+  }
+  if ($runtimeOut -notmatch "main") {
+    throw "Direct object runtime null trace output missing Mettle frame names"
+  }
+  if ($runtimeOut -notmatch "test_runtime_null_deref_check\.mettle:\d+:\d+") {
+    throw "Direct object runtime null trace output missing file:line:column"
+  }
+  if ($runtimeOut -notmatch "\|") {
+    throw "Direct object runtime null trace output missing source snippet border"
+  }
+  if ($runtimeOut -notmatch "\^") {
+    throw "Direct object runtime null trace output missing caret marker"
+  }
+
+  Write-CaseResult -Name "runtime_null_trace_coff" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "runtime_null_trace_coff" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend bounds trap context: --build -s reports index and length.
+$total++
+try {
+  $boundsExe = Join-Path $tmpDir "test_runtime_bounds_trace_coff.exe"
+  $boundsBuild = & $CompilerPath --build -s tests\test_crash_bounds_context.mettle -o $boundsExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object runtime bounds trace build failed: $boundsBuild"
+  }
+
+  $boundsOut = & $boundsExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object runtime bounds trace exited with $LASTEXITCODE (expected 1)"
+  }
+  if ($boundsOut -notmatch "index 4") {
+    throw "Direct object runtime bounds trace output missing index value"
+  }
+  if ($boundsOut -notmatch "length 4") {
+    throw "Direct object runtime bounds trace output missing array length"
+  }
+  if ($boundsOut -notmatch "test_crash_bounds_context\.mettle:\d+:\d+") {
+    throw "Direct object runtime bounds trace output missing file:line:column"
+  }
+  if ($boundsOut -notmatch "\^") {
+    throw "Direct object runtime bounds trace output missing caret marker"
+  }
+
+  Write-CaseResult -Name "runtime_bounds_trace_coff" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "runtime_bounds_trace_coff" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend access-violation trace with file:line when symbolicated.
+$total++
+try {
+  $avExe = Join-Path $tmpDir "test_runtime_av_trace_coff.exe"
+  $avBuild = & $CompilerPath --build -s tests\test_runtime_av_trace_coff.mettle -o $avExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object runtime access-violation trace build failed: $avBuild"
+  }
+
+  $avOut = & $avExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 1) {
+    throw "Direct object runtime access-violation trace exited with $LASTEXITCODE (expected 1)"
+  }
+  if ($avOut -notmatch "0xC0000005") {
+    throw "Direct object runtime access-violation trace output missing exception code"
+  }
+  if ($avOut -notmatch "Stack trace:") {
+    throw "Direct object runtime access-violation trace output missing stack trace header"
+  }
+  if ($avOut -notmatch "leaf_crash") {
+    throw "Direct object runtime access-violation trace output missing frame names"
+  }
+  if ($avOut -notmatch "test_runtime_av_trace_coff\.mettle:\d+:\d+") {
+    throw "Direct object runtime access-violation trace output missing file:line:column"
+  }
+
+  Write-CaseResult -Name "runtime_access_violation_trace_coff" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "runtime_access_violation_trace_coff" -Passed $false -Reason $_.Exception.Message
+}
+
 # main(argc, argv) test: emitted startup calls CRT __getmainargs directly.
 $total++
 try {
@@ -2644,6 +3049,33 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "main_argc_argv" -Passed $false -Reason $_.Exception.Message
+}
+
+# main(argc, argv) via --build: internal startup must call __getmainargs.
+$total++
+try {
+  $buildArgvExe = Join-Path $tmpDir "test_main_argc_argv_build.exe"
+
+  $buildArgvOut = & $CompilerPath --build tests\test_main_argc_argv.mettle -o $buildArgvExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) --build compile failed: $buildArgvOut"
+  }
+
+  $exeImports = & objdump -p $buildArgvExe 2>&1 | Out-String
+  if ($exeImports -notmatch "__getmainargs") {
+    throw "main(argc,argv) --build executable missing __getmainargs import"
+  }
+
+  $buildArgvResult = & $buildArgvExe "dummy-arg" 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "main(argc,argv) --build test exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "main_argc_argv_build" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "main_argc_argv_build" -Passed $false -Reason $_.Exception.Message
 }
 
 $total++
@@ -2807,6 +3239,121 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "opt_reduction_unroll" -Passed $false -Reason $_.Exception.Message
+}
+
+# Runtime profile mode: function entry/exit instrumentation and exit report
+$total++
+try {
+  $profileExe = Join-Path $tmpDir "test_profile_runtime.exe"
+  $profileBuild = & $CompilerPath --build --emit-obj --linker internal --profile-runtime `
+    tests\test_profile_runtime.mettle -o $profileExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "profile-runtime build failed: $profileBuild"
+  }
+  if (-not (Test-Path $profileExe)) {
+    throw "profile-runtime build did not produce an executable"
+  }
+
+  $profileRun = & $profileExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "profile-runtime exe exited with $LASTEXITCODE"
+  }
+  if ($profileRun -notmatch "Runtime profile:") {
+    throw "profile-runtime report missing header: $profileRun"
+  }
+  if ($profileRun -notmatch "helper") {
+    throw "profile-runtime report missing helper: $profileRun"
+  }
+  if ($profileRun -notmatch "work") {
+    throw "profile-runtime report missing work: $profileRun"
+  }
+  if ($profileRun -notmatch "main") {
+    throw "profile-runtime report missing main: $profileRun"
+  }
+  if ($profileRun -notmatch "location") {
+    throw "profile-runtime report missing location column: $profileRun"
+  }
+  if ($profileRun -notmatch "Runtime profile \(call graph\):") {
+    throw "profile-runtime report missing call graph: $profileRun"
+  }
+  if ($profileRun -notmatch "test_profile_runtime\.mettle:[0-9]+") {
+    throw "profile-runtime report missing file:line location: $profileRun"
+  }
+
+  Write-CaseResult -Name "profile_runtime" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "profile_runtime" -Passed $false -Reason $_.Exception.Message
+}
+
+$total++
+try {
+  $profileOpsExe = Join-Path $tmpDir "test_profile_runtime_ops.exe"
+  $profileOpsBuild = & $CompilerPath --build --emit-obj --linker internal --profile-runtime-ops `
+    tests\test_profile_runtime.mettle -o $profileOpsExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "profile-runtime-ops build failed: $profileOpsBuild"
+  }
+  if (-not (Test-Path $profileOpsExe)) {
+    throw "profile-runtime-ops build did not produce an executable"
+  }
+
+  $profileOpsRun = & $profileOpsExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "profile-runtime-ops exe exited with $LASTEXITCODE"
+  }
+  if ($profileOpsRun -notmatch "Operation profile:") {
+    throw "profile-runtime-ops report missing header: $profileOpsRun"
+  }
+  if ($profileOpsRun -notmatch "function\s+op_class\s+count") {
+    throw "profile-runtime-ops report missing columns: $profileOpsRun"
+  }
+  if ($profileOpsRun -notmatch "work\s+add") {
+    throw "profile-runtime-ops report missing expected op row: $profileOpsRun"
+  }
+  if ($profileOpsRun -notmatch "work\s+branch") {
+    throw "profile-runtime-ops report missing branch row: $profileOpsRun"
+  }
+
+  Write-CaseResult -Name "profile_runtime_ops" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "profile_runtime_ops" -Passed $false -Reason $_.Exception.Message
+}
+
+try {
+  $total++
+  $iceExe = Join-Path $tmpDir "compiler_ice_report_test.exe"
+  $iceCompile = & gcc -Wall -Wextra -std=c99 -g -O0 -Isrc tests\compiler_ice_report_test.c src\common.c src\lexer\lexer.c src\compiler\compiler_context.c src\compiler\compiler_crash.c src\runtime\crash_handler.c src\ir\ir.c -o $iceExe -ldbghelp 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "compiler ICE report harness compile failed: $iceCompile"
+  }
+  $iceRun = & $iceExe 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "compiler ICE report harness exited with $LASTEXITCODE"
+  }
+  if ($iceRun -notmatch "Mettle internal compiler error") {
+    throw "compiler ICE report missing banner: $iceRun"
+  }
+  if ($iceRun -notmatch "Phase: IR optimization") {
+    throw "compiler ICE report missing phase: $iceRun"
+  }
+  if ($iceRun -notmatch "Pass: memcpy_inline") {
+    throw "compiler ICE report missing pass: $iceRun"
+  }
+  if ($iceRun -notmatch "Compiler backtrace:") {
+    throw "compiler ICE report missing backtrace: $iceRun"
+  }
+  if ($iceRun -notmatch "memcpy_inline") {
+    throw "compiler ICE report missing IR instruction text: $iceRun"
+  }
+  Write-CaseResult -Name "compiler_ice_report" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "compiler_ice_report" -Passed $false -Reason $_.Exception.Message
 }
 
 Write-Host ""

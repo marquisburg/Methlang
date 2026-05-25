@@ -1,21 +1,14 @@
 #include "debug_info.h"
+#include "../common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-// Helper function for string duplication
-static char* string_duplicate(const char* s) {
-    if (!s) return NULL;
-    size_t len = strlen(s) + 1;
-    char* dup = malloc(len);
-    if (dup) memcpy(dup, s, len);
-    return dup;
-}
 
 #define INITIAL_SYMBOL_CAPACITY 64
 #define INITIAL_MAPPING_CAPACITY 256
 #define INITIAL_RUNTIME_FUNCTION_CAPACITY 64
 #define INITIAL_RUNTIME_LOCATION_CAPACITY 256
+#define INITIAL_RUNTIME_TRAP_SITE_CAPACITY 64
 
 DebugInfo* debug_info_create(const char* source_filename, const char* assembly_filename) {
     DebugInfo* debug_info = malloc(sizeof(DebugInfo));
@@ -61,9 +54,23 @@ DebugInfo* debug_info_create(const char* source_filename, const char* assembly_f
     debug_info->runtime_function_capacity = INITIAL_RUNTIME_FUNCTION_CAPACITY;
     debug_info->runtime_location_count = 0;
     debug_info->runtime_location_capacity = INITIAL_RUNTIME_LOCATION_CAPACITY;
+
+    debug_info->runtime_trap_sites =
+        malloc(sizeof(RuntimeTrapSiteMapping) * INITIAL_RUNTIME_TRAP_SITE_CAPACITY);
+    if (!debug_info->runtime_trap_sites) {
+        free(debug_info->runtime_locations);
+        free(debug_info->runtime_functions);
+        free(debug_info->line_mappings);
+        free(debug_info->symbols);
+        free(debug_info);
+        return NULL;
+    }
+
+    debug_info->runtime_trap_site_count = 0;
+    debug_info->runtime_trap_site_capacity = INITIAL_RUNTIME_TRAP_SITE_CAPACITY;
     
-    debug_info->source_filename = string_duplicate(source_filename);
-    debug_info->assembly_filename = string_duplicate(assembly_filename);
+    debug_info->source_filename = mettle_strdup(source_filename);
+    debug_info->assembly_filename = mettle_strdup(assembly_filename);
     
     return debug_info;
 }
@@ -71,7 +78,6 @@ DebugInfo* debug_info_create(const char* source_filename, const char* assembly_f
 void debug_info_destroy(DebugInfo* debug_info) {
     if (!debug_info) return;
     
-    // Clean up symbols
     for (size_t i = 0; i < debug_info->symbol_count; i++) {
         free(debug_info->symbols[i].name);
         free(debug_info->symbols[i].type_name);
@@ -79,7 +85,6 @@ void debug_info_destroy(DebugInfo* debug_info) {
     }
     free(debug_info->symbols);
     
-    // Clean up line mappings
     for (size_t i = 0; i < debug_info->mapping_count; i++) {
         free(debug_info->line_mappings[i].filename);
     }
@@ -99,6 +104,16 @@ void debug_info_destroy(DebugInfo* debug_info) {
         free(debug_info->runtime_locations[i].filename);
     }
     free(debug_info->runtime_locations);
+
+    for (size_t i = 0; i < debug_info->runtime_trap_site_count; i++) {
+        free(debug_info->runtime_trap_sites[i].address_label);
+        free(debug_info->runtime_trap_sites[i].function_name);
+        free(debug_info->runtime_trap_sites[i].filename);
+        free(debug_info->runtime_trap_sites[i].source_line);
+        free(debug_info->runtime_trap_sites[i].message_template);
+        free(debug_info->runtime_trap_sites[i].static_context);
+    }
+    free(debug_info->runtime_trap_sites);
     
     free(debug_info->source_filename);
     free(debug_info->assembly_filename);
@@ -159,6 +174,21 @@ static int debug_info_expand_runtime_locations(DebugInfo* debug_info) {
     return 1;
 }
 
+static int debug_info_expand_runtime_trap_sites(DebugInfo* debug_info) {
+    if (debug_info->runtime_trap_site_count >=
+        debug_info->runtime_trap_site_capacity) {
+        size_t new_capacity = debug_info->runtime_trap_site_capacity * 2;
+        RuntimeTrapSiteMapping* new_items = realloc(
+            debug_info->runtime_trap_sites,
+            sizeof(RuntimeTrapSiteMapping) * new_capacity);
+        if (!new_items) return 0;
+
+        debug_info->runtime_trap_sites = new_items;
+        debug_info->runtime_trap_site_capacity = new_capacity;
+    }
+    return 1;
+}
+
 void debug_info_add_symbol(DebugInfo* debug_info, const char* name, DebugSymbolType type,
                           const char* type_name, size_t line, size_t column) {
     if (!debug_info || !name) return;
@@ -166,9 +196,15 @@ void debug_info_add_symbol(DebugInfo* debug_info, const char* name, DebugSymbolT
     if (!debug_info_expand_symbols(debug_info)) return;
     
     DebugSymbol* symbol = &debug_info->symbols[debug_info->symbol_count];
-    symbol->name = string_duplicate(name);
+    symbol->name = mettle_strdup(name);
+    if (!symbol->name) return;
     symbol->type = type;
-    symbol->type_name = string_duplicate(type_name);
+    symbol->type_name = mettle_strdup(type_name);
+    if (!symbol->type_name) {
+        free(symbol->name);
+        symbol->name = NULL;
+        return;
+    }
     symbol->line = line;
     symbol->column = column;
     symbol->address = 0;
@@ -178,24 +214,6 @@ void debug_info_add_symbol(DebugInfo* debug_info, const char* name, DebugSymbolT
     symbol->stack_offset = 0;
     
     debug_info->symbol_count++;
-}
-
-void debug_info_set_symbol_address(DebugInfo* debug_info, const char* name, size_t address, size_t size) {
-    DebugSymbol* symbol = debug_info_find_symbol(debug_info, name);
-    if (symbol) {
-        symbol->address = address;
-        symbol->size = size;
-        symbol->is_register = 0;
-    }
-}
-
-void debug_info_set_symbol_register(DebugInfo* debug_info, const char* name, const char* register_name) {
-    DebugSymbol* symbol = debug_info_find_symbol(debug_info, name);
-    if (symbol) {
-        symbol->is_register = 1;
-        free(symbol->register_name);
-        symbol->register_name = string_duplicate(register_name);
-    }
 }
 
 void debug_info_set_symbol_stack_offset(DebugInfo* debug_info, const char* name, int stack_offset) {
@@ -227,20 +245,9 @@ void debug_info_add_line_mapping(DebugInfo* debug_info, size_t source_line, size
     mapping->source_line = source_line;
     mapping->source_column = source_column;
     mapping->assembly_line = assembly_line;
-    mapping->filename = string_duplicate(filename);
+    mapping->filename = mettle_strdup(filename);
     
     debug_info->mapping_count++;
-}
-
-SourceLineMapping* debug_info_find_line_mapping(DebugInfo* debug_info, size_t assembly_line) {
-    if (!debug_info) return NULL;
-    
-    for (size_t i = 0; i < debug_info->mapping_count; i++) {
-        if (debug_info->line_mappings[i].assembly_line == assembly_line) {
-            return &debug_info->line_mappings[i];
-        }
-    }
-    return NULL;
 }
 
 void debug_info_add_runtime_function_mapping(DebugInfo* debug_info,
@@ -255,10 +262,10 @@ void debug_info_add_runtime_function_mapping(DebugInfo* debug_info,
 
     RuntimeFunctionMapping* mapping =
         &debug_info->runtime_functions[debug_info->runtime_function_count];
-    mapping->function_name = string_duplicate(function_name);
-    mapping->start_label = string_duplicate(start_label);
-    mapping->end_label = string_duplicate(end_label);
-    mapping->filename = string_duplicate(filename);
+    mapping->function_name = mettle_strdup(function_name);
+    mapping->start_label = mettle_strdup(start_label);
+    mapping->end_label = mettle_strdup(end_label);
+    mapping->filename = mettle_strdup(filename);
     mapping->line = line;
     mapping->column = column;
     debug_info->runtime_function_count++;
@@ -275,15 +282,92 @@ void debug_info_add_runtime_location_mapping(DebugInfo* debug_info,
 
     RuntimeLocationMapping* mapping =
         &debug_info->runtime_locations[debug_info->runtime_location_count];
-    mapping->function_name = string_duplicate(function_name);
-    mapping->address_label = string_duplicate(address_label);
-    mapping->filename = string_duplicate(filename);
+    mapping->function_name = mettle_strdup(function_name);
+    mapping->address_label = mettle_strdup(address_label);
+    mapping->filename = mettle_strdup(filename);
     mapping->line = line;
     mapping->column = column;
     debug_info->runtime_location_count++;
 }
 
-// Debug output generation functions
+char* debug_info_read_source_line(const char* filename, size_t line_number) {
+    char buffer[4096];
+    size_t current_line = 1;
+    FILE* file = NULL;
+    char* result = NULL;
+
+    if (!filename || line_number == 0) {
+        return NULL;
+    }
+
+    file = fopen(filename, "rb");
+    if (!file) {
+        return NULL;
+    }
+
+    while (fgets(buffer, (int)sizeof(buffer), file)) {
+        if (current_line == line_number) {
+            size_t length = strlen(buffer);
+            while (length > 0 &&
+                   (buffer[length - 1] == '\n' || buffer[length - 1] == '\r')) {
+                buffer[--length] = '\0';
+            }
+            result = mettle_strdup(buffer);
+            break;
+        }
+        current_line++;
+    }
+
+    fclose(file);
+    return result;
+}
+
+void debug_info_add_runtime_trap_site_mapping(
+    DebugInfo* debug_info, const char* address_label, uint32_t kind,
+    const char* function_name, const char* filename, size_t line,
+    size_t column, const char* source_line, const char* message_template,
+    const char* static_context) {
+    RuntimeTrapSiteMapping* mapping = NULL;
+
+    if (!debug_info || !address_label || !function_name) {
+        return;
+    }
+
+    if (!debug_info_expand_runtime_trap_sites(debug_info)) {
+        return;
+    }
+
+    mapping = &debug_info->runtime_trap_sites[debug_info->runtime_trap_site_count];
+    mapping->address_label = mettle_strdup(address_label);
+    mapping->kind = kind;
+    mapping->function_name = mettle_strdup(function_name);
+    mapping->filename = mettle_strdup(filename ? filename : "");
+    mapping->line = line;
+    mapping->column = column;
+    mapping->source_line = source_line ? mettle_strdup(source_line) : NULL;
+    mapping->message_template =
+        message_template ? mettle_strdup(message_template) : NULL;
+    mapping->static_context =
+        static_context ? mettle_strdup(static_context) : NULL;
+    if (!mapping->address_label || !mapping->function_name || !mapping->filename) {
+        free(mapping->address_label);
+        free(mapping->function_name);
+        free(mapping->filename);
+        free(mapping->source_line);
+        free(mapping->message_template);
+        free(mapping->static_context);
+        mapping->address_label = NULL;
+        mapping->function_name = NULL;
+        mapping->filename = NULL;
+        mapping->source_line = NULL;
+        mapping->message_template = NULL;
+        mapping->static_context = NULL;
+        return;
+    }
+
+    debug_info->runtime_trap_site_count++;
+}
+
 
 void debug_info_generate_dwarf(DebugInfo* debug_info, const char* output_filename) {
     if (!debug_info || !output_filename) return;
@@ -304,7 +388,6 @@ void debug_info_generate_dwarf(DebugInfo* debug_info, const char* output_filenam
     fprintf(file, ".long .debug_abbrev  # Abbreviation table offset\n");
     fprintf(file, ".byte 8  # Address size\n\n");
     
-    // Generate debug symbols
     for (size_t i = 0; i < debug_info->symbol_count; i++) {
         DebugSymbol* symbol = &debug_info->symbols[i];
         
@@ -457,142 +540,6 @@ void debug_info_generate_debug_map(DebugInfo* debug_info, const char* output_fil
                 mapping->assembly_line,
                 mapping->filename ? mapping->filename : "");
     }
-    
-    fclose(file);
-}
-
-// Stack trace support implementation
-
-StackTrace* stack_trace_create(void) {
-    StackTrace* trace = malloc(sizeof(StackTrace));
-    if (!trace) return NULL;
-    
-    trace->frames = malloc(sizeof(StackFrame) * 16);
-    if (!trace->frames) {
-        free(trace);
-        return NULL;
-    }
-    
-    trace->frame_count = 0;
-    trace->frame_capacity = 16;
-    
-    return trace;
-}
-
-void stack_trace_destroy(StackTrace* trace) {
-    if (!trace) return;
-    
-    for (size_t i = 0; i < trace->frame_count; i++) {
-        free(trace->frames[i].function_name);
-        free(trace->frames[i].filename);
-    }
-    
-    free(trace->frames);
-    free(trace);
-}
-
-void stack_trace_add_frame(StackTrace* trace, const char* function_name, 
-                          const char* filename, size_t line, size_t address) {
-    if (!trace) return;
-    
-    if (trace->frame_count >= trace->frame_capacity) {
-        size_t new_capacity = trace->frame_capacity * 2;
-        StackFrame* new_frames = realloc(trace->frames, sizeof(StackFrame) * new_capacity);
-        if (!new_frames) return;
-        
-        trace->frames = new_frames;
-        trace->frame_capacity = new_capacity;
-    }
-    
-    StackFrame* frame = &trace->frames[trace->frame_count];
-    frame->function_name = string_duplicate(function_name);
-    frame->filename = string_duplicate(filename);
-    frame->line = line;
-    frame->address = address;
-    
-    trace->frame_count++;
-}
-
-void stack_trace_print(StackTrace* trace) {
-    if (!trace) return;
-    
-    printf("Stack trace:\n");
-    for (size_t i = 0; i < trace->frame_count; i++) {
-        StackFrame* frame = &trace->frames[i];
-        printf("  #%zu: %s at %s:%zu (0x%zx)\n",
-               i,
-               frame->function_name ? frame->function_name : "<unknown>",
-               frame->filename ? frame->filename : "<unknown>",
-               frame->line,
-               frame->address);
-    }
-}
-
-void debug_info_generate_stack_trace_code(DebugInfo* debug_info, const char* output_filename) {
-    if (!debug_info || !output_filename) return;
-    
-    FILE* file = fopen(output_filename, "w");
-    if (!file) return;
-    
-    fprintf(file, "# Stack trace generation code\n");
-    fprintf(file, "# This code can be included in the generated assembly to provide runtime stack traces\n\n");
-    
-    fprintf(file, ".section .text\n");
-    fprintf(file, ".global print_stack_trace\n");
-    fprintf(file, "print_stack_trace:\n");
-    fprintf(file, "    push %%rbp\n");
-    fprintf(file, "    mov %%rsp, %%rbp\n");
-    fprintf(file, "    \n");
-    fprintf(file, "    # Save registers\n");
-    fprintf(file, "    push %%rax\n");
-    fprintf(file, "    push %%rbx\n");
-    fprintf(file, "    push %%rcx\n");
-    fprintf(file, "    push %%rdx\n");
-    fprintf(file, "    \n");
-    fprintf(file, "    # Print stack trace header\n");
-    fprintf(file, "    lea stack_trace_header(%%rip), %%rdi\n");
-    fprintf(file, "    call printf\n");
-    fprintf(file, "    \n");
-    fprintf(file, "    # Walk the stack\n");
-    fprintf(file, "    mov %%rbp, %%rbx  # Current frame pointer\n");
-    fprintf(file, "    xor %%rcx, %%rcx  # Frame counter\n");
-    fprintf(file, "    \n");
-    fprintf(file, "stack_walk_loop:\n");
-    fprintf(file, "    cmp $10, %%rcx    # Limit to 10 frames\n");
-    fprintf(file, "    jge stack_walk_done\n");
-    fprintf(file, "    \n");
-    fprintf(file, "    test %%rbx, %%rbx  # Check if frame pointer is valid\n");
-    fprintf(file, "    jz stack_walk_done\n");
-    fprintf(file, "    \n");
-    fprintf(file, "    # Get return address\n");
-    fprintf(file, "    mov 8(%%rbx), %%rax\n");
-    fprintf(file, "    \n");
-    fprintf(file, "    # Print frame info\n");
-    fprintf(file, "    lea stack_frame_format(%%rip), %%rdi\n");
-    fprintf(file, "    mov %%rcx, %%rsi\n");
-    fprintf(file, "    mov %%rax, %%rdx\n");
-    fprintf(file, "    call printf\n");
-    fprintf(file, "    \n");
-    fprintf(file, "    # Move to next frame\n");
-    fprintf(file, "    mov (%%rbx), %%rbx\n");
-    fprintf(file, "    inc %%rcx\n");
-    fprintf(file, "    jmp stack_walk_loop\n");
-    fprintf(file, "    \n");
-    fprintf(file, "stack_walk_done:\n");
-    fprintf(file, "    # Restore registers\n");
-    fprintf(file, "    pop %%rdx\n");
-    fprintf(file, "    pop %%rcx\n");
-    fprintf(file, "    pop %%rbx\n");
-    fprintf(file, "    pop %%rax\n");
-    fprintf(file, "    \n");
-    fprintf(file, "    pop %%rbp\n");
-    fprintf(file, "    ret\n");
-    fprintf(file, "    \n");
-    fprintf(file, ".section .rodata\n");
-    fprintf(file, "stack_trace_header:\n");
-    fprintf(file, "    .string \"Stack trace:\\n\"\n");
-    fprintf(file, "stack_frame_format:\n");
-    fprintf(file, "    .string \"  #%%zu: 0x%%zx\\n\"\n");
     
     fclose(file);
 }

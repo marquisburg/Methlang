@@ -1,0 +1,28 @@
+import "std/io";
+
+extern function memcpy(dst: cstring, src: cstring, len: int32) -> cstring = "memcpy";
+
+function main() -> int32 {
+  var s: cstring = cstr("ABCDEFGH");
+  var p: cstring = s + 2;
+  if (p[0] != 67) {
+    return 1;
+  }
+
+  var tail: cstring = s + 4;
+  var mid: cstring = tail - 2;
+  if (mid[0] != 67) {
+    return 2;
+  }
+
+  var buf: uint8[32];
+  var base: cstring = (cstring)((int64)(&(buf[0])));
+  var off: int32 = 5;
+  buf[0] = 88;
+  memcpy(base + off, base, 1);
+  if (buf[off] != 88) {
+    return 3;
+  }
+
+  return 0;
+}

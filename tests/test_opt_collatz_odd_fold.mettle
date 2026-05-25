@@ -1,0 +1,18 @@
+function main() -> int32 {
+  var x: int64 = 7;
+  var count: int64 = 0;
+
+  while (x > 1) {
+    if (x % 2 == 0) {
+      x = x / 2;
+    } else {
+      x = 3 * x + 1;
+    }
+    count = count + 1;
+  }
+
+  if (count == 16) {
+    return 0;
+  }
+  return 1;
+}

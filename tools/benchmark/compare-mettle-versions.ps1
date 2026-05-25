@@ -167,17 +167,11 @@ function Get-BenchmarkSource {
         return Normalize-Path ([string]$Bench.source)
     }
 
-    if ($null -eq $Bench.mettle_exe -and ($null -eq $Bench.meth_exe -or [string]::IsNullOrWhiteSpace([string]$Bench.meth_exe))) {
+    if ($null -eq $Bench.mettle_exe -or [string]::IsNullOrWhiteSpace([string]$Bench.mettle_exe)) {
         throw "Benchmark '$($Bench.name)' does not define source or mettle_exe."
     }
 
-    $exePath = if ($null -ne $Bench.mettle_exe -and -not [string]::IsNullOrWhiteSpace([string]$Bench.mettle_exe)) {
-        [string]$Bench.mettle_exe
-    } else {
-        [string]$Bench.meth_exe
-    }
-
-    return [System.IO.Path]::ChangeExtension((Normalize-Path $exePath), ".mettle")
+    return [System.IO.Path]::ChangeExtension((Normalize-Path ([string]$Bench.mettle_exe)), ".mettle")
 }
 
 function Export-BaselineSource {

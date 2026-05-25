@@ -1,0 +1,10 @@
+function main() -> int32 {
+  var x: int32 = 1;
+  var p: int32* = &x;
+
+  if (x == 1) {
+    p = 0;
+  }
+
+  return *p;
+}

@@ -19,7 +19,7 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo Building C counterpart...
-gcc -O2 -o examples\collatz\collatz_c.exe examples\collatz\collatz.c -lkernel32
+gcc -O3 -o examples\collatz\collatz_c.exe examples\collatz\collatz.c -lkernel32
 if %ERRORLEVEL% NEQ 0 (
     echo C build failed.
     exit /b 1
@@ -34,5 +34,5 @@ echo Running benchmark (Mettle vs C)...
 echo ===== Mettle (--release) =====
 examples\collatz\collatz.exe
 echo.
-echo ========= C (gcc -O2) =========
+echo ========= C (gcc -O3) =========
 examples\collatz\collatz_c.exe

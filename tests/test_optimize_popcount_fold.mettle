@@ -1,0 +1,13 @@
+function popcount_byte(b: uint8) -> int32 {
+  var count: int32 = 0;
+  var v: uint8 = b;
+  while (v != 0) {
+    count = count + (int32)(v & 1);
+    v = (uint8)(v / 2);
+  }
+  return count;
+}
+
+function main() -> int32 {
+  return popcount_byte(255);
+}

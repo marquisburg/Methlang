@@ -1,43 +1,11 @@
 #include "binary_emitter.h"
 #include "linker/relocation.h"
+#include "test_helpers.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static int report_failure(const char *message, const char *detail) {
-  if (detail && detail[0] != '\0') {
-    fprintf(stderr, "%s: %s\n", message, detail);
-  } else {
-    fprintf(stderr, "%s\n", message);
-  }
-  return 1;
-}
-
-static char *join_path(const char *dir, const char *name) {
-  size_t dir_length = 0;
-  size_t name_length = 0;
-  char *path = NULL;
-
-  if (!dir || !name) {
-    return NULL;
-  }
-
-  dir_length = strlen(dir);
-  name_length = strlen(name);
-  path = malloc(dir_length + name_length + 2u);
-  if (!path) {
-    return NULL;
-  }
-
-  memcpy(path, dir, dir_length);
-  if (dir_length > 0u && dir[dir_length - 1] != '\\' && dir[dir_length - 1] != '/') {
-    path[dir_length++] = '\\';
-  }
-  memcpy(path + dir_length, name, name_length + 1u);
-  return path;
-}
 
 static int write_object(BinaryEmitter *emitter, const char *path) {
   if (!binary_emitter_write_object_file(emitter, path)) {
@@ -123,9 +91,9 @@ static int create_addr64_holder(const char *path) {
                                    NULL) ||
       !binary_emitter_define_symbol(emitter, "holder64", BINARY_SYMBOL_GLOBAL,
                                     rdata, 0u, sizeof(placeholder)) ||
-      !binary_emitter_declare_external(emitter, "target_data") ||
+      !binary_emitter_declare_external(emitter, TEST_TARGET_DATA_SYMBOL) ||
       !binary_emitter_add_relocation(emitter, rdata, 0u, BINARY_RELOCATION_ADDR64,
-                                     "target_data", 0)) {
+                                     TEST_TARGET_DATA_SYMBOL, 0)) {
     goto cleanup;
   }
 
@@ -153,10 +121,10 @@ static int create_addr32nb_holder(const char *path) {
                                    NULL) ||
       !binary_emitter_define_symbol(emitter, "holder32nb", BINARY_SYMBOL_GLOBAL,
                                     data, 0u, sizeof(placeholder)) ||
-      !binary_emitter_declare_external(emitter, "target_data") ||
+      !binary_emitter_declare_external(emitter, TEST_TARGET_DATA_SYMBOL) ||
       !binary_emitter_add_relocation(emitter, data, 0u,
                                      BINARY_RELOCATION_ADDR32NB,
-                                     "target_data", 0)) {
+                                     TEST_TARGET_DATA_SYMBOL, 0)) {
     goto cleanup;
   }
 
@@ -184,10 +152,10 @@ static int create_secrel_holder(const char *path) {
                                    NULL) ||
       !binary_emitter_define_symbol(emitter, "holder_secrel", BINARY_SYMBOL_GLOBAL,
                                     data, 0u, sizeof(placeholder)) ||
-      !binary_emitter_declare_external(emitter, "target_data") ||
+      !binary_emitter_declare_external(emitter, TEST_TARGET_DATA_SYMBOL) ||
       !binary_emitter_add_relocation(emitter, data, 0u,
                                      BINARY_RELOCATION_SECTION_REL32,
-                                     "target_data", 0)) {
+                                     TEST_TARGET_DATA_SYMBOL, 0)) {
     goto cleanup;
   }
 
@@ -213,7 +181,7 @@ static int create_data_provider(const char *path) {
                                               0, 8u);
   if (data == (size_t)-1 ||
       !binary_emitter_append_bytes(emitter, data, prefix, sizeof(prefix), NULL) ||
-      !binary_emitter_define_symbol(emitter, "target_data", BINARY_SYMBOL_GLOBAL,
+      !binary_emitter_define_symbol(emitter, TEST_TARGET_DATA_SYMBOL, BINARY_SYMBOL_GLOBAL,
                                     data, 4u, sizeof(payload)) ||
       !binary_emitter_append_bytes(emitter, data, payload, sizeof(payload), NULL)) {
     goto cleanup;
@@ -226,17 +194,6 @@ cleanup:
   return ok;
 }
 
-static uint32_t read_u32(const unsigned char *bytes) {
-  return (uint32_t)(bytes[0] | ((uint32_t)bytes[1] << 8) |
-                    ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24));
-}
-
-static uint64_t read_u64(const unsigned char *bytes) {
-  return (uint64_t)bytes[0] | ((uint64_t)bytes[1] << 8) |
-         ((uint64_t)bytes[2] << 16) | ((uint64_t)bytes[3] << 24) |
-         ((uint64_t)bytes[4] << 32) | ((uint64_t)bytes[5] << 40) |
-         ((uint64_t)bytes[6] << 48) | ((uint64_t)bytes[7] << 56);
-}
 
 static int expect_rel32(const char *caller_path, const char *provider_path) {
   const char *paths[2] = {caller_path, provider_path};
@@ -262,7 +219,7 @@ static int expect_rel32(const char *caller_path, const char *provider_path) {
     goto cleanup;
   }
 
-  patched = (int32_t)read_u32(text->data);
+  patched = (int32_t)test_read_u32(text->data);
   expected = (int32_t)(callee->virtual_address - 4u);
   if (patched != expected) {
     result = report_failure("REL32 relocation value mismatch", "callee");
@@ -294,17 +251,17 @@ static int expect_addr64(const char *holder_path, const char *provider_path) {
   }
 
   rdata = link_resolution_find_section(resolution, COFF_SECTION_KIND_RDATA);
-  target = link_resolution_find_symbol(resolution, "target_data");
+  target = link_resolution_find_symbol(resolution, TEST_TARGET_DATA_SYMBOL);
   if (!rdata || !target || rdata->size < 8u) {
     result = report_failure("ADDR64 resolution produced invalid merged rdata",
                             holder_path);
     goto cleanup;
   }
 
-  patched = read_u64(rdata->data);
+  patched = test_read_u64(rdata->data);
   expected = target->virtual_address + 5u;
   if (patched != expected) {
-    result = report_failure("ADDR64 relocation value mismatch", "target_data");
+    result = report_failure("ADDR64 relocation value mismatch", TEST_TARGET_DATA_SYMBOL);
     goto cleanup;
   }
 
@@ -334,17 +291,17 @@ static int expect_addr32nb(const char *holder_path, const char *provider_path) {
   }
 
   data = link_resolution_find_section(resolution, COFF_SECTION_KIND_DATA);
-  target = link_resolution_find_symbol(resolution, "target_data");
+  target = link_resolution_find_symbol(resolution, TEST_TARGET_DATA_SYMBOL);
   if (!data || !target || data->size < 4u) {
     result = report_failure("ADDR32NB resolution produced invalid merged data",
                             holder_path);
     goto cleanup;
   }
 
-  patched = read_u32(data->data);
+  patched = test_read_u32(data->data);
   expected = (uint32_t)(target->virtual_address + 7u);
   if (patched != expected) {
-    result = report_failure("ADDR32NB relocation value mismatch", "target_data");
+    result = report_failure("ADDR32NB relocation value mismatch", TEST_TARGET_DATA_SYMBOL);
     goto cleanup;
   }
 
@@ -373,17 +330,17 @@ static int expect_secrel(const char *holder_path, const char *provider_path) {
   }
 
   data = link_resolution_find_section(resolution, COFF_SECTION_KIND_DATA);
-  target = link_resolution_find_symbol(resolution, "target_data");
+  target = link_resolution_find_symbol(resolution, TEST_TARGET_DATA_SYMBOL);
   if (!data || !target || data->size < 4u) {
     result = report_failure("SECREL resolution produced invalid merged data",
                             holder_path);
     goto cleanup;
   }
 
-  patched = read_u32(data->data);
+  patched = test_read_u32(data->data);
   expected = (uint32_t)(target->merged_offset + 3u);
   if (patched != expected) {
-    result = report_failure("SECREL relocation value mismatch", "target_data");
+    result = report_failure("SECREL relocation value mismatch", TEST_TARGET_DATA_SYMBOL);
     goto cleanup;
   }
 

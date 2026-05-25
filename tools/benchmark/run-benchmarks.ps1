@@ -5,6 +5,7 @@
 # - Records executable sizes
 # - Executes binaries (warmup + median of N runs)
 # - Parses "Time: <N> us" output (falls back to ms)
+# - Optionally profiles large compile-only fixtures (parse_stress, profiler)
 # - Writes canonical JSON to docs/benchmarks/latest.json
 # - Mirrors JSON to web/benchmarks.json for the web server
 #
@@ -12,15 +13,26 @@
 #   .\tools\benchmark\run-benchmarks.ps1
 #   .\tools\benchmark\run-benchmarks.ps1 -BuildCompiler
 #   .\tools\benchmark\run-benchmarks.ps1 -Runs 7 -Warmup 2
+#   .\tools\benchmark\run-benchmarks.ps1 -Benchmark fib,grep
+#   .\tools\benchmark\run-benchmarks.ps1 -CompileOnly
+#   .\tools\benchmark\run-benchmarks.ps1 -SkipCompileBenchmarks
 #   .\tools\benchmark\run-benchmarks.ps1 -Quiet
+#   .\tools\benchmark\run-benchmarks.ps1 -OpenReport
+#   .\tools\benchmark\run-benchmarks.ps1 -NoReport
 
 param(
     [switch]$BuildCompiler,
+    [switch]$CompileOnly,
+    [switch]$SkipCompileBenchmarks,
     [switch]$Quiet,
+    [switch]$NoReport,
+    [switch]$OpenReport,
     [string]$ConfigPath = "docs/benchmarks/harness.json",
     [string]$CompilerPath = "",
-    [int]$Runs = 5,
-    [int]$Warmup = 1
+    [string[]]$Benchmark = @(),
+    [string[]]$CFlags = @(),
+    [int]$Runs = 0,
+    [int]$Warmup = -1
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,15 +66,27 @@ function Get-FullPath {
     return [System.IO.Path]::GetFullPath((Join-Path $Root $normalized))
 }
 
+function Test-BenchmarkSelected {
+    param([string]$Name)
+
+    if ($null -eq $Benchmark -or $Benchmark.Count -eq 0) {
+        return $true
+    }
+
+    foreach ($item in $Benchmark) {
+        if ($item -eq $Name) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Get-BenchmarkMettleExe {
     param([object]$Bench)
 
     if ($null -ne $Bench.mettle_exe -and -not [string]::IsNullOrWhiteSpace([string]$Bench.mettle_exe)) {
         return Normalize-Path ([string]$Bench.mettle_exe)
-    }
-
-    if ($null -ne $Bench.meth_exe -and -not [string]::IsNullOrWhiteSpace([string]$Bench.meth_exe)) {
-        return Normalize-Path ([string]$Bench.meth_exe)
     }
 
     throw "Benchmark '$($Bench.name)' does not define mettle_exe."
@@ -73,10 +97,6 @@ function Get-BenchmarkMettleSource {
 
     if ($null -ne $Bench.mettle_source -and -not [string]::IsNullOrWhiteSpace([string]$Bench.mettle_source)) {
         return Normalize-Path ([string]$Bench.mettle_source)
-    }
-
-    if ($null -ne $Bench.meth_source -and -not [string]::IsNullOrWhiteSpace([string]$Bench.meth_source)) {
-        return Normalize-Path ([string]$Bench.meth_source)
     }
 
     return [System.IO.Path]::ChangeExtension((Get-BenchmarkMettleExe -Bench $Bench), ".mettle")
@@ -119,6 +139,18 @@ function Parse-TimeUs {
         if ($Output -match $pattern) {
             return [double]$Matches[1] * 1000.0
         }
+    }
+
+    return $null
+}
+
+function Parse-ProfileTotalMs {
+    param([string]$Output)
+
+    if ([string]::IsNullOrWhiteSpace($Output)) { return $null }
+
+    if ($Output -match "(?im)^\s*total\s+([0-9]+(?:\.[0-9]+)?)\s*ms\b") {
+        return [double]$Matches[1]
     }
 
     return $null
@@ -167,6 +199,145 @@ function Get-Median {
     }
 
     return ([double]$sorted[$middle - 1] + [double]$sorted[$middle]) / 2.0
+}
+
+function Get-StdDev {
+    param([double[]]$Values)
+
+    if ($null -eq $Values -or $Values.Count -lt 2) { return $null }
+
+    $mean = ($Values | Measure-Object -Average).Average
+    $sumSquares = 0.0
+    foreach ($value in $Values) {
+        $delta = [double]$value - $mean
+        $sumSquares += $delta * $delta
+    }
+
+    return [math]::Sqrt($sumSquares / ($Values.Count - 1))
+}
+
+function Get-TimingStats {
+    param([double[]]$Values)
+
+    if ($null -eq $Values -or $Values.Count -eq 0) { return $null }
+
+    $sorted = @($Values | Sort-Object)
+    return [ordered]@{
+        median_us = [uint64][math]::Round((Get-Median -Values $Values), 0)
+        min_us = [uint64][math]::Round([double]$sorted[0], 0)
+        max_us = [uint64][math]::Round([double]$sorted[$sorted.Count - 1], 0)
+        stddev_us = if ($Values.Count -ge 2) { [math]::Round((Get-StdDev -Values $Values), 1) } else { $null }
+        samples = $Values.Count
+    }
+}
+
+function Get-GeometricMean {
+    param([double[]]$Values)
+
+    if ($null -eq $Values -or $Values.Count -eq 0) { return $null }
+
+    $sumLogs = 0.0
+    foreach ($value in $Values) {
+        if ($value -le 0) { return $null }
+        $sumLogs += [math]::Log([double]$value)
+    }
+
+    return [math]::Round([math]::Exp($sumLogs / $Values.Count), 3)
+}
+
+function Get-BenchmarkHostInfo {
+    param(
+        [string]$CompilerFullPath,
+        [string]$GccVersion
+    )
+
+    $osCaption = $null
+    $cpuName = $null
+    $logicalProcessors = $null
+    $ramGb = $null
+
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $osCaption = [string]$os.Caption
+        if ($null -ne $os.TotalVisibleMemorySize) {
+            $ramGb = [math]::Round([double]$os.TotalVisibleMemorySize / 1048576.0, 1)
+        }
+    } catch {
+        $osCaption = [string][System.Environment]::OSVersion
+    }
+
+    try {
+        $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        if ($null -ne $cpu) {
+            $cpuName = [string]$cpu.Name
+            $logicalProcessors = [int]$cpu.NumberOfLogicalProcessors
+        }
+    } catch {
+        $logicalProcessors = [int][System.Environment]::ProcessorCount
+    }
+
+    return [ordered]@{
+        machine_name = [string]$env:COMPUTERNAME
+        os = $osCaption
+        cpu = $cpuName
+        logical_processors = $logicalProcessors
+        ram_gb = $ramGb
+        gcc_version = $GccVersion
+        compiler = $CompilerFullPath
+    }
+}
+
+function Get-BenchmarkSummary {
+    param([array]$RuntimeResults)
+
+    $runtimeRatios = @()
+    $compileRatios = @()
+    $sizeRatios = @()
+    $wins = 0
+    $losses = 0
+    $parity = 0
+    $fastestWin = $null
+    $slowestLoss = $null
+
+    foreach ($row in $RuntimeResults) {
+        if ($null -ne $row.relative) {
+            $ratio = [double]$row.relative
+            $runtimeRatios += $ratio
+
+            if ($ratio -lt 0.95) {
+                $wins++
+                if ($null -eq $fastestWin -or $ratio -lt [double]$fastestWin.relative) {
+                    $fastestWin = [ordered]@{ name = $row.name; relative = $ratio }
+                }
+            } elseif ($ratio -gt 1.05) {
+                $losses++
+                if ($null -eq $slowestLoss -or $ratio -gt [double]$slowestLoss.relative) {
+                    $slowestLoss = [ordered]@{ name = $row.name; relative = $ratio }
+                }
+            } else {
+                $parity++
+            }
+        }
+
+        if ($null -ne $row.compile_relative) {
+            $compileRatios += [double]$row.compile_relative
+        }
+
+        if ($null -ne $row.size_relative) {
+            $sizeRatios += [double]$row.size_relative
+        }
+    }
+
+    return [ordered]@{
+        runtime_wins = $wins
+        runtime_losses = $losses
+        runtime_parity = $parity
+        runtime_geomean = Get-GeometricMean -Values $runtimeRatios
+        compile_geomean = Get-GeometricMean -Values $compileRatios
+        size_geomean = Get-GeometricMean -Values $sizeRatios
+        fastest_win = $fastestWin
+        slowest_loss = $slowestLoss
+    }
 }
 
 function Format-Number {
@@ -221,12 +392,53 @@ function Format-Ratio {
     return [math]::Round($Numerator / $Denominator, 2)
 }
 
+function Get-MettleBuildArgs {
+    param(
+        [object]$Config,
+        [object]$Bench
+    )
+
+    $args = @()
+    if ($null -ne $Config.defaults -and $null -ne $Config.defaults.mettle_flags) {
+        $args += @($Config.defaults.mettle_flags)
+    } else {
+        $args += @("--build", "--emit-obj", "--linker", "internal", "--release")
+    }
+
+    if ($null -ne $Bench.mettle_flags) {
+        $args = @($Bench.mettle_flags)
+    }
+
+    return $args
+}
+
+function Get-CCompileArgs {
+    param(
+        [object]$Config,
+        [string]$SourcePath,
+        [string]$ExePath
+    )
+
+    $flags = @()
+    if ($CFlags.Count -gt 0) {
+        $flags = @($CFlags)
+    } elseif ($null -ne $Config.defaults -and $null -ne $Config.defaults.c_flags) {
+        $flags = @($Config.defaults.c_flags)
+    } else {
+        $flags = @("-O3", "-lkernel32")
+    }
+
+    return @($flags) + @("-o", $ExePath, $SourcePath)
+}
+
 function Compile-MettleBenchmark {
     param(
         [string]$CompilerPath,
         [string]$SourcePath,
         [string]$ExePath,
-        [string]$BenchmarkName
+        [string]$BenchmarkName,
+        [object]$Config,
+        [object]$Bench
     )
 
     $exeDir = Split-Path -Parent $ExePath
@@ -238,10 +450,8 @@ function Compile-MettleBenchmark {
         Remove-Item -LiteralPath $ExePath -Force
     }
 
-    $args = @(
-        "--build", "--emit-obj", "--linker", "internal", "--release",
-        $SourcePath, "-o", $ExePath
-    )
+    $buildArgs = Get-MettleBuildArgs -Config $Config -Bench $Bench
+    $args = @($buildArgs) + @($SourcePath, "-o", $ExePath)
     $compile = Invoke-CapturedProcess -FilePath $CompilerPath -Arguments $args -WorkingDirectory $Root
     if ($compile.ExitCode -ne 0) {
         throw "Mettle compile failed for ${BenchmarkName}:`n$($compile.Output)"
@@ -254,11 +464,54 @@ function Compile-MettleBenchmark {
     return [double]$compile.ElapsedMs
 }
 
-function Compile-CBenchmark {
+function Export-MettleAsmSnapshot {
+    param(
+        [string]$CompilerPath,
+        [string]$SourcePath,
+        [string]$BenchmarkName,
+        [object]$Config,
+        [object]$Bench
+    )
+
+    $asmDir = Join-Path $Root ".tmp\bench-asm"
+    if (-not (Test-Path $asmDir)) {
+        New-Item -ItemType Directory -Path $asmDir -Force | Out-Null
+    }
+
+    $objPath = Join-Path $asmDir "${BenchmarkName}_mettle.obj"
+    $asmPath = Join-Path $asmDir "${BenchmarkName}_mettle.asm.txt"
+
+    if (Test-Path $objPath) {
+        Remove-Item -LiteralPath $objPath -Force
+    }
+
+    $buildArgs = Get-MettleBuildArgs -Config $Config -Bench $Bench
+    $args = @($buildArgs) + @($SourcePath, "-o", $objPath)
+    $compile = Invoke-CapturedProcess -FilePath $CompilerPath -Arguments $args -WorkingDirectory $Root
+    if ($compile.ExitCode -ne 0) {
+        Write-Log "  asm snapshot skipped for ${BenchmarkName}: $($compile.Output)"
+        return
+    }
+
+    $objdump = Get-Command objdump -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $objdump) {
+        Write-Log "  asm snapshot skipped for ${BenchmarkName}: objdump not on PATH"
+        return
+    }
+
+    $disasm = Invoke-CapturedProcess -FilePath "objdump" -Arguments @("-d", "-M", "intel", $objPath) -WorkingDirectory $Root
+    if ($disasm.ExitCode -eq 0) {
+        $disasm.Output | Set-Content -Path $asmPath -Encoding UTF8
+        Write-Log "  asm snapshot: $asmPath"
+    }
+}
+
+function Compile-CBenchmarkWithFlags {
     param(
         [string]$SourcePath,
         [string]$ExePath,
-        [string]$BenchmarkName
+        [string]$BenchmarkName,
+        [string[]]$Flags
     )
 
     $exeDir = Split-Path -Parent $ExePath
@@ -270,7 +523,54 @@ function Compile-CBenchmark {
         Remove-Item -LiteralPath $ExePath -Force
     }
 
-    $args = @("-O2", "-o", $ExePath, $SourcePath, "-lkernel32")
+    $args = @($Flags) + @("-o", $ExePath, $SourcePath)
+    $compile = Invoke-CapturedProcess -FilePath "gcc" -Arguments $args -WorkingDirectory $Root
+    if ($compile.ExitCode -ne 0) {
+        throw "C compile failed for ${BenchmarkName}:`n$($compile.Output)"
+    }
+
+    return [double]$compile.ElapsedMs
+}
+
+function Profile-MettleCompile {
+    param(
+        [string]$CompilerPath,
+        [string]$SourcePath,
+        [string]$BenchmarkName
+    )
+
+    $args = @("--profile", $SourcePath)
+    $compile = Invoke-CapturedProcess -FilePath $CompilerPath -Arguments $args -WorkingDirectory $Root
+    if ($compile.ExitCode -ne 0) {
+        throw "Mettle profile compile failed for ${BenchmarkName}:`n$($compile.Output)"
+    }
+
+    $profileTotalMs = Parse-ProfileTotalMs $compile.Output
+    if ($null -eq $profileTotalMs) {
+        throw "Could not parse profile total for ${BenchmarkName}:`n$($compile.Output)"
+    }
+
+    return [double]$profileTotalMs
+}
+
+function Compile-CBenchmark {
+    param(
+        [string]$SourcePath,
+        [string]$ExePath,
+        [string]$BenchmarkName,
+        [object]$Config
+    )
+
+    $exeDir = Split-Path -Parent $ExePath
+    if (-not (Test-Path $exeDir)) {
+        New-Item -ItemType Directory -Path $exeDir -Force | Out-Null
+    }
+
+    if (Test-Path $ExePath) {
+        Remove-Item -LiteralPath $ExePath -Force
+    }
+
+    $args = Get-CCompileArgs -Config $Config -SourcePath $SourcePath -ExePath $ExePath
     $compile = Invoke-CapturedProcess -FilePath "gcc" -Arguments $args -WorkingDirectory $Root
     if ($compile.ExitCode -ne 0) {
         throw "C compile failed for ${BenchmarkName}:`n$($compile.Output)"
@@ -333,17 +633,44 @@ function Measure-BenchmarkExe {
         return $null
     }
 
-    return Get-Median -Values $values
+    $median = Get-Median -Values $values
+    return [pscustomobject][ordered]@{
+        median_us = [double]$median
+        runs_us = @($values | ForEach-Object { [uint64][math]::Round([double]$_, 0) })
+        stats = Get-TimingStats -Values $values
+    }
 }
 
-if ($Runs -lt 1) {
-    Write-Error "-Runs must be at least 1."
-    exit 1
-}
+function Write-SummaryTable {
+    param(
+        [array]$RuntimeResults,
+        [array]$CompileResults
+    )
 
-if ($Warmup -lt 0) {
-    Write-Error "-Warmup must be at least 0."
-    exit 1
+    if ($Quiet) { return }
+
+    Write-Log ""
+    Write-Log "=== Runtime summary (Mettle vs C, median) ==="
+    Write-Log ("{0,-14} {1,12} {2,12} {3,8} {4,8} {5,8}" -f "benchmark", "mettle", "c", "runtime", "compile", "size")
+    foreach ($row in $RuntimeResults) {
+        $runtimeRatio = if ($null -ne $row.relative) { "{0}x" -f ([double]$row.relative).ToString("F2", $InvariantCulture) } else { "FAIL" }
+        $compileRatio = if ($null -ne $row.compile_relative) { "{0}x" -f ([double]$row.compile_relative).ToString("F2", $InvariantCulture) } else { "FAIL" }
+        $sizeRatio = if ($null -ne $row.size_relative) { "{0}x" -f ([double]$row.size_relative).ToString("F2", $InvariantCulture) } else { "FAIL" }
+        Write-Log ("{0,-14} {1,12} {2,12} {3,8} {4,8} {5,8}" -f `
+            $row.name, `
+            $(if ($null -ne $row.mettle_ms) { "{0} ms" -f ([double]$row.mettle_ms).ToString("F3", $InvariantCulture) } else { "FAIL" }), `
+            $(if ($null -ne $row.c_ms) { "{0} ms" -f ([double]$row.c_ms).ToString("F3", $InvariantCulture) } else { "FAIL" }), `
+            $runtimeRatio, $compileRatio, $sizeRatio)
+    }
+
+    if ($CompileResults.Count -gt 0) {
+        Write-Log ""
+        Write-Log "=== Compile-only summary (Mettle --profile total) ==="
+        Write-Log ("{0,-14} {1,12}" -f "benchmark", "compile_ms")
+        foreach ($row in $CompileResults) {
+            Write-Log ("{0,-14} {1,12}" -f $row.name, $(Format-Number $row.mettle_compile_ms 0))
+        }
+    }
 }
 
 $configFullPath = Join-Path $Root (Normalize-Path $ConfigPath)
@@ -353,8 +680,17 @@ if (-not (Test-Path $configFullPath)) {
 }
 
 $config = Get-Content -Raw -Path $configFullPath | ConvertFrom-Json
-if ($null -eq $config -or $null -eq $config.benchmarks -or $config.benchmarks.Count -eq 0) {
-    Write-Error "Harness config has no benchmarks: $configFullPath"
+
+$effectiveRuns = if ($Runs -gt 0) { $Runs } elseif ($null -ne $config.defaults -and $null -ne $config.defaults.runs) { [int]$config.defaults.runs } else { 5 }
+$effectiveWarmup = if ($Warmup -ge 0) { $Warmup } elseif ($null -ne $config.defaults -and $null -ne $config.defaults.warmup) { [int]$config.defaults.warmup } else { 1 }
+
+if ($effectiveRuns -lt 1) {
+    Write-Error "-Runs must be at least 1."
+    exit 1
+}
+
+if ($effectiveWarmup -lt 0) {
+    Write-Error "-Warmup must be at least 0."
     exit 1
 }
 
@@ -381,88 +717,197 @@ if (-not $gccCommand) {
     exit 1
 }
 
+$gccVersionOutput = (& gcc --version 2>&1 | Out-String).Trim()
+$gccVersionLine = ($gccVersionOutput -split "`r?`n")[0]
+$hostInfo = Get-BenchmarkHostInfo -CompilerFullPath $compilerFullPath -GccVersion $gccVersionLine
+
 $results = @()
+$compileResults = @()
 $failed = @()
 
-foreach ($bench in $config.benchmarks) {
-    $name = [string]$bench.name
-    $description = [string]$bench.description
-    $mettleExe = Get-FullPath (Get-BenchmarkMettleExe -Bench $bench)
-    $cExe = Get-FullPath ([string]$bench.c_exe)
-    $mettleSource = Get-FullPath (Get-BenchmarkMettleSource -Bench $bench)
-    $cSource = Get-FullPath (Get-BenchmarkCSource -Bench $bench)
-
-    Write-Log "Building $name..."
-
-    try {
-        if (-not (Test-Path $mettleSource)) {
-            throw "Mettle source not found: $mettleSource"
-        }
-        if (-not (Test-Path $cSource)) {
-            throw "C source not found: $cSource"
+if ($null -ne $config.benchmarks -and $config.benchmarks.Count -gt 0) {
+    foreach ($bench in $config.benchmarks) {
+        $name = [string]$bench.name
+        if (-not (Test-BenchmarkSelected -Name $name)) {
+            continue
         }
 
-        $mettleCompileMs = Compile-MettleBenchmark -CompilerPath $compilerFullPath -SourcePath $mettleSource -ExePath $mettleExe -BenchmarkName $name
-        $cCompileMs = Compile-CBenchmark -SourcePath $cSource -ExePath $cExe -BenchmarkName $name
+        $description = [string]$bench.description
+        $mettleExe = Get-FullPath (Get-BenchmarkMettleExe -Bench $bench)
+        $cExe = Get-FullPath ([string]$bench.c_exe)
+        $mettleSource = Get-FullPath (Get-BenchmarkMettleSource -Bench $bench)
+        $cSource = Get-FullPath (Get-BenchmarkCSource -Bench $bench)
 
-        $mettleExeBytes = Get-ExeSizeBytes -ExePath $mettleExe
-        $cExeBytes = Get-ExeSizeBytes -ExePath $cExe
+        Write-Log "Building $name..."
 
-        $mettleUs = Measure-BenchmarkExe -ExePath $mettleExe -WarmupCount $Warmup -RunCount $Runs
-        $cUs = Measure-BenchmarkExe -ExePath $cExe -WarmupCount $Warmup -RunCount $Runs
+        try {
+            if (-not (Test-Path $mettleSource)) {
+                throw "Mettle source not found: $mettleSource"
+            }
+            if (-not (Test-Path $cSource)) {
+                throw "C source not found: $cSource"
+            }
 
-        $mettleMs = if ($null -ne $mettleUs) { [math]::Round($mettleUs / 1000.0, 3) } else { $null }
-        $cMs = if ($null -ne $cUs) { [math]::Round($cUs / 1000.0, 3) } else { $null }
+            $mettleCompileMs = Compile-MettleBenchmark -CompilerPath $compilerFullPath -SourcePath $mettleSource -ExePath $mettleExe -BenchmarkName $name -Config $config -Bench $bench
+            $cCompileMs = Compile-CBenchmark -SourcePath $cSource -ExePath $cExe -BenchmarkName $name -Config $config
 
-        $runtimeRatio = Format-Ratio -Numerator $mettleUs -Denominator $cUs
-        $compileRatio = Format-Ratio -Numerator $mettleCompileMs -Denominator $cCompileMs
-        $sizeRatio = Format-Ratio -Numerator $mettleExeBytes -Denominator $cExeBytes
+            if ($bench.track_asm -eq $true) {
+                Export-MettleAsmSnapshot -CompilerPath $compilerFullPath -SourcePath $mettleSource -BenchmarkName $name -Config $config -Bench $bench
+            }
 
-        $results += [ordered]@{
-            name = $name
-            description = $description
-            mettle_us = if ($null -ne $mettleUs) { [uint64][math]::Round($mettleUs, 0) } else { $null }
-            c_us = if ($null -ne $cUs) { [uint64][math]::Round($cUs, 0) } else { $null }
-            mettle_ms = $mettleMs
-            c_ms = $cMs
-            relative = $runtimeRatio
-            mettle_compile_ms = [math]::Round($mettleCompileMs, 0)
-            c_compile_ms = [math]::Round($cCompileMs, 0)
-            compile_relative = $compileRatio
-            mettle_exe_bytes = $mettleExeBytes
-            c_exe_bytes = $cExeBytes
-            size_relative = $sizeRatio
+            $mettleExeBytes = Get-ExeSizeBytes -ExePath $mettleExe
+            $cExeBytes = Get-ExeSizeBytes -ExePath $cExe
+
+            $mettleUs = $null
+            $cUs = $null
+            $cNoinlineUs = $null
+            $mettleRunsUs = $null
+            $cRunsUs = $null
+            $mettleStats = $null
+            $cStats = $null
+            if (-not $CompileOnly) {
+                $mettleMeasure = Measure-BenchmarkExe -ExePath $mettleExe -WarmupCount $effectiveWarmup -RunCount $effectiveRuns
+                $cMeasure = Measure-BenchmarkExe -ExePath $cExe -WarmupCount $effectiveWarmup -RunCount $effectiveRuns
+                if ($null -ne $mettleMeasure) {
+                    $mettleUs = $mettleMeasure.median_us
+                    $mettleRunsUs = $mettleMeasure.runs_us
+                    $mettleStats = $mettleMeasure.stats
+                }
+                if ($null -ne $cMeasure) {
+                    $cUs = $cMeasure.median_us
+                    $cRunsUs = $cMeasure.runs_us
+                    $cStats = $cMeasure.stats
+                }
+                if ($name -eq "matrix_mul" -and $CFlags.Count -eq 0) {
+                    $cNoinlineExe = Get-FullPath ($cExe -replace "_c\.exe$", "_c_noinline.exe")
+                    try {
+                        Compile-CBenchmarkWithFlags -SourcePath $cSource -ExePath $cNoinlineExe -BenchmarkName "${name}_noinline" -Flags @("-O3", "-fno-inline", "-lkernel32") | Out-Null
+                        $cNoinlineMeasure = Measure-BenchmarkExe -ExePath $cNoinlineExe -WarmupCount $effectiveWarmup -RunCount $effectiveRuns
+                        if ($null -ne $cNoinlineMeasure) {
+                            $cNoinlineUs = $cNoinlineMeasure.median_us
+                        }
+                    } catch {
+                        Write-Log "  optional C -fno-inline baseline skipped: $($_.Exception.Message)"
+                    }
+                }
+            }
+
+            $mettleMs = if ($null -ne $mettleUs) { [math]::Round($mettleUs / 1000.0, 3) } else { $null }
+            $cMs = if ($null -ne $cUs) { [math]::Round($cUs / 1000.0, 3) } else { $null }
+
+            $runtimeRatio = Format-Ratio -Numerator $mettleUs -Denominator $cUs
+            $compileRatio = Format-Ratio -Numerator $mettleCompileMs -Denominator $cCompileMs
+            $sizeRatio = Format-Ratio -Numerator $mettleExeBytes -Denominator $cExeBytes
+
+            $results += [ordered]@{
+                name = $name
+                kind = if ($null -ne $bench.kind) { [string]$bench.kind } else { "runtime" }
+                description = $description
+                mettle_us = if ($null -ne $mettleUs) { [uint64][math]::Round($mettleUs, 0) } else { $null }
+                c_us = if ($null -ne $cUs) { [uint64][math]::Round($cUs, 0) } else { $null }
+                c_noinline_us = if ($null -ne $cNoinlineUs) { [uint64][math]::Round($cNoinlineUs, 0) } else { $null }
+                mettle_runs_us = $mettleRunsUs
+                c_runs_us = $cRunsUs
+                mettle_stats = $mettleStats
+                c_stats = $cStats
+                mettle_ms = $mettleMs
+                c_ms = $cMs
+                relative = $runtimeRatio
+                mettle_compile_ms = [math]::Round($mettleCompileMs, 0)
+                c_compile_ms = [math]::Round($cCompileMs, 0)
+                compile_relative = $compileRatio
+                mettle_exe_bytes = $mettleExeBytes
+                c_exe_bytes = $cExeBytes
+                size_relative = $sizeRatio
+            }
+
+            if (-not $CompileOnly) {
+                Write-Log ("  runtime  Mettle: {0} | C: {1}{2} | median of {3} run(s), {4} warmup" -f `
+                    $(if ($null -ne $mettleUs) { Format-BenchTime $mettleUs } else { "FAIL" }), `
+                    $(if ($null -ne $cUs) { Format-BenchTime $cUs } else { "FAIL" }), `
+                    $(if ($null -ne $runtimeRatio) { " | $runtimeRatio`x vs C" } else { "" }), `
+                    $effectiveRuns, $effectiveWarmup)
+            }
+            Write-Log ("  compile  Mettle: {0} ms | C: {1} ms{2}" -f `
+                (Format-Number $mettleCompileMs 0), `
+                (Format-Number $cCompileMs 0), `
+                $(if ($null -ne $compileRatio) { " | $compileRatio`x vs C" } else { "" }))
+            if (-not $CompileOnly) {
+                Write-Log ("  size     Mettle: {0} | C: {1}{2}" -f `
+                    (Format-FileSize $mettleExeBytes), `
+                    (Format-FileSize $cExeBytes), `
+                    $(if ($null -ne $sizeRatio) { " | $sizeRatio`x vs C" } else { "" }))
+            }
+        } catch {
+            Write-Log "  FAILED: $($_.Exception.Message)"
+            $failed += $name
+        }
+    }
+} else {
+    Write-Error "Harness config has no runtime benchmarks: $configFullPath"
+    exit 1
+}
+
+if (-not $SkipCompileBenchmarks -and $null -ne $config.compile_benchmarks -and $config.compile_benchmarks.Count -gt 0) {
+    foreach ($bench in $config.compile_benchmarks) {
+        $name = [string]$bench.name
+        if (-not (Test-BenchmarkSelected -Name $name)) {
+            continue
         }
 
-        Write-Log ("  runtime  Mettle: {0} | C: {1}{2} | median of {3} run(s), {4} warmup" -f `
-            $(if ($null -ne $mettleUs) { Format-BenchTime $mettleUs } else { "FAIL" }), `
-            $(if ($null -ne $cUs) { Format-BenchTime $cUs } else { "FAIL" }), `
-            $(if ($null -ne $runtimeRatio) { " | $runtimeRatio`x vs C" } else { "" }), `
-            $Runs, $Warmup)
-        Write-Log ("  compile  Mettle: {0} ms | C: {1} ms{2}" -f `
-            (Format-Number $mettleCompileMs 0), `
-            (Format-Number $cCompileMs 0), `
-            $(if ($null -ne $compileRatio) { " | $compileRatio`x vs C" } else { "" }))
-        Write-Log ("  size     Mettle: {0} | C: {1}{2}" -f `
-            (Format-FileSize $mettleExeBytes), `
-            (Format-FileSize $cExeBytes), `
-            $(if ($null -ne $sizeRatio) { " | $sizeRatio`x vs C" } else { "" }))
-    } catch {
-        Write-Log "  FAILED: $($_.Exception.Message)"
-        $failed += $name
+        $description = [string]$bench.description
+        $mettleSource = Get-FullPath (Normalize-Path ([string]$bench.mettle_source))
+
+        Write-Log "Profiling compile: $name..."
+
+        try {
+            if (-not (Test-Path $mettleSource)) {
+                throw "Mettle source not found: $mettleSource"
+            }
+
+            $mettleCompileMs = Profile-MettleCompile -CompilerPath $compilerFullPath -SourcePath $mettleSource -BenchmarkName $name
+
+            $compileResults += [ordered]@{
+                name = $name
+                description = $description
+                mettle_source = [string]$bench.mettle_source
+                mettle_compile_ms = [math]::Round($mettleCompileMs, 0)
+            }
+
+            Write-Log ("  compile  Mettle profile total: {0} ms" -f (Format-Number $mettleCompileMs 0))
+        } catch {
+            Write-Log "  FAILED: $($_.Exception.Message)"
+            $failed += $name
+        }
     }
 }
 
+Write-SummaryTable -RuntimeResults $results -CompileResults $compileResults
+
+$mettleFlags = if ($null -ne $config.defaults -and $null -ne $config.defaults.mettle_flags) {
+    @($config.defaults.mettle_flags)
+} else {
+    @("--build", "--emit-obj", "--linker", "internal", "--release")
+}
+
+$summary = Get-BenchmarkSummary -RuntimeResults $results
+
 $payload = [ordered]@{
     generated = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    host = $hostInfo
+    summary = $summary
     harness = [ordered]@{
         config = $ConfigPath
         mode = if ($null -ne $config.mode) { [string]$config.mode } else { "mettle-vs-c" }
-        runs = $Runs
-        warmup = $Warmup
+        runs = $effectiveRuns
+        warmup = $effectiveWarmup
+        compile_only = [bool]$CompileOnly
         compiler = $compilerFullPath
+        mettle_flags = @($mettleFlags)
+        c_flags = if ($CFlags.Count -gt 0) { @($CFlags) } elseif ($null -ne $config.defaults.c_flags) { @($config.defaults.c_flags) } else { @("-O3", "-lkernel32") }
     }
     benchmarks = $results
+    compile_benchmarks = $compileResults
     failed = $failed
 }
 
@@ -486,4 +931,46 @@ Write-Log ""
 Write-Log "Wrote $primaryOutputPath"
 if (-not [string]::IsNullOrWhiteSpace($mirrorOutput)) {
     Write-Log "Mirrored to $(Join-Path $Root $mirrorOutput)"
+}
+
+if (-not $NoReport) {
+    $reportOutput = if ($null -ne $config.outputs.report_html -and -not [string]::IsNullOrWhiteSpace([string]$config.outputs.report_html)) {
+        [string]$config.outputs.report_html
+    } else {
+        [System.IO.Path]::ChangeExtension($primaryOutput, ".html")
+    }
+
+    $reportScript = Join-Path $PSScriptRoot "generate-report.ps1"
+    if (Test-Path $reportScript) {
+        $reportArgs = @{
+            InputPath = $primaryOutput
+            OutputPath = $reportOutput
+        }
+        if ($OpenReport) {
+            $reportArgs.OpenReport = $true
+        }
+        & $reportScript @reportArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log "Report generation failed."
+        }
+    } else {
+        Write-Log "Report generator not found: $reportScript"
+    }
+}
+
+if (-not $Quiet -and $null -ne $summary.runtime_geomean) {
+    Write-Log ""
+    Write-Log ("Summary: {0} faster, {1} parity, {2} slower | runtime geomean {3}x | compile geomean {4}x | size geomean {5}x" -f `
+        $summary.runtime_wins, `
+        $summary.runtime_parity, `
+        $summary.runtime_losses, `
+        (Format-Number $summary.runtime_geomean 2), `
+        (Format-Number $summary.compile_geomean 2), `
+        (Format-Number $summary.size_geomean 2))
+}
+
+if ($failed.Count -gt 0) {
+    Write-Log ""
+    Write-Log ("Failed benchmarks: {0}" -f ($failed -join ", "))
+    exit 1
 }

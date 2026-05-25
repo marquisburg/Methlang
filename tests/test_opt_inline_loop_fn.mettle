@@ -1,0 +1,14 @@
+// Small loop-bearing callee should inline into main under --release.
+function sum_small(n: int32) -> int32 {
+  var s: int32 = 0;
+  var i: int32 = 0;
+  while (i < n) {
+    s = s + i;
+    i = i + 1;
+  }
+  return s;
+}
+
+function main() -> int32 {
+  return sum_small(10);
+}

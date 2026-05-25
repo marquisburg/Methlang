@@ -28,8 +28,8 @@ int main(void) {
     int64_t result = sum_squares(100000);
     printf("Sum = %" PRId64 "\n", result);
 
-    const int passes = 500;
-    printf("Benchmark: 500 passes (sum_squares 100000 each)\n");
+    const int passes = 200;
+    printf("Benchmark: 200 passes (sum_squares 100000 each)\n");
 
     volatile int64_t bench_n = 100000;
 

@@ -29,8 +29,8 @@ function main() -> int32 {
   print(cstr(result_str));
   println_int(result);
 
-  var passes: int32 = 500;
-  var bench_header: string = "Benchmark: 500 passes (sum_squares 100000 each)";
+  var passes: int32 = 200;
+  var bench_header: string = "Benchmark: 200 passes (sum_squares 100000 each)";
   println(cstr(bench_header));
 
   var t0: uint64 = bench_time_us();

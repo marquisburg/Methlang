@@ -1,4 +1,5 @@
 #include "code_generator_internal.h"
+#include "../common.h"
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -154,19 +155,6 @@ static const x86Register IR_PROMOTION_REGISTERS[] = {
 static int ir_binary_operator_is_comparison(const char *op);
 static int ir_binary_operator_is_commutative(const char *op);
 
-static char *ir_codegen_strdup(const char *text) {
-  if (!text) {
-    return NULL;
-  }
-  size_t length = strlen(text) + 1;
-  char *copy = malloc(length);
-  if (!copy) {
-    return NULL;
-  }
-  memcpy(copy, text, length);
-  return copy;
-}
-
 /* Per-instruction loop nesting depth, derived from backward branches.
  *
  * A label that is targeted by a later JUMP/BRANCH forms a loop whose body is
@@ -276,7 +264,7 @@ static IRSymbolStatsEntry *ir_symbol_stats_map_get_or_add(IRSymbolStatsMap *map,
     map->capacity = new_capacity;
   }
 
-  char *name_copy = ir_codegen_strdup(name);
+  char *name_copy = mettle_strdup(name);
   if (!name_copy) {
     return NULL;
   }
@@ -425,7 +413,7 @@ static int ir_temp_use_map_add(IRTempUseMap *map, const char *name) {
     map->capacity = new_capacity;
   }
 
-  char *name_copy = ir_codegen_strdup(name);
+  char *name_copy = mettle_strdup(name);
   if (!name_copy) {
     return 0;
   }
@@ -879,6 +867,7 @@ static int ir_call_ignores_register_promotion_barrier(const char *callee_name) {
   }
   /* Pure native helpers that do not clobber promoted arithmetic state. */
   if (strcmp(callee_name, "mettle_crash_trap") == 0 ||
+      strcmp(callee_name, "mettle_crash_trap_ex") == 0 ||
       strcmp(callee_name, "GetTickCount64") == 0 ||
       strcmp(callee_name, "QueryPerformanceCounter") == 0 ||
       strcmp(callee_name, "QueryPerformanceFrequency") == 0) {
@@ -3121,7 +3110,7 @@ static int code_generator_emit_ir_runtime_trap_call(
     return 0;
   }
 
-  char *trap_pc_label = code_generator_generate_label(generator, "methdbg_trap_pc");
+  char *trap_pc_label = code_generator_generate_label(generator, "mettledbg_trap_pc");
   if (!trap_pc_label) {
     code_generator_set_error(generator,
                              "Out of memory while creating runtime trap label");
@@ -3189,8 +3178,17 @@ static int code_generator_emit_ir_call(CodeGenerator *generator,
     code_generator_set_error(generator, "Invalid IR call target");
     return 0;
   }
-  if (strcmp(call_target, "mettle_crash_trap") == 0) {
-    return code_generator_emit_ir_runtime_trap_call(generator, instruction,
+  if (strcmp(call_target, "mettle_crash_trap") == 0 ||
+      strcmp(call_target, "mettle_crash_trap_ex") == 0) {
+    IRInstruction adapted = *instruction;
+    if (strcmp(call_target, "mettle_crash_trap_ex") == 0 &&
+        instruction->argument_count >= 2 &&
+        instruction->arguments[1].kind == IR_OPERAND_STRING) {
+      adapted.text = "mettle_crash_trap";
+      adapted.argument_count = 1;
+      adapted.arguments = (IROperand *)&instruction->arguments[1];
+    }
+    return code_generator_emit_ir_runtime_trap_call(generator, &adapted,
                                                     temp_table);
   }
   if ((function_symbol && function_symbol->is_extern) || !function_symbol) {
@@ -4443,6 +4441,23 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
   case IR_OP_COUNT_WORD_STARTS:
     return code_generator_emit_ir_count_word_starts(generator, instruction);
 
+  case IR_OP_MEMCPY_INLINE:
+  case IR_OP_SIMD_SUM_I32:
+  case IR_OP_SIMD_MATMUL_N32:
+  case IR_OP_SIMD_INSERTION_SORT_I32:
+  case IR_OP_SIMD_DOT_I32:
+  case IR_OP_SIMD_SCALE_I32:
+  case IR_OP_SIMD_CLAMP_I32:
+  case IR_OP_SIMD_REVERSE_COPY_I32:
+  case IR_OP_LOWER_BOUND_I32:
+  case IR_OP_PREFIX_SUM_I32:
+  case IR_OP_SIMD_MINMAX_I32:
+    code_generator_set_error(
+        generator,
+        "IR opcode %d requires the direct object (--emit-obj) backend",
+        (int)instruction->op);
+    return 0;
+
   default:
     code_generator_set_error(generator, "Unhandled IR opcode: %d",
                              instruction->op);
@@ -4483,7 +4498,7 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   }
   char *runtime_end_label = NULL;
   if (generator->debug_info) {
-    runtime_end_label = code_generator_generate_label(generator, "methdbg_func_end");
+    runtime_end_label = code_generator_generate_label(generator, "mettledbg_func_end");
     if (!runtime_end_label) {
       code_generator_set_error(generator,
                                "Out of memory while tracking function debug range");
@@ -4491,11 +4506,17 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
     }
     code_generator_add_runtime_function_mapping(
         generator, function_data->name, function_data->name, runtime_end_label,
-        function_declaration->location.line, function_declaration->location.column,
-        generator->debug_info->source_filename);
+        function_declaration->location.line,
+        function_declaration->location.column,
+        code_generator_runtime_filename(generator,
+                                        function_declaration->location.filename));
   }
 
-  symbol_table_enter_scope(generator->symbol_table, SCOPE_FUNCTION);
+  if (!symbol_table_enter_scope(generator->symbol_table, SCOPE_FUNCTION)) {
+    code_generator_set_error(generator,
+                             "Out of memory while entering function scope");
+    return 0;
+  }
 
   if (generator->generate_debug_info) {
     code_generator_add_debug_symbol(
@@ -4987,10 +5008,13 @@ int code_generator_generate_function_from_ir(CodeGenerator *generator,
   if (!generator->has_error) {
     for (size_t i = 0; i < ir_function->instruction_count; i++) {
       const IRInstruction *instruction = &ir_function->instructions[i];
-      if (generator->debug_info && instruction->location.line > 0) {
+      if (generator->debug_info && instruction->location.line > 0 &&
+          generator->generate_stack_trace_support) {
         code_generator_emit_runtime_location_marker(
-            generator, instruction->location.line, instruction->location.column,
-            generator->debug_info->source_filename);
+            generator, instruction->location.line,
+            instruction->location.column,
+            code_generator_runtime_filename(generator,
+                                            instruction->location.filename));
       }
       if (i + 1 < ir_function->instruction_count) {
         const IRInstruction *next = &ir_function->instructions[i + 1];

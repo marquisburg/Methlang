@@ -192,6 +192,11 @@ static int type_checker_types_equal(const Type *lhs, const Type *rhs) {
   }
 }
 
+static int type_checker_is_cstring_type(const Type *type) {
+  return type && type->kind == TYPE_POINTER && type->name &&
+         strcmp(type->name, "cstring") == 0;
+}
+
 static int type_checker_is_lvalue_expression(ASTNode *expression) {
   if (!expression) {
     return 0;
@@ -1751,14 +1756,8 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
       int is_null_pointer_arg =
           (param_type && param_type->kind == TYPE_POINTER &&
            type_checker_is_null_pointer_constant(call->arguments[i]));
-      // Allow implicit string -> cstring coercion on extern calls.
-      // Strings are backed by a null-terminated chars pointer suitable for C.
-      int is_string_to_cstring =
-          (func_symbol->is_extern && param_type && param_type->name &&
-           strcmp(param_type->name, "cstring") == 0 && arg_type &&
-           arg_type->kind == TYPE_STRING);
-      if (!is_null_pointer_arg && !is_string_to_cstring &&
-          !type_checker_is_assignable(checker, param_type, arg_type)) {
+      if (!is_null_pointer_arg &&
+           !type_checker_is_assignable(checker, param_type, arg_type)) {
         type_checker_report_type_mismatch(checker, call->arguments[i]->location,
                                           param_type->name, arg_type->name);
         return NULL;
@@ -2153,42 +2152,6 @@ void type_checker_init_builtin_types(TypeChecker *checker) {
   }
 }
 
-Type *type_checker_get_builtin_type(TypeChecker *checker, TypeKind kind) {
-  if (!checker)
-    return NULL;
-
-  switch (kind) {
-  case TYPE_INT8:
-    return checker->builtin_int8;
-  case TYPE_INT16:
-    return checker->builtin_int16;
-  case TYPE_INT32:
-    return checker->builtin_int32;
-  case TYPE_INT64:
-    return checker->builtin_int64;
-  case TYPE_UINT8:
-    return checker->builtin_uint8;
-  case TYPE_UINT16:
-    return checker->builtin_uint16;
-  case TYPE_UINT32:
-    return checker->builtin_uint32;
-  case TYPE_UINT64:
-    return checker->builtin_uint64;
-  case TYPE_BOOL:
-    return checker->builtin_bool;
-  case TYPE_FLOAT32:
-    return checker->builtin_float32;
-  case TYPE_FLOAT64:
-    return checker->builtin_float64;
-  case TYPE_STRING:
-    return checker->builtin_string;
-  case TYPE_VOID:
-    return checker->builtin_void;
-  default:
-    return NULL;
-  }
-}
-
 static Type *type_checker_parse_function_pointer_type(TypeChecker *checker,
                                                       const char *name) {
   if (!checker || !name) {
@@ -2545,18 +2508,6 @@ int type_checker_is_numeric_type(Type *type) {
          type_checker_is_floating_type(type);
 }
 
-size_t type_checker_get_type_size(Type *type) {
-  if (!type)
-    return 0;
-  return type->size;
-}
-
-size_t type_checker_get_type_alignment(Type *type) {
-  if (!type)
-    return 1;
-  return type->alignment;
-}
-
 // Type inference and promotion functions implementation
 
 Type *type_checker_promote_types(TypeChecker *checker, Type *left, Type *right,
@@ -2640,15 +2591,6 @@ int type_checker_get_type_rank(Type *type) {
   }
 }
 
-Type *type_checker_infer_variable_type(TypeChecker *checker,
-                                       ASTNode *initializer) {
-  if (!checker || !initializer)
-    return NULL;
-
-  // Use the general type inference function
-  return type_checker_infer_type(checker, initializer);
-}
-
 // Type compatibility and conversion functions implementation
 
 int type_checker_is_cast_valid(Type *from, Type *to) {
@@ -2706,6 +2648,12 @@ int type_checker_is_assignable(TypeChecker *checker, Type *dest_type,
     return 1;
   }
 
+  /* A Mettle string can flow to a cstring by exposing its chars pointer. */
+  if (type_checker_is_cstring_type(dest_type) &&
+      src_type->kind == TYPE_STRING) {
+    return 1;
+  }
+
   /* Allow int8* (e.g. from &array[0] for int8[]) to cstring (uint8*) for C interop */
   if (dest_type->kind == TYPE_POINTER && src_type->kind == TYPE_POINTER &&
       dest_type->name && strcmp(dest_type->name, "cstring") == 0 &&
@@ -2760,85 +2708,6 @@ int type_checker_is_implicitly_convertible(Type *from_type, Type *to_type) {
 
   // No other implicit conversions are allowed
   return 0;
-}
-
-int type_checker_validate_function_call(TypeChecker *checker,
-                                        CallExpression *call,
-                                        Symbol *func_symbol) {
-  if (!checker || !call || !func_symbol)
-    return 0;
-
-  // Check argument count
-  if (call->argument_count != func_symbol->data.function.parameter_count) {
-    type_checker_set_error(
-        checker, "Function '%s' expects %llu arguments, got %llu",
-        call->function_name,
-        (unsigned long long)func_symbol->data.function.parameter_count,
-        (unsigned long long)call->argument_count);
-    return 0;
-  }
-
-  // Check each argument type
-  for (size_t i = 0; i < call->argument_count; i++) {
-    Type *arg_type = type_checker_infer_type(checker, call->arguments[i]);
-    if (!arg_type) {
-      type_checker_set_error(
-          checker, "Cannot infer type for argument %zu in call to '%s'", i + 1,
-          call->function_name);
-      return 0;
-    }
-
-    Type *param_type = func_symbol->data.function.parameter_types[i];
-    int is_null_pointer_arg =
-        (param_type && param_type->kind == TYPE_POINTER &&
-         type_checker_is_null_pointer_constant(call->arguments[i]));
-    // Allow implicit string -> cstring coercion on extern calls.
-    int is_string_to_cstring = (func_symbol->is_extern && param_type &&
-                                param_type->name &&
-                                strcmp(param_type->name, "cstring") == 0 &&
-                                arg_type && arg_type->kind == TYPE_STRING);
-    if (!is_null_pointer_arg && !is_string_to_cstring &&
-        !type_checker_is_assignable(checker, param_type, arg_type)) {
-      type_checker_set_error(
-          checker,
-          "Argument %zu in call to '%s': cannot convert from '%s' to '%s'",
-          i + 1, call->function_name,
-          arg_type->name ? arg_type->name : "unknown",
-          param_type->name ? param_type->name : "unknown");
-      return 0;
-    }
-  }
-
-  return 1;
-}
-
-int type_checker_validate_assignment(TypeChecker *checker, Type *dest_type,
-                                     ASTNode *src_expr) {
-  if (!checker || !dest_type || !src_expr)
-    return 0;
-
-  Type *src_type = type_checker_infer_type(checker, src_expr);
-  if (!src_type) {
-    if (!checker->has_error) {
-      type_checker_set_error(checker, "Cannot infer type of assignment value");
-    }
-    return 0;
-  }
-
-  if (dest_type->kind == TYPE_POINTER &&
-      type_checker_is_null_pointer_constant(src_expr)) {
-    return 1;
-  }
-
-  if (!type_checker_is_assignable(checker, dest_type, src_type)) {
-    type_checker_set_error(
-        checker, "Cannot assign value of type '%s' to variable of type '%s'",
-        src_type->name ? src_type->name : "unknown",
-        dest_type->name ? dest_type->name : "unknown");
-    return 0;
-  }
-
-  return 1;
 }
 
 void type_checker_set_error(TypeChecker *checker, const char *format, ...) {
@@ -3252,7 +3121,13 @@ static int type_checker_check_match_statement(TypeChecker *checker,
           free(covered);
           return 0;
         }
-        symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK);
+        if (!symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK)) {
+          type_checker_set_error_at_location(
+              checker, statement->location,
+              "Out of memory while entering match binding scope");
+          free(covered);
+          return 0;
+        }
         Symbol *binding =
             symbol_create(arm->binding_name, SYMBOL_VARIABLE, payload);
         if (binding) {
@@ -3392,7 +3267,12 @@ static Type *type_checker_check_match_expression(TypeChecker *checker,
 
     int has_binding_scope = (payload && arm->binding_name);
     if (has_binding_scope) {
-      symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK);
+      if (!symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK)) {
+        type_checker_set_error_at_location(
+            checker, expression->location,
+            "Out of memory while entering match binding scope");
+        return NULL;
+      }
       Symbol *binding =
           symbol_create(arm->binding_name, SYMBOL_VARIABLE, payload);
       if (binding) {
@@ -4023,7 +3903,12 @@ int type_checker_process_declaration(TypeChecker *checker,
     checker->current_function_decl = declaration;
 
     // Enter a new scope for the function body
-    symbol_table_enter_scope(checker->symbol_table, SCOPE_FUNCTION);
+    if (!symbol_table_enter_scope(checker->symbol_table, SCOPE_FUNCTION)) {
+      type_checker_set_error_at_location(
+          checker, declaration->location,
+          "Out of memory while entering function scope");
+      return 0;
+    }
     type_checker_init_tracker_reset(checker);
     if (!type_checker_init_tracker_enter_scope(checker)) {
       type_checker_set_error_at_location(
@@ -4135,10 +4020,11 @@ int type_checker_process_declaration(TypeChecker *checker,
           return 0;
         }
 
-        if (object_type->kind != TYPE_STRUCT) {
+        if (object_type->kind != TYPE_STRUCT &&
+            object_type->kind != TYPE_STRING) {
           char error_msg[512];
           snprintf(error_msg, sizeof(error_msg),
-                   "Cannot assign field '%s' on non-struct type '%s'",
+                   "Cannot assign field '%s' on non-struct/string type '%s'",
                    member->member, object_type->name);
           type_checker_set_error_at_location(
               checker, assignment->target->location, error_msg);
@@ -4149,7 +4035,7 @@ int type_checker_process_declaration(TypeChecker *checker,
         if (!field_type) {
           char error_msg[512];
           snprintf(error_msg, sizeof(error_msg),
-                   "Field '%s' not found in struct '%s'", member->member,
+                   "Field '%s' not found in type '%s'", member->member,
                    object_type->name);
           type_checker_set_error_at_location(
               checker, assignment->target->location, error_msg);
@@ -4489,43 +4375,400 @@ void type_checker_report_duplicate_declaration(TypeChecker *checker,
   }
 }
 
-void type_checker_report_scope_violation(TypeChecker *checker,
-                                         SourceLocation location,
-                                         const char *symbol_name,
-                                         const char *violation_type) {
-  if (!checker || !symbol_name || !violation_type)
-    return;
-
-  char error_msg[512];
-  snprintf(error_msg, sizeof(error_msg), "Scope violation: %s '%s'",
-           violation_type, symbol_name);
-
-  checker->has_error = 1;
-  free(checker->error_message);
-  checker->error_message = strdup(error_msg);
-
-  if (checker->error_reporter) {
-    char suggestion[256];
-    if (strcmp(violation_type,
-               "cannot access local variable from outer scope") == 0) {
-      snprintf(suggestion, sizeof(suggestion),
-               "declare '%s' in the current scope or pass it as a parameter",
-               symbol_name);
-    } else if (strcmp(violation_type, "cannot redeclare parameter") == 0) {
-      snprintf(suggestion, sizeof(suggestion), "use a different variable name");
-    } else {
-      snprintf(suggestion, sizeof(suggestion), "check the scope rules for '%s'",
-               symbol_name);
-    }
-    SourceSpan span = source_span_from_location(location, strlen(symbol_name));
-    error_reporter_add_error_with_span_and_suggestion(
-        checker->error_reporter, ERROR_SCOPE, span, error_msg, suggestion);
-  }
-}
-
 // Validation functions for semantic analysis
 
 // Statement and expression validation functions
+
+static int type_checker_check_if_statement(TypeChecker *checker,
+                                           ASTNode *statement) {
+  IfStatement *if_stmt = (IfStatement *)statement->data;
+  if (!if_stmt || !if_stmt->condition) {
+    type_checker_set_error_at_location(checker, statement->location,
+                                       "Invalid if statement");
+    return 0;
+  }
+
+  Type *condition_type = type_checker_infer_type(checker, if_stmt->condition);
+  if (!condition_type) {
+    return 0;
+  }
+
+  if (!type_checker_is_numeric_type(condition_type)) {
+    type_checker_report_type_mismatch(checker, if_stmt->condition->location,
+                                      "numeric type", condition_type->name);
+    return 0;
+  }
+
+  size_t init_snapshot_count = 0;
+  unsigned char *init_snapshot =
+      type_checker_init_tracker_capture(checker, &init_snapshot_count);
+  if (checker->tracked_var_count > 0 && !init_snapshot) {
+    type_checker_set_error_at_location(
+        checker, statement->location,
+        "Out of memory while analyzing variable initialization flow");
+    return 0;
+  }
+
+  if (if_stmt->then_branch &&
+      !type_checker_check_statement(checker, if_stmt->then_branch)) {
+    free(init_snapshot);
+    return 0;
+  }
+  type_checker_init_tracker_restore(checker, init_snapshot,
+                                    init_snapshot_count);
+
+  for (size_t i = 0; i < if_stmt->else_if_count; i++) {
+    Type *elif_cond_type =
+        type_checker_infer_type(checker, if_stmt->else_ifs[i].condition);
+    if (!elif_cond_type) {
+      free(init_snapshot);
+      return 0;
+    }
+    if (!type_checker_is_numeric_type(elif_cond_type)) {
+      type_checker_report_type_mismatch(
+          checker, if_stmt->else_ifs[i].condition->location, "numeric type",
+          elif_cond_type->name);
+      free(init_snapshot);
+      return 0;
+    }
+    if (if_stmt->else_ifs[i].body &&
+        !type_checker_check_statement(checker, if_stmt->else_ifs[i].body)) {
+      free(init_snapshot);
+      return 0;
+    }
+    type_checker_init_tracker_restore(checker, init_snapshot,
+                                      init_snapshot_count);
+  }
+
+  if (if_stmt->else_branch &&
+      !type_checker_check_statement(checker, if_stmt->else_branch)) {
+    free(init_snapshot);
+    return 0;
+  }
+  type_checker_init_tracker_restore(checker, init_snapshot,
+                                    init_snapshot_count);
+  free(init_snapshot);
+
+  return 1;
+}
+
+static int type_checker_check_for_statement(TypeChecker *checker,
+                                            ASTNode *statement) {
+  ForStatement *for_stmt = (ForStatement *)statement->data;
+  if (!for_stmt) {
+    type_checker_set_error_at_location(checker, statement->location,
+                                       "Invalid for statement");
+    return 0;
+  }
+
+  if (!symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK)) {
+    type_checker_set_error_at_location(
+        checker, statement->location,
+        "Out of memory while entering for-loop scope");
+    return 0;
+  }
+  if (!type_checker_init_tracker_enter_scope(checker)) {
+    type_checker_set_error_at_location(
+        checker, statement->location,
+        "Out of memory while entering initialization analysis scope");
+    symbol_table_exit_scope(checker->symbol_table);
+    return 0;
+  }
+
+  if (for_stmt->initializer) {
+    int init_ok = 0;
+    if (for_stmt->initializer->type == AST_VAR_DECLARATION ||
+        for_stmt->initializer->type == AST_ASSIGNMENT ||
+        for_stmt->initializer->type == AST_FUNCTION_CALL) {
+      init_ok = type_checker_check_statement(checker, for_stmt->initializer);
+    } else {
+      init_ok = type_checker_check_expression(checker, for_stmt->initializer);
+    }
+    if (!init_ok) {
+      type_checker_init_tracker_exit_scope(checker);
+      symbol_table_exit_scope(checker->symbol_table);
+      return 0;
+    }
+  }
+
+  size_t post_init_snapshot_count = 0;
+  unsigned char *post_init_snapshot =
+      type_checker_init_tracker_capture(checker, &post_init_snapshot_count);
+  if (checker->tracked_var_count > 0 && !post_init_snapshot) {
+    type_checker_set_error_at_location(
+        checker, statement->location,
+        "Out of memory while analyzing variable initialization flow");
+    type_checker_init_tracker_exit_scope(checker);
+    symbol_table_exit_scope(checker->symbol_table);
+    return 0;
+  }
+
+  if (for_stmt->condition) {
+    Type *cond_type = type_checker_infer_type(checker, for_stmt->condition);
+    if (!cond_type) {
+      free(post_init_snapshot);
+      type_checker_init_tracker_exit_scope(checker);
+      symbol_table_exit_scope(checker->symbol_table);
+      return 0;
+    }
+    if (!type_checker_is_numeric_type(cond_type)) {
+      type_checker_report_type_mismatch(checker,
+                                        for_stmt->condition->location,
+                                        "numeric type", cond_type->name);
+      free(post_init_snapshot);
+      type_checker_init_tracker_exit_scope(checker);
+      symbol_table_exit_scope(checker->symbol_table);
+      return 0;
+    }
+  }
+
+  if (for_stmt->increment &&
+      !type_checker_check_expression(checker, for_stmt->increment)) {
+    free(post_init_snapshot);
+    type_checker_init_tracker_exit_scope(checker);
+    symbol_table_exit_scope(checker->symbol_table);
+    return 0;
+  }
+
+  checker->loop_depth++;
+  if (for_stmt->body &&
+      !type_checker_check_statement(checker, for_stmt->body)) {
+    checker->loop_depth--;
+    free(post_init_snapshot);
+    type_checker_init_tracker_exit_scope(checker);
+    symbol_table_exit_scope(checker->symbol_table);
+    return 0;
+  }
+  checker->loop_depth--;
+
+  type_checker_init_tracker_restore(checker, post_init_snapshot,
+                                    post_init_snapshot_count);
+  free(post_init_snapshot);
+  type_checker_init_tracker_exit_scope(checker);
+  symbol_table_exit_scope(checker->symbol_table);
+  return 1;
+}
+
+static int type_checker_check_switch_statement(TypeChecker *checker,
+                                               ASTNode *statement) {
+  SwitchStatement *switch_stmt = (SwitchStatement *)statement->data;
+  if (!switch_stmt || !switch_stmt->expression) {
+    type_checker_set_error_at_location(checker, statement->location,
+                                       "Invalid switch statement");
+    return 0;
+  }
+
+  Type *switch_type =
+      type_checker_infer_type(checker, switch_stmt->expression);
+  if (!switch_type) {
+    return 0;
+  }
+  if (!type_checker_is_integer_type(switch_type)) {
+    type_checker_report_type_mismatch(checker,
+                                      switch_stmt->expression->location,
+                                      "integer type", switch_type->name);
+    return 0;
+  }
+
+  size_t init_snapshot_count = 0;
+  unsigned char *init_snapshot =
+      type_checker_init_tracker_capture(checker, &init_snapshot_count);
+  if (checker->tracked_var_count > 0 && !init_snapshot) {
+    type_checker_set_error_at_location(
+        checker, statement->location,
+        "Out of memory while analyzing variable initialization flow");
+    return 0;
+  }
+
+  long long *case_values = NULL;
+  size_t case_value_count = 0;
+  int seen_default = 0;
+
+  if (switch_stmt->case_count > 0) {
+    case_values = malloc(switch_stmt->case_count * sizeof(long long));
+    if (!case_values) {
+      type_checker_set_error_at_location(
+          checker, statement->location,
+          "Memory allocation failed in switch validation");
+      return 0;
+    }
+  }
+
+  checker->switch_depth++;
+  for (size_t i = 0; i < switch_stmt->case_count; i++) {
+    ASTNode *case_node = switch_stmt->cases ? switch_stmt->cases[i] : NULL;
+    if (!case_node || case_node->type != AST_CASE_CLAUSE) {
+      type_checker_set_error_at_location(checker, statement->location,
+                                         "Invalid case clause in switch");
+      checker->switch_depth--;
+      free(init_snapshot);
+      free(case_values);
+      return 0;
+    }
+
+    CaseClause *case_clause = (CaseClause *)case_node->data;
+    if (!case_clause) {
+      type_checker_set_error_at_location(checker, case_node->location,
+                                         "Invalid case clause");
+      checker->switch_depth--;
+      free(init_snapshot);
+      free(case_values);
+      return 0;
+    }
+
+    if (case_clause->is_default) {
+      if (seen_default) {
+        type_checker_set_error_at_location(
+            checker, case_node->location,
+            "Switch may only contain one default clause");
+        checker->switch_depth--;
+        free(init_snapshot);
+        free(case_values);
+        return 0;
+      }
+      seen_default = 1;
+    } else {
+      if (!case_clause->value) {
+        type_checker_set_error_at_location(
+            checker, case_node->location,
+            "Case clause is missing a value expression");
+        checker->switch_depth--;
+        free(init_snapshot);
+        free(case_values);
+        return 0;
+      }
+
+      Type *case_type = type_checker_infer_type(checker, case_clause->value);
+      if (!case_type) {
+        checker->switch_depth--;
+        free(init_snapshot);
+        free(case_values);
+        return 0;
+      }
+      if (!type_checker_is_integer_type(case_type)) {
+        type_checker_report_type_mismatch(checker,
+                                          case_clause->value->location,
+                                          "integer type", case_type->name);
+        checker->switch_depth--;
+        free(init_snapshot);
+        free(case_values);
+        return 0;
+      }
+      if (!type_checker_is_assignable(checker, switch_type, case_type)) {
+        type_checker_report_type_mismatch(checker,
+                                          case_clause->value->location,
+                                          switch_type->name, case_type->name);
+        checker->switch_depth--;
+        free(init_snapshot);
+        free(case_values);
+        return 0;
+      }
+
+      long long case_value = 0;
+      int case_eval_ok =
+          type_checker_eval_integer_constant(case_clause->value, &case_value);
+      if (!case_eval_ok &&
+          case_clause->value->type == AST_IDENTIFIER) {
+        Identifier *cid = (Identifier *)case_clause->value->data;
+        Symbol *csym =
+            symbol_table_lookup(checker->symbol_table, cid->name);
+        if (csym && csym->kind == SYMBOL_CONSTANT) {
+          case_value = csym->data.constant.value;
+          case_eval_ok = 1;
+        }
+      }
+      if (!case_eval_ok) {
+        type_checker_set_error_at_location(
+            checker, case_clause->value->location,
+            "Case value must be a compile-time integer constant expression");
+        checker->switch_depth--;
+        free(init_snapshot);
+        free(case_values);
+        return 0;
+      }
+
+      for (size_t j = 0; j < case_value_count; j++) {
+        if (case_values[j] == case_value) {
+          type_checker_set_error_at_location(
+              checker, case_clause->value->location,
+              "Duplicate case value '%lld' in switch", case_value);
+          checker->switch_depth--;
+          free(init_snapshot);
+          free(case_values);
+          return 0;
+        }
+      }
+      case_values[case_value_count++] = case_value;
+    }
+
+    if (!case_clause->body) {
+      type_checker_set_error_at_location(checker, case_node->location,
+                                         "Case clause must have a body");
+      checker->switch_depth--;
+      free(init_snapshot);
+      free(case_values);
+      return 0;
+    }
+
+    if (!type_checker_check_statement(checker, case_clause->body)) {
+      checker->switch_depth--;
+      free(init_snapshot);
+      free(case_values);
+      return 0;
+    }
+    type_checker_init_tracker_restore(checker, init_snapshot,
+                                      init_snapshot_count);
+  }
+  checker->switch_depth--;
+  type_checker_init_tracker_restore(checker, init_snapshot,
+                                    init_snapshot_count);
+  free(init_snapshot);
+
+  if (switch_type->kind == TYPE_ENUM && !seen_default) {
+    Scope *global = checker->symbol_table->global_scope;
+    for (size_t i = 0; i < global->symbol_count; i++) {
+      Symbol *sym = global->symbols[i];
+      if (!sym || sym->kind != SYMBOL_CONSTANT || sym->type != switch_type) {
+        continue;
+      }
+      int covered = 0;
+      for (size_t j = 0; j < case_value_count; j++) {
+        if (case_values[j] == sym->data.constant.value) {
+          covered = 1;
+          break;
+        }
+      }
+      if (!covered) {
+        type_checker_set_error_at_location(
+            checker, statement->location,
+            "Non-exhaustive switch on '%s': variant '%s' not covered; "
+            "add a 'case %s:' arm or a 'default:' arm",
+            switch_type->name, sym->name, sym->name);
+        free(case_values);
+        return 0;
+      }
+    }
+  }
+
+  if (switch_type->kind == TYPE_BOOL && !seen_default) {
+    int has_true = 0, has_false = 0;
+    for (size_t i = 0; i < case_value_count; i++) {
+      if (case_values[i] == 1) has_true = 1;
+      if (case_values[i] == 0) has_false = 1;
+    }
+    if (!has_true || !has_false) {
+      type_checker_set_error_at_location(
+          checker, statement->location,
+          "Non-exhaustive switch over 'bool': must cover both 'true' and "
+          "'false', or add a 'default:' arm");
+      free(case_values);
+      return 0;
+    }
+  }
+
+  free(case_values);
+  return 1;
+}
 
 int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
   if (!checker || !statement)
@@ -4658,81 +4901,8 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     return 1;
   }
 
-  case AST_IF_STATEMENT: {
-    IfStatement *if_stmt = (IfStatement *)statement->data;
-    if (!if_stmt || !if_stmt->condition) {
-      type_checker_set_error_at_location(checker, statement->location,
-                                         "Invalid if statement");
-      return 0;
-    }
-
-    // Check condition type
-    Type *condition_type = type_checker_infer_type(checker, if_stmt->condition);
-    if (!condition_type) {
-      return 0; // Error already reported
-    }
-
-    // Condition should be a numeric type (treated as boolean)
-    if (!type_checker_is_numeric_type(condition_type)) {
-      type_checker_report_type_mismatch(checker, if_stmt->condition->location,
-                                        "numeric type", condition_type->name);
-      return 0;
-    }
-
-    size_t init_snapshot_count = 0;
-    unsigned char *init_snapshot =
-        type_checker_init_tracker_capture(checker, &init_snapshot_count);
-    if (checker->tracked_var_count > 0 && !init_snapshot) {
-      type_checker_set_error_at_location(
-          checker, statement->location,
-          "Out of memory while analyzing variable initialization flow");
-      return 0;
-    }
-
-    // Check then branch
-    if (if_stmt->then_branch &&
-        !type_checker_check_statement(checker, if_stmt->then_branch)) {
-      free(init_snapshot);
-      return 0;
-    }
-    type_checker_init_tracker_restore(checker, init_snapshot,
-                                      init_snapshot_count);
-
-    for (size_t i = 0; i < if_stmt->else_if_count; i++) {
-      Type *elif_cond_type =
-          type_checker_infer_type(checker, if_stmt->else_ifs[i].condition);
-      if (!elif_cond_type) {
-        free(init_snapshot);
-        return 0;
-      }
-      if (!type_checker_is_numeric_type(elif_cond_type)) {
-        type_checker_report_type_mismatch(
-            checker, if_stmt->else_ifs[i].condition->location, "numeric type",
-            elif_cond_type->name);
-        free(init_snapshot);
-        return 0;
-      }
-      if (if_stmt->else_ifs[i].body &&
-          !type_checker_check_statement(checker, if_stmt->else_ifs[i].body)) {
-        free(init_snapshot);
-        return 0;
-      }
-      type_checker_init_tracker_restore(checker, init_snapshot,
-                                        init_snapshot_count);
-    }
-
-    // Check else branch if present
-    if (if_stmt->else_branch &&
-        !type_checker_check_statement(checker, if_stmt->else_branch)) {
-      free(init_snapshot);
-      return 0;
-    }
-    type_checker_init_tracker_restore(checker, init_snapshot,
-                                      init_snapshot_count);
-    free(init_snapshot);
-
-    return 1;
-  }
+  case AST_IF_STATEMENT:
+    return type_checker_check_if_statement(checker, statement);
 
   case AST_WHILE_STATEMENT: {
     WhileStatement *while_stmt = (WhileStatement *)statement->data;
@@ -4782,320 +4952,11 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     return 1;
   }
 
-  case AST_FOR_STATEMENT: {
-    ForStatement *for_stmt = (ForStatement *)statement->data;
-    if (!for_stmt) {
-      type_checker_set_error_at_location(checker, statement->location,
-                                         "Invalid for statement");
-      return 0;
-    }
+  case AST_FOR_STATEMENT:
+    return type_checker_check_for_statement(checker, statement);
 
-    symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK);
-    if (!type_checker_init_tracker_enter_scope(checker)) {
-      type_checker_set_error_at_location(
-          checker, statement->location,
-          "Out of memory while entering initialization analysis scope");
-      symbol_table_exit_scope(checker->symbol_table);
-      return 0;
-    }
-
-    if (for_stmt->initializer) {
-      int init_ok = 0;
-      if (for_stmt->initializer->type == AST_VAR_DECLARATION ||
-          for_stmt->initializer->type == AST_ASSIGNMENT ||
-          for_stmt->initializer->type == AST_FUNCTION_CALL) {
-        init_ok = type_checker_check_statement(checker, for_stmt->initializer);
-      } else {
-        init_ok = type_checker_check_expression(checker, for_stmt->initializer);
-      }
-      if (!init_ok) {
-        type_checker_init_tracker_exit_scope(checker);
-        symbol_table_exit_scope(checker->symbol_table);
-        return 0;
-      }
-    }
-
-    size_t post_init_snapshot_count = 0;
-    unsigned char *post_init_snapshot =
-        type_checker_init_tracker_capture(checker, &post_init_snapshot_count);
-    if (checker->tracked_var_count > 0 && !post_init_snapshot) {
-      type_checker_set_error_at_location(
-          checker, statement->location,
-          "Out of memory while analyzing variable initialization flow");
-      type_checker_init_tracker_exit_scope(checker);
-      symbol_table_exit_scope(checker->symbol_table);
-      return 0;
-    }
-
-    if (for_stmt->condition) {
-      Type *cond_type = type_checker_infer_type(checker, for_stmt->condition);
-      if (!cond_type) {
-        free(post_init_snapshot);
-        type_checker_init_tracker_exit_scope(checker);
-        symbol_table_exit_scope(checker->symbol_table);
-        return 0;
-      }
-      if (!type_checker_is_numeric_type(cond_type)) {
-        type_checker_report_type_mismatch(checker,
-                                          for_stmt->condition->location,
-                                          "numeric type", cond_type->name);
-        free(post_init_snapshot);
-        type_checker_init_tracker_exit_scope(checker);
-        symbol_table_exit_scope(checker->symbol_table);
-        return 0;
-      }
-    }
-
-    if (for_stmt->increment &&
-        !type_checker_check_expression(checker, for_stmt->increment)) {
-      free(post_init_snapshot);
-      type_checker_init_tracker_exit_scope(checker);
-      symbol_table_exit_scope(checker->symbol_table);
-      return 0;
-    }
-
-    checker->loop_depth++;
-    if (for_stmt->body &&
-        !type_checker_check_statement(checker, for_stmt->body)) {
-      checker->loop_depth--;
-      free(post_init_snapshot);
-      type_checker_init_tracker_exit_scope(checker);
-      symbol_table_exit_scope(checker->symbol_table);
-      return 0;
-    }
-    checker->loop_depth--;
-
-    type_checker_init_tracker_restore(checker, post_init_snapshot,
-                                      post_init_snapshot_count);
-    free(post_init_snapshot);
-    type_checker_init_tracker_exit_scope(checker);
-    symbol_table_exit_scope(checker->symbol_table);
-    return 1;
-  }
-
-  case AST_SWITCH_STATEMENT: {
-    SwitchStatement *switch_stmt = (SwitchStatement *)statement->data;
-    if (!switch_stmt || !switch_stmt->expression) {
-      type_checker_set_error_at_location(checker, statement->location,
-                                         "Invalid switch statement");
-      return 0;
-    }
-
-    Type *switch_type =
-        type_checker_infer_type(checker, switch_stmt->expression);
-    if (!switch_type) {
-      return 0;
-    }
-    if (!type_checker_is_integer_type(switch_type)) {
-      type_checker_report_type_mismatch(checker,
-                                        switch_stmt->expression->location,
-                                        "integer type", switch_type->name);
-      return 0;
-    }
-
-    size_t init_snapshot_count = 0;
-    unsigned char *init_snapshot =
-        type_checker_init_tracker_capture(checker, &init_snapshot_count);
-    if (checker->tracked_var_count > 0 && !init_snapshot) {
-      type_checker_set_error_at_location(
-          checker, statement->location,
-          "Out of memory while analyzing variable initialization flow");
-      return 0;
-    }
-
-    long long *case_values = NULL;
-    size_t case_value_count = 0;
-    int seen_default = 0;
-
-    if (switch_stmt->case_count > 0) {
-      case_values = malloc(switch_stmt->case_count * sizeof(long long));
-      if (!case_values) {
-        type_checker_set_error_at_location(
-            checker, statement->location,
-            "Memory allocation failed in switch validation");
-        return 0;
-      }
-    }
-
-    checker->switch_depth++;
-    for (size_t i = 0; i < switch_stmt->case_count; i++) {
-      ASTNode *case_node = switch_stmt->cases ? switch_stmt->cases[i] : NULL;
-      if (!case_node || case_node->type != AST_CASE_CLAUSE) {
-        type_checker_set_error_at_location(checker, statement->location,
-                                           "Invalid case clause in switch");
-        checker->switch_depth--;
-        free(init_snapshot);
-        free(case_values);
-        return 0;
-      }
-
-      CaseClause *case_clause = (CaseClause *)case_node->data;
-      if (!case_clause) {
-        type_checker_set_error_at_location(checker, case_node->location,
-                                           "Invalid case clause");
-        checker->switch_depth--;
-        free(init_snapshot);
-        free(case_values);
-        return 0;
-      }
-
-      if (case_clause->is_default) {
-        if (seen_default) {
-          type_checker_set_error_at_location(
-              checker, case_node->location,
-              "Switch may only contain one default clause");
-          checker->switch_depth--;
-          free(init_snapshot);
-          free(case_values);
-          return 0;
-        }
-        seen_default = 1;
-      } else {
-        if (!case_clause->value) {
-          type_checker_set_error_at_location(
-              checker, case_node->location,
-              "Case clause is missing a value expression");
-          checker->switch_depth--;
-          free(init_snapshot);
-          free(case_values);
-          return 0;
-        }
-
-        Type *case_type = type_checker_infer_type(checker, case_clause->value);
-        if (!case_type) {
-          checker->switch_depth--;
-          free(init_snapshot);
-          free(case_values);
-          return 0;
-        }
-        if (!type_checker_is_integer_type(case_type)) {
-          type_checker_report_type_mismatch(checker,
-                                            case_clause->value->location,
-                                            "integer type", case_type->name);
-          checker->switch_depth--;
-          free(init_snapshot);
-          free(case_values);
-          return 0;
-        }
-        if (!type_checker_is_assignable(checker, switch_type, case_type)) {
-          type_checker_report_type_mismatch(checker,
-                                            case_clause->value->location,
-                                            switch_type->name, case_type->name);
-          checker->switch_depth--;
-          free(init_snapshot);
-          free(case_values);
-          return 0;
-        }
-
-        long long case_value = 0;
-        int case_eval_ok =
-            type_checker_eval_integer_constant(case_clause->value, &case_value);
-        // Also resolve named constants (enum variants, bool true/false)
-        if (!case_eval_ok &&
-            case_clause->value->type == AST_IDENTIFIER) {
-          Identifier *cid = (Identifier *)case_clause->value->data;
-          Symbol *csym =
-              symbol_table_lookup(checker->symbol_table, cid->name);
-          if (csym && csym->kind == SYMBOL_CONSTANT) {
-            case_value = csym->data.constant.value;
-            case_eval_ok = 1;
-          }
-        }
-        if (!case_eval_ok) {
-          type_checker_set_error_at_location(
-              checker, case_clause->value->location,
-              "Case value must be a compile-time integer constant expression");
-          checker->switch_depth--;
-          free(init_snapshot);
-          free(case_values);
-          return 0;
-        }
-
-        for (size_t j = 0; j < case_value_count; j++) {
-          if (case_values[j] == case_value) {
-            type_checker_set_error_at_location(
-                checker, case_clause->value->location,
-                "Duplicate case value '%lld' in switch", case_value);
-            checker->switch_depth--;
-            free(init_snapshot);
-            free(case_values);
-            return 0;
-          }
-        }
-        case_values[case_value_count++] = case_value;
-      }
-
-      if (!case_clause->body) {
-        type_checker_set_error_at_location(checker, case_node->location,
-                                           "Case clause must have a body");
-        checker->switch_depth--;
-        free(init_snapshot);
-        free(case_values);
-        return 0;
-      }
-
-      if (!type_checker_check_statement(checker, case_clause->body)) {
-        checker->switch_depth--;
-        free(init_snapshot);
-        free(case_values);
-        return 0;
-      }
-      type_checker_init_tracker_restore(checker, init_snapshot,
-                                        init_snapshot_count);
-    }
-    checker->switch_depth--;
-    type_checker_init_tracker_restore(checker, init_snapshot,
-                                      init_snapshot_count);
-    free(init_snapshot);
-
-    // Exhaustiveness check for enum types: every variant must be covered or
-    // there must be a default case.
-    if (switch_type->kind == TYPE_ENUM && !seen_default) {
-      Scope *global = checker->symbol_table->global_scope;
-      for (size_t i = 0; i < global->symbol_count; i++) {
-        Symbol *sym = global->symbols[i];
-        if (!sym || sym->kind != SYMBOL_CONSTANT || sym->type != switch_type) {
-          continue;
-        }
-        int covered = 0;
-        for (size_t j = 0; j < case_value_count; j++) {
-          if (case_values[j] == sym->data.constant.value) {
-            covered = 1;
-            break;
-          }
-        }
-        if (!covered) {
-          type_checker_set_error_at_location(
-              checker, statement->location,
-              "Non-exhaustive switch on '%s': variant '%s' not covered; "
-              "add a 'case %s:' arm or a 'default:' arm",
-              switch_type->name, sym->name, sym->name);
-          free(case_values);
-          return 0;
-        }
-      }
-    }
-
-    // Exhaustiveness check for bool: must cover both true (1) and false (0).
-    if (switch_type->kind == TYPE_BOOL && !seen_default) {
-      int has_true = 0, has_false = 0;
-      for (size_t i = 0; i < case_value_count; i++) {
-        if (case_values[i] == 1) has_true = 1;
-        if (case_values[i] == 0) has_false = 1;
-      }
-      if (!has_true || !has_false) {
-        type_checker_set_error_at_location(
-            checker, statement->location,
-            "Non-exhaustive switch over 'bool': must cover both 'true' and "
-            "'false', or add a 'default:' arm");
-        free(case_values);
-        return 0;
-      }
-    }
-
-    free(case_values);
-    return 1;
-  }
+  case AST_SWITCH_STATEMENT:
+    return type_checker_check_switch_statement(checker, statement);
 
   case AST_MATCH_STATEMENT: {
     MatchStatement *m = (MatchStatement *)statement->data;
@@ -5123,16 +4984,19 @@ int type_checker_check_statement(TypeChecker *checker, ASTNode *statement) {
     return 1;
 
   case AST_INLINE_ASM:
-    // Inline assembly is passed through without type checking
     return 1;
-    break;
 
   case AST_PROGRAM: {
     // A block of statements
     Program *block = (Program *)statement->data;
     if (block) {
       // Enter a new nested scope
-      symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK);
+      if (!symbol_table_enter_scope(checker->symbol_table, SCOPE_BLOCK)) {
+        type_checker_set_error_at_location(
+            checker, statement->location,
+            "Out of memory while entering block scope");
+        return 0;
+      }
       if (!type_checker_init_tracker_enter_scope(checker)) {
         type_checker_set_error_at_location(
             checker, statement->location,

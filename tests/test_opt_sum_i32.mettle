@@ -1,0 +1,21 @@
+// sum_array pattern should vectorize under --release (COFF backend).
+function sum_array(data: int32*, len: int32) -> int64 {
+  var sum: int64 = 0;
+  var i: int32 = 0;
+  while (i < len) {
+    sum = sum + (int64)data[i];
+    i = i + 1;
+  }
+  return sum;
+}
+
+function main() -> int32 {
+  var buf: int32[8];
+  var i: int32 = 0;
+  while (i < 8) {
+    buf[i] = i + 1;
+    i = i + 1;
+  }
+  var s: int64 = sum_array(&buf[0], 8);
+  return (int32)s;
+}

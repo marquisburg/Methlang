@@ -2,22 +2,36 @@
 #define _GNU_SOURCE
 #endif
 #include "main.h"
+#include "common.h"
+#include "codegen/binary/startup.h"
 #include "codegen/binary_emitter.h"
+#include "codegen/program_entry.h"
 #include "linker/pe_emitter.h"
 #include "string_intern.h"
+#include "compiler/compiler_context.h"
+#include "compiler/compiler_crash.h"
 #include "ir/ir.h"
 #include "ir/ir_optimize.h"
+#include "ir/ir_profile.h"
 #include "semantic/import_resolver.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32) || defined(__MINGW32__)
 #include <sys/time.h>
+#endif
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
 #include <sys/stat.h>
+#if !defined(__MINGW32__)
+/* Avoid windows.h here: winnt.h defines TokenType, which clashes with lexer.h. */
+typedef long long MettleQpcTicks;
+__declspec(dllimport) int __stdcall QueryPerformanceFrequency(MettleQpcTicks *frequency);
+__declspec(dllimport) int __stdcall QueryPerformanceCounter(MettleQpcTicks *counter);
+#endif
 #else
 #include <limits.h>
 #include <sys/stat.h>
@@ -27,24 +41,27 @@
 #endif
 #endif
 
-typedef enum {
-  PROFILE_PHASE_READ_INPUT = 0,
-  PROFILE_PHASE_LEXICAL_VALIDATION,
-  PROFILE_PHASE_INIT,
-  PROFILE_PHASE_PARSE,
-  PROFILE_PHASE_PRELUDE,
-  PROFILE_PHASE_IMPORTS,
-  PROFILE_PHASE_MONOMORPHIZE,
-  PROFILE_PHASE_TYPE_CHECK,
-  PROFILE_PHASE_IR_LOWERING,
-  PROFILE_PHASE_IR_OPTIMIZATION,
-  PROFILE_PHASE_IR_DUMP,
-  PROFILE_PHASE_CODEGEN,
-  PROFILE_PHASE_WRITE_OUTPUT,
-  PROFILE_PHASE_DEBUG_INFO,
-  PROFILE_PHASE_CLEANUP,
-  PROFILE_PHASE_COUNT
-} CompilerProfilePhase;
+#define PROFILE_PHASE_READ_INPUT METTLE_COMPILER_PHASE_READ_INPUT
+#define PROFILE_PHASE_LEXICAL_VALIDATION METTLE_COMPILER_PHASE_LEXICAL_VALIDATION
+#define PROFILE_PHASE_INIT METTLE_COMPILER_PHASE_INIT
+#define PROFILE_PHASE_PARSE METTLE_COMPILER_PHASE_PARSE
+#define PROFILE_PHASE_PRELUDE METTLE_COMPILER_PHASE_PRELUDE
+#define PROFILE_PHASE_IMPORTS METTLE_COMPILER_PHASE_IMPORTS
+#define PROFILE_PHASE_MONOMORPHIZE METTLE_COMPILER_PHASE_MONOMORPHIZE
+#define PROFILE_PHASE_TYPE_CHECK METTLE_COMPILER_PHASE_TYPE_CHECK
+#define PROFILE_PHASE_IR_LOWERING METTLE_COMPILER_PHASE_IR_LOWERING
+#define PROFILE_PHASE_IR_OPTIMIZATION METTLE_COMPILER_PHASE_IR_OPTIMIZATION
+#define PROFILE_PHASE_IR_DUMP METTLE_COMPILER_PHASE_IR_DUMP
+#define PROFILE_PHASE_CODEGEN METTLE_COMPILER_PHASE_CODEGEN
+#define PROFILE_PHASE_WRITE_OUTPUT METTLE_COMPILER_PHASE_WRITE_OUTPUT
+#define PROFILE_PHASE_DEBUG_INFO METTLE_COMPILER_PHASE_DEBUG_INFO
+#define PROFILE_PHASE_CLEANUP METTLE_COMPILER_PHASE_CLEANUP
+#define PROFILE_PHASE_COUNT METTLE_COMPILER_PHASE_COUNT
+
+static int compiler_options_use_profile_runtime(const CompilerOptions *options) {
+  return options &&
+         (options->profile_runtime || options->profile_runtime_ops);
+}
 
 typedef struct {
   int enabled;
@@ -52,10 +69,24 @@ typedef struct {
 } CompilerProfile;
 
 static double compiler_profile_now_ms(void) {
+#if defined(_WIN32) && !defined(__MINGW32__)
+  static MettleQpcTicks frequency = 0;
+  MettleQpcTicks counter = 0;
+
+  if (frequency == 0) {
+    QueryPerformanceFrequency(&frequency);
+  }
+  if (frequency == 0) {
+    return 0.0;
+  }
+  QueryPerformanceCounter(&counter);
+  return (double)counter * 1000.0 / (double)frequency;
+#else
   struct timeval tv;
 
   gettimeofday(&tv, NULL);
   return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
+#endif
 }
 
 static void compiler_profile_init(CompilerProfile *profile, int enabled) {
@@ -71,7 +102,7 @@ static double compiler_profile_begin(const CompilerProfile *profile) {
 }
 
 static void compiler_profile_add(CompilerProfile *profile,
-                                 CompilerProfilePhase phase,
+                                 MettleCompilerPhase phase,
                                  double started_ms) {
   if (!profile || !profile->enabled || phase < 0 ||
       phase >= PROFILE_PHASE_COUNT) {
@@ -83,13 +114,6 @@ static void compiler_profile_add(CompilerProfile *profile,
 static void compiler_profile_print_compile(const CompilerProfile *profile,
                                            const char *input_filename,
                                            int result) {
-  static const char *phase_names[PROFILE_PHASE_COUNT] = {
-      "read input",       "lexical validation", "init",
-      "parse",            "prelude injection",  "imports",
-      "monomorphize",     "type check",         "IR lowering",
-      "IR optimization",  "IR dump",            "codegen",
-      "write output",     "debug info",         "cleanup",
-  };
   double total_ms = 0.0;
 
   if (!profile || !profile->enabled) {
@@ -110,10 +134,14 @@ static void compiler_profile_print_compile(const CompilerProfile *profile,
     if (ms <= 0.0) {
       continue;
     }
-    fprintf(stderr, "  %-20s %9.3f ms  %6.2f%%\n", phase_names[i], ms,
-            percent);
+    fprintf(stderr, "  %-20s %9.3f ms  %6.2f%%\n",
+            mettle_compiler_phase_name((MettleCompilerPhase)i), ms, percent);
   }
   fprintf(stderr, "  %-20s %9.3f ms  %6.2f%%\n", "total", total_ms, 100.0);
+}
+
+static void compiler_set_phase(MettleCompilerPhase phase) {
+  mettle_compiler_ctx_set_phase(phase);
 }
 
 static int directory_exists(const char *path) {
@@ -183,14 +211,21 @@ static char *directory_from_path(const char *path) {
 }
 
 static char *get_executable_path(const char *argv0) {
+  static char *cached_path = NULL;
+  static int cached = 0;
+  if (cached) return cached_path ? strdup(cached_path) : NULL;
+  cached = 1;
+
 #ifdef _WIN32
   char *program_path = NULL;
   if (_get_pgmptr(&program_path) == 0 && program_path &&
       program_path[0] != '\0') {
-    return strdup(program_path);
+    cached_path = strdup(program_path);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   if (argv0 && argv0[0] != '\0') {
-    return strdup(argv0);
+    cached_path = strdup(argv0);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   return NULL;
 #elif defined(__APPLE__)
@@ -207,127 +242,72 @@ static char *get_executable_path(const char *argv0) {
     return NULL;
   }
   buffer[size] = '\0';
-  return buffer;
+  cached_path = buffer;
+  return strdup(cached_path);
 #else
   char buffer[PATH_MAX + 1];
   ssize_t len = readlink("/proc/self/exe", buffer, PATH_MAX);
   if (len > 0) {
     buffer[len] = '\0';
-    return strdup(buffer);
+    cached_path = strdup(buffer);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   if (argv0 && argv0[0] != '\0') {
-    return strdup(argv0);
+    cached_path = strdup(argv0);
+    return cached_path ? strdup(cached_path) : NULL;
   }
   return NULL;
 #endif
 }
 
-static char *infer_default_stdlib_directory(const char *argv0) {
+static char *infer_default_sibling_directory(const char *argv0,
+                                             const char *leaf_name,
+                                             const char *fallback_path) {
   char *exe_path = get_executable_path(argv0);
   char *exe_dir = directory_from_path(exe_path);
 
   if (exe_dir) {
     char *parent_dir = join_paths(exe_dir, "..");
     if (parent_dir) {
-      char *packaged_stdlib = join_paths(parent_dir, "stdlib");
+      char *packaged = join_paths(parent_dir, leaf_name);
       free(parent_dir);
-      if (packaged_stdlib && directory_exists(packaged_stdlib)) {
+      if (packaged && directory_exists(packaged)) {
         free(exe_path);
         free(exe_dir);
-        return packaged_stdlib;
+        return packaged;
       }
-      free(packaged_stdlib);
+      free(packaged);
     }
 
-    char *local_stdlib = join_paths(exe_dir, "stdlib");
-    if (local_stdlib && directory_exists(local_stdlib)) {
+    char *local = join_paths(exe_dir, leaf_name);
+    if (local && directory_exists(local)) {
       free(exe_path);
       free(exe_dir);
-      return local_stdlib;
+      return local;
     }
-    free(local_stdlib);
+    free(local);
   }
 
   free(exe_path);
   free(exe_dir);
 
-  if (directory_exists("stdlib")) {
-    return strdup("stdlib");
+  if (directory_exists(leaf_name)) {
+    return strdup(leaf_name);
   }
 
-  return strdup("stdlib");
+  return fallback_path ? strdup(fallback_path) : NULL;
+}
+
+static char *infer_default_stdlib_directory(const char *argv0) {
+  return infer_default_sibling_directory(argv0, "stdlib", "stdlib");
 }
 
 static char *infer_default_runtime_directory(const char *argv0) {
-  char *exe_path = get_executable_path(argv0);
-  char *exe_dir = directory_from_path(exe_path);
-
-  if (exe_dir) {
-    char *parent_dir = join_paths(exe_dir, "..");
-    if (parent_dir) {
-      char *packaged_runtime = join_paths(parent_dir, "runtime");
-      free(parent_dir);
-      if (packaged_runtime && directory_exists(packaged_runtime)) {
-        free(exe_path);
-        free(exe_dir);
-        return packaged_runtime;
-      }
-      free(packaged_runtime);
-    }
-
-    char *local_runtime = join_paths(exe_dir, "runtime");
-    if (local_runtime && directory_exists(local_runtime)) {
-      free(exe_path);
-      free(exe_dir);
-      return local_runtime;
-    }
-    free(local_runtime);
-  }
-
-  free(exe_path);
-  free(exe_dir);
-
-  if (directory_exists("runtime")) {
-    return strdup("runtime");
-  }
-
-  return NULL;
+  return infer_default_sibling_directory(argv0, "runtime", NULL);
 }
 
 static char *infer_default_docs_directory(const char *argv0) {
-  char *exe_path = get_executable_path(argv0);
-  char *exe_dir = directory_from_path(exe_path);
-
-  if (exe_dir) {
-    char *parent_dir = join_paths(exe_dir, "..");
-    if (parent_dir) {
-      char *packaged_docs = join_paths(parent_dir, "docs");
-      free(parent_dir);
-      if (packaged_docs && directory_exists(packaged_docs)) {
-        free(exe_path);
-        free(exe_dir);
-        return packaged_docs;
-      }
-      free(packaged_docs);
-    }
-
-    char *local_docs = join_paths(exe_dir, "docs");
-    if (local_docs && directory_exists(local_docs)) {
-      free(exe_path);
-      free(exe_dir);
-      return local_docs;
-    }
-    free(local_docs);
-  }
-
-  free(exe_path);
-  free(exe_dir);
-
-  if (directory_exists("docs")) {
-    return strdup("docs");
-  }
-
-  return NULL;
+  return infer_default_sibling_directory(argv0, "docs", NULL);
 }
 
 static void print_doc_reference(const char *argv0, const char *relative_path) {
@@ -459,49 +439,6 @@ static int print_help_topic(const char *program_name, const char *argv0,
   fprintf(stderr, "Available topics: " METTLE_HELP_TOPICS "\n");
   fprintf(stderr, "Try 'mettle help' for general usage.\n");
   return 1;
-}
-
-static int validate_lexical_phase(const char *source, ErrorReporter *reporter) {
-  if (!source) {
-    return 0;
-  }
-
-  Lexer *lexer = lexer_create(source);
-  if (!lexer) {
-    if (reporter) {
-      error_reporter_add_error(reporter, ERROR_INTERNAL,
-                               source_location_create(0, 0),
-                               "Failed to initialize lexer for lexical "
-                               "validation");
-    }
-    return 0;
-  }
-
-  int has_lexical_error = 0;
-
-  while (1) {
-    Token token = lexer_next_token(lexer);
-    if (token.type == TOKEN_ERROR) {
-      has_lexical_error = 1;
-      if (reporter) {
-        SourceLocation location =
-            source_location_create(token.line, token.column);
-        error_reporter_add_error(reporter, ERROR_LEXICAL, location,
-                                 token.value ? token.value
-                                             : "Unknown lexical error");
-      }
-    }
-
-    if (token.type == TOKEN_EOF) {
-      token_destroy(&token);
-      break;
-    }
-
-    token_destroy(&token);
-  }
-
-  lexer_destroy(lexer);
-  return !has_lexical_error;
 }
 
 static char *build_sidecar_filename(const char *base_filename,
@@ -765,7 +702,8 @@ static int resolve_import_library_path(const char *library_name,
     }
   }
 
-  env_copy = getenv("LIB") ? strdup(getenv("LIB")) : NULL;
+  const char *lib_env = getenv("LIB");
+  env_copy = lib_env ? strdup(lib_env) : NULL;
   token = env_copy ? strtok(env_copy, ";") : NULL;
   while (token) {
     candidate = join_paths(token, library_name);
@@ -953,12 +891,21 @@ static int object_has_undefined_symbol_prefix(const char *object_path,
   return found;
 }
 
+static int object_needs_runtime_object(const char *object_path,
+                                       const char *prefix) {
+  return object_has_undefined_symbol_prefix(object_path, prefix);
+}
+
 static int object_needs_crash_handler(const char *object_path) {
-  return object_has_undefined_symbol_prefix(object_path, "mettle_crash_");
+  return object_needs_runtime_object(object_path, "mettle_crash_");
 }
 
 static int object_needs_atomics(const char *object_path) {
-  return object_has_undefined_symbol_prefix(object_path, "mettle_atomic_");
+  return object_needs_runtime_object(object_path, "mettle_atomic_");
+}
+
+static int object_needs_profile_runtime(const char *object_path) {
+  return object_needs_runtime_object(object_path, "mettle_profile_");
 }
 
 static int append_argument_text(char *buffer, size_t buffer_size, size_t *offset,
@@ -1235,40 +1182,12 @@ static int mettle_build_with_link(const char *object_filename,
   return 0;
 }
 
-static int write_internal_startup_object(const char *path) {
-  BinaryEmitter *emitter = NULL;
-  size_t text = 0u;
-  static const unsigned char code[] = {
-      0x48u, 0x83u, 0xECu, 0x28u, 0xE8u, 0x00u, 0x00u, 0x00u,
-      0x00u, 0x89u, 0xC1u, 0xE8u, 0x00u, 0x00u, 0x00u, 0x00u};
-  int result = 1;
-
-  emitter = binary_emitter_create(BINARY_TARGET_FORMAT_COFF_WIN64);
-  if (!emitter) {
-    return 1;
-  }
-
-  text = binary_emitter_get_or_create_section(emitter, ".text", BINARY_SECTION_TEXT,
-                                              0, 16u);
-  if (text == (size_t)-1 ||
-      !binary_emitter_append_bytes(emitter, text, code, sizeof(code), NULL) ||
-      !binary_emitter_define_symbol(emitter, "mainCRTStartup", BINARY_SYMBOL_GLOBAL,
-                                    text, 0u, sizeof(code)) ||
-      !binary_emitter_declare_external(emitter, "main") ||
-      !binary_emitter_declare_external(emitter, "ExitProcess") ||
-      !binary_emitter_add_relocation(emitter, text, 5u, BINARY_RELOCATION_REL32,
-                                     "main", 0) ||
-      !binary_emitter_add_relocation(emitter, text, 12u, BINARY_RELOCATION_REL32,
-                                     "ExitProcess", 0) ||
-      !binary_emitter_write_object_file(emitter, path)) {
-    goto cleanup;
-  }
-
-  result = 0;
-
-cleanup:
-  binary_emitter_destroy(emitter);
-  return result;
+static int write_internal_startup_object(const char *path, int profile_runtime,
+                                         int stack_trace_init,
+                                         int main_wants_argc_argv) {
+  return binary_write_program_startup_object(path, profile_runtime,
+                                             stack_trace_init,
+                                             main_wants_argc_argv);
 }
 
 /* Build → link routing is documented in docs/linker-build-pipelines.md (asm+GCC
@@ -1505,8 +1424,11 @@ static int mettle_build_executable(const char *asm_filename,
   char *crash_msvc_object = join_paths(runtime_directory, "crash_handler.obj");
   char *atomics_gcc_object = join_paths(runtime_directory, "atomics.o");
   char *atomics_msvc_object = join_paths(runtime_directory, "atomics.obj");
+  char *profile_gcc_object = join_paths(runtime_directory, "profile.o");
+  char *profile_msvc_object = join_paths(runtime_directory, "profile.obj");
   if (!gcc_object_filename || !msvc_object_filename || !crash_gcc_object ||
-      !crash_msvc_object || !atomics_gcc_object || !atomics_msvc_object) {
+      !crash_msvc_object || !atomics_gcc_object || !atomics_msvc_object ||
+      !profile_gcc_object || !profile_msvc_object) {
     fprintf(stderr, "Error: Failed to allocate build paths\n");
     free(gcc_object_filename);
     free(msvc_object_filename);
@@ -1514,6 +1436,8 @@ static int mettle_build_executable(const char *asm_filename,
     free(crash_msvc_object);
     free(atomics_gcc_object);
     free(atomics_msvc_object);
+    free(profile_gcc_object);
+    free(profile_msvc_object);
     return 1;
   }
 
@@ -1521,11 +1445,12 @@ static int mettle_build_executable(const char *asm_filename,
 
   if (linker_mode == LINKER_MODE_INTERNAL || linker_mode == LINKER_MODE_AUTO) {
     size_t object_capacity =
-        3u + (options ? options->link_argument_count : 0u);
+        4u + (options ? options->link_argument_count : 0u);
     const char **object_paths = calloc(object_capacity, sizeof(const char *));
     size_t object_count = 0u;
     const char *crash_object = NULL;
     const char *atomics_object = NULL;
+    const char *profile_object = NULL;
 
     if (!object_paths) {
       fprintf(stderr, "Error: Failed to allocate internal-linker object list\n");
@@ -1559,6 +1484,30 @@ static int mettle_build_executable(const char *asm_filename,
         goto cleanup;
       }
     }
+    if (object_needs_profile_runtime(msvc_object_filename) ||
+        (options && compiler_options_use_profile_runtime(options))) {
+      profile_object = (_access(profile_msvc_object, 0) == 0)
+                           ? profile_msvc_object
+                           : profile_gcc_object;
+      if (_access(profile_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled profile runtime object not found in '%s'\n",
+                runtime_directory);
+        free(object_paths);
+        goto cleanup;
+      }
+    }
+    if (profile_object && !crash_object) {
+      crash_object = (_access(crash_msvc_object, 0) == 0) ? crash_msvc_object
+                                                          : crash_gcc_object;
+      if (_access(crash_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled crash-handler runtime object not found in '%s'\n",
+                runtime_directory);
+        free(object_paths);
+        goto cleanup;
+      }
+    }
 
     object_paths[object_count++] = msvc_object_filename;
     if (crash_object) {
@@ -1566,6 +1515,9 @@ static int mettle_build_executable(const char *asm_filename,
     }
     if (atomics_object) {
       object_paths[object_count++] = atomics_object;
+    }
+    if (profile_object) {
+      object_paths[object_count++] = profile_object;
     }
     if (!append_internal_link_object_args(options, object_paths, object_capacity,
                                           &object_count)) {
@@ -1675,6 +1627,8 @@ cleanup:
   free(crash_msvc_object);
   free(atomics_gcc_object);
   free(atomics_msvc_object);
+  free(profile_gcc_object);
+  free(profile_msvc_object);
   return build_result;
 }
 
@@ -1712,27 +1666,41 @@ static int mettle_link_object_file(const char *object_filename,
   char *crash_msvc_object = join_paths(runtime_directory, "crash_handler.obj");
   char *atomics_gcc_object = join_paths(runtime_directory, "atomics.o");
   char *atomics_msvc_object = join_paths(runtime_directory, "atomics.obj");
+  char *profile_gcc_object = join_paths(runtime_directory, "profile.o");
+  char *profile_msvc_object = join_paths(runtime_directory, "profile.obj");
   if (!crash_gcc_object || !crash_msvc_object || !atomics_gcc_object ||
-      !atomics_msvc_object) {
+      !atomics_msvc_object || !profile_gcc_object || !profile_msvc_object) {
     fprintf(stderr, "Error: Failed to allocate build paths\n");
     free(crash_gcc_object);
     free(crash_msvc_object);
     free(atomics_gcc_object);
     free(atomics_msvc_object);
+    free(profile_gcc_object);
+    free(profile_msvc_object);
     return 1;
   }
 
   int needs_crash = object_needs_crash_handler(object_filename);
   int needs_atomics = object_needs_atomics(object_filename);
+  int needs_profile = object_needs_profile_runtime(object_filename);
+  int profile_runtime =
+      options && compiler_options_use_profile_runtime(options) ? 1 : 0;
+  if (profile_runtime) {
+    needs_profile = 1;
+  }
+  if (needs_profile) {
+    needs_crash = 1;
+  }
 
   int build_result = 1;
 
   if (linker_mode == LINKER_MODE_INTERNAL || linker_mode == LINKER_MODE_AUTO) {
     size_t object_capacity =
-        4u + (options ? options->link_argument_count : 0u);
+        5u + (options ? options->link_argument_count : 0u);
     const char **object_paths = calloc(object_capacity, sizeof(const char *));
     const char *crash_object = NULL;
     const char *atomics_object = NULL;
+    const char *profile_object = NULL;
     char *startup_object = replace_extension(executable_filename, ".startup.obj");
     size_t object_count = 0u;
     int startup_ready = 0;
@@ -1752,7 +1720,10 @@ static int mettle_link_object_file(const char *object_filename,
       fprintf(stderr,
               "Warning: Failed to allocate internal-linker startup object path, "
               "falling back to external linkers\n");
-    } else if (write_internal_startup_object(startup_object) != 0) {
+    } else if (write_internal_startup_object(
+                   startup_object, profile_runtime,
+                   options && options->generate_stack_trace_support ? 1 : 0,
+                   options && options->main_wants_argc_argv ? 1 : 0) != 0) {
       if (linker_mode == LINKER_MODE_INTERNAL || (!has_gcc && !has_link)) {
         fprintf(stderr,
                 "Error: Failed to generate internal-linker startup object\n");
@@ -1777,6 +1748,24 @@ static int mettle_link_object_file(const char *object_filename,
                              ? atomics_msvc_object
                              : atomics_gcc_object;
       }
+      if (needs_profile) {
+        profile_object = (_access(profile_msvc_object, 0) == 0)
+                             ? profile_msvc_object
+                             : profile_gcc_object;
+        if (_access(profile_object, 0) != 0) {
+          fprintf(stderr,
+                  "Error: Bundled profile runtime object not found in '%s'\n",
+                  runtime_directory);
+          free(object_paths);
+          if (startup_object) {
+            if (startup_ready) {
+              _unlink(startup_object);
+            }
+            free(startup_object);
+          }
+          goto cleanup;
+        }
+      }
 
       object_paths[object_count++] = startup_object;
       object_paths[object_count++] = object_filename;
@@ -1785,6 +1774,9 @@ static int mettle_link_object_file(const char *object_filename,
       }
       if (atomics_object) {
         object_paths[object_count++] = atomics_object;
+      }
+      if (profile_object) {
+        object_paths[object_count++] = profile_object;
       }
       if (!append_internal_link_object_args(options, object_paths,
                                             object_capacity, &object_count)) {
@@ -1830,7 +1822,7 @@ static int mettle_link_object_file(const char *object_filename,
   }
 
   if (has_gcc && linker_mode != LINKER_MODE_MSVC) {
-    const char *runtime_objects[2] = {NULL, NULL};
+    const char *runtime_objects[3] = {NULL, NULL, NULL};
     size_t runtime_object_count = 0u;
     if (needs_crash) {
       if (_access(crash_gcc_object, 0) != 0) {
@@ -1850,6 +1842,15 @@ static int mettle_link_object_file(const char *object_filename,
       }
       runtime_objects[runtime_object_count++] = atomics_gcc_object;
     }
+    if (needs_profile) {
+      if (_access(profile_gcc_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled profile runtime object not found in '%s'\n",
+                runtime_directory);
+        goto cleanup;
+      }
+      runtime_objects[runtime_object_count++] = profile_gcc_object;
+    }
     if (mettle_link_object_with_gcc(object_filename, executable_filename,
                                       runtime_objects, runtime_object_count,
                                       options) == 0) {
@@ -1859,7 +1860,7 @@ static int mettle_link_object_file(const char *object_filename,
   }
 
   if (has_link && linker_mode != LINKER_MODE_GCC) {
-    const char *runtime_objects[2] = {NULL, NULL};
+    const char *runtime_objects[3] = {NULL, NULL, NULL};
     size_t runtime_object_count = 0u;
     if (needs_crash) {
       const char *crash_object = (_access(crash_msvc_object, 0) == 0)
@@ -1885,6 +1886,18 @@ static int mettle_link_object_file(const char *object_filename,
       }
       runtime_objects[runtime_object_count++] = atomics_object;
     }
+    if (needs_profile) {
+      const char *profile_object = (_access(profile_msvc_object, 0) == 0)
+                                       ? profile_msvc_object
+                                       : profile_gcc_object;
+      if (_access(profile_object, 0) != 0) {
+        fprintf(stderr,
+                "Error: Bundled profile runtime object not found in '%s'\n",
+                runtime_directory);
+        goto cleanup;
+      }
+      runtime_objects[runtime_object_count++] = profile_object;
+    }
     if (mettle_link_object_with_link(object_filename, executable_filename,
                                        runtime_objects, runtime_object_count,
                                        options) == 0) {
@@ -1901,6 +1914,8 @@ cleanup:
   free(crash_msvc_object);
   free(atomics_gcc_object);
   free(atomics_msvc_object);
+  free(profile_gcc_object);
+  free(profile_msvc_object);
   return build_result;
 }
 #endif
@@ -1943,6 +1958,7 @@ static int add_link_argument(CompilerOptions *options, const char *argument) {
 
 int main(int argc, char *argv[]) {
   CompilerOptions options = {0};
+  mettle_compiler_crash_install(argc, argv);
   char *auto_stdlib_directory = NULL;
   char *auto_runtime_directory = NULL;
   char *build_output_filename = NULL;
@@ -2022,6 +2038,8 @@ int main(int argc, char *argv[]) {
       options.generate_debug_symbols = 1;
       options.generate_line_mapping = 1;
       options.generate_stack_trace_support = 1;
+    } else if (strcmp(argv[i], "--dump-ir") == 0) {
+      options.dump_ir = 1;
     } else if (strcmp(argv[i], "-g") == 0 ||
                strcmp(argv[i], "--debug-symbols") == 0) {
       options.generate_debug_symbols = 1;
@@ -2047,6 +2065,12 @@ int main(int argc, char *argv[]) {
       options.prelude = 1;
     } else if (strcmp(argv[i], "--profile") == 0) {
       options.profile = 1;
+    } else if (strcmp(argv[i], "--profile-runtime") == 0) {
+      options.profile_runtime = 1;
+    } else if (strcmp(argv[i], "--profile-runtime-ops") == 0) {
+      options.profile_runtime_ops = 1;
+    } else if (strcmp(argv[i], "--debug-compiler") == 0) {
+      options.debug_compiler = 1;
     } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
       print_usage(argv[0]);
       return 0;
@@ -2203,6 +2227,117 @@ int main(int argc, char *argv[]) {
   return result;
 }
 
+static int compile_read_source(const char *filename, char **out_source) {
+  *out_source = read_file(filename);
+  if (!*out_source) {
+    fprintf(stderr, "Error: Could not read file '%s'\n", filename);
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_lex_and_parse(Parser *parser, ErrorReporter *error_reporter,
+                                 ASTNode **out_program) {
+  *out_program = parser_parse_program(parser);
+  if (!*out_program || parser->had_error ||
+      error_reporter_has_errors(error_reporter)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Parse error: %s\n",
+              parser->error_message ? parser->error_message : "Unknown error");
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_resolve_imports(ASTNode *program, const char *input_filename,
+                                   ErrorReporter *error_reporter,
+                                   ImportResolverOptions *import_options) {
+  if (!resolve_imports_with_options(program, input_filename, error_reporter,
+                                    import_options)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Import resolution error\n");
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_monomorphize(ASTNode *program,
+                                ErrorReporter *error_reporter) {
+  if (!monomorphize_program(program, error_reporter)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Generic monomorphization error\n");
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_type_check(TypeChecker *type_checker, ASTNode *program,
+                              ErrorReporter *error_reporter) {
+  if (!type_checker_check_program(type_checker, program)) {
+    if (error_reporter_has_errors(error_reporter)) {
+      error_reporter_print_errors(error_reporter);
+    } else {
+      fprintf(stderr, "Type error: %s\n",
+              type_checker->error_message ? type_checker->error_message
+                                          : "Unknown error");
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_lower_to_ir(ASTNode *program, TypeChecker *type_checker,
+                               SymbolTable *symbol_table,
+                               int emit_runtime_checks,
+                               IRProgram **out_ir_program,
+                               char **out_ir_error) {
+  *out_ir_program = ir_lower_program(program, type_checker, symbol_table,
+                                     out_ir_error, emit_runtime_checks);
+  if (!*out_ir_program) {
+    mettle_compiler_ice_report("IR lowering failed",
+                               *out_ir_error ? *out_ir_error : NULL);
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_optimize_ir(IRProgram *ir_program,
+                               CompilerOptions *options) {
+  IROptimizeOptions ir_optimize_options = {0};
+  ir_optimize_options.preserve_function_boundaries =
+      options->profile_runtime ? 1 : 0;
+  if (!ir_optimize_program(ir_program, &ir_optimize_options)) {
+    mettle_compiler_ice_report("IR optimization failed", NULL);
+    return 0;
+  }
+  return 1;
+}
+
+static int compile_generate_code(CodeGenerator *code_generator,
+                                 ASTNode *program) {
+  if (!code_generator_generate_program(code_generator, program)) {
+    fprintf(stderr, "Code generation error: %s\n",
+            (code_generator && code_generator->error_message)
+                ? code_generator->error_message
+                : "Unknown error");
+    mettle_compiler_ice_report("Code generation failed",
+                               code_generator && code_generator->error_message
+                                   ? code_generator->error_message
+                                   : NULL);
+    return 0;
+  }
+  return 1;
+}
+
 int compile_file(const char *input_filename, const char *output_filename,
                  CompilerOptions *options) {
   CompilerProfile profile;
@@ -2210,16 +2345,24 @@ int compile_file(const char *input_filename, const char *output_filename,
 
   compiler_profile_init(&profile, options && options->profile);
 
-  // Read input file
+  mettle_compiler_ctx_reset();
+  mettle_compiler_ctx_set_input_filename(input_filename);
+  mettle_compiler_ctx_set_current_filename(input_filename);
+  if (options) {
+    mettle_compiler_ctx_set_options(options->debug_compiler, options->dump_ir);
+  }
+
+  compiler_set_phase(PROFILE_PHASE_READ_INPUT);
   phase_start = compiler_profile_begin(&profile);
-  char *source = read_file(input_filename);
+  char *source = NULL;
+  int read_ok = compile_read_source(input_filename, &source);
   compiler_profile_add(&profile, PROFILE_PHASE_READ_INPUT, phase_start);
-  if (!source) {
-    fprintf(stderr, "Error: Could not read file '%s'\n", input_filename);
+  if (!read_ok) {
     compiler_profile_print_compile(&profile, input_filename, 1);
     return 1;
   }
 
+  compiler_set_phase(PROFILE_PHASE_INIT);
   phase_start = compiler_profile_begin(&profile);
   ErrorReporter *error_reporter = error_reporter_create(input_filename, source);
   compiler_profile_add(&profile, PROFILE_PHASE_INIT, phase_start);
@@ -2230,20 +2373,19 @@ int compile_file(const char *input_filename, const char *output_filename,
     return 1;
   }
 
+  /* Lexical errors are reported inline by the parser (parser_advance calls
+   * parser_report_lexer_token_error on any TOKEN_ERROR, into this same
+   * error_reporter, and the post-parse check below aborts before codegen).
+   * A separate pre-pass that re-tokenized the whole source just to find those
+   * same errors was pure duplicate work -- a full extra lexer pass over the
+   * input -- so it has been removed. The phase slot is kept (recorded as 0 ms)
+   * to preserve the --profile output layout. */
+  compiler_set_phase(PROFILE_PHASE_LEXICAL_VALIDATION);
   phase_start = compiler_profile_begin(&profile);
-  if (!validate_lexical_phase(source, error_reporter)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_LEXICAL_VALIDATION,
-                         phase_start);
-    error_reporter_print_errors(error_reporter);
-    error_reporter_destroy(error_reporter);
-    free(source);
-    compiler_profile_print_compile(&profile, input_filename, 1);
-    return 1;
-  }
-  compiler_profile_add(&profile, PROFILE_PHASE_LEXICAL_VALIDATION,
-                       phase_start);
+  compiler_profile_add(&profile, PROFILE_PHASE_LEXICAL_VALIDATION, phase_start);
 
   // Initialize compiler components
+  compiler_set_phase(PROFILE_PHASE_INIT);
   phase_start = compiler_profile_begin(&profile);
   Lexer *lexer = lexer_create(source);
   Parser *parser = NULL;
@@ -2345,40 +2487,61 @@ int compile_file(const char *input_filename, const char *output_filename,
 
   code_generator_set_emit_asm_comments(code_generator,
                                        options->strip_asm_comments ? 0 : 1);
+  if (debug_info) {
+    code_generator_set_debug_sidecar_emission(
+        code_generator,
+        (options->debug_mode || options->generate_debug_symbols ||
+         options->generate_line_mapping)
+            ? 1
+            : 0);
+  }
   code_generator_set_stack_trace_support(
       code_generator, options->generate_stack_trace_support ? 1 : 0);
   code_generator_set_eliminate_unreachable_functions(
       code_generator, options->release ? 1 : 0);
+  code_generator_set_profile_runtime(code_generator,
+                                     compiler_options_use_profile_runtime(options)
+                                         ? 1
+                                         : 0);
   compiler_profile_add(&profile, PROFILE_PHASE_INIT, phase_start);
 
   int result = 0;
 
   if (options->emit_object) {
-    if (options->debug_mode || options->generate_debug_symbols ||
-        options->generate_line_mapping ||
-        options->generate_stack_trace_support) {
+    if ((options->debug_mode || options->generate_debug_symbols ||
+         options->generate_line_mapping) &&
+        !compiler_options_use_profile_runtime(options)) {
       fprintf(stderr,
               "Error: direct object emission does not yet support debug "
-              "metadata or runtime trace instrumentation\n");
+              "metadata sidecars (DWARF/stabs/debug-map)\n");
+      result = 1;
+      goto cleanup;
+    }
+    if ((options->debug_mode || options->generate_debug_symbols ||
+         options->generate_line_mapping ||
+         options->generate_stack_trace_support) &&
+        compiler_options_use_profile_runtime(options)) {
+      fprintf(stderr,
+              "Error: --profile-runtime cannot be combined with debug metadata "
+              "or runtime trace instrumentation on the direct object backend\n");
       result = 1;
       goto cleanup;
     }
     code_generator_set_backend_mode(code_generator,
                                     CODEGEN_BACKEND_BINARY_OBJECT);
+  } else if (compiler_options_use_profile_runtime(options)) {
+    fprintf(stderr,
+            "Error: --profile-runtime/--profile-runtime-ops require the direct "
+            "object backend (use --build or --emit-obj)\n");
+    result = 1;
+    goto cleanup;
   }
 
-  // Parse the source code
+  compiler_set_phase(PROFILE_PHASE_PARSE);
   phase_start = compiler_profile_begin(&profile);
-  program = parser_parse_program(parser);
+  int parse_ok = compile_lex_and_parse(parser, error_reporter, &program);
   compiler_profile_add(&profile, PROFILE_PHASE_PARSE, phase_start);
-  if (!program || parser->had_error ||
-      error_reporter_has_errors(error_reporter)) {
-    if (error_reporter_has_errors(error_reporter)) {
-      error_reporter_print_errors(error_reporter);
-    } else {
-      fprintf(stderr, "Parse error: %s\n",
-              parser->error_message ? parser->error_message : "Unknown error");
-    }
+  if (!parse_ok) {
     result = 1;
     goto cleanup;
   }
@@ -2397,6 +2560,7 @@ int compile_file(const char *input_filename, const char *output_filename,
   }
 
   // Auto-inject the standard prelude only when --prelude was specified.
+  compiler_set_phase(PROFILE_PHASE_PRELUDE);
   phase_start = compiler_profile_begin(&profile);
   if (options->prelude) {
     Program *prog_data = (Program *)program->data;
@@ -2422,80 +2586,82 @@ int compile_file(const char *input_filename, const char *output_filename,
   }
   compiler_profile_add(&profile, PROFILE_PHASE_PRELUDE, phase_start);
 
+  compiler_set_phase(PROFILE_PHASE_IMPORTS);
   phase_start = compiler_profile_begin(&profile);
-  if (!resolve_imports_with_options(program, input_filename, error_reporter,
-                                    &import_options)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_IMPORTS, phase_start);
-    if (error_reporter_has_errors(error_reporter)) {
-      error_reporter_print_errors(error_reporter);
-    } else {
-      fprintf(stderr, "Import resolution error\n");
-    }
-    result = 1;
-    goto cleanup;
-  }
+  int imports_ok = compile_resolve_imports(program, input_filename,
+                                           error_reporter, &import_options);
   compiler_profile_add(&profile, PROFILE_PHASE_IMPORTS, phase_start);
-
-  // Monomorphize generics (before type checking)
-  phase_start = compiler_profile_begin(&profile);
-  if (!monomorphize_program(program, error_reporter)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_MONOMORPHIZE, phase_start);
-    if (error_reporter_has_errors(error_reporter)) {
-      error_reporter_print_errors(error_reporter);
-    } else {
-      fprintf(stderr, "Generic monomorphization error\n");
-    }
+  if (!imports_ok) {
     result = 1;
     goto cleanup;
   }
+
+  options->main_wants_argc_argv = program_main_wants_argc_argv(program);
+
+  compiler_set_phase(PROFILE_PHASE_MONOMORPHIZE);
+  phase_start = compiler_profile_begin(&profile);
+  int mono_ok = compile_monomorphize(program, error_reporter);
   compiler_profile_add(&profile, PROFILE_PHASE_MONOMORPHIZE, phase_start);
-
-  // Type checking
-  phase_start = compiler_profile_begin(&profile);
-  if (!type_checker_check_program(type_checker, program)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_TYPE_CHECK, phase_start);
-    if (error_reporter_has_errors(error_reporter)) {
-      error_reporter_print_errors(error_reporter);
-    } else {
-      fprintf(stderr, "Type error: %s\n",
-              type_checker->error_message ? type_checker->error_message
-                                          : "Unknown error");
-    }
+  if (!mono_ok) {
     result = 1;
     goto cleanup;
   }
+
+  compiler_set_phase(PROFILE_PHASE_TYPE_CHECK);
+  phase_start = compiler_profile_begin(&profile);
+  int tc_ok = compile_type_check(type_checker, program, error_reporter);
   compiler_profile_add(&profile, PROFILE_PHASE_TYPE_CHECK, phase_start);
-
-  // Lower to the compiler IR before backend code generation.
-  int emit_runtime_checks = options->release ? 0 : 1;
-  phase_start = compiler_profile_begin(&profile);
-  ir_program =
-      ir_lower_program(program, type_checker, symbol_table, &ir_error_message,
-                       emit_runtime_checks);
-  compiler_profile_add(&profile, PROFILE_PHASE_IR_LOWERING, phase_start);
-  if (!ir_program) {
-    fprintf(stderr, "IR lowering error: %s\n",
-            ir_error_message ? ir_error_message : "Unknown error");
+  if (!tc_ok) {
     result = 1;
     goto cleanup;
   }
 
-  if (options->optimize) {
-    phase_start = compiler_profile_begin(&profile);
-    if (!ir_optimize_program(ir_program)) {
-      compiler_profile_add(&profile, PROFILE_PHASE_IR_OPTIMIZATION,
-                           phase_start);
-      fprintf(stderr, "IR optimization error\n");
+  int emit_runtime_checks = options->release ? 0 : 1;
+  compiler_set_phase(PROFILE_PHASE_IR_LOWERING);
+  phase_start = compiler_profile_begin(&profile);
+  int ir_ok = compile_lower_to_ir(program, type_checker, symbol_table,
+                                   emit_runtime_checks, &ir_program,
+                                   &ir_error_message);
+  compiler_profile_add(&profile, PROFILE_PHASE_IR_LOWERING, phase_start);
+  if (!ir_ok) {
+    result = 1;
+    goto cleanup;
+  }
+
+  mettle_compiler_ctx_set_ir_program(ir_program);
+
+  if (compiler_options_use_profile_runtime(options)) {
+    if (!ir_profile_instrument_program(ir_program)) {
+      fprintf(stderr, "Error: Failed to instrument IR for runtime profiling\n");
       result = 1;
       goto cleanup;
     }
-    compiler_profile_add(&profile, PROFILE_PHASE_IR_OPTIMIZATION,
-                         phase_start);
+  }
+
+  if (options->optimize) {
+    compiler_set_phase(PROFILE_PHASE_IR_OPTIMIZATION);
+    phase_start = compiler_profile_begin(&profile);
+    int opt_ok = compile_optimize_ir(ir_program, options);
+    compiler_profile_add(&profile, PROFILE_PHASE_IR_OPTIMIZATION, phase_start);
+    if (!opt_ok) {
+      result = 1;
+      goto cleanup;
+    }
+  }
+
+  if (options->profile_runtime_ops) {
+    if (!ir_profile_instrument_operation_counters(ir_program)) {
+      fprintf(stderr,
+              "Error: Failed to instrument IR operation counters for runtime profiling\n");
+      result = 1;
+      goto cleanup;
+    }
   }
 
   code_generator_set_ir_program(code_generator, ir_program);
 
-  if (options->debug_mode || (options->optimize && !options->release)) {
+  if (options->debug_mode || options->dump_ir) {
+    compiler_set_phase(PROFILE_PHASE_IR_DUMP);
     phase_start = compiler_profile_begin(&profile);
     char *ir_output = build_sidecar_filename(output_filename, ".ir");
     if (!ir_output) {
@@ -2522,19 +2688,16 @@ int compile_file(const char *input_filename, const char *output_filename,
     compiler_profile_add(&profile, PROFILE_PHASE_IR_DUMP, phase_start);
   }
 
-  // Generate code
+  compiler_set_phase(PROFILE_PHASE_CODEGEN);
   phase_start = compiler_profile_begin(&profile);
-  if (!code_generator_generate_program(code_generator, program)) {
-    compiler_profile_add(&profile, PROFILE_PHASE_CODEGEN, phase_start);
-    fprintf(stderr, "Code generation error: %s\n",
-            (code_generator && code_generator->error_message)
-                ? code_generator->error_message
-                : "Unknown error");
+  int codegen_ok = compile_generate_code(code_generator, program);
+  compiler_profile_add(&profile, PROFILE_PHASE_CODEGEN, phase_start);
+  if (!codegen_ok) {
     result = 1;
     goto cleanup;
   }
-  compiler_profile_add(&profile, PROFILE_PHASE_CODEGEN, phase_start);
 
+  compiler_set_phase(PROFILE_PHASE_WRITE_OUTPUT);
   phase_start = compiler_profile_begin(&profile);
   if (options->emit_object) {
     BinaryEmitter *binary_emitter =
@@ -2567,6 +2730,7 @@ int compile_file(const char *input_filename, const char *output_filename,
   compiler_profile_add(&profile, PROFILE_PHASE_WRITE_OUTPUT, phase_start);
 
   // Generate debug information files if requested
+  compiler_set_phase(PROFILE_PHASE_DEBUG_INFO);
   phase_start = compiler_profile_begin(&profile);
   if (debug_info) {
     if (options->debug_mode || options->generate_debug_symbols ||
@@ -2631,6 +2795,7 @@ int compile_file(const char *input_filename, const char *output_filename,
 
 cleanup:
   // Clean up resources
+  compiler_set_phase(PROFILE_PHASE_CLEANUP);
   phase_start = compiler_profile_begin(&profile);
   if (program)
     ast_destroy_node(program);
@@ -2676,6 +2841,7 @@ void print_usage(const char *program_name) {
   printf("  --link-arg <arg>    Pass an extra linker argument (repeatable; "
          "use with --build)\n");
   printf("  -d, --debug         Enable debug output and symbols\n");
+  printf("  --dump-ir           Write optimized IR sidecar (.ir) without debug metadata\n");
   printf("  -g, --debug-symbols Generate debug symbols\n");
   printf("  -l, --line-mapping  Generate source line mapping\n");
   printf("  -s, --stack-trace   Embed runtime crash traceback support\n");
@@ -2688,6 +2854,11 @@ void print_usage(const char *program_name) {
   printf("  --prelude           Auto-import the standard prelude (std/io, "
          "std/net, etc.)\n");
   printf("  --profile           Print per-phase compilation timings\n");
+  printf("  --profile-runtime   Emit function-level runtime timing report "
+         "(disables inlining)\n");
+  printf("  --profile-runtime-ops  Emit runtime op-class counters per function "
+         "(after optimization)\n");
+  printf("  --debug-compiler    Track compiler context for internal error reports\n");
   printf("  -h, --help          Show this help message\n");
   printf("\nExamples:\n");
   printf("  %s app.mettle -o app.s\n", program_name);

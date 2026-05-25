@@ -23,6 +23,7 @@ typedef struct {
   const char *input_filename;
   const char *output_filename;
   int debug_mode;
+  int dump_ir;
   int optimize;
   int release;
   int strip_asm_comments;
@@ -38,10 +39,13 @@ typedef struct {
   const char *stdlib_directory;
   int prelude;
   int profile;
+  int profile_runtime;
+  int profile_runtime_ops;
+  int debug_compiler;
+  int main_wants_argc_argv;
   LinkerMode linker_mode;
 } CompilerOptions;
 
-// Function declarations
 int compile_file(const char *input_filename, const char *output_filename,
                  CompilerOptions *options);
 void print_usage(const char *program_name);

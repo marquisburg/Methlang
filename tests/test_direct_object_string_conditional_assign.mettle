@@ -1,0 +1,16 @@
+import "std/io";
+
+function emit_label(flag: int32) {
+  var label: string = "[-] ";
+  if (flag != 0) {
+    label = "[+] ";
+  }
+  print(label.chars);
+}
+
+function main() -> int32 {
+  emit_label(0);
+  emit_label(1);
+  print(cstr("\n"));
+  return 0;
+}

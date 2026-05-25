@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "error_reporter.h"
+#include "../common.h"
 #include "../parser/ast.h"
 #include <errno.h>
 #include <stdio.h>
@@ -29,15 +30,6 @@
 /* Maximum source-line width in the snippet before truncation with "…" */
 #define SNIPPET_MAX_COLS 120
 
-/* Portable strdup — MSVC deprecates the POSIX name */
-static char *er_strdup(const char *s) {
-  if (!s) return NULL;
-  size_t n = strlen(s) + 1;
-  char *copy = malloc(n);
-  if (copy) memcpy(copy, s, n);
-  return copy;
-}
-
 /* All diagnostic output goes to stderr so it doesn't pollute stdout pipelines */
 #define DIAG_STREAM stderr
 
@@ -59,46 +51,56 @@ static void error_reporter_enable_vt_windows(void) {
 #endif
 
 static int error_reporter_should_use_color(void) {
+  static int cached = -1;
+  if (cached >= 0) return cached;
+
   /* CLICOLOR_FORCE=1 overrides everything (force color even when not a tty) */
   const char *force = getenv("CLICOLOR_FORCE");
   if (force && force[0] != '\0' && strcmp(force, "0") != 0) {
 #ifdef _WIN32
     error_reporter_enable_vt_windows();
 #endif
-    return 1;
+    cached = 1;
+    return cached;
   }
 
   /* NO_COLOR disables color (https://no-color.org/) */
   const char *no_color = getenv("NO_COLOR");
   if (no_color && no_color[0] != '\0') {
-    return 0;
+    cached = 0;
+    return cached;
   }
 
-  /* TERM=dumb — no sequences */
+  /* TERM=dumb - no sequences */
   const char *term = getenv("TERM");
   if (term && strcmp(term, "dumb") == 0) {
-    return 0;
+    cached = 0;
+    return cached;
   }
 
   /* CLICOLOR=0 disables even when tty */
   const char *clicolor = getenv("CLICOLOR");
   if (clicolor && strcmp(clicolor, "0") == 0) {
-    return 0;
+    cached = 0;
+    return cached;
   }
 
   /* Only color when stderr is a tty */
   int fd = fileno(DIAG_STREAM);
   if (fd < 0) {
-    return 0;
+    cached = 0;
+    return cached;
   }
   if (!isatty(fd)) {
-    return 0;
+    cached = 0;
+    return cached;
   }
 
 #ifdef _WIN32
   error_reporter_enable_vt_windows();
 #endif
-  return 1;
+  cached = 1;
+  return cached;
 }
 
 /* Return the short error-code string for an ErrorType */
@@ -140,7 +142,7 @@ ErrorReporter *error_reporter_create(const char *filename,
   reporter->capacity = INITIAL_ERROR_CAPACITY;
   reporter->max_errors = MAX_ERRORS_DEFAULT;
   reporter->source_code = source_code;
-  reporter->filename = filename ? er_strdup(filename) : NULL;
+  reporter->filename = filename ? mettle_strdup(filename) : NULL;
   reporter->sources = NULL;
   reporter->source_count = 0;
   reporter->source_capacity = 0;
@@ -213,7 +215,7 @@ int error_reporter_register_source(ErrorReporter *reporter,
   ErrorReporterSource *existing =
       (ErrorReporterSource *)error_reporter_find_source(reporter, filename);
   if (existing) {
-    char *source_copy = er_strdup(source_code);
+    char *source_copy = mettle_strdup(source_code);
     if (!source_copy) {
       return 0;
     }
@@ -235,8 +237,8 @@ int error_reporter_register_source(ErrorReporter *reporter,
   }
 
   ErrorReporterSource *entry = &reporter->sources[reporter->source_count];
-  entry->filename = er_strdup(filename);
-  entry->source_code = er_strdup(source_code);
+  entry->filename = mettle_strdup(filename);
+  entry->source_code = mettle_strdup(source_code);
   if (!entry->filename || !entry->source_code) {
     free(entry->filename);
     free(entry->source_code);
@@ -309,15 +311,10 @@ void error_reporter_add_error_with_suggestion(ErrorReporter *reporter,
                                                     message, suggestion);
 }
 
-void error_reporter_add_error_with_span(ErrorReporter *reporter, ErrorType type,
-                                        SourceSpan span, const char *message) {
-  error_reporter_add_error_with_span_and_suggestion(reporter, type, span,
-                                                    message, NULL);
-}
-
-void error_reporter_add_error_with_span_and_suggestion(
-    ErrorReporter *reporter, ErrorType type, SourceSpan span, const char *message,
-    const char *suggestion) {
+static void error_reporter_add_report(ErrorReporter *reporter,
+                                      ErrorSeverity severity, SourceSpan span,
+                                      ErrorType type, const char *message,
+                                      const char *suggestion) {
   if (!reporter || reporter->count >= reporter->max_errors)
     return;
 
@@ -336,19 +333,32 @@ void error_reporter_add_error_with_span_and_suggestion(
 
   ErrorReport *error = &reporter->errors[reporter->count];
   error->type = type;
-  error->severity = DIAG_SEVERITY_ERROR;
+  error->severity = severity;
   error->location = source_location_create(span.line, span.column);
   error->location.filename = filename;
   error->span = span;
   error->span.filename = filename;
-  error->filename = filename ? er_strdup(filename) : NULL;
+  error->filename = filename ? mettle_strdup(filename) : NULL;
   error->source_code = source_code;
-  error->message = er_strdup(message);
-  error->suggestion = suggestion ? er_strdup(suggestion) : NULL;
+  error->message = mettle_strdup(message);
+  error->suggestion = suggestion ? mettle_strdup(suggestion) : NULL;
   error->code_snippet =
       error_reporter_get_line_from_source(source_code, span.line);
 
   reporter->count++;
+}
+
+void error_reporter_add_error_with_span(ErrorReporter *reporter, ErrorType type,
+                                        SourceSpan span, const char *message) {
+  error_reporter_add_error_with_span_and_suggestion(reporter, type, span,
+                                                    message, NULL);
+}
+
+void error_reporter_add_error_with_span_and_suggestion(
+    ErrorReporter *reporter, ErrorType type, SourceSpan span, const char *message,
+    const char *suggestion) {
+  error_reporter_add_report(reporter, DIAG_SEVERITY_ERROR, span, type, message,
+                            suggestion);
 }
 
 void error_reporter_add_warning(ErrorReporter *reporter, ErrorType type,
@@ -359,61 +369,8 @@ void error_reporter_add_warning(ErrorReporter *reporter, ErrorType type,
 
 void error_reporter_add_warning_with_span(ErrorReporter *reporter, ErrorType type,
                                           SourceSpan span, const char *message) {
-  if (!reporter || reporter->count >= reporter->max_errors)
-    return;
-
-  if (!error_reporter_expand_capacity(reporter))
-    return;
-
-  if (span.length == 0)
-    span.length = 1;
-
-  const char *filename =
-      span.filename ? span.filename : reporter->current_filename;
-  const ErrorReporterSource *source_entry =
-      filename ? error_reporter_find_source(reporter, filename) : NULL;
-  const char *source_code =
-      source_entry ? source_entry->source_code : reporter->current_source_code;
-
-  ErrorReport *error = &reporter->errors[reporter->count];
-  error->type = type;
-  error->severity = DIAG_SEVERITY_WARNING;
-  error->location = source_location_create(span.line, span.column);
-  error->location.filename = filename;
-  error->span = span;
-  error->span.filename = filename;
-  error->filename = filename ? er_strdup(filename) : NULL;
-  error->source_code = source_code;
-  error->message = er_strdup(message);
-  error->suggestion = NULL;
-  error->code_snippet =
-      error_reporter_get_line_from_source(source_code, span.line);
-
-  reporter->count++;
-}
-
-void error_reporter_add_note(ErrorReporter *reporter, const char *message) {
-  if (!reporter || reporter->count == 0)
-    return;
-  if (reporter->count >= reporter->max_errors)
-    return;
-  if (!error_reporter_expand_capacity(reporter))
-    return;
-
-  /* Inherit type and location from the preceding diagnostic */
-  const ErrorReport *parent = &reporter->errors[reporter->count - 1];
-  ErrorReport *note = &reporter->errors[reporter->count];
-  note->type = parent->type;
-  note->severity = DIAG_SEVERITY_NOTE_OF;
-  note->location = parent->location;
-  note->span = parent->span;
-  note->filename = parent->filename ? er_strdup(parent->filename) : NULL;
-  note->source_code = parent->source_code;
-  note->message = er_strdup(message);
-  note->suggestion = NULL;
-  note->code_snippet = NULL; /* notes don't re-print the snippet */
-
-  reporter->count++;
+  error_reporter_add_report(reporter, DIAG_SEVERITY_WARNING, span, type,
+                            message, NULL);
 }
 
 void error_reporter_print_errors(ErrorReporter *reporter) {
@@ -631,7 +588,6 @@ char *error_reporter_get_line_from_source(const char *source,
   const char *line_start = source;
   const char *line_end = source;
 
-  // Find the start of the target line
   while (*line_end && current_line < line_number) {
     if (*line_end == '\n') {
       current_line++;
@@ -643,12 +599,10 @@ char *error_reporter_get_line_from_source(const char *source,
   if (current_line != line_number)
     return NULL;
 
-  // Find the end of the line
   while (*line_end && *line_end != '\n') {
     line_end++;
   }
 
-  // Copy the line
   size_t line_length = line_end - line_start;
   char *line = malloc(line_length + 1);
   if (!line)
@@ -669,12 +623,10 @@ char *error_reporter_create_caret_line(size_t column, size_t length) {
   if (!caret_line)
     return NULL;
 
-  // Fill with spaces up to the error column
   for (size_t i = 0; i < column - 1; i++) {
     caret_line[i] = ' ';
   }
 
-  // Add carets for the error length
   for (size_t i = column - 1; i < column - 1 + (length > 0 ? length : 1); i++) {
     caret_line[i] = '^';
   }
@@ -687,7 +639,6 @@ const char *error_reporter_suggest_for_token(const char *token) {
   if (!token)
     return NULL;
 
-  // Common typos and suggestions
   if (strcmp(token, "fucntion") == 0)
     return "did you mean 'function'?";
   if (strcmp(token, "retrun") == 0)
@@ -800,7 +751,7 @@ char *error_reporter_closest_candidate(const char *name,
     }
   }
 
-  return best ? er_strdup(best) : NULL;
+  return best ? mettle_strdup(best) : NULL;
 }
 
 /* Returns a heap-allocated suggestion string the caller must free, or NULL. */
@@ -815,17 +766,17 @@ char *error_reporter_suggest_for_type_mismatch(const char *expected,
   if ((strcmp(expected, "int32") == 0 && strcmp(actual, "int64") == 0) ||
       (strcmp(expected, "int64") == 0 && strcmp(actual, "int32") == 0)) {
     snprintf(buf, sizeof(buf), "consider explicit casting: (%s)value", expected);
-    return er_strdup(buf);
+    return mettle_strdup(buf);
   }
 
   /* Suggest string literal for string type */
   if (strcmp(expected, "string") == 0 && strcmp(actual, "int32") == 0) {
-    return er_strdup("use string literal with double quotes: \"value\"");
+    return mettle_strdup("use string literal with double quotes: \"value\"");
   }
 
   /* Suggest numeric literal for numeric types */
   if (strstr(expected, "int") && strcmp(actual, "string") == 0) {
-    return er_strdup("use numeric literal without quotes: 42");
+    return mettle_strdup("use numeric literal without quotes: 42");
   }
 
   return NULL;

@@ -1,0 +1,31 @@
+// Generic indexed-loop shape: should lower to pointer induction, not stay on i<<2.
+
+function map_inc(src: int32*, dst: int32*, n: int64) -> int64 {
+  var sum: int64 = 0;
+  var i: int64 = 0;
+  while (i < n) {
+    var v: int32 = src[i] + 1;
+    dst[i] = v;
+    sum = sum + (int64)v;
+    i = i + 1;
+  }
+  return sum;
+}
+
+function main() -> int32 {
+  var src: int32[8];
+  var dst: int32[8];
+  var n: int64 = 8;
+
+  var i: int64 = 0;
+  while (i < n) {
+    src[i] = (int32)i;
+    i = i + 1;
+  }
+
+  var result: int64 = map_inc(&src[0], &dst[0], n);
+  if (result != 36) {
+    return 2;
+  }
+  return 0;
+}

@@ -22,17 +22,20 @@ static int is_space(unsigned char c) {
 static int64_t word_count(const unsigned char *buf, int64_t len) {
     int64_t count = 0;
     int in_word = 0;
+
     for (int64_t i = 0; i < len; i++) {
         unsigned char c = buf[i];
-        if (is_space(c)) {
+
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
             in_word = 0;
         } else {
-            if (!in_word) {
+            if (in_word == 0) {
                 count++;
             }
             in_word = 1;
         }
     }
+
     return count;
 }
 
@@ -58,7 +61,7 @@ int main(void) {
 
     int64_t wc = word_count(buf, buf_size);
 
-    const int passes = 500;
+    const int passes = 200;
     uint64_t t0 = bench_time_us();
     int64_t total = 0;
     for (int p = 0; p < passes; p++) {
@@ -68,7 +71,7 @@ int main(void) {
 
     printf("Word count: 256 KB buffer (a b pattern)\n");
     printf("Words = %" PRId64 "\n", wc);
-    printf("Benchmark: 500 passes (word_count)\n");
+    printf("Benchmark: 200 passes (word_count)\n");
     printf("Total words = %" PRId64 "\n", total);
     printf("Time: %" PRIu64 " us\n", elapsed_us);
 

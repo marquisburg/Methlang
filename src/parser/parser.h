@@ -4,7 +4,6 @@
 #include "../error/error_reporter.h"
 #include "../lexer/lexer.h"
 #include "ast.h"
-#include <string.h>
 
 typedef struct {
   Lexer *lexer;
@@ -46,7 +45,6 @@ ASTNode *parser_parse_trait_declaration(Parser *parser);
 ASTNode *parser_parse_impl_declaration(Parser *parser);
 ASTNode *parser_parse_method_declaration(Parser *parser);
 ASTNode *parser_parse_inline_asm(Parser *parser);
-ASTNode *parser_parse_assignment(Parser *parser);
 ASTNode *parser_parse_return_statement(Parser *parser);
 ASTNode *parser_parse_if_statement(Parser *parser);
 ASTNode *parser_parse_while_statement(Parser *parser);
@@ -69,7 +67,6 @@ void parser_set_error_with_suggestion(Parser *parser, const char *message,
                                       const char *suggestion);
 void parser_recover_from_error(Parser *parser);
 void parser_synchronize(Parser *parser);
-int parser_is_at_statement_boundary(Parser *parser);
 int parser_get_operator_precedence(TokenType type);
 int parser_is_binary_operator(TokenType type);
 int parser_is_unary_operator(TokenType type);

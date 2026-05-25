@@ -3,7 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Variable declaration implementation functions
+#define CODEGEN_PTR_SIZE 8
+
 void code_generator_generate_global_variable(CodeGenerator *generator,
                                              ASTNode *var_declaration) {
   if (!generator || !var_declaration ||
@@ -39,7 +40,7 @@ void code_generator_generate_global_variable(CodeGenerator *generator,
         code_generator_calculate_variable_size(generator, var_data->type_name);
   }
   if (var_size <= 0) {
-    var_size = 8; // Default to 8 bytes for unknown types
+    var_size = CODEGEN_PTR_SIZE;
   }
 
   code_generator_emit_to_global_buffer(
@@ -215,10 +216,10 @@ void code_generator_generate_local_variable(CodeGenerator *generator,
         code_generator_calculate_variable_size(generator, resolved_type_name);
   }
   if (var_size <= 0) {
-    var_size = 8; // Default to 8 bytes for unknown types
+    var_size = CODEGEN_PTR_SIZE;
   }
 
-  int alignment = (var_size > 4) ? 8 : var_size; // Align to size, max 8
+  int alignment = (var_size > 4) ? CODEGEN_PTR_SIZE : var_size;
   int offset =
       code_generator_allocate_stack_space(generator, var_size, alignment);
 
@@ -260,6 +261,16 @@ void code_generator_generate_variable_initialization(CodeGenerator *generator,
 
   // Generate the initializer expression
   code_generator_generate_expression(generator, initializer);
+  if (symbol->type && symbol->type->kind == TYPE_POINTER &&
+      symbol->type->name && strcmp(symbol->type->name, "cstring") == 0) {
+    Type *initializer_type =
+        code_generator_infer_expression_type(generator, initializer);
+    if (initializer_type && initializer_type->kind == TYPE_STRING) {
+      code_generator_emit(
+          generator,
+          "    mov rax, qword [rax]  ; Implicit string -> cstring init\n");
+    }
+  }
 
   // Store the result (in rax) to the variable's memory location
   if (symbol->data.variable.is_in_register) {
@@ -429,7 +440,7 @@ int code_generator_calculate_variable_size(CodeGenerator *generator,
   (void)generator; // Suppress unused parameter warning
 
   if (!type_name) {
-    return 8; // Default size for unknown types
+    return CODEGEN_PTR_SIZE;
   }
 
   // Basic type size mapping - comprehensive coverage
@@ -449,11 +460,11 @@ int code_generator_calculate_variable_size(CodeGenerator *generator,
   } else if (strcmp(type_name, "float64") == 0) {
     return 8;
   } else if (strcmp(type_name, "string") == 0) {
-    return 8; // String is a pointer to char array
+    return CODEGEN_PTR_SIZE;
   } else if (strcmp(type_name, "void") == 0) {
     return 0; // Void type has no size
   } else if (strstr(type_name, "*") != NULL) {
-    return 8; // All pointers are 8 bytes on x86-64
+    return CODEGEN_PTR_SIZE;
   } else if (strstr(type_name, "[") != NULL) {
     const char *lbracket = strchr(type_name, '[');
     const char *rbracket = lbracket ? strchr(lbracket, ']') : NULL;
@@ -473,7 +484,7 @@ int code_generator_calculate_variable_size(CodeGenerator *generator,
         }
       }
     }
-    return 8;
+    return CODEGEN_PTR_SIZE;
   }
 
   // Check if it's a struct type by looking it up in symbol table
@@ -486,8 +497,7 @@ int code_generator_calculate_variable_size(CodeGenerator *generator,
     }
   }
 
-  // For unknown types, assume pointer size (8 bytes on x86-64)
-  return 8;
+  return CODEGEN_PTR_SIZE;
 }
 
 int code_generator_allocate_stack_space(CodeGenerator *generator, int size,

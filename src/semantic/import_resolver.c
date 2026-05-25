@@ -2,9 +2,11 @@
 #define _GNU_SOURCE
 #endif
 #include "import_resolver.h"
+#include "../compiler/compiler_context.h"
 #include "../lexer/lexer.h"
 #include "../parser/parser.h"
 #include "../string_intern.h"
+#include "../common.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -494,15 +496,6 @@ typedef struct RewriteScope {
 
 static const char *get_declaration_name(ASTNode *decl);
 
-static void free_ast_compatible_string(char *value) {
-  if (!value) {
-    return;
-  }
-  if (!string_is_interned(value)) {
-    free(value);
-  }
-}
-
 static int replace_interned_string(char **slot, const char *value) {
   char *replacement = NULL;
 
@@ -517,7 +510,7 @@ static int replace_interned_string(char **slot, const char *value) {
     }
   }
 
-  free_ast_compatible_string(*slot);
+  mettle_free_string(*slot);
   *slot = replacement;
   return 1;
 }
@@ -565,13 +558,7 @@ static char *duplicate_string_slice(const char *value, size_t length) {
 }
 
 static void free_string_array(char **items, size_t count) {
-  if (!items) {
-    return;
-  }
-  for (size_t i = 0; i < count; i++) {
-    free(items[i]);
-  }
-  free(items);
+  mettle_free_string_array(items, count);
 }
 
 static int clone_string_array(char **items, size_t count, char ***out_items,
@@ -1454,7 +1441,7 @@ static int rewrite_node_names(ASTNode *node, const NameRewrite *rewrites,
         ast_destroy_node(member->object);
         free(old_children);
 
-        free_ast_compatible_string(member->member);
+        mettle_free_string(member->member);
         free(member);
 
         identifier = malloc(sizeof(Identifier));
@@ -2024,15 +2011,6 @@ typedef struct {
   size_t bucket_count;
 } DeclNameMap;
 
-static size_t decl_name_hash(const char *s) {
-  size_t h = (size_t)1469598103934665603ULL;
-  for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
-    h ^= (size_t)*p;
-    h *= (size_t)1099511628211ULL;
-  }
-  return h;
-}
-
 static void decl_name_map_init(DeclNameMap *m, size_t expected_entries) {
   size_t cap = 16;
   while (cap < (expected_entries + 1) * 2) {
@@ -2055,7 +2033,7 @@ static void decl_name_map_put(DeclNameMap *m, const char *key,
     return;
   }
   size_t mask = m->bucket_count - 1;
-  size_t pos = decl_name_hash(key) & mask;
+  size_t pos = mettle_fnv1a_hash(key) & mask;
   while (m->vals[pos] != 0) {
     if (strcmp(m->keys[pos], key) == 0) {
       return; /* first declaration of a name wins, matching prior behavior */
@@ -2072,7 +2050,7 @@ static int decl_name_map_get(const DeclNameMap *m, const char *key,
     return 0;
   }
   size_t mask = m->bucket_count - 1;
-  size_t pos = decl_name_hash(key) & mask;
+  size_t pos = mettle_fnv1a_hash(key) & mask;
   while (m->vals[pos] != 0) {
     if (strcmp(m->keys[pos], key) == 0) {
       *out_index = m->vals[pos] - 1;
@@ -2680,6 +2658,7 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
         *had_error = 1;
         continue;
       }
+      mettle_compiler_ctx_set_current_filename(full_path);
 
       size_t parse_error_count_before =
           ctx->reporter ? (size_t)error_reporter_get_error_count(ctx->reporter)
@@ -3000,6 +2979,7 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
         error_reporter_set_source_context(ctx->reporter,
                                           previous_reporter_filename,
                                           previous_reporter_source);
+        mettle_compiler_ctx_set_current_filename(previous_reporter_filename);
       }
       free(source);
       path_set_remove(ctx->active_files, &ctx->active_count, full_path);

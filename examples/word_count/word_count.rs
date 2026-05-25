@@ -26,7 +26,7 @@ fn word_count(buf: &[u8]) -> i64 {
 
 fn main() {
     const BUF_SIZE: usize = 262_144;
-    const PASSES: i32 = 500;
+    const PASSES: i32 = 200;
     let template: &[u8] = b"a b ";
 
     let mut buf = vec![0u8; BUF_SIZE];

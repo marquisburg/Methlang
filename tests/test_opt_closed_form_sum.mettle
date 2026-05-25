@@ -1,0 +1,67 @@
+// Regression guard for the constant-bound loop unroller.
+//
+// Each function is a counted reduction loop summing a polynomial in the
+// induction variable. The optimizer unrolls these (reduction-unroll + the
+// constant-bound unroller). A past bug left a mutated counter recorded at its
+// stale pre-loop constant in ir_build_symbol_int_map_before, so the unrolled
+// remainder loop ran with the wrong trip count and miscompiled cubes
+// (f(4) returned 1296 instead of 100). This test fails (nonzero exit) if any
+// closed-form result diverges from the scalar truth.
+
+import "std/io";
+
+function sum_i(n: int64) -> int64 {
+  var s: int64 = 0;
+  var i: int64 = 1;
+  while (i <= n) { s = s + i; i = i + 1; }
+  return s;
+}
+
+function sum_i2(n: int64) -> int64 {
+  var s: int64 = 0;
+  var i: int64 = 1;
+  while (i <= n) { s = s + i * i; i = i + 1; }
+  return s;
+}
+
+function sum_affine(n: int64) -> int64 {
+  var s: int64 = 0;
+  var i: int64 = 1;
+  while (i <= n) { s = s + (2 * i + 3); i = i + 1; }
+  return s;
+}
+
+function sum_i3(n: int64) -> int64 {
+  var s: int64 = 0;
+  var i: int64 = 1;
+  while (i <= n) { s = s + i * i * i; i = i + 1; }
+  return s;
+}
+
+function sum_const(n: int64) -> int64 {
+  var s: int64 = 0;
+  var i: int64 = 0;
+  while (i < n) { s = s + 7; i = i + 1; }
+  return s;
+}
+
+function main() -> int32 {
+  var ok: int32 = 1;
+
+  if (sum_i(100) != 5050) { ok = 0; }
+  if (sum_i2(100) != 338350) { ok = 0; }
+  if (sum_affine(100) != 10400) { ok = 0; }   // 100*101 + 3*100
+  if (sum_i3(10) != 3025) { ok = 0; }          // (10*11/2)^2 = 55^2
+  if (sum_i3(4) != 100) { ok = 0; }            // 1+8+27+64 (the regressed case)
+  if (sum_i3(5) != 225) { ok = 0; }            // +125 = 15^2
+  if (sum_const(1000) != 7000) { ok = 0; }
+  if (sum_i(0) != 0) { ok = 0; }               // empty loop
+  if (sum_i2(1) != 1) { ok = 0; }              // single iteration
+
+  if (ok == 1) {
+    println(cstr("closed_form_sum OK"));
+    return 0;
+  }
+  println(cstr("closed_form_sum FAIL"));
+  return 1;
+}

@@ -1,0 +1,66 @@
+// Nim distinct-type equivalent in Mettle
+//
+// Nim:
+//   type Foo = distinct int32;
+//   type Bar = distinct int32;
+//   const a: Foo = 1;
+//   const b: Bar = 2;
+//   const c = cast[Bar]a + b;
+//   const d: Foo = cast b;
+//
+// Mettle has no distinct types; single-field structs are the newtype pattern.
+// Casts are explicit helper functions (Mettle's (Type)expr works on numerics/pointers).
+
+import "std/io";
+
+struct Foo {
+  v: int32;
+}
+
+struct Bar {
+  v: int32;
+}
+
+function cast_bar(x: Foo) -> Bar {
+  var r: Bar;
+  r.v = x.v;
+  return r;
+}
+
+function cast_foo(x: Bar) -> Foo {
+  var r: Foo;
+  r.v = x.v;
+  return r;
+}
+
+function main() -> int32 {
+  var a: Foo;
+  a.v = 1;
+
+  var b: Bar;
+  b.v = 2;
+
+  var a_as_bar: Bar = cast_bar(a);
+  var c: Bar;
+  c.v = a_as_bar.v + b.v;
+
+  var d: Foo = cast_foo(b);
+
+  print(cstr("a (Foo) = "));
+  print_int(a.v);
+  println(cstr(""));
+
+  print(cstr("b (Bar) = "));
+  print_int(b.v);
+  println(cstr(""));
+
+  print(cstr("c = cast[Bar]a + b (Bar) = "));
+  print_int(c.v);
+  println(cstr(""));
+
+  print(cstr("d = cast b (Foo) = "));
+  print_int(d.v);
+  println(cstr(""));
+
+  return c.v - 3;
+}

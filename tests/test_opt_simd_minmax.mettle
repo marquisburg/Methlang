@@ -1,0 +1,35 @@
+// Min/max scan should fuse to simd_minmax_i32 in the inlined hot path.
+
+function minmax_scan(arr: int32*, n: int64) -> int64 {
+  var minv: int32 = arr[0];
+  var maxv: int32 = arr[0];
+  var i: int64 = 1;
+  while (i < n) {
+    var v: int32 = arr[i];
+    if (v < minv) {
+      minv = v;
+    }
+    if (v > maxv) {
+      maxv = v;
+    }
+    i = i + 1;
+  }
+  return (int64)minv + (int64)maxv;
+}
+
+function main() -> int32 {
+  var arr: int32[8];
+  var n: int64 = 8;
+
+  var i: int64 = 0;
+  while (i < n) {
+    arr[i] = (int32)((i * 23 + 7) % 997);
+    i = i + 1;
+  }
+
+  var result: int64 = minmax_scan(&arr[0], n);
+  if (result != 175) {
+    return 2;
+  }
+  return 0;
+}

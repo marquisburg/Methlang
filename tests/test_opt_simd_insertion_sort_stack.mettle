@@ -1,0 +1,77 @@
+function insertion_sort(data: int32*, len: int32) {
+  var i: int32 = 1;
+  var cur: int32* = data + 4;
+  while (i < len) {
+    var key: int32 = *cur;
+    var scan: int32* = cur;
+    var j: int32 = i - 1;
+    while (j >= 0) {
+      var prev: int32* = scan - 4;
+      var current: int32 = *prev;
+      if (current <= key) {
+        break;
+      }
+      *scan = current;
+      scan = prev;
+      j = j - 1;
+    }
+    *scan = key;
+    cur = cur + 4;
+    i = i + 1;
+  }
+}
+
+function checksum(data: int32*, len: int32) -> int64 {
+  var s: int64 = 0;
+  var x: int64 = 0;
+  var i: int32 = 0;
+  while (i < len) {
+    s = s + (int64)data[i];
+    x = x ^ (int64)data[i];
+    i = i + 1;
+  }
+  return s * 1000003 + x;
+}
+
+function is_sorted(data: int32*, len: int32) -> int32 {
+  var i: int32 = 1;
+  while (i < len) {
+    if (data[i] < data[i - 1]) {
+      return 0;
+    }
+    i = i + 1;
+  }
+  return 1;
+}
+
+function run_case(len: int32, seed: int32) -> int32 {
+  var data: int32[129];
+  var i: int32 = 0;
+  var state: int32 = seed;
+  while (i < len) {
+    state = state * 1103515245 + 12345;
+    data[i] = state % 511 - 255;
+    i = i + 1;
+  }
+
+  var before: int64 = checksum(&data[0], len);
+  insertion_sort(&data[0], len);
+  if (is_sorted(&data[0], len) == 0) {
+    return 0;
+  }
+  if (checksum(&data[0], len) != before) {
+    return 0;
+  }
+  return 1;
+}
+
+function main() -> int32 {
+  if (run_case(0, 11) == 0) { return 10; }
+  if (run_case(1, 13) == 0) { return 11; }
+  if (run_case(2, 17) == 0) { return 12; }
+  if (run_case(7, 19) == 0) { return 13; }
+  if (run_case(32, 23) == 0) { return 14; }
+  if (run_case(65, 29) == 0) { return 15; }
+  if (run_case(129, 31) == 0) { return 16; }
+  return 0;
+}

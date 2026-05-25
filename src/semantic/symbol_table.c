@@ -4,6 +4,7 @@
 #include "symbol_table.h"
 #include "../error/error_reporter.h"
 #include "../string_intern.h"
+#include "../common.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,16 +24,6 @@ static int symbol_table_names_equal(const char *lhs, const char *rhs) {
  * symbols across all modules) is what the index exists for. */
 #define SYMBOL_NAME_INDEX_MIN_SYMBOLS 24
 
-static size_t symbol_name_hash(const char *name) {
-  /* FNV-1a over size_t, matching the string interner's hash width. */
-  size_t hash = (size_t)1469598103934665603ULL;
-  for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
-    hash ^= (size_t)*p;
-    hash *= (size_t)1099511628211ULL;
-  }
-  return hash;
-}
-
 /* Rebuilds a scope's hash index from its current symbol array. */
 static int scope_name_index_rebuild(Scope *scope, size_t bucket_count) {
   size_t *buckets = calloc(bucket_count, sizeof(size_t));
@@ -44,7 +35,7 @@ static int scope_name_index_rebuild(Scope *scope, size_t bucket_count) {
     if (!scope->symbols[i] || !scope->symbols[i]->name) {
       continue;
     }
-    size_t pos = symbol_name_hash(scope->symbols[i]->name) & mask;
+    size_t pos = mettle_fnv1a_hash(scope->symbols[i]->name) & mask;
     while (buckets[pos] != 0) {
       pos = (pos + 1) & mask;
     }
@@ -75,21 +66,6 @@ static int scope_name_index_ensure(Scope *scope) {
   return 1;
 }
 
-/* Records that scope->symbols[symbol_index] now exists in the index. The
- * symbol must already be appended to the array. */
-static void scope_name_index_insert(Scope *scope, size_t symbol_index) {
-  if (!scope->name_index || scope->name_index_bucket_count == 0) {
-    return;
-  }
-  size_t mask = scope->name_index_bucket_count - 1;
-  const char *name = scope->symbols[symbol_index]->name;
-  size_t pos = symbol_name_hash(name) & mask;
-  while (scope->name_index[pos] != 0) {
-    pos = (pos + 1) & mask;
-  }
-  scope->name_index[pos] = symbol_index + 1;
-}
-
 /* Called immediately after a symbol is appended at `new_index`. Keeps the
  * scope's name index consistent: ensure() rebuilds and reindexes every
  * symbol (including this one) when the scope first crosses the size threshold
@@ -106,7 +82,7 @@ static void scope_register_appended_symbol(Scope *scope, size_t new_index) {
   /* If a rebuild ran inside ensure() it already placed this symbol; detect
    * that so we don't insert a duplicate bucket entry. */
   size_t mask = scope->name_index_bucket_count - 1;
-  size_t pos = symbol_name_hash(scope->symbols[new_index]->name) & mask;
+  size_t pos = mettle_fnv1a_hash(scope->symbols[new_index]->name) & mask;
   while (scope->name_index[pos] != 0) {
     if (scope->name_index[pos] == new_index + 1) {
       return; /* already indexed by the rebuild */
@@ -121,7 +97,7 @@ static void scope_register_appended_symbol(Scope *scope, size_t new_index) {
 static Symbol *scope_lookup_symbol(Scope *scope, const char *name) {
   if (scope->name_index && scope->name_index_bucket_count > 0) {
     size_t mask = scope->name_index_bucket_count - 1;
-    size_t pos = symbol_name_hash(name) & mask;
+    size_t pos = mettle_fnv1a_hash(name) & mask;
     while (scope->name_index[pos] != 0) {
       size_t idx = scope->name_index[pos] - 1;
       if (scope->symbols[idx] &&
@@ -140,15 +116,6 @@ static Symbol *scope_lookup_symbol(Scope *scope, const char *name) {
     }
   }
   return NULL;
-}
-
-static void symbol_table_free_string(char *value) {
-  if (!value) {
-    return;
-  }
-  if (!string_is_interned(value)) {
-    free(value);
-  }
 }
 
 static const char *symbol_table_effective_link_name(const Symbol *symbol) {
@@ -289,8 +256,8 @@ static void scope_destroy(Scope *scope) {
   for (size_t i = 0; i < scope->symbol_count; i++) {
     Symbol *symbol = scope->symbols[i];
     if (symbol) {
-      symbol_table_free_string(symbol->name);
-      symbol_table_free_string(symbol->link_name);
+      mettle_free_string(symbol->name);
+      mettle_free_string(symbol->link_name);
       if (symbol->kind == SYMBOL_FUNCTION) {
         // Free function parameter names (strings we own)
         for (size_t j = 0; j < symbol->data.function.parameter_count; j++) {
@@ -333,13 +300,13 @@ void symbol_table_destroy(SymbolTable *table) {
   free(table);
 }
 
-void symbol_table_enter_scope(SymbolTable *table, ScopeType type) {
+int symbol_table_enter_scope(SymbolTable *table, ScopeType type) {
   if (!table)
-    return;
+    return 0;
 
   Scope *new_scope = malloc(sizeof(Scope));
   if (!new_scope)
-    return;
+    return 0;
 
   new_scope->type = type;
   new_scope->parent = table->current_scope;
@@ -350,6 +317,7 @@ void symbol_table_enter_scope(SymbolTable *table, ScopeType type) {
   new_scope->name_index_bucket_count = 0;
 
   table->current_scope = new_scope;
+  return 1;
 }
 
 void symbol_table_exit_scope(SymbolTable *table) {
@@ -504,7 +472,7 @@ void type_destroy(Type *type) {
     // Clean up struct-specific fields
     if (type->field_names) {
       for (size_t i = 0; i < type->field_count; i++) {
-        symbol_table_free_string(type->field_names[i]);
+        mettle_free_string(type->field_names[i]);
       }
       free(type->field_names);
     }
@@ -523,7 +491,7 @@ void type_destroy(Type *type) {
     }
     if (type->tagged_variant_names) {
       for (size_t i = 0; i < type->tagged_variant_count; i++) {
-        symbol_table_free_string(type->tagged_variant_names[i]);
+        mettle_free_string(type->tagged_variant_names[i]);
       }
       free(type->tagged_variant_names);
     }
@@ -534,10 +502,10 @@ void type_destroy(Type *type) {
       free(type->tagged_variant_payloads);
     }
     if (type->generic_template_name) {
-      symbol_table_free_string(type->generic_template_name);
+      mettle_free_string(type->generic_template_name);
     }
 
-    symbol_table_free_string(type->name);
+    mettle_free_string(type->name);
     free(type);
   }
 }
@@ -685,8 +653,8 @@ void symbol_destroy(Symbol *symbol) {
   if (!symbol)
     return;
 
-  symbol_table_free_string(symbol->name);
-  symbol_table_free_string(symbol->link_name);
+  mettle_free_string(symbol->name);
+  mettle_free_string(symbol->link_name);
 
   if (symbol->kind == SYMBOL_FUNCTION) {
     // Free function parameter names (strings we own)
@@ -941,22 +909,6 @@ size_t type_get_field_offset(Type *struct_type, const char *field_name) {
   for (size_t i = 0; i < struct_type->field_count; i++) {
     if (symbol_table_names_equal(struct_type->field_names[i], field_name)) {
       return struct_type->field_offsets[i];
-    }
-  }
-
-  return 0; // Field not found
-}
-
-int type_has_field(Type *struct_type, const char *field_name) {
-  if (!struct_type ||
-      (struct_type->kind != TYPE_STRUCT && struct_type->kind != TYPE_STRING) ||
-      !field_name) {
-    return 0;
-  }
-
-  for (size_t i = 0; i < struct_type->field_count; i++) {
-    if (symbol_table_names_equal(struct_type->field_names[i], field_name)) {
-      return 1; // Field found
     }
   }
 

@@ -28,7 +28,7 @@ From the compiler you can also run **`mettle docs`** (and **`mettle help`**) for
 
 ### Syntax highlighting
 
-The TextMate grammar (`syntaxes/meth.tmLanguage.json`) scopes Mettle source as `source.mettle` so themes can color keywords, types, strings, comments, and assembly blocks consistently.
+The TextMate grammar (`syntaxes/mettle.tmLanguage.json`) scopes Mettle source as `source.mettle` so themes can color keywords, types, strings, comments, and assembly blocks consistently.
 
 ### Editor behavior (`language-configuration.json`)
 
@@ -42,7 +42,6 @@ The TextMate grammar (`syntaxes/meth.tmLanguage.json`) scopes Mettle source as `
 
 1. **Regex-based (on open and while typing, debounced)**  
    Fast checks aligned with [known limitations](../docs/known-limitations.md) and the lexer:
-   - No compound assignment (`+=`, `-=`, `*=`, `/=`)
    - Invalid `0x` / `0b` literals, underscores inside numbers
    - Block comments `/* */` (only `//` is valid)
    - Labeled `break` / `continue`
@@ -57,9 +56,9 @@ Regex diagnostics refresh as you edit; **compiler diagnostics run when you save*
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `meth.linter.compilerEnabled` | `true` | Run the compiler for semantic diagnostics on save. |
-| `meth.linter.compilerPath` | *(empty)* | Path to `mettle` (relative to workspace or absolute). Empty: try workspace `bin/mettle(.exe)`, then `mettle` on `PATH`. |
-| `meth.linter.stdlibPath` | *(empty)* | Optional `--stdlib` override; empty uses the compiler’s normal stdlib resolution. |
+| `mettle.linter.compilerEnabled` | `true` | Run the compiler for semantic diagnostics on save. |
+| `mettle.linter.compilerPath` | *(empty)* | Path to `mettle` (relative to workspace or absolute). Empty: try workspace `bin/mettle(.exe)`, then `mettle` on `PATH`. |
+| `mettle.linter.stdlibPath` | *(empty)* | Optional `--stdlib` override; empty uses the compiler’s normal stdlib resolution. |
 
 The linter invokes the compiler similarly to a check build, e.g. `-i <file> -o <temp> -I <file-dir> -I <workspace>` and optional `--stdlib`. See [Compilation](../docs/compilation.md) for CLI details.
 
@@ -69,20 +68,20 @@ The linter invokes the compiler similarly to a check build, e.g. `-i <file> -o <
 
 1. Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
 2. **Developer: Install Extension from Location...**
-3. Choose this `meth-syntax` directory
+3. Choose this `mettle-syntax` directory
 
 ### Option 2: Copy to extensions directory
 
 - **Windows:** `%USERPROFILE%\.vscode\extensions\`
 - **macOS/Linux:** `~/.vscode/extensions/`
 
-Copy the whole `meth-syntax` folder, then reload the window.
+Copy the whole `mettle-syntax` folder, then reload the window.
 
 ### Option 3: Symlink (development)
 
 ```powershell
 # From repo root
-New-Item -ItemType Junction -Path "$env:USERPROFILE\.vscode\extensions\meth-syntax" -Target "$PWD\meth-syntax"
+New-Item -ItemType Junction -Path "$env:USERPROFILE\.vscode\extensions\mettle-syntax" -Target "$PWD\mettle-syntax"
 ```
 
 Reload the editor after installing.

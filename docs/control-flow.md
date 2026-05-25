@@ -12,7 +12,17 @@ ptr->field = value;
 arr[i] = x;
 ```
 
-**Compound assignment** (`+=`, `-=`, `*=`, `/=`) is not supported. Use explicit forms: `x = x + 1` instead of `x += 1`.
+**Compound assignment** (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`) is syntactic sugar for `target = target OP value`, where `OP` is the corresponding binary operator. The left side must be the same kind of lvalue as for plain assignment. Compound assignment is a statement, not an expression—it does not produce a value for use in larger expressions. It is valid in `for`-loop initializers and increments.
+
+```mettle
+count += 1;
+arr[i] *= 2;
+for (var i: int32 = 0; i < 10; i += 1) {
+  // ...
+}
+```
+
+See [Lexical Structure](lexical-structure.md#operators-and-punctuation) for the full operator list.
 
 **Type mismatches** produce a compile error. Assigning a value of incompatible type (e.g. `x = 3.14` where `x` is `int32`) is rejected; the compiler does not silently truncate.
 
