@@ -1,0 +1,70 @@
+name: CI
+
+# Builds the Mettle compiler and runs the full test suite on every push and PR.
+# The suite (tests/run_tests.ps1) asserts MS x64 ABI codegen, so it runs on
+# Windows. build.bat compiles + links bin\mettle.exe, bundles stdlib/runtime,
+# then runs the suite - which ends with a light 60-seed differential-fuzz gate.
+# The heavy fuzz sweep lives in fuzz-nightly.yml.
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch/PR cancels the in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & test (windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python (for differential fuzzer)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Show toolchain versions
+        shell: pwsh
+        run: |
+          gcc --version
+          python --version
+          $PSVersionTable.PSVersion
+
+      # build.bat builds the compiler, bundles stdlib/runtime, then runs
+      # tests/run_tests.ps1 (full suite + 60-seed differential fuzz). It exits
+      # non-zero if the build OR any test fails, so this single step is the gate.
+      - name: Build and run test suite
+        shell: cmd
+        # METTLE_NO_CODEVIEW avoids a MinGW gcc ICE in the CodeView debug-info
+        # emitter on large functions (e.g. lexer_next_token); CI doesn't need
+        # the .pdb-backed ICE backtraces that flag provides.
+        env:
+          METTLE_NO_CODEVIEW: "1"
+        run: build.bat gcc
+
+      # run_tests.ps1 writes generated .s/.ir output to $env:TEMP\Mettle-test-artifacts.
+      # Surface that path so a failed run's codegen can be inspected from the UI.
+      - name: Resolve test artifact dir
+        if: failure()
+        id: artifacts
+        shell: pwsh
+        run: "echo \"dir=$env:TEMP\\Mettle-test-artifacts\" >> $env:GITHUB_OUTPUT"
+
+      - name: Upload assembly artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-test-output
+          path: ${{ steps.artifacts.outputs.dir }}/**
+          if-no-files-found: ignore
+          retention-days: 7

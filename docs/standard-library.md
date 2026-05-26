@@ -109,7 +109,7 @@ Menus and dialogs:
 - `ui_window_set_menu(hwnd, menu)`, `ui_menu_destroy(menu)`
 - `ui_alert(owner, title, text)` displays an informational message box
 
-See `examples/ui_demo/ui_demo.mettle` for a complete sample with custom painting, a menu, timer, fonts, layout helpers, and common controls.
+See `examples/ui_demo/ui_demo.mettle` for a documentation browser that dynamically scans `docs/`, loads Markdown at runtime, and renders styled headings, lists, and code blocks.
 
 ## std/system
 
@@ -117,7 +117,7 @@ Process spawning. `system(cmd: cstring) -> int32` runs a shell command via the C
 
 ## std/dir
 
-Directory and file operations. Requires linking `stdlib/dir_helpers.c`. `dir_exists(path: cstring) -> int32` returns 1 if the path is an existing directory. `dir_create(path: cstring) -> int32` creates a directory (returns 0 on success). `file_exists(path: cstring) -> int32` returns 1 if the path is an existing regular file. `getcwd(buf: cstring, size: int32) -> int32` fills `buf` with the current working directory (returns 0 on success). Cross-platform (Windows and Linux).
+Directory and file operations. Requires linking `stdlib/dir_helpers.c`. `dir_exists(path: cstring) -> int32` returns 1 if the path is an existing directory. `dir_create(path: cstring) -> int32` creates a directory (returns 0 on success). `file_exists(path: cstring) -> int32` returns 1 if the path is an existing regular file. `getcwd(buf: cstring, size: int32) -> int32` fills `buf` with the current working directory (returns 0 on success). `dir_list_md_files(root_dir, paths_buf, paths_size, max_files) -> int32` recursively lists `.md` files under `root_dir`, writing null-separated relative paths into `paths_buf`. Cross-platform (Windows and Linux).
 
 ## std/http
 

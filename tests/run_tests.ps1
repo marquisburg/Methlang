@@ -2,7 +2,8 @@ param(
   [string]$CompilerPath = ".\bin\mettle.exe",
   [switch]$BuildCompiler,
   [switch]$SkipRuntime,
-  [switch]$SkipDeterminism
+  [switch]$SkipDeterminism,
+  [int]$FuzzCount = 60
 )
 
 $ErrorActionPreference = "Continue"
@@ -2141,9 +2142,11 @@ try {
   $cObjectPath = Join-Path $tmpDir "phase6_fallback_static_lib.o"
   $libPath = Join-Path $tmpDir "phase6_fallback_static_lib.a"
   $exePath = Join-Path $tmpDir "auto_link_fallback_static_lib.exe"
-  $arCommand = Get-Command ar -CommandType Application -ErrorAction SilentlyContinue
+  # PATH may carry several archivers (e.g. both MinGW and Strawberry Perl ship
+  # ar.exe on GitHub runners); take the first so $arCommand.Source is one path.
+  $arCommand = Get-Command ar -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $arCommand) {
-    $arCommand = Get-Command gcc-ar -CommandType Application -ErrorAction SilentlyContinue
+    $arCommand = Get-Command gcc-ar -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   }
   if (-not $arCommand) {
     throw "Static-library archiver not found (expected ar or gcc-ar)"
@@ -2660,6 +2663,40 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "direct_object_pointer_param_address" -Passed $false -Reason $_.Exception.Message
+}
+
+# Direct object backend struct method calls: receiver desugars to a first arg
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_struct_method_calls.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_struct_method_calls.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_struct_method_calls.mettle -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object struct-method compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object struct-method compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_struct_method_calls.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object struct-method build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object struct-method build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object struct-method executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "direct_object_struct_method_calls" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_struct_method_calls" -Passed $false -Reason $_.Exception.Message
 }
 
 # Direct object backend pointer-memory test: new, addr_of, load, store, and pointer args
@@ -3361,6 +3398,39 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "compiler_ice_report" -Passed $false -Reason $_.Exception.Message
+}
+
+# Differential miscompile fuzzer gate. Generates UB-free programs, builds each
+# at debug and release, and fails on any exit-code divergence (a silent
+# miscompile). See tools/fuzz/README.md. Skipped if Python is unavailable or
+# -FuzzCount 0. Uses a fixed seed range so the gate is deterministic.
+if ($FuzzCount -gt 0) {
+  $total++
+  try {
+    $python = (Get-Command python -ErrorAction SilentlyContinue)
+    if (-not $python) {
+      $python = (Get-Command python3 -ErrorAction SilentlyContinue)
+    }
+    if (-not $python) {
+      Write-CaseResult -Name "differential_fuzz" -Passed $true -Reason "python not found; skipped"
+    }
+    else {
+      $compilerFull = (Resolve-Path $CompilerPath).Path
+      $fuzzOut = & $python.Source "tools\fuzz\fuzz.py" --count $FuzzCount --compiler $compilerFull 2>&1 | Out-String
+      if ($LASTEXITCODE -ne 0) {
+        $failed++
+        Write-CaseResult -Name "differential_fuzz" -Passed $false -Reason "miscompile divergence detected"
+        Write-Host ($fuzzOut.TrimEnd())
+      }
+      else {
+        Write-CaseResult -Name "differential_fuzz" -Passed $true -Reason "$FuzzCount seeds, no divergence"
+      }
+    }
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "differential_fuzz" -Passed $false -Reason $_.Exception.Message
+  }
 }
 
 Write-Host ""

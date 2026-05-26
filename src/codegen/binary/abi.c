@@ -409,6 +409,13 @@ int code_generator_binary_collect_symbol_aliases(
         code_generator_binary_get_local_offset(context, name) <= 0 ||
         code_generator_binary_get_symbol_offset(context, target) <= 0 ||
         code_generator_binary_symbol_write_count(ir_function, name) != 1 ||
+        /* The alias makes `name` share `target`'s storage, which is only sound
+         * if `target` keeps the aliased value for as long as `name` is live.
+         * If `target` is written more than once it can be mutated after the
+         * `name <- target` copy while `name` is still read later, so the alias
+         * would observe the mutated value (silent miscompile). Require `target`
+         * to have a single, definitional write. */
+        code_generator_binary_symbol_write_count(ir_function, target) != 1 ||
         binary_named_slot_table_get_offset(&context->address_taken_symbols,
                                            name) >= 0 ||
         binary_named_slot_table_get_offset(&context->address_taken_symbols,

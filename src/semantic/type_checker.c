@@ -1,4 +1,5 @@
 #include "type_checker.h"
+#include "../common.h"
 #include "../error/error_reporter.h"
 #include "symbol_table.h"
 #include <ctype.h>
@@ -1385,6 +1386,89 @@ int type_checker_check_program(TypeChecker *checker, ASTNode *program) {
 static Type *type_checker_infer_type_internal(TypeChecker *checker,
                                               ASTNode *expression);
 
+static Type *type_checker_method_receiver_struct_type(Type *receiver_type) {
+  if (!receiver_type) {
+    return NULL;
+  }
+  if (receiver_type->kind == TYPE_STRUCT) {
+    return receiver_type;
+  }
+  if (receiver_type->kind == TYPE_POINTER && receiver_type->base_type &&
+      receiver_type->base_type->kind == TYPE_STRUCT) {
+    return receiver_type->base_type;
+  }
+  return NULL;
+}
+
+static int type_checker_desugar_struct_method_call(TypeChecker *checker,
+                                                   ASTNode *expression,
+                                                   CallExpression *call) {
+  Type *receiver_type = NULL;
+  Type *struct_type = NULL;
+  char *mangled_name = NULL;
+  ASTNode **new_args = NULL;
+  size_t name_len = 0;
+
+  if (!checker || !expression || !call || !call->object ||
+      !call->function_name) {
+    return 1;
+  }
+
+  receiver_type = type_checker_infer_type(checker, call->object);
+  struct_type = type_checker_method_receiver_struct_type(receiver_type);
+  if (!struct_type || !struct_type->name) {
+    const char *receiver_name =
+        (receiver_type && receiver_type->name) ? receiver_type->name : "unknown";
+    type_checker_set_error_at_location(
+        checker, expression->location,
+        "Method call receiver must be a struct or pointer-to-struct, got '%s'",
+        receiver_name);
+    return 0;
+  }
+
+  name_len = strlen(struct_type->name) + 1 + strlen(call->function_name) + 1;
+  mangled_name = malloc(name_len);
+  if (!mangled_name) {
+    type_checker_set_error_at_location(
+        checker, expression->location,
+        "Out of memory while resolving struct method call");
+    return 0;
+  }
+  snprintf(mangled_name, name_len, "%s_%s", struct_type->name,
+           call->function_name);
+
+  if (!symbol_table_lookup(checker->symbol_table, mangled_name)) {
+    type_checker_set_error_at_location(
+        checker, expression->location,
+        "Undefined method '%s.%s' (expected function '%s')",
+        struct_type->name, call->function_name, mangled_name);
+    free(mangled_name);
+    return 0;
+  }
+
+  new_args = malloc((call->argument_count + 1) * sizeof(ASTNode *));
+  if (!new_args) {
+    free(mangled_name);
+    type_checker_set_error_at_location(
+        checker, expression->location,
+        "Out of memory while rewriting struct method call");
+    return 0;
+  }
+
+  new_args[0] = call->object;
+  for (size_t i = 0; i < call->argument_count; i++) {
+    new_args[i + 1] = call->arguments[i];
+  }
+  free(call->arguments);
+  call->arguments = new_args;
+  call->argument_count++;
+  call->object = NULL;
+
+  mettle_free_string(call->function_name);
+  call->function_name = mangled_name;
+  return 1;
+}
+
 Type *type_checker_infer_type(TypeChecker *checker, ASTNode *expression) {
   if (!checker || !expression)
     return NULL;
@@ -1644,6 +1728,11 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
     // Thread.join(), Mutex.new(), mutex.lock(), guard (unlock via drop),
     // Atomic.new(), atomic.load/store/fetch_add/fetch_sub/cas(),
     // channel(), tx.send(), rx.recv()
+    if (call && call->object &&
+        !type_checker_desugar_struct_method_call(checker, expression, call)) {
+      return NULL;
+    }
+
     Symbol *func_symbol =
         symbol_table_lookup(checker->symbol_table, call->function_name);
     if (!func_symbol) {
