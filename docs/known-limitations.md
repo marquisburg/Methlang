@@ -62,7 +62,6 @@ Structs work normally as **locals**: field access, whole-struct assignment, and 
 | Chained pattern `f(g())` where both are struct-by-value               | Supported. The returned struct survives passage into the next call.                                                                                                                            |
 | Mettle calling C functions with struct-by-value args/returns          | Supported on Windows when the C object uses the Microsoft x64 ABI and the final link uses Mettle's internal linker.                                                                            |
 | C calling exported Mettle functions with struct-by-value args/returns | Not yet covered by tests or documented as supported.                                                                                                                                           |
-| Method call on a struct **value** (`v.m()`)                           | Ordinary method-call lowering is still incomplete. Use explicit receiver functions such as `Big_total(v)` for now.                                                                             |
 | Float-typed return values from Mettle-to-Mettle calls                 | Supported in text-asm and `--emit-obj` modes. Callees return through `xmm0` per the Win64 ABI; the text IR path still mirrors the bits into `rax` after calls for its internal value pipeline. |
 
 
@@ -73,10 +72,6 @@ Structs work normally as **locals**: field access, whole-struct assignment, and 
 - With `--linker internal`, raw COFF `.o` / `.obj` files can be supplied through `--link-arg`; the final executable link remains inside Mettle.
 
 Arrays follow the same rule as in [Types - Array Types](types.md#array-types): they are not passed by value; use `&arr[0]` or a `T`* parameter.
-
-### Pointer Operations
-
-- No pointer arithmetic with `ptr + n`. Use indexing `ptr[i]` instead, which scales by element size.
 
 ### Null & Bounds Checks
 
