@@ -24,7 +24,7 @@ Traits and constrained generics support inline bounds, multiple bounds, trailing
 
 ### Pattern Matching
 
-- **`match` on tagged enums** supports both a statement form (arm bodies are `{ ... }` blocks) and an expression form that yields a value. In expression form, each arm body must be a single value-yielding expression (for example, `match (o) { case Some(v): v + 1, default: 0 }`). All arm types must unify, and the match must be exhaustive (`default:` or all variants covered) because it must always produce a value.
+- `**match` on tagged enums** supports both a statement form (arm bodies are `{ ... }` blocks) and an expression form that yields a value. In expression form, each arm body must be a single value-yielding expression (for example, `match (o) { case Some(v): v + 1, default: 0 }`). All arm types must unify, and the match must be exhaustive (`default:` or all variants covered) because it must always produce a value.
 - **Tagged-enum constructors** are function-like. Payload variants use `Some(x)`; payloadless variants use empty call syntax such as `None()`.
 
 ### Switch
@@ -52,19 +52,19 @@ Structs work normally as **locals**: field access, whole-struct assignment, and 
 - **Arguments:** the caller copies the source struct into a per-call stack temp and passes the temp's address in the normal argument register/slot. The callee dereferences the pointer to access fields. By-value semantics are preserved; mutations inside the callee affect only the temp copy, not the caller's original.
 - **Returns:** the caller allocates a slot in its own frame and passes its address as a hidden first integer argument (Win64: `rcx`). The callee writes the result through that pointer and returns the pointer in `rax`. The caller materializes the returned struct from that frame slot, so the value outlives the call's stack teardown.
 
-See [docs/struct-abi-design.md](struct-abi-design.md) for the full contract.
-
 **Remaining limitations:**
 
-| Scenario | Behavior |
-|----------|----------|
-| Parameter `fn(s: Big)` with `sizeof(Big) > 8` | Supported in text-asm and `--emit-obj` modes. |
-| Returning `-> Big` with `sizeof(Big) > 8` | Supported in text-asm and `--emit-obj` modes. Hidden out-pointer; result lives in the caller's frame. |
-| Chained pattern `f(g())` where both are struct-by-value | Supported. The returned struct survives passage into the next call. |
-| Mettle calling C functions with struct-by-value args/returns | Supported on Windows when the C object uses the Microsoft x64 ABI and the final link uses Mettle's internal linker. |
-| C calling exported Mettle functions with struct-by-value args/returns | Not yet covered by tests or documented as supported. |
-| Method call on a struct **value** (`v.m()`) | Ordinary method-call lowering is still incomplete. Use explicit receiver functions such as `Big_total(v)` for now. |
-| Float-typed return values from Mettle-to-Mettle calls | Supported in text-asm and `--emit-obj` modes. Callees return through `xmm0` per the Win64 ABI; the text IR path still mirrors the bits into `rax` after calls for its internal value pipeline. |
+
+| Scenario                                                              | Behavior                                                                                                                                                                                       |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Parameter `fn(s: Big)` with `sizeof(Big) > 8`                         | Supported in text-asm and `--emit-obj` modes.                                                                                                                                                  |
+| Returning `-> Big` with `sizeof(Big) > 8`                             | Supported in text-asm and `--emit-obj` modes. Hidden out-pointer; result lives in the caller's frame.                                                                                          |
+| Chained pattern `f(g())` where both are struct-by-value               | Supported. The returned struct survives passage into the next call.                                                                                                                            |
+| Mettle calling C functions with struct-by-value args/returns          | Supported on Windows when the C object uses the Microsoft x64 ABI and the final link uses Mettle's internal linker.                                                                            |
+| C calling exported Mettle functions with struct-by-value args/returns | Not yet covered by tests or documented as supported.                                                                                                                                           |
+| Method call on a struct **value** (`v.m()`)                           | Ordinary method-call lowering is still incomplete. Use explicit receiver functions such as `Big_total(v)` for now.                                                                             |
+| Float-typed return values from Mettle-to-Mettle calls                 | Supported in text-asm and `--emit-obj` modes. Callees return through `xmm0` per the Win64 ABI; the text IR path still mirrors the bits into `rax` after calls for its internal value pipeline. |
+
 
 **Practical guidance:**
 
@@ -72,7 +72,7 @@ See [docs/struct-abi-design.md](struct-abi-design.md) for the full contract.
 - For C interop, struct passing and returning matches the Microsoft x64 C ABI on Windows for the covered Mettle-calls-C direction. See [C Interoperability - Passing Structs to C](c-interop.md).
 - With `--linker internal`, raw COFF `.o` / `.obj` files can be supplied through `--link-arg`; the final executable link remains inside Mettle.
 
-Arrays follow the same rule as in [Types - Array Types](types.md#array-types): they are not passed by value; use `&arr[0]` or a `T*` parameter.
+Arrays follow the same rule as in [Types - Array Types](types.md#array-types): they are not passed by value; use `&arr[0]` or a `T`* parameter.
 
 ### Pointer Operations
 
@@ -115,3 +115,4 @@ Arrays follow the same rule as in [Types - Array Types](types.md#array-types): t
 ### Platform Support
 
 - `std/net` and the web server example are Windows-only (Winsock2). Use POSIX socket externs for networking on Linux.
+

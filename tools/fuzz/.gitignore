@@ -1,0 +1,3 @@
+# Transient fuzzer output; regenerate with genprog.py <seed>
+repros/
+__pycache__/

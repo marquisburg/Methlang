@@ -10,8 +10,12 @@ if /I "%~1"=="clang" set "CC=clang"
 if /I "%~1"=="gcc" set "CC=gcc"
 if not defined CC set "CC=gcc"
 
-set CFLAGS=-Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc
+set CFLAGS=-Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc -fno-omit-frame-pointer
 if /I "%CC%"=="clang" set "CFLAGS=%CFLAGS% -D_CRT_NONSTDC_NO_DEPRECATE -D_CRT_SECURE_NO_WARNINGS"
+REM CodeView debug info lets DbgHelp resolve ICE backtraces to file:line on Windows.
+if /I "%CC%"=="gcc" set "CFLAGS=%CFLAGS% -gcodeview"
+if /I "%CC%"=="clang" set "CFLAGS=%CFLAGS% -gcodeview"
+set LDFLAGS=-ldbghelp -Wl,--pdb,bin\mettle.pdb
 
 REM Check if selected compiler is available
 where %CC% >nul 2>&1
@@ -142,7 +146,7 @@ echo Compiling main...
 if %ERRORLEVEL% NEQ 0 exit /b 1
 
 echo Linking...
-%CC% obj\common.o obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\\codegen\\binary\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\error\error_reporter.o obj\compiler\compiler_context.o obj\compiler\compiler_crash.o obj\runtime\crash_handler.o obj\tracy_build.o obj\main.o -o bin\mettle.exe -ldbghelp
+%CC% obj\common.o obj\lexer\lexer.o obj\parser\ast.o obj\parser\parser.o obj\semantic\symbol_table.o obj\semantic\type_checker.o obj\semantic\register_allocator.o obj\semantic\import_resolver.o obj\semantic\monomorphize.o obj\ir\*.o obj\\codegen\\*.o obj\\codegen\\binary\\*.o obj\\linker\\*.o obj\debug\debug_info.o obj\error\error_reporter.o obj\compiler\compiler_context.o obj\compiler\compiler_crash.o obj\runtime\crash_handler.o obj\tracy_build.o obj\main.o -o bin\mettle.exe %LDFLAGS%
 
 if %ERRORLEVEL% NEQ 0 (
     echo Build failed!

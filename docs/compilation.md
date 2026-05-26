@@ -135,6 +135,8 @@ Last action:
   collecting temp uses for IR_OP_MEMCPY_INLINE
 
 Compiler backtrace:
+  #0 mettle_compiler_ice_report at src/compiler/compiler_crash.c:282 (0x...)
+  #1 main at src/main.c:123 (0x...)
   ...
 
 Please rerun with:

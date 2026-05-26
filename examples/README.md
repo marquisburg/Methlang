@@ -39,7 +39,7 @@ Run the full Mettle-vs-C suite:
 |-----------|-------------|
 | [`grep/`](grep/) | Also the reference string-search benchmark |
 | [`hexdump/`](hexdump/) | Hex dump utility |
-| [`ui_demo/`](ui_demo/) | Win32 UI demo (`std/ui`) |
+| [`ui_demo/`](ui_demo/) | Win32 UI demo (`std/ui`); see [ui_demo/README.md](ui_demo/README.md) |
 | [`tracy_demo/`](tracy_demo/) | Tracy profiler demo (`std/tracy`); see [tracy_demo/README.md](tracy_demo/README.md) |
 | [`guessing-game/`](guessing-game/) | Simple interactive game |
 | [`direct_object_smoke/`](direct_object_smoke/) | Direct object backend smoke test |

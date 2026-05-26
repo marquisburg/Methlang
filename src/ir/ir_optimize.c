@@ -3513,10 +3513,27 @@ static int ir_remove_empty_conditional_diamonds_pass(IRFunction *function,
     }
 
     if (strcmp(branch->text, jump->text) == 0) {
-      ir_instruction_make_nop(branch);
-      ir_instruction_make_nop(jump);
-      if (changed) {
-        *changed = 1;
+      /* `branch -> L; jump L` looks redundant (both paths reach L), but only if
+       * the `jump` is genuinely this branch's diamond-closer -- i.e. the very
+       * next non-nop instruction is `label L` itself. If some OTHER label
+       * intervenes (e.g. this is an empty nested then-arm immediately followed
+       * by an enclosing if's else-entry label), the `jump` is the then-arm's
+       * skip-over-the-else and removing it makes the else run unconditionally
+       * (silent miscompile). Guard against that. */
+      size_t after_jump = jump_index + 1;
+      while (after_jump < function->instruction_count &&
+             function->instructions[after_jump].op == IR_OP_NOP) {
+        after_jump++;
+      }
+      if (after_jump < function->instruction_count &&
+          function->instructions[after_jump].op == IR_OP_LABEL &&
+          function->instructions[after_jump].text &&
+          strcmp(function->instructions[after_jump].text, jump->text) == 0) {
+        ir_instruction_make_nop(branch);
+        ir_instruction_make_nop(jump);
+        if (changed) {
+          *changed = 1;
+        }
       }
       continue;
     }
@@ -5004,6 +5021,32 @@ static int ir_try_unroll_loop_at(IRFunction *function, size_t header_index,
       if (!ir_clone_instruction_plain(&function->instructions[b], &cloned) ||
           !ir_instruction_vector_append_move(&vector, &cloned)) {
         ir_instruction_destroy_storage(&cloned);
+        ir_instruction_vector_destroy(&vector);
+        ir_temp_value_map_destroy(&symbol_map);
+        return 0;
+      }
+    }
+  }
+
+  /* Emit an explicit jump to the loop's exit label after the unrolled body.
+   * Without it, the unrolled straight-line body falls through into whatever
+   * instruction textually follows the old back-edge (the exit label normally,
+   * but if a sibling/else block was laid out there, control would leak into
+   * it). The exit block then has no explicit predecessor, so once jump
+   * threading redirects the original exit branch elsewhere, the
+   * unreachable-block pass can delete the exit block's own jump and silently
+   * fuse the unrolled body into the following block. The explicit jump keeps
+   * the exit block referenced and the fall-through unambiguous; a later
+   * redundant-jump pass removes it when it is truly a no-op. */
+  {
+    const IRInstruction *branch = &function->instructions[branch_index];
+    if (branch->text) {
+      IRInstruction exit_jump = {0};
+      exit_jump.op = IR_OP_JUMP;
+      exit_jump.text = mettle_strdup(branch->text);
+      if (!exit_jump.text ||
+          !ir_instruction_vector_append_move(&vector, &exit_jump)) {
+        ir_instruction_destroy_storage(&exit_jump);
         ir_instruction_vector_destroy(&vector);
         ir_temp_value_map_destroy(&symbol_map);
         return 0;
@@ -11841,7 +11884,9 @@ static const char *g_ir_pass_names[IR_OPT_PASS_COUNT] = {
  * assumed to reach its own fixpoint in a single call). */
 #define DRIVE_PASS(idx, fn)                                                    \
   do {                                                                         \
-    if (clean_version[idx] != version) {                                       \
+    if (ir_pass_is_skipped(idx)) {                                             \
+      clean_version[idx] = version;                                            \
+    } else if (clean_version[idx] != version) {                                \
       int _c = 0;                                                              \
       if (!fn(function, &_c))                                                   \
         return 0;                                                              \
@@ -11862,6 +11907,31 @@ static const char *g_ir_pass_names[IR_OPT_PASS_COUNT] = {
       clean_version[idx] = version;                                            \
     }                                                                          \
   } while (0)
+
+/* Diagnostic: METTLE_SKIP_PASS="16,17" disables the listed pass indices so a
+ * miscompile can be bisected to a single pass. Empty/unset = skip nothing. */
+static int ir_pass_is_skipped(int idx) {
+  const char *spec = getenv("METTLE_SKIP_PASS");
+  if (!spec || !*spec) {
+    return 0;
+  }
+  char buf[16];
+  int n = snprintf(buf, sizeof(buf), "%d", idx);
+  if (n <= 0) {
+    return 0;
+  }
+  const char *p = spec;
+  while ((p = strstr(p, buf)) != NULL) {
+    char before = (p == spec) ? ',' : p[-1];
+    char after = p[n];
+    if ((before == ',' || before == ' ') &&
+        (after == ',' || after == ' ' || after == '\0')) {
+      return 1;
+    }
+    p += n;
+  }
+  return 0;
+}
 
 static int ir_optimize_function(IRFunction *function) {
   if (!function) {

@@ -2,7 +2,8 @@ param(
   [string]$CompilerPath = ".\bin\mettle.exe",
   [switch]$BuildCompiler,
   [switch]$SkipRuntime,
-  [switch]$SkipDeterminism
+  [switch]$SkipDeterminism,
+  [int]$FuzzCount = 60
 )
 
 $ErrorActionPreference = "Continue"
@@ -3361,6 +3362,39 @@ try {
 catch {
   $failed++
   Write-CaseResult -Name "compiler_ice_report" -Passed $false -Reason $_.Exception.Message
+}
+
+# Differential miscompile fuzzer gate. Generates UB-free programs, builds each
+# at debug and release, and fails on any exit-code divergence (a silent
+# miscompile). See tools/fuzz/README.md. Skipped if Python is unavailable or
+# -FuzzCount 0. Uses a fixed seed range so the gate is deterministic.
+if ($FuzzCount -gt 0) {
+  $total++
+  try {
+    $python = (Get-Command python -ErrorAction SilentlyContinue)
+    if (-not $python) {
+      $python = (Get-Command python3 -ErrorAction SilentlyContinue)
+    }
+    if (-not $python) {
+      Write-CaseResult -Name "differential_fuzz" -Passed $true -Reason "python not found; skipped"
+    }
+    else {
+      $compilerFull = (Resolve-Path $CompilerPath).Path
+      $fuzzOut = & $python.Source "tools\fuzz\fuzz.py" --count $FuzzCount --compiler $compilerFull 2>&1 | Out-String
+      if ($LASTEXITCODE -ne 0) {
+        $failed++
+        Write-CaseResult -Name "differential_fuzz" -Passed $false -Reason "miscompile divergence detected"
+        Write-Host ($fuzzOut.TrimEnd())
+      }
+      else {
+        Write-CaseResult -Name "differential_fuzz" -Passed $true -Reason "$FuzzCount seeds, no divergence"
+      }
+    }
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "differential_fuzz" -Passed $false -Reason $_.Exception.Message
+  }
 }
 
 Write-Host ""

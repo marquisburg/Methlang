@@ -1,5 +1,9 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc
+CFLAGS = -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc -fno-omit-frame-pointer
+LDFLAGS =
+ifneq ($(filter Linux linux-gnu,$(shell uname -s 2>/dev/null)),)
+LDFLAGS = -rdynamic
+endif
 SRCDIR = src
 OBJDIR = obj
 BINDIR = bin
@@ -29,7 +33,7 @@ TARGET = $(BINDIR)/mettle
 all: $(TARGET) bundle-stdlib bundle-runtime
 
 $(TARGET): $(OBJECTS) | $(BINDIR)
-	$(CC) $(OBJECTS) -o $@
+	$(CC) $(OBJECTS) -o $@ $(LDFLAGS)
 
 bundle-stdlib: | $(BINDIR)
 	rm -rf $(BINDIR)/stdlib
