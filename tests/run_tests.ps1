@@ -2142,9 +2142,11 @@ try {
   $cObjectPath = Join-Path $tmpDir "phase6_fallback_static_lib.o"
   $libPath = Join-Path $tmpDir "phase6_fallback_static_lib.a"
   $exePath = Join-Path $tmpDir "auto_link_fallback_static_lib.exe"
-  $arCommand = Get-Command ar -CommandType Application -ErrorAction SilentlyContinue
+  # PATH may carry several archivers (e.g. both MinGW and Strawberry Perl ship
+  # ar.exe on GitHub runners); take the first so $arCommand.Source is one path.
+  $arCommand = Get-Command ar -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $arCommand) {
-    $arCommand = Get-Command gcc-ar -CommandType Application -ErrorAction SilentlyContinue
+    $arCommand = Get-Command gcc-ar -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   }
   if (-not $arCommand) {
     throw "Static-library archiver not found (expected ar or gcc-ar)"
