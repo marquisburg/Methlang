@@ -2663,6 +2663,40 @@ catch {
   Write-CaseResult -Name "direct_object_pointer_param_address" -Passed $false -Reason $_.Exception.Message
 }
 
+# Direct object backend struct method calls: receiver desugars to a first arg
+$total++
+try {
+  $objPath = Join-Path $tmpDir "test_direct_object_struct_method_calls.obj"
+  $exePath = Join-Path $tmpDir "test_direct_object_struct_method_calls.exe"
+
+  $objOut = & $CompilerPath --emit-obj tests\test_direct_object_struct_method_calls.mettle -o $objPath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object struct-method compile failed: $objOut"
+  }
+  if (-not (Test-Path $objPath)) {
+    throw "Direct object struct-method compile did not produce an object file"
+  }
+
+  $buildOut = & $CompilerPath --build --emit-obj tests\test_direct_object_struct_method_calls.mettle -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object struct-method build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Direct object struct-method build did not produce an executable"
+  }
+
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Direct object struct-method executable exited with $LASTEXITCODE (expected 0)"
+  }
+
+  Write-CaseResult -Name "direct_object_struct_method_calls" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "direct_object_struct_method_calls" -Passed $false -Reason $_.Exception.Message
+}
+
 # Direct object backend pointer-memory test: new, addr_of, load, store, and pointer args
 $total++
 try {
