@@ -1,0 +1,10 @@
+# Keep Windows scripts CRLF so cmd.exe `for %%f` loops and PowerShell parse
+# correctly when checked out on the CI runner.
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+
+# Workflow/YAML and shell scripts stay LF.
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.sh    text eol=lf

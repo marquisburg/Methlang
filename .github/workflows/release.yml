@@ -1,0 +1,71 @@
+name: Release
+
+# On a version tag (v*), build the compiler, run the suite as a gate, then
+# package bin\mettle.exe with its bundled stdlib/runtime into a zip and attach
+# it to the GitHub Release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag/label for a manual package (no Release upload)"
+        default: "manual"
+        required: false
+
+permissions:
+  contents: write   # needed to create/attach the Release
+
+jobs:
+  package:
+    name: Build & package (windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Build + full suite (build.bat runs the gate); a tag must pass tests to ship.
+      - name: Build and test
+        shell: cmd
+        run: build.bat gcc
+
+      - name: Stage release bundle
+        id: stage
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ([string]::IsNullOrWhiteSpace($tag) -or $tag -eq 'development' -or $tag -eq 'main') {
+            $tag = "${{ github.event.inputs.tag }}"
+          }
+          $out = "mettle-$tag-windows-x64"
+          New-Item -ItemType Directory -Path $out | Out-Null
+          Copy-Item bin\mettle.exe "$out\"
+          Copy-Item -Recurse bin\stdlib "$out\stdlib"
+          Copy-Item -Recurse bin\runtime "$out\runtime"
+          if (Test-Path bin\mettle-build.bat) { Copy-Item bin\mettle-build.bat "$out\" }
+          if (Test-Path LICENSE) { Copy-Item LICENSE "$out\" }
+          if (Test-Path README.md) { Copy-Item README.md "$out\" }
+          $zip = "$out.zip"
+          Compress-Archive -Path "$out\*" -DestinationPath $zip -Force
+          echo "zip=$zip" >> $env:GITHUB_OUTPUT
+          Write-Host "Packaged $zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.zip }}
+          path: ${{ steps.stage.outputs.zip }}
+          retention-days: 30
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.stage.outputs.zip }}
+          generate_release_notes: true

@@ -1,0 +1,117 @@
+name: Nightly differential fuzz
+
+# Heavy differential miscompile sweep: builds each generated program at debug
+# and release and flags exit-code divergence (a silent optimizer/backend bug).
+# See tools/fuzz/README.md. The start offset rotates by day-of-year so each
+# night explores a fresh seed window rather than re-running 1..N.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "Number of seeds to fuzz"
+        default: "3000"
+        required: false
+      start:
+        description: "Start seed (blank = rotate by day-of-year)"
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  fuzz:
+    name: Fuzz sweep (windows)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build compiler (no test tail)
+        shell: pwsh
+        # Build the compiler and bundle runtime/stdlib without running the suite's
+        # 60-seed gate. run_tests.ps1 -BuildCompiler would re-run the whole suite,
+        # so build via the batch path and confirm the binary exists.
+        run: |
+          & cmd /c "build.bat gcc"
+          if (-not (Test-Path "bin\mettle.exe")) { throw "compiler build failed" }
+
+      - name: Compute seed window
+        id: window
+        shell: pwsh
+        run: |
+          $count = "${{ github.event.inputs.count }}"
+          if ([string]::IsNullOrWhiteSpace($count)) { $count = "3000" }
+          $start = "${{ github.event.inputs.start }}"
+          if ([string]::IsNullOrWhiteSpace($start)) {
+            # Rotate the window so consecutive nights cover different seeds.
+            $doy = (Get-Date).DayOfYear
+            $start = (1 + $doy * [int]$count).ToString()
+          }
+          echo "count=$count" >> $env:GITHUB_OUTPUT
+          echo "start=$start" >> $env:GITHUB_OUTPUT
+          Write-Host "Fuzzing $count seeds starting at $start"
+
+      - name: Run differential fuzzer
+        id: fuzz
+        shell: pwsh
+        run: |
+          python tools/fuzz/fuzz.py `
+            --count ${{ steps.window.outputs.count }} `
+            --start ${{ steps.window.outputs.start }} `
+            --compiler (Resolve-Path "bin\mettle.exe").Path
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Upload repros on divergence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-repros-${{ steps.window.outputs.start }}
+          path: tools/fuzz/repros/**
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Open issue on divergence
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const start = '${{ steps.window.outputs.start }}';
+            const count = '${{ steps.window.outputs.count }}';
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `Nightly fuzz: miscompile divergence (seeds ${start}..)`;
+            const body = [
+              `The nightly differential fuzzer found an exit-code divergence between`,
+              `debug and release builds (a silent miscompile).`,
+              ``,
+              `- Seed window: start=${start}, count=${count}`,
+              `- Failing repros are attached to the run as the \`fuzz-repros-${start}\` artifact.`,
+              `- Replay any case with \`python tools/fuzz/genprog.py <seed>\`, then bisect`,
+              `  the pass with \`METTLE_SKIP_PASS\` (see tools/fuzz/README.md).`,
+              ``,
+              `Run: ${run}`,
+            ].join('\n');
+            // Avoid duplicate issues: reuse an open one with the same label.
+            const label = 'fuzz-divergence';
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: label,
+            });
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.data[0].number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: [label],
+              });
+            }
