@@ -33,6 +33,9 @@ jobs:
       # Build + full suite (build.bat runs the gate); a tag must pass tests to ship.
       - name: Build and test
         shell: cmd
+        # METTLE_NO_CODEVIEW avoids a MinGW gcc ICE in the CodeView emitter.
+        env:
+          METTLE_NO_CODEVIEW: "1"
         run: build.bat gcc
 
       - name: Stage release bundle

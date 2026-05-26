@@ -45,6 +45,11 @@ jobs:
       # non-zero if the build OR any test fails, so this single step is the gate.
       - name: Build and run test suite
         shell: cmd
+        # METTLE_NO_CODEVIEW avoids a MinGW gcc ICE in the CodeView debug-info
+        # emitter on large functions (e.g. lexer_next_token); CI doesn't need
+        # the .pdb-backed ICE backtraces that flag provides.
+        env:
+          METTLE_NO_CODEVIEW: "1"
         run: build.bat gcc
 
       # run_tests.ps1 writes generated .s/.ir output to $env:TEMP\Mettle-test-artifacts.

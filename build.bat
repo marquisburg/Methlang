@@ -13,9 +13,16 @@ if not defined CC set "CC=gcc"
 set CFLAGS=-Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc -fno-omit-frame-pointer
 if /I "%CC%"=="clang" set "CFLAGS=%CFLAGS% -D_CRT_NONSTDC_NO_DEPRECATE -D_CRT_SECURE_NO_WARNINGS"
 REM CodeView debug info lets DbgHelp resolve ICE backtraces to file:line on Windows.
-if /I "%CC%"=="gcc" set "CFLAGS=%CFLAGS% -gcodeview"
-if /I "%CC%"=="clang" set "CFLAGS=%CFLAGS% -gcodeview"
-set LDFLAGS=-ldbghelp -Wl,--pdb,bin\mettle.pdb
+REM Some MinGW gcc builds ICE in the CodeView emitter on large functions, so allow
+REM opting out via METTLE_NO_CODEVIEW=1 (used by CI). The .pdb link flag is dropped
+REM with it since there is no CodeView data to emit.
+if defined METTLE_NO_CODEVIEW (
+    set "LDFLAGS=-ldbghelp"
+) else (
+    if /I "%CC%"=="gcc" set "CFLAGS=%CFLAGS% -gcodeview"
+    if /I "%CC%"=="clang" set "CFLAGS=%CFLAGS% -gcodeview"
+    set "LDFLAGS=-ldbghelp -Wl,--pdb,bin\mettle.pdb"
+)
 
 REM Check if selected compiler is available
 where %CC% >nul 2>&1

@@ -34,11 +34,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build compiler (no test tail)
+      - name: Build compiler
         shell: pwsh
-        # Build the compiler and bundle runtime/stdlib without running the suite's
-        # 60-seed gate. run_tests.ps1 -BuildCompiler would re-run the whole suite,
-        # so build via the batch path and confirm the binary exists.
+        # METTLE_NO_CODEVIEW avoids a MinGW gcc ICE in the CodeView emitter.
+        env:
+          METTLE_NO_CODEVIEW: "1"
         run: |
           & cmd /c "build.bat gcc"
           if (-not (Test-Path "bin\mettle.exe")) { throw "compiler build failed" }
