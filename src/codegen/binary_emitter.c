@@ -1,4 +1,5 @@
 #include "binary_emitter.h"
+#include "binary_emitter_internal.h"
 #include "../common.h"
 
 #include <stdio.h>
@@ -382,6 +383,14 @@ static uint16_t binary_emitter_map_relocation_kind(BinaryRelocationKind kind) {
   }
 }
 
+BinaryTargetFormat binary_target_format_host_default(void) {
+#ifdef _WIN32
+  return BINARY_TARGET_FORMAT_COFF_WIN64;
+#else
+  return BINARY_TARGET_FORMAT_ELF_X64;
+#endif
+}
+
 BinaryEmitter *binary_emitter_create(BinaryTargetFormat target_format) {
   BinaryEmitter *emitter = calloc(1, sizeof(BinaryEmitter));
   if (!emitter) {
@@ -678,16 +687,8 @@ const char *binary_emitter_get_error(const BinaryEmitter *emitter) {
   return emitter ? emitter->error_message : NULL;
 }
 
-int binary_emitter_write_object_file(BinaryEmitter *emitter,
-                                     const char *filename) {
-  if (!emitter || !filename || filename[0] == '\0') {
-    return 0;
-  }
-  if (emitter->target_format != BINARY_TARGET_FORMAT_COFF_WIN64) {
-    binary_emitter_set_error(emitter,
-                             "Only Win64 COFF object serialization is supported");
-    return 0;
-  }
+static int binary_emitter_write_coff_object_file(BinaryEmitter *emitter,
+                                                 const char *filename) {
   if (emitter->section_count > 0xFFFFu) {
     binary_emitter_set_error(emitter, "Too many sections for COFF object file");
     return 0;
@@ -1030,4 +1031,29 @@ cleanup:
   free(section_reloc_counts);
   free(symbol_table_indices);
   return ok;
+}
+
+void binary_emitter_record_error(BinaryEmitter *emitter, const char *message) {
+  binary_emitter_set_error(emitter, message);
+}
+
+int binary_emitter_lookup_symbol_index(const BinaryEmitter *emitter,
+                                       const char *name) {
+  return binary_emitter_find_symbol_index(emitter, name);
+}
+
+int binary_emitter_write_object_file(BinaryEmitter *emitter,
+                                     const char *filename) {
+  if (!emitter || !filename || filename[0] == '\0') {
+    return 0;
+  }
+  switch (emitter->target_format) {
+  case BINARY_TARGET_FORMAT_COFF_WIN64:
+    return binary_emitter_write_coff_object_file(emitter, filename);
+  case BINARY_TARGET_FORMAT_ELF_X64:
+    return binary_emitter_write_elf_object_file(emitter, filename);
+  default:
+    binary_emitter_set_error(emitter, "Unknown target object format");
+    return 0;
+  }
 }

@@ -6,7 +6,13 @@
 
 typedef enum {
   BINARY_TARGET_FORMAT_COFF_WIN64 = 0,
+  BINARY_TARGET_FORMAT_ELF_X64,
 } BinaryTargetFormat;
+
+/* The object/executable format the running compiler targets by default: COFF on
+ * Windows, ELF on Linux/other ELF hosts. Cross-compilation can override the
+ * format passed to binary_emitter_create directly. */
+BinaryTargetFormat binary_target_format_host_default(void);
 
 typedef enum {
   BINARY_SECTION_TEXT = 0,
