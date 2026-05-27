@@ -12,6 +12,9 @@ if not defined CC set "CC=gcc"
 
 set CFLAGS=-Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc -fno-omit-frame-pointer
 if /I "%CC%"=="clang" set "CFLAGS=%CFLAGS% -D_CRT_NONSTDC_NO_DEPRECATE -D_CRT_SECURE_NO_WARNINGS"
+REM Release builds stamp the version via METTLE_VERSION (e.g. set by release.yml);
+REM dev builds fall back to the default in main.c.
+if defined METTLE_VERSION set "CFLAGS=%CFLAGS% -DMETTLE_VERSION=\"%METTLE_VERSION%\""
 REM CodeView debug info lets DbgHelp resolve ICE backtraces to file:line on Windows.
 REM Some MinGW gcc builds ICE in the CodeView emitter on large functions, so allow
 REM opting out via METTLE_NO_CODEVIEW=1 (used by CI). The .pdb link flag is dropped

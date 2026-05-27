@@ -38,33 +38,56 @@ No LLVM. No C backend. No managed runtime.
   built-in PE linker on Windows, ELF and `ld` on Linux, with no NASM, gcc, or
   `link.exe` needed
 
-## Quick Start
+## Install
 
-Build the compiler:
-
-```powershell
-.\build.bat
-```
-
-Build and run a Mettle program on Windows:
-
-```powershell
-.\bin\mettle.exe --build hello.mettle -o hello.exe
-.\hello.exe
-```
-
-Build and run on Linux:
+Linux (x86-64):
 
 ```bash
-make
-./bin/mettle --build hello.mettle -o hello
-./hello
+curl -fsSL https://raw.githubusercontent.com/The-Mettle-Project/Mettle/main/install.sh | sh
+```
+
+Windows (x86-64), in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/The-Mettle-Project/Mettle/main/install.ps1 | iex
+```
+
+The installer downloads the latest release for your platform, installs it to a
+per-user directory (`~/.mettle` on Linux, `%LOCALAPPDATA%\Mettle` on Windows),
+adds the compiler to your PATH, and checks for the C toolchain Mettle links
+with. No root or administrator rights required. Pin a version with
+`--version v0.3.0` (or `-Version v0.3.0` on Windows).
+
+After installing, open a new terminal and confirm:
+
+```bash
+mettle --version
+```
+
+## Quick Start
+
+Compile and run a program:
+
+```bash
+echo 'function main() -> int32 { return 0; }' > hello.mettle
+mettle --build hello.mettle -o hello
+./hello          # on Windows: .\hello.exe
 ```
 
 The Linux `--build` path emits a native ELF object with the compiler's own
 `_start` and links it with `ld` into a statically linked executable, with no
 libc, CRT, or assembler. Programs that use the standard library (`std/io`,
 `std/bench`) are not yet supported on Linux and fail at link time.
+
+## Build from source
+
+```powershell
+.\build.bat        # Windows
+```
+
+```bash
+make               # Linux
+```
 
 Production build:
 
@@ -98,8 +121,17 @@ Production build:
 
 ## Development
 
+Run the test suite (Windows):
+
 ```powershell
-.\build.bat
-.\tests\run_tests.ps1
+.\build.bat                        # build + full suite
+.\tests\run_tests.ps1              # suite against the current bin\mettle.exe
 .\tests\run_tests.ps1 -BuildCompiler
+```
+
+Native ELF backend tests (Linux):
+
+```bash
+make
+bash tools/test-elf-native.sh
 ```

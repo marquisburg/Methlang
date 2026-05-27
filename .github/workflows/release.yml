@@ -1,8 +1,9 @@
 name: Release
 
-# On a version tag (v*), build the compiler, run the suite as a gate, then
-# package bin\mettle.exe with its bundled stdlib/runtime into a zip and attach
-# it to the GitHub Release.
+# On a version tag (v*), build the compiler on each platform, run the suite as
+# a gate, then package the compiler with its bundled stdlib/runtime and attach
+# it to the GitHub Release: a Windows .zip and a Linux .tar.gz. The one-line
+# installers (install.sh / install.ps1) download these artifacts.
 
 on:
   push:
@@ -31,11 +32,14 @@ jobs:
           python-version: "3.12"
 
       # Build + full suite (build.bat runs the gate); a tag must pass tests to ship.
+      # METTLE_VERSION stamps the version into the binary (build.bat reads it);
+      # on a tag push it is the tag, otherwise the manual-dispatch label.
       - name: Build and test
         shell: cmd
         # METTLE_NO_CODEVIEW avoids a MinGW gcc ICE in the CodeView emitter.
         env:
           METTLE_NO_CODEVIEW: "1"
+          METTLE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}
         run: build.bat gcc
 
       - name: Stage release bundle
@@ -59,16 +63,95 @@ jobs:
           echo "zip=$zip" >> $env:GITHUB_OUTPUT
           Write-Host "Packaged $zip"
 
-      - name: Upload build artifact
+      # Build the GUI installer (Inno Setup) from the bundle build.bat produced.
+      # ISCC ships on the windows-latest image; install it if the image changes.
+      - name: Build GUI installer
+        id: installer
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ([string]::IsNullOrWhiteSpace($tag) -or $tag -eq 'development' -or $tag -eq 'main') {
+            $tag = "${{ github.event.inputs.tag }}"
+          }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          if (-not (Test-Path $iscc)) { $iscc = (Get-Command ISCC.exe).Source }
+          # Inno expects a numeric-ish AppVersion; strip a leading 'v'.
+          $ver = $tag -replace '^v',''
+          & $iscc "/DMyAppVersion=$ver" installer\Mettle.iss
+          $setup = "mettle-$tag-windows-x64-setup.exe"
+          Copy-Item installer\out\Mettle-Setup.exe $setup -Force
+          echo "setup=$setup" >> $env:GITHUB_OUTPUT
+          Write-Host "Built $setup"
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.stage.outputs.zip }}
-          path: ${{ steps.stage.outputs.zip }}
+          name: mettle-windows-x64
+          path: |
+            ${{ steps.stage.outputs.zip }}
+            ${{ steps.installer.outputs.setup }}
           retention-days: 30
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.stage.outputs.zip }}
+          files: |
+            ${{ steps.stage.outputs.zip }}
+            ${{ steps.installer.outputs.setup }}
+          generate_release_notes: true
+
+  package-linux:
+    name: Build & package (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build compiler
+        run: |
+          tag="${{ github.ref_name }}"
+          if [ -z "$tag" ] || [ "$tag" = "development" ] || [ "$tag" = "main" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          fi
+          make -j"$(nproc)" EXTRA_CFLAGS="-DMETTLE_VERSION=\"$tag\""
+
+      - name: Native ELF backend tests
+        run: bash tools/test-elf-native.sh
+
+      - name: Stage release bundle
+        id: stage
+        shell: bash
+        run: |
+          tag="${{ github.ref_name }}"
+          if [ -z "$tag" ] || [ "$tag" = "development" ] || [ "$tag" = "main" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          fi
+          out="mettle-$tag-linux-x64"
+          mkdir -p "$out/bin"
+          cp bin/mettle "$out/bin/"
+          cp -r bin/stdlib "$out/stdlib"
+          cp -r bin/runtime "$out/runtime"
+          [ -f LICENSE ] && cp LICENSE "$out/" || true
+          [ -f README.md ] && cp README.md "$out/" || true
+          tar="$out.tar.gz"
+          tar -czf "$tar" "$out"
+          echo "tar=$tar" >> "$GITHUB_OUTPUT"
+          echo "Packaged $tar"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.tar }}
+          path: ${{ steps.stage.outputs.tar }}
+          retention-days: 30
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.stage.outputs.tar }}
           generate_release_notes: true

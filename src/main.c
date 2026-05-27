@@ -42,6 +42,13 @@ __declspec(dllimport) int __stdcall QueryPerformanceCounter(MettleQpcTicks *coun
 #endif
 #endif
 
+/* Compiler version string. Release builds stamp the real tag by defining
+ * METTLE_VERSION at compile time (e.g. -DMETTLE_VERSION=\"v0.3.0\"); local and
+ * dev builds report this default. */
+#ifndef METTLE_VERSION
+#define METTLE_VERSION "v0.9.0-dev"
+#endif
+
 #define PROFILE_PHASE_READ_INPUT METTLE_COMPILER_PHASE_READ_INPUT
 #define PROFILE_PHASE_LEXICAL_VALIDATION METTLE_COMPILER_PHASE_LEXICAL_VALIDATION
 #define PROFILE_PHASE_INIT METTLE_COMPILER_PHASE_INIT
@@ -536,10 +543,11 @@ static int parse_linker_mode(const char *text, LinkerMode *mode_out) {
   return 0;
 }
 
+#ifndef _WIN32
 /* Links a native ELF executable: emits the self-contained _start object, then
  * invokes `ld` to combine it with the program object into a statically linked
- * binary that needs no libc/CRT. Cross-platform (used on ELF hosts); does not
- * depend on the Windows-only link helpers below. Returns 0 on success. */
+ * binary that needs no libc/CRT. Used on ELF hosts (Linux); does not depend on
+ * the Windows-only link helpers below. Returns 0 on success. */
 static int mettle_link_elf_executable(const char *object_filename,
                                       const char *executable_filename,
                                       const CompilerOptions *options) {
@@ -605,6 +613,7 @@ static int mettle_link_elf_executable(const char *object_filename,
   free(command);
   return result;
 }
+#endif /* !_WIN32 */
 
 #ifdef _WIN32
 typedef struct {
@@ -2304,6 +2313,16 @@ int main(int argc, char *argv[]) {
   options.debug_format = "dwarf";
 
   if (argc >= 2) {
+    if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0 ||
+        strcmp(argv[1], "version") == 0) {
+      const char *target =
+          binary_target_format_host_default() == BINARY_TARGET_FORMAT_ELF_X64
+              ? "x86_64-linux (ELF)"
+              : "x86_64-windows (COFF)";
+      printf("mettle %s\n", METTLE_VERSION);
+      printf("target: %s\n", target);
+      return 0;
+    }
     if (strcmp(argv[1], "help") == 0) {
       return print_help_topic(argv[0], argv[0], argc >= 3 ? argv[2] : NULL);
     }

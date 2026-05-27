@@ -1,119 +1,182 @@
-﻿# Mettle local installation script
-# This script installs Mettle directly to C:\Program Files\Mettle and adds it to your PATH.
+<#
+.SYNOPSIS
+  Mettle installer for Windows.
 
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Warning "Please run this script as an Administrator."
-    Exit
+.DESCRIPTION
+  Downloads the latest Mettle release, installs it under %LOCALAPPDATA%\Mettle,
+  and adds the compiler to your user PATH. No administrator rights required.
+
+  One-liner:
+    irm https://raw.githubusercontent.com/The-Mettle-Project/Mettle/main/install.ps1 | iex
+
+  Pin a version or change the location:
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/The-Mettle-Project/Mettle/main/install.ps1))) -Version v0.3.0
+
+.PARAMETER Version
+  Release tag to install (default: latest).
+
+.PARAMETER InstallDir
+  Install location (default: %LOCALAPPDATA%\Mettle).
+
+.PARAMETER NoModifyPath
+  Install but do not modify the user PATH.
+#>
+[CmdletBinding()]
+param(
+  [string]$Version = $env:METTLE_VERSION,
+  [string]$InstallDir = $(if ($env:METTLE_INSTALL_DIR) { $env:METTLE_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Mettle' }),
+  [switch]$NoModifyPath,
+  [string]$BaseUrl = $env:METTLE_BASE_URL  # internal/testing: override the download host
+)
+
+$ErrorActionPreference = 'Stop'
+$Repo = 'The-Mettle-Project/Mettle'
+
+function Say  { param($m) Write-Host $m -ForegroundColor Blue }
+function Ok   { param($m) Write-Host "[ok] $m" -ForegroundColor Green }
+function Warn { param($m) Write-Host "[!] $m" -ForegroundColor Yellow }
+function Die  { param($m) Write-Host "error: $m" -ForegroundColor Red; exit 1 }
+
+# TLS 1.2 for older PowerShell hosts talking to GitHub.
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+
+# --- platform check ---------------------------------------------------------
+$arch = $env:PROCESSOR_ARCHITECTURE
+if ($arch -ne 'AMD64' -and $arch -ne 'x86_64') {
+  Die "unsupported architecture '$arch'. Mettle currently targets x86-64."
+}
+$target = 'windows-x64'
+
+# --- resolve version --------------------------------------------------------
+if ([string]::IsNullOrWhiteSpace($Version)) {
+  Say 'Finding the latest Mettle release...'
+  try {
+    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" `
+      -Headers @{ 'User-Agent' = 'mettle-installer' }
+    $Version = $rel.tag_name
+  } catch {
+    Die "could not determine the latest release. Pass -Version vX.Y.Z, or see https://github.com/$Repo/releases."
+  }
+  if ([string]::IsNullOrWhiteSpace($Version)) {
+    Die "the latest release has no tag. Pass -Version vX.Y.Z explicitly."
+  }
 }
 
-$InstallDir = "$env:ProgramFiles\Mettle"
-
-Write-Host "Installing Mettle to $InstallDir..."
-if (-not (Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+$bundle = "mettle-$Version-$target"
+if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
+  $BaseUrl = "https://github.com/$Repo/releases/download/$Version"
 }
+$url = "$BaseUrl/$bundle.zip"
 
-if (-not (Test-Path "$InstallDir\runtime")) {
-    New-Item -ItemType Directory -Force -Path "$InstallDir\runtime" | Out-Null
-}
+Write-Host "Installing Mettle " -NoNewline
+Write-Host $Version -ForegroundColor Green -NoNewline
+Write-Host " for " -NoNewline
+Write-Host $target -ForegroundColor Green
 
-Write-Host "Copying files..."
-Copy-Item "bin" "$InstallDir\" -Recurse -Force
-Copy-Item "stdlib" "$InstallDir\" -Recurse -Force
-Copy-Item "src\runtime\*" "$InstallDir\runtime\" -Recurse -Force
-Copy-Item "mettle.ico" "$InstallDir\" -Force
+# --- download + extract -----------------------------------------------------
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("mettle-install-" + [System.IO.Path]::GetRandomFileName())
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+try {
+  $zip = Join-Path $tmp 'mettle.zip'
+  Say "Downloading $url"
+  try {
+    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -Headers @{ 'User-Agent' = 'mettle-installer' }
+  } catch {
+    Die "download failed. Does $Version ship a $target build? See https://github.com/$Repo/releases."
+  }
+  if (-not (Test-Path $zip) -or (Get-Item $zip).Length -eq 0) {
+    Die "downloaded archive is empty."
+  }
 
-if (Test-Path "installer\mettle-build.bat") {
-    Copy-Item "installer\mettle-build.bat" "$InstallDir\bin\" -Force
-}
+  Say 'Unpacking...'
+  $unzip = Join-Path $tmp 'unzipped'
+  Expand-Archive -Path $zip -DestinationPath $unzip -Force
 
-#
-# Windows file type: .mettle -> Mettle (same ProgID + commands as installer\Mettle.iss).
-#
-function Remove-LegacyMethlangAssociations {
-    $classesRoot = "HKLM:\SOFTWARE\Classes"
-    $methKey = Join-Path $classesRoot ".meth"
-    if (Test-Path $methKey) {
-        try {
-            $progId = (Get-ItemProperty -LiteralPath $methKey -Name "(default)" -ErrorAction Stop).'(default)'
-            if ($progId -eq "MethlangFile") {
-                Remove-Item -LiteralPath $methKey -Recurse -Force -ErrorAction Stop
-                Write-Host "Removed legacy association: .meth -> MethlangFile"
-            }
-        } catch { }
+  # The zip's contents may sit at the root or under a <bundle>\ folder.
+  $src = $unzip
+  if (Test-Path (Join-Path $unzip $bundle)) { $src = Join-Path $unzip $bundle }
+  $exe = Join-Path $src 'mettle.exe'
+  if (-not (Test-Path $exe)) { $exe = Join-Path $src 'bin\mettle.exe' }
+  if (-not (Test-Path $exe)) { Die "archive did not contain mettle.exe (unexpected layout)." }
+
+  # --- install (replace any prior install) ----------------------------------
+  Say "Installing to $InstallDir"
+  if (Test-Path $InstallDir) {
+    $backup = "$InstallDir.old"
+    if (Test-Path $backup) { Remove-Item -Recurse -Force $backup }
+    Rename-Item -Path $InstallDir -NewName $backup
+  }
+  New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+  Copy-Item -Path (Join-Path $src '*') -Destination $InstallDir -Recurse -Force
+  if (Test-Path "$InstallDir.old") { Remove-Item -Recurse -Force "$InstallDir.old" }
+
+  # The compiler lives at <InstallDir>\bin\mettle.exe; normalize if the zip put
+  # it at the root.
+  $binDir = Join-Path $InstallDir 'bin'
+  if (-not (Test-Path (Join-Path $binDir 'mettle.exe'))) {
+    if (Test-Path (Join-Path $InstallDir 'mettle.exe')) {
+      New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+      Move-Item -Force (Join-Path $InstallDir 'mettle.exe') (Join-Path $binDir 'mettle.exe')
+    } else {
+      Die "installed tree is missing bin\mettle.exe."
     }
-    $mfKey = Join-Path $classesRoot "MethlangFile"
-    if (Test-Path $mfKey) {
-        try {
-            Remove-Item -LiteralPath $mfKey -Recurse -Force -ErrorAction Stop
-            Write-Host "Removed legacy ProgID: MethlangFile"
-        } catch { }
+  }
+  Ok "Installed mettle to $binDir\mettle.exe"
+
+  # --- user PATH ------------------------------------------------------------
+  if ($NoModifyPath) {
+    Warn "Skipping PATH update (-NoModifyPath). Add this directory yourself:"
+    Write-Host "    $binDir"
+  } else {
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if ([string]::IsNullOrEmpty($userPath)) { $userPath = '' }
+    $parts = $userPath.Split(';') | Where-Object { $_ -ne '' }
+    if ($parts -notcontains $binDir) {
+      $newPath = (@($parts) + $binDir) -join ';'
+      [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+      $env:Path = "$env:Path;$binDir"  # also update this session
+      Ok "Added $binDir to your user PATH"
+      $script:PathChanged = $true
+    } else {
+      Ok "$binDir is already on your PATH"
     }
-}
+  }
 
-function Register-MettleFileAssociation {
-    param(
-        [Parameter(Mandatory = $true)][string]$IconPath,
-        [Parameter(Mandatory = $true)][string]$CompilerExe
-    )
-    $classesRoot = "HKLM:\SOFTWARE\Classes"
-    if (-not (Test-Path $classesRoot)) {
-        throw "Cannot access $classesRoot (administrator required)."
+  # --- toolchain check (detect + guide) -------------------------------------
+  Write-Host ''
+  Write-Host 'Checking the C toolchain Mettle links with...' -ForegroundColor DarkGray
+  if (Get-Command gcc -ErrorAction SilentlyContinue) {
+    Ok 'Found gcc'
+  } else {
+    Warn 'gcc was not found on PATH.'
+    Write-Host '  Mettle uses the internal PE linker by default, but gcc is needed for'
+    Write-Host '  the --emit-asm path and as a linker fallback. Install one of:'
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+      Write-Host '    winget install -e --id BrechtSanders.WinLibs.POSIX.UCRT' -ForegroundColor White
     }
-
-    New-Item -Path "$classesRoot\.mettle" -Force | Out-Null
-    Set-ItemProperty -LiteralPath "$classesRoot\.mettle" -Name "(default)" -Value "MettleFile"
-
-    New-Item -Path "$classesRoot\MettleFile" -Force | Out-Null
-    Set-ItemProperty -LiteralPath "$classesRoot\MettleFile" -Name "(default)" -Value "Mettle Source File"
-
-    New-Item -Path "$classesRoot\MettleFile\DefaultIcon" -Force | Out-Null
-    Set-ItemProperty -LiteralPath "$classesRoot\MettleFile\DefaultIcon" -Name "(default)" -Value "$IconPath"
-
-    New-Item -Path "$classesRoot\MettleFile\shell\open\command" -Force | Out-Null
-    $openCmd = "`"$CompilerExe`" `"%1`""
-    Set-ItemProperty -LiteralPath "$classesRoot\MettleFile\shell\open\command" -Name "(default)" -Value $openCmd
-
-    Write-Host "Registered .mettle files (ProgID MettleFile, icon + open with mettle.exe)."
-}
-
-Write-Host "Updating Windows file associations..."
-Remove-LegacyMethlangAssociations
-$iconPath = Join-Path $InstallDir "mettle.ico"
-$compilerPath = Join-Path $InstallDir "bin\mettle.exe"
-if (-not (Test-Path $compilerPath)) {
-    Write-Warning "mettle.exe not found at $compilerPath - skipping .mettle registration."
-} elseif (-not (Test-Path $iconPath)) {
-    Write-Warning "mettle.ico not found at $iconPath - skipping .mettle registration."
-} else {
-    Register-MettleFileAssociation -IconPath $iconPath -CompilerExe $compilerPath
-}
-
-Write-Host "Updating Machine PATH variable..."
-$Path = [Environment]::GetEnvironmentVariable("Path", "Machine")
-$TargetBinDir = "$InstallDir\bin"
-if ($Path -notmatch "[;]$( [regex]::Escape($TargetBinDir) )[;]?$") {
-    $NewPath = $Path
-    if (-not $NewPath.EndsWith(";")) {
-        $NewPath += ";"
+    if (Get-Command choco -ErrorAction SilentlyContinue) {
+      Write-Host '    choco install mingw' -ForegroundColor White
     }
-    $NewPath += $TargetBinDir
-    [Environment]::SetEnvironmentVariable("Path", $NewPath, "Machine")
-    Write-Host "Added $TargetBinDir to Machine PATH."
-}
-else {
-    Write-Host "Mettle bin directory is already in PATH."
-}
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue) -and
+        -not (Get-Command choco -ErrorAction SilentlyContinue)) {
+      Write-Host '    install MinGW-w64 (gcc) and add it to PATH'
+    }
+  }
 
-Write-Host ""
-Write-Host "Checking compiler dependencies..."
-if (-not (Get-Command "gcc" -ErrorAction SilentlyContinue)) {
-    Write-Warning "gcc was not found in PATH. Mettle requires gcc for linking."
+  # --- done -----------------------------------------------------------------
+  Write-Host ''
+  Write-Host "Mettle $Version is installed." -ForegroundColor Green
+  if ($script:PathChanged) {
+    Write-Host 'Open a new terminal, then:'
+  } else {
+    Write-Host 'Get started:'
+  }
+  Write-Host '    mettle --version' -ForegroundColor White
+  Write-Host "    'function main() -> int32 { return 0; }' | Out-File hello.mettle -Encoding ascii" -ForegroundColor White
+  Write-Host '    mettle --build hello.mettle -o hello.exe; .\hello.exe' -ForegroundColor White
+  Write-Host ''
+  Write-Host "Docs: https://github.com/$Repo" -ForegroundColor Blue
 }
-
-if (-not (Get-Command "nasm" -ErrorAction SilentlyContinue)) {
-    Write-Warning "nasm was not found in PATH. Mettle requires nasm to assemble .s files."
+finally {
+  Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
-
-Write-Host ""
-Write-Host "Installation complete! Open a new terminal to use 'mettle-build' or 'mettle'. "

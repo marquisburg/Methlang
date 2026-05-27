@@ -7,7 +7,6 @@ web/
 lib/
 tests/_tmp_*
 .html
-
 *.exe
 *.o
 *.obj

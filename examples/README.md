@@ -33,6 +33,10 @@ Run the full Mettle-vs-C suite:
 .\tools\benchmark\run-benchmarks.ps1
 ```
 
+## Mettle vs Rust demo
+
+[`mettle_vs_rust/`](mettle_vs_rust/) — single workload in Mettle and Rust with a script that compares **compile time**, **binary size**, and **runtime** side by side. Run `examples\mettle_vs_rust\build.bat`.
+
 ## Other examples
 
 | Directory | Description |

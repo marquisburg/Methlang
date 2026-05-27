@@ -33,6 +33,31 @@ function Write-CaseResult {
   }
 }
 
+function Get-Sha256FileHash {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $stream = $null
+  $sha256 = $null
+  try {
+    $resolvedPath = (Resolve-Path -LiteralPath $Path).ProviderPath
+    $stream = [System.IO.File]::OpenRead($resolvedPath)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $bytes = $sha256.ComputeHash($stream)
+    return ([System.BitConverter]::ToString($bytes) -replace "-", "")
+  }
+  finally {
+    if ($stream) {
+      $stream.Dispose()
+    }
+    if ($sha256) {
+      $sha256.Dispose()
+    }
+  }
+}
+
 function Test-AssemblyOutput {
   param(
     [string]$AsmPath,
@@ -1050,8 +1075,8 @@ foreach ($case in $cases) {
             }
           }
           else {
-            $hash1 = (Get-FileHash -Algorithm SHA256 -Path $outFile).Hash
-            $hash2 = (Get-FileHash -Algorithm SHA256 -Path $outFile2).Hash
+            $hash1 = Get-Sha256FileHash -Path $outFile
+            $hash2 = Get-Sha256FileHash -Path $outFile2
             if ($hash1 -ne $hash2) {
               $passed = $false
               $reason = "Determinism check failed: outputs differ between identical runs"

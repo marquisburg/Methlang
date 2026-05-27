@@ -36,7 +36,7 @@ var sp: MyStruct*;    // pointer to struct
 
 The null pointer is written `0`. Pointers and `0` are comparable for equality.
 
-**Pointer arithmetic:** The expression `ptr + n` is not supported. Use indexing instead: `ptr[i]` computes the address of the i-th element and advances by the size of the pointed-to type (C semantics). For `int32* p`, the expression `p[1]` accesses the next int32 (4 bytes). For byte-level access, use `uint8*` or `cstring`; then `ptr[i]` advances by 1 byte.
+**Pointer arithmetic:** `ptr + n` and `ptr - n` are supported when one operand is a pointer and the other is an integer; the offset scales by the pointed-to type size (C semantics). `ptr1 - ptr2` is supported when both pointers have the same type and yields a byte offset as `int64`. Indexing `ptr[i]` is equivalent to `*(ptr + i)`. For byte-level stepping, use `uint8*` or `cstring`.
 
 **Null dereference:** In normal builds, the compiler emits runtime null checks for dynamic pointer dereference/indexing and traps with a fatal message on null. In `--release`, these generated checks are disabled; null dereference is undefined behavior and typically crashes.
 
