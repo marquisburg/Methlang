@@ -43,10 +43,19 @@ __declspec(dllimport) int __stdcall QueryPerformanceCounter(MettleQpcTicks *coun
 #endif
 
 /* Compiler version string. Release builds stamp the real tag by defining
- * METTLE_VERSION at compile time (e.g. -DMETTLE_VERSION=\"v0.3.0\"); local and
- * dev builds report this default. */
+ * the version at compile time. Two forms are accepted:
+ *   -DMETTLE_VERSION_RAW=v0.3.0      (bare token, stringified here)
+ *   -DMETTLE_VERSION=\"v0.3.0\"      (pre-quoted string literal)
+ * The raw form avoids fragile quote escaping through shell -> make -> gcc.
+ * Local and dev builds report the default below. */
+#define METTLE_STRINGIFY_(x) #x
+#define METTLE_STRINGIFY(x) METTLE_STRINGIFY_(x)
 #ifndef METTLE_VERSION
+#ifdef METTLE_VERSION_RAW
+#define METTLE_VERSION METTLE_STRINGIFY(METTLE_VERSION_RAW)
+#else
 #define METTLE_VERSION "v0.9.0-dev"
+#endif
 #endif
 
 #define PROFILE_PHASE_READ_INPUT METTLE_COMPILER_PHASE_READ_INPUT

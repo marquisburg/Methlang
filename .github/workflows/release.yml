@@ -117,7 +117,7 @@ jobs:
           if [ -z "$tag" ] || [ "$tag" = "development" ] || [ "$tag" = "main" ]; then
             tag="${{ github.event.inputs.tag }}"
           fi
-          make -j"$(nproc)" EXTRA_CFLAGS="-DMETTLE_VERSION=\"$tag\""
+          make -j"$(nproc)" EXTRA_CFLAGS="-DMETTLE_VERSION_RAW=$tag"
 
       - name: Native ELF backend tests
         run: bash tools/test-elf-native.sh
