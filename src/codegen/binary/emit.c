@@ -2652,31 +2652,74 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
                                  [context->indirect_return_slot_cursor++];
   }
 
-  /* Effective ABI argument count includes the hidden out-pointer. */
+  /* Effective ABI argument count includes the hidden out-pointer. Compute the
+   * per-argument layout under the active convention; the hidden out-pointer is
+   * a leading integer argument. */
+  const BinaryAbi *abi = code_generator_binary_active_abi();
   size_t effective_arg_count = argument_count + hidden_arg_count;
-  size_t stack_argument_count =
-      effective_arg_count > BINARY_WIN64_REGISTER_ARG_COUNT
-          ? effective_arg_count - BINARY_WIN64_REGISTER_ARG_COUNT
-          : 0;
-  if (stack_argument_count >
-      (size_t)(INT_MAX / BINARY_FUNCTION_STACK_SLOT_SIZE)) {
+  int *arg_is_float = effective_arg_count > 0
+                          ? calloc(effective_arg_count, sizeof(int))
+                          : NULL;
+  BinaryArgLocation *arg_locations =
+      effective_arg_count > 0
+          ? calloc(effective_arg_count, sizeof(BinaryArgLocation))
+          : NULL;
+  if (effective_arg_count > 0 && (!arg_is_float || !arg_locations)) {
     free(is_indirect_arg);
     free(indirect_arg_offset);
     free(indirect_arg_size);
+    free(arg_is_float);
+    free(arg_locations);
+    code_generator_set_error(generator, "Out of memory planning call layout");
+    return 0;
+  }
+  for (size_t i = 0; i < argument_count; i++) {
+    Type *param_t =
+        function_symbol && function_symbol->kind == SYMBOL_FUNCTION &&
+                function_symbol->data.function.parameter_types
+            ? function_symbol->data.function.parameter_types[i]
+            : NULL;
+    /* INDIRECT args pass a pointer (integer class). */
+    arg_is_float[i + hidden_arg_count] =
+        (!is_indirect_arg[i] &&
+         code_generator_binary_resolved_type_float_bits(param_t))
+            ? 1
+            : 0;
+  }
+
+  int stack_bytes = 0;
+  if (effective_arg_count > 0 &&
+      !code_generator_binary_compute_arg_layout(abi, arg_is_float,
+                                                effective_arg_count,
+                                                arg_locations, &stack_bytes)) {
+    free(is_indirect_arg);
+    free(indirect_arg_offset);
+    free(indirect_arg_size);
+    free(arg_is_float);
+    free(arg_locations);
+    code_generator_set_error(generator, "Failed to compute call layout");
+    return 0;
+  }
+  if (stack_bytes > INT_MAX - 64) {
+    free(is_indirect_arg);
+    free(indirect_arg_offset);
+    free(indirect_arg_size);
+    free(arg_is_float);
+    free(arg_locations);
     code_generator_set_error(generator,
                              "Too many call arguments in function '%s'",
                              context->function_name);
     return 0;
   }
 
-  int call_stack_total = indirect_temp_region +
-                         BINARY_WIN64_SHADOW_SPACE_SIZE +
-                         (int)(stack_argument_count *
-                               BINARY_FUNCTION_STACK_SLOT_SIZE);
+  int call_stack_total =
+      indirect_temp_region + abi->shadow_space_size + stack_bytes;
   if (!binary_align_up_int(call_stack_total, 16, &call_stack_total)) {
     free(is_indirect_arg);
     free(indirect_arg_offset);
     free(indirect_arg_size);
+    free(arg_is_float);
+    free(arg_locations);
     code_generator_set_error(generator,
                              "Call frame too large in function '%s'",
                              context->function_name);
@@ -2688,6 +2731,8 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
     free(is_indirect_arg);
     free(indirect_arg_offset);
     free(indirect_arg_size);
+    free(arg_is_float);
+    free(arg_locations);
     code_generator_set_error(generator,
                              "Out of memory while emitting call frame");
     return 0;
@@ -2702,6 +2747,8 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
       free(is_indirect_arg);
       free(indirect_arg_offset);
       free(indirect_arg_size);
+      free(arg_is_float);
+      free(arg_locations);
       return 0;
     }
     /* dst = lea rdx, [rsp + offset] (offset within indirect_temp_region) */
@@ -2713,22 +2760,22 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
       free(is_indirect_arg);
       free(indirect_arg_offset);
       free(indirect_arg_size);
+      free(arg_is_float);
+      free(arg_locations);
       code_generator_set_error(generator,
                                "Out of memory copying INDIRECT call arg");
       return 0;
     }
   }
 
-  /* Stack args: skip slot 0 if hidden out-ptr is present (it's a register
-   * arg on Win64 anyway). For Win64 every arg has a stack slot above the
-   * shadow space if it doesn't fit in registers. The first 4 ABI slots are
-   * register; slots >= 4 are stack. */
+  /* Stack args: arguments the layout placed on the stack. Their rsp-relative
+   * home is the indirect-temp region, then shadow space, then the layout's
+   * outgoing offset. */
   for (size_t i = 0; i < argument_count; i++) {
-    size_t abi_slot = i + hidden_arg_count;
-    if (abi_slot < BINARY_WIN64_REGISTER_ARG_COUNT) continue;
-    int slot_offset = indirect_temp_region + BINARY_WIN64_SHADOW_SPACE_SIZE +
-                      (int)((abi_slot - BINARY_WIN64_REGISTER_ARG_COUNT) *
-                            BINARY_FUNCTION_STACK_SLOT_SIZE);
+    const BinaryArgLocation *loc = &arg_locations[i + hidden_arg_count];
+    if (loc->kind != BINARY_ARG_ON_STACK) continue;
+    int slot_offset =
+        indirect_temp_region + abi->shadow_space_size + loc->stack_offset;
     if (is_indirect_arg[i]) {
       /* Place &temp into the stack slot. */
       if (!binary_emit_lea_reg_mem(&context->code, BINARY_GP_RAX,
@@ -2738,6 +2785,8 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
         free(is_indirect_arg);
         free(indirect_arg_offset);
         free(indirect_arg_size);
+        free(arg_is_float);
+        free(arg_locations);
         code_generator_set_error(generator,
                                  "Out of memory writing INDIRECT stack arg");
         return 0;
@@ -2757,6 +2806,8 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
       free(is_indirect_arg);
       free(indirect_arg_offset);
       free(indirect_arg_size);
+      free(arg_is_float);
+      free(arg_locations);
       if (!generator->has_error) {
         code_generator_set_error(generator,
                                  "Out of memory while materializing call args");
@@ -2765,18 +2816,20 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
     }
   }
 
-  /* Register args. ABI slot = i + hidden_arg_count. */
+  /* Register args: arguments the layout placed in a GP or XMM register. */
   for (size_t i = 0; i < argument_count; i++) {
-    size_t abi_slot = i + hidden_arg_count;
-    if (abi_slot >= BINARY_WIN64_REGISTER_ARG_COUNT) continue;
+    const BinaryArgLocation *loc = &arg_locations[i + hidden_arg_count];
+    if (loc->kind == BINARY_ARG_ON_STACK) continue;
     if (is_indirect_arg[i]) {
-      /* lea reg, [rsp + offset] */
-      if (!binary_emit_lea_reg_mem(
-              &context->code, BINARY_WIN64_INT_PARAM_REGISTERS[abi_slot],
-              BINARY_GP_RSP, indirect_arg_offset[i])) {
+      /* INDIRECT args always pass a pointer in a GP register. */
+      if (loc->kind != BINARY_ARG_IN_GP_REGISTER ||
+          !binary_emit_lea_reg_mem(&context->code, loc->gp_register,
+                                   BINARY_GP_RSP, indirect_arg_offset[i])) {
         free(is_indirect_arg);
         free(indirect_arg_offset);
         free(indirect_arg_size);
+        free(arg_is_float);
+        free(arg_locations);
         code_generator_set_error(generator,
                                  "Out of memory loading INDIRECT arg ptr");
         return 0;
@@ -2790,28 +2843,37 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
             : NULL;
     int param_fbits =
         code_generator_binary_resolved_type_float_bits(parameter_type);
-    if ((param_fbits &&
+    if ((loc->kind == BINARY_ARG_IN_XMM_REGISTER &&
          !code_generator_binary_emit_float_call_argument(
              generator, context, &instruction->arguments[i], parameter_type,
-             param_fbits, BINARY_WIN64_FLOAT_PARAM_REGISTERS[abi_slot])) ||
-        (!param_fbits &&
+             param_fbits, loc->xmm_register)) ||
+        (loc->kind == BINARY_ARG_IN_GP_REGISTER &&
          !code_generator_binary_emit_call_argument_load(
              generator, context, &instruction->arguments[i], parameter_type,
-             BINARY_WIN64_INT_PARAM_REGISTERS[abi_slot]))) {
+             loc->gp_register))) {
       free(is_indirect_arg);
       free(indirect_arg_offset);
       free(indirect_arg_size);
+      free(arg_is_float);
+      free(arg_locations);
       return 0;
     }
   }
 
-  /* Hidden out-pointer for INDIRECT return: load &return_slot into rcx
-   * LAST, after any user-arg memcpy that may have clobbered rcx. The slot
-   * lives in the caller's function frame, so it survives the call's
-   * stack teardown. */
+  /* The layout is fully consumed; the hidden out-pointer is loaded below from
+   * the ABI's dedicated register, not the layout. */
+  free(arg_is_float);
+  free(arg_locations);
+  arg_is_float = NULL;
+  arg_locations = NULL;
+
+  /* Hidden out-pointer for INDIRECT return: load &return_slot into the ABI's
+   * dedicated out-pointer register (MS-x64 RCX, SysV RDI) LAST, after any
+   * user-arg work that may have clobbered it. The slot lives in the caller's
+   * function frame, so it survives the call's stack teardown. */
   if (return_is_indirect) {
-    if (!binary_emit_lea_reg_mem(&context->code, BINARY_GP_RCX, BINARY_GP_RBP,
-                                 -return_slot_rbp_offset)) {
+    if (!binary_emit_lea_reg_mem(&context->code, abi->indirect_return_register,
+                                 BINARY_GP_RBP, -return_slot_rbp_offset)) {
       free(is_indirect_arg);
       free(indirect_arg_offset);
       free(indirect_arg_size);
@@ -3007,12 +3069,43 @@ int code_generator_binary_emit_call_indirect(
           ? symbol->type
           : NULL;
 
-  stack_argument_count =
-      instruction->argument_count > BINARY_WIN64_REGISTER_ARG_COUNT
-          ? instruction->argument_count - BINARY_WIN64_REGISTER_ARG_COUNT
-          : 0;
-  if (stack_argument_count >
-      (size_t)(INT_MAX / BINARY_FUNCTION_STACK_SLOT_SIZE)) {
+  const BinaryAbi *abi = code_generator_binary_active_abi();
+  size_t indirect_arg_count = instruction->argument_count;
+  int *arg_is_float =
+      indirect_arg_count > 0 ? calloc(indirect_arg_count, sizeof(int)) : NULL;
+  BinaryArgLocation *arg_locations =
+      indirect_arg_count > 0
+          ? calloc(indirect_arg_count, sizeof(BinaryArgLocation))
+          : NULL;
+  if (indirect_arg_count > 0 && (!arg_is_float || !arg_locations)) {
+    free(arg_is_float);
+    free(arg_locations);
+    code_generator_set_error(generator,
+                             "Out of memory planning indirect call layout");
+    return 0;
+  }
+  for (size_t i = 0; i < indirect_arg_count; i++) {
+    Type *parameter_type = function_type && function_type->fn_param_types
+                               ? function_type->fn_param_types[i]
+                               : NULL;
+    arg_is_float[i] =
+        code_generator_binary_resolved_type_float_bits(parameter_type) ? 1 : 0;
+  }
+
+  int stack_bytes = 0;
+  if (indirect_arg_count > 0 &&
+      !code_generator_binary_compute_arg_layout(abi, arg_is_float,
+                                                indirect_arg_count,
+                                                arg_locations, &stack_bytes)) {
+    free(arg_is_float);
+    free(arg_locations);
+    code_generator_set_error(generator, "Failed to compute indirect layout");
+    return 0;
+  }
+  (void)stack_argument_count;
+  if (stack_bytes > INT_MAX - 64) {
+    free(arg_is_float);
+    free(arg_locations);
     code_generator_set_error(generator,
                              "Too many indirect call arguments in function "
                              "'%s'",
@@ -3020,10 +3113,10 @@ int code_generator_binary_emit_call_indirect(
     return 0;
   }
 
-  call_stack_total = BINARY_WIN64_SHADOW_SPACE_SIZE +
-                     (int)(stack_argument_count *
-                           BINARY_FUNCTION_STACK_SLOT_SIZE);
+  call_stack_total = abi->shadow_space_size + stack_bytes;
   if (!binary_align_up_int(call_stack_total, 16, &call_stack_total)) {
+    free(arg_is_float);
+    free(arg_locations);
     code_generator_set_error(generator,
                              "Indirect call frame too large in function '%s'",
                              context->function_name);
@@ -3032,16 +3125,17 @@ int code_generator_binary_emit_call_indirect(
 
   if (call_stack_total > 0 &&
       !binary_emit_sub_rsp_imm32(&context->code, (uint32_t)call_stack_total)) {
+    free(arg_is_float);
+    free(arg_locations);
     code_generator_set_error(generator,
                              "Out of memory while emitting indirect call frame");
     return 0;
   }
 
-  for (size_t i = BINARY_WIN64_REGISTER_ARG_COUNT;
-       i < instruction->argument_count; i++) {
-    int slot_offset = BINARY_WIN64_SHADOW_SPACE_SIZE +
-                      (int)((i - BINARY_WIN64_REGISTER_ARG_COUNT) *
-                            BINARY_FUNCTION_STACK_SLOT_SIZE);
+  for (size_t i = 0; i < indirect_arg_count; i++) {
+    const BinaryArgLocation *loc = &arg_locations[i];
+    if (loc->kind != BINARY_ARG_ON_STACK) continue;
+    int slot_offset = abi->shadow_space_size + loc->stack_offset;
     Type *parameter_type =
         function_type && function_type->fn_param_types
             ? function_type->fn_param_types[i]
@@ -3051,6 +3145,8 @@ int code_generator_binary_emit_call_indirect(
             BINARY_GP_R10) ||
         !binary_emit_mov_mem_reg(&context->code, BINARY_GP_RSP, slot_offset,
                                  BINARY_GP_R10)) {
+      free(arg_is_float);
+      free(arg_locations);
       if (!generator->has_error) {
         code_generator_set_error(
             generator, "Out of memory while materializing indirect call args");
@@ -3059,28 +3155,30 @@ int code_generator_binary_emit_call_indirect(
     }
   }
 
-  size_t register_argument_count = instruction->argument_count;
-  if (register_argument_count > BINARY_WIN64_REGISTER_ARG_COUNT) {
-    register_argument_count = BINARY_WIN64_REGISTER_ARG_COUNT;
-  }
-  for (size_t i = 0; i < register_argument_count; i++) {
+  for (size_t i = 0; i < indirect_arg_count; i++) {
+    const BinaryArgLocation *loc = &arg_locations[i];
+    if (loc->kind == BINARY_ARG_ON_STACK) continue;
     Type *parameter_type =
         function_type && function_type->fn_param_types
             ? function_type->fn_param_types[i]
             : NULL;
     int param_fbits =
         code_generator_binary_resolved_type_float_bits(parameter_type);
-    if ((param_fbits &&
+    if ((loc->kind == BINARY_ARG_IN_XMM_REGISTER &&
          !code_generator_binary_emit_float_call_argument(
              generator, context, &instruction->arguments[i], parameter_type,
-             param_fbits, BINARY_WIN64_FLOAT_PARAM_REGISTERS[i])) ||
-        (!param_fbits &&
+             param_fbits, loc->xmm_register)) ||
+        (loc->kind == BINARY_ARG_IN_GP_REGISTER &&
          !code_generator_binary_emit_call_argument_load(
              generator, context, &instruction->arguments[i], parameter_type,
-             BINARY_WIN64_INT_PARAM_REGISTERS[i]))) {
+             loc->gp_register))) {
+      free(arg_is_float);
+      free(arg_locations);
       return 0;
     }
   }
+  free(arg_is_float);
+  free(arg_locations);
 
   if (!code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->lhs,
@@ -4575,104 +4673,143 @@ int code_generator_binary_emit_prologue(CodeGenerator *generator,
     }
   }
 
-  /* Hidden return out-pointer (Win64 rcx): stash it at the fixed home slot
-   * [rbp - 8] before homing user parameters. User-param homes start one slot
-   * higher when an INDIRECT return is in use. */
+  const BinaryAbi *abi = code_generator_binary_active_abi();
+
+  /* Hidden return out-pointer: stash it at the fixed home slot [rbp - 8] before
+   * homing user parameters. It arrives in the ABI's indirect-return register
+   * (MS-x64 RCX, SysV RDI) and occupies the leading ABI argument slot, so user
+   * params shift one slot when an INDIRECT return is in use. */
   if (context->returns_indirect) {
     if (!binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP, -8,
-                                 BINARY_GP_RCX)) {
+                                 abi->indirect_return_register)) {
       code_generator_set_error(generator,
                                "Out of memory homing hidden return ptr");
       return 0;
     }
   }
 
-  for (size_t i = 0; i < function_data->parameter_count; i++) {
-    const char *parameter_name = function_data->parameter_names[i];
-    int parameter_fbits = code_generator_binary_named_type_float_bits(
-        generator, function_data->parameter_types
-                       ? function_data->parameter_types[i]
-                       : NULL);
-    BinaryGpRegister assigned_register = BINARY_GP_RAX;
-    int parameter_in_register = code_generator_binary_symbol_assigned_register(
-        generator, context, parameter_name, &assigned_register);
-    int home_offset =
-        code_generator_binary_get_parameter_offset(context, parameter_name);
-    if (home_offset <= 0) {
-      code_generator_set_error(
-          generator,
-          "Missing parameter home for '%s' in function '%s'",
-          parameter_name ? parameter_name : "<unnamed>",
-          context->function_name);
+  /* Build the incoming-argument layout: the hidden out-pointer (if any) is a
+   * leading integer argument, followed by the user parameters classified by
+   * float-ness. The layout tells us each argument's register or stack home
+   * under the active convention. */
+  size_t hidden = context->returns_indirect ? 1u : 0u;
+  size_t layout_count = function_data->parameter_count + hidden;
+  if (layout_count > 0) {
+    int *is_float = calloc(layout_count, sizeof(int));
+    BinaryArgLocation *locations =
+        calloc(layout_count, sizeof(BinaryArgLocation));
+    if (!is_float || !locations) {
+      free(is_float);
+      free(locations);
+      code_generator_set_error(generator,
+                               "Out of memory computing parameter layout");
+      return 0;
+    }
+    /* Hidden out-pointer is integer (is_float[0] already 0). */
+    for (size_t i = 0; i < function_data->parameter_count; i++) {
+      int fbits = code_generator_binary_named_type_float_bits(
+          generator, function_data->parameter_types
+                         ? function_data->parameter_types[i]
+                         : NULL);
+      is_float[i + hidden] = fbits ? 1 : 0;
+    }
+    if (!code_generator_binary_compute_arg_layout(abi, is_float, layout_count,
+                                                  locations, NULL)) {
+      free(is_float);
+      free(locations);
+      code_generator_set_error(generator, "Failed to compute parameter layout");
       return 0;
     }
 
-    /* When the function returns INDIRECT, the hidden out-pointer occupies
-     * ABI slot 0, so user param i occupies ABI slot i+1. */
-    size_t abi_slot = i + (context->returns_indirect ? 1 : 0);
-
-    if (parameter_in_register) {
-      int home_ok = 1;
-      if (abi_slot < BINARY_WIN64_REGISTER_ARG_COUNT) {
-        home_ok = binary_emit_mov_reg_reg(
-            &context->code, assigned_register,
-            BINARY_WIN64_INT_PARAM_REGISTERS[abi_slot]);
-      } else {
-        int incoming_stack_offset =
-            16 + BINARY_WIN64_SHADOW_SPACE_SIZE +
-            (int)((abi_slot - BINARY_WIN64_REGISTER_ARG_COUNT) *
-                  BINARY_FUNCTION_STACK_SLOT_SIZE);
-        home_ok = binary_emit_mov_reg_mem(&context->code, assigned_register,
-                                          BINARY_GP_RBP,
-                                          incoming_stack_offset);
-      }
-      if (!home_ok) {
+    for (size_t i = 0; i < function_data->parameter_count; i++) {
+      const char *parameter_name = function_data->parameter_names[i];
+      int parameter_fbits = code_generator_binary_named_type_float_bits(
+          generator, function_data->parameter_types
+                         ? function_data->parameter_types[i]
+                         : NULL);
+      BinaryGpRegister assigned_register = BINARY_GP_RAX;
+      int parameter_in_register =
+          code_generator_binary_symbol_assigned_register(
+              generator, context, parameter_name, &assigned_register);
+      int home_offset =
+          code_generator_binary_get_parameter_offset(context, parameter_name);
+      if (home_offset <= 0) {
+        free(is_float);
+        free(locations);
         code_generator_set_error(
-            generator, "Out of memory while homing register parameters");
+            generator, "Missing parameter home for '%s' in function '%s'",
+            parameter_name ? parameter_name : "<unnamed>",
+            context->function_name);
         return 0;
       }
-      continue;
-    }
 
-    if (abi_slot < BINARY_WIN64_REGISTER_ARG_COUNT) {
+      const BinaryArgLocation *loc = &locations[i + hidden];
+      /* Callee-side address of a stack argument: above saved rbp + return
+       * address (16) and the callee-owned shadow space, then the layout's
+       * outgoing offset. */
+      int incoming_stack_offset =
+          16 + abi->shadow_space_size + loc->stack_offset;
+
       int home_ok = 1;
-      if (parameter_fbits) {
+      if (parameter_in_register) {
+        /* Symbol pinned to a specific GP register by the allocator. */
+        if (loc->kind == BINARY_ARG_IN_GP_REGISTER) {
+          home_ok = binary_emit_mov_reg_reg(&context->code, assigned_register,
+                                            loc->gp_register);
+        } else if (loc->kind == BINARY_ARG_IN_XMM_REGISTER) {
+          home_ok = (parameter_fbits == 32
+                         ? binary_emit_movd_reg_xmm(&context->code,
+                                                    assigned_register,
+                                                    loc->xmm_register)
+                         : binary_emit_movq_reg_xmm(&context->code,
+                                                    assigned_register,
+                                                    loc->xmm_register));
+        } else {
+          home_ok = binary_emit_mov_reg_mem(&context->code, assigned_register,
+                                            BINARY_GP_RBP,
+                                            incoming_stack_offset);
+        }
+        if (!home_ok) {
+          free(is_float);
+          free(locations);
+          code_generator_set_error(
+              generator, "Out of memory while homing register parameters");
+          return 0;
+        }
+        continue;
+      }
+
+      if (loc->kind == BINARY_ARG_IN_XMM_REGISTER) {
         /* Float params arrive in XMM; copy the bits to GP at the param's
-         * precision (movd for float32, movq for float64) before homing. */
-        home_ok =
-            (parameter_fbits == 32
-                 ? binary_emit_movd_reg_xmm(
-                       &context->code, BINARY_GP_RAX,
-                       BINARY_WIN64_FLOAT_PARAM_REGISTERS[abi_slot])
-                 : binary_emit_movq_reg_xmm(
-                       &context->code, BINARY_GP_RAX,
-                       BINARY_WIN64_FLOAT_PARAM_REGISTERS[abi_slot])) &&
-            binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP,
-                                    -home_offset, BINARY_GP_RAX);
+         * precision before homing to the stack slot. */
+        home_ok = (parameter_fbits == 32
+                       ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                                  loc->xmm_register)
+                       : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                                  loc->xmm_register)) &&
+                  binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP,
+                                          -home_offset, BINARY_GP_RAX);
+      } else if (loc->kind == BINARY_ARG_IN_GP_REGISTER) {
+        home_ok = binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP,
+                                          -home_offset, loc->gp_register);
       } else {
-        home_ok = binary_emit_mov_mem_reg(
-            &context->code, BINARY_GP_RBP, -home_offset,
-            BINARY_WIN64_INT_PARAM_REGISTERS[abi_slot]);
+        home_ok =
+            binary_emit_mov_reg_mem(&context->code, BINARY_GP_RAX, BINARY_GP_RBP,
+                                    incoming_stack_offset) &&
+            binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP, -home_offset,
+                                    BINARY_GP_RAX);
       }
       if (!home_ok) {
-        code_generator_set_error(generator,
-                                 "Out of memory while homing parameters");
-        return 0;
-      }
-    } else {
-      int incoming_stack_offset =
-          16 + BINARY_WIN64_SHADOW_SPACE_SIZE +
-          (int)((abi_slot - BINARY_WIN64_REGISTER_ARG_COUNT) *
-                BINARY_FUNCTION_STACK_SLOT_SIZE);
-      if (!binary_emit_mov_reg_mem(&context->code, BINARY_GP_RAX, BINARY_GP_RBP,
-                                   incoming_stack_offset) ||
-          !binary_emit_mov_mem_reg(&context->code, BINARY_GP_RBP, -home_offset,
-                                   BINARY_GP_RAX)) {
+        free(is_float);
+        free(locations);
         code_generator_set_error(generator,
                                  "Out of memory while homing parameters");
         return 0;
       }
     }
+
+    free(is_float);
+    free(locations);
   }
 
   return 1;

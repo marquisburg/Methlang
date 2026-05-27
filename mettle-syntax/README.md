@@ -1,96 +1,95 @@
-# Mettle Syntax Highlighting
+# Mettle Language Support
 
-VS Code / Cursor extension for **Mettle** (`.mettle`) files: grammar-based highlighting, sensible editing defaults (brackets, indentation, folding), and a two-stage linter (fast regex rules + optional compiler diagnostics).
+VS Code and Cursor support for **Mettle** (`.mettle`) files.
 
-## What is Mettle?
+## Features
 
-Mettle is a **typed, assembly-inspired language** that compiles to **x86-64** assembly. Programs use explicit types, structs, pointers, control flow familiar from C-family languages, and a standard library for I/O, math, and more. The full language reference lives in the main repository under [`docs/`](../docs/LANGUAGE.md).
+- TextMate syntax highlighting for current Mettle syntax.
+- Nested block comments and line comments.
+- Bracket matching, auto-pairs, folding, and indentation rules.
+- Snippets for functions, imports, structs, enums, traits, loops, `defer`, `errdefer`, and `match`.
+- Rich hover documentation for Mettle keywords, primitive types, strings, imports, traits, generics, defers, control flow, and allocation.
+- Contextual hovers for import paths, including best-effort resolution against the workspace, stdlib, and configured include paths.
+- Same-file declaration hovers for functions, globals, structs, enums, traits, methods, and impls.
+- Fast editor diagnostics for lexer-level mistakes.
+- Optional compiler-backed diagnostics for real semantic errors.
+- Commands:
+  - `Mettle: Lint Active File`
+  - `Mettle: Clear Diagnostics`
+  - `Mettle: Show Output`
 
-| Topic | Document |
-|--------|----------|
-| Comments, identifiers, keywords, literals, operators | [Lexical structure](../docs/lexical-structure.md) |
-| Integer/float/pointer/string types, generics | [Types](../docs/types.md) |
-| Functions, structs, enums, methods, `extern` | [Declarations](../docs/declarations.md) |
-| Operators, casts, calls | [Expressions](../docs/expressions.md) |
-| `if`, loops, `switch`, `defer` / `errdefer` | [Control flow](../docs/control-flow.md) |
-| Files, visibility | [Modules](../docs/modules.md) |
-| `import`, search paths, `import_str` | [Imports](../docs/imports.md) |
-| `std/...` modules | [Standard library](../docs/standard-library.md) |
-| Heap, `new`, runtime linking | [Heap allocator runtime](../docs/heap-allocation.md) |
-| `extern`, C strings | [C interoperability](../docs/c-interop.md) |
-| `mettle` CLI, `-I`, `--stdlib`, `--build` | [Compilation](../docs/compilation.md) |
-| Cheat sheet | [Quick reference](../docs/quick-reference.md) |
-| Gaps vs other languages | [Known limitations](../docs/known-limitations.md) |
+## Compiler Diagnostics
 
-From the compiler you can also run **`mettle docs`** (and **`mettle help`**) for bundled topic lists and paths.
+The extension can run `mettle` on open/save and show compiler errors in the Problems panel.
 
-## Extension features
+Compiler discovery order:
 
-### Syntax highlighting
+1. `mettle.linter.compilerPath`, if set.
+2. `bin/mettle.exe` or `bin/mettle` found by walking up from the current file.
+3. Workspace `bin/mettle.exe`, `bin/mettle`, `mettle.exe`, or `mettle`.
+4. `mettle.exe` or `mettle` on `PATH`.
 
-The TextMate grammar (`syntaxes/mettle.tmLanguage.json`) scopes Mettle source as `source.mettle` so themes can color keywords, types, strings, comments, and assembly blocks consistently.
-
-### Editor behavior (`language-configuration.json`)
-
-- **Line comments** — `//` (toggle with your editor’s line-comment command).
-- **Bracket matching** — `{ }`, `[ ]`, `( )`.
-- **Auto-closing / surrounding** — braces, brackets, parentheses, and string quotes.
-- **Folding** — brace-region folding using `{` / `}` markers.
-- **Indentation** — increases after `{` or `(` when the line looks incomplete; decreases on lines starting with `}` or `)`.
-
-### Diagnostics (linter)
-
-1. **Regex-based (on open and while typing, debounced)**  
-   Fast checks aligned with [known limitations](../docs/known-limitations.md) and the lexer:
-   - Invalid `0x` / `0b` literals, underscores inside numbers
-   - Block comments `/* */` (only `//` is valid)
-   - Labeled `break` / `continue`
-   - Unterminated double-quoted strings  
-
-2. **Compiler-backed (on save)**  
-   Invokes the **Mettle** executable for real semantic diagnostics: types, scopes, undefined symbols, use-before-init, etc.
-
-Regex diagnostics refresh as you edit; **compiler diagnostics run when you save** the file (if enabled).
-
-### Settings (Mettle)
+Settings:
 
 | Setting | Default | Meaning |
-|---------|---------|---------|
-| `mettle.linter.compilerEnabled` | `true` | Run the compiler for semantic diagnostics on save. |
-| `mettle.linter.compilerPath` | *(empty)* | Path to `mettle` (relative to workspace or absolute). Empty: try workspace `bin/mettle(.exe)`, then `mettle` on `PATH`. |
-| `mettle.linter.stdlibPath` | *(empty)* | Optional `--stdlib` override; empty uses the compiler’s normal stdlib resolution. |
+| --- | --- | --- |
+| `mettle.linter.compilerEnabled` | `true` | Run compiler diagnostics. |
+| `mettle.linter.compilerPath` | `""` | Absolute path, or path relative to the workspace. |
+| `mettle.linter.stdlibPath` | `""` | Optional `--stdlib` override. |
+| `mettle.linter.extraIncludePaths` | `[]` | Additional `-I` include directories. |
+| `mettle.linter.compilerTimeoutMs` | `10000` | Timeout for one compiler diagnostics run. |
 
-The linter invokes the compiler similarly to a check build, e.g. `-i <file> -o <temp> -I <file-dir> -I <workspace>` and optional `--stdlib`. See [Compilation](../docs/compilation.md) for CLI details.
+## Language Coverage
 
-## Installation (local)
+The grammar is aligned with the current compiler surface:
 
-### Option 1: Install from folder (recommended)
+- Declarations: `import`, `import_str`, `extern`, `export`, `var`, `function`, `fn`, `struct`, `enum`, `method`, `trait`, `impl`, `where`.
+- Control flow: `if`, `else`, `while`, `for`, `switch`, `match`, `case`, `default`, `break`, `continue`, `return`, `defer`, `errdefer`.
+- Types: integer and float primitives, `string`, `cstring`, `bool`, `void`, `fn(...) -> ...`, and user types.
+- Literals: decimal, hex, binary, float, strings, and character literals.
+- Operators: assignment, compound assignment, comparisons, logical operators, bitwise operators, pointer/member access, and casts.
+- Inline `asm { ... }` blocks with basic x86 mnemonic/register highlighting.
 
-1. Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
-2. **Developer: Install Extension from Location...**
-3. Choose this `mettle-syntax` directory
+## Hover Coverage
 
-### Option 2: Copy to extensions directory
+Hover cards are designed as compact reference docs, not one-line labels. They include syntax examples, gotchas, and the rules that tend to matter while coding:
 
-- **Windows:** `%USERPROFILE%\.vscode\extensions\`
-- **macOS/Linux:** `~/.vscode/extensions/`
+- Module behavior for `import`, `import_str`, `export`, and `extern`.
+- Control-flow semantics for `if`, loops, `switch`, `match`, `break`, `continue`, and `return`.
+- Cleanup behavior for `defer` and `errdefer`, including LIFO ordering and error-return convention.
+- Type notes for primitives, `string`, `cstring`, `fn`, pointers, structs, enums, traits, `impl`, and `where`.
+- Common standard-library and C interop calls from `std/io`, `std/mem`, `std/conv`, `std/process`, and `std/system`.
+- Compile-time helpers such as `sizeof`, `alignof`, and `static_assert`.
 
-Copy the whole `mettle-syntax` folder, then reload the window.
+When hovering a quoted import path, the extension tries to show the resolved file. It uses the current file directory, workspace root, `mettle.linter.stdlibPath`, discovered `stdlib/`, and `mettle.linter.extraIncludePaths`.
 
-### Option 3: Symlink (development)
+## Local Installation
+
+### Install From Folder
+
+1. Open the Command Palette.
+2. Run `Developer: Install Extension from Location...`.
+3. Pick this `mettle-syntax` directory.
+4. Reload the editor window.
+
+### Development Symlink
 
 ```powershell
-# From repo root
 New-Item -ItemType Junction -Path "$env:USERPROFILE\.vscode\extensions\mettle-syntax" -Target "$PWD\mettle-syntax"
 ```
 
-Reload the editor after installing.
+## Validation
 
-## Trying the linter
+Run the extension self-check:
 
-Open [`test-lint.mettle`](test-lint.mettle) to see regex rules in action. For compiler diagnostics, save a `.mettle` file with the Mettle binary available (workspace build or `PATH`).
+```powershell
+cd mettle-syntax
+npm run check
+```
 
-## Minimal Mettle program
+The check parses all JSON contribution files, verifies contributed paths exist, verifies command registrations, and guards against known README/package mojibake.
+
+## Minimal Program
 
 ```mettle
 function main() -> int32 {
@@ -98,4 +97,4 @@ function main() -> int32 {
 }
 ```
 
-More examples: [Quick reference](../docs/quick-reference.md).
+See the repository `docs/` directory for the full language reference.

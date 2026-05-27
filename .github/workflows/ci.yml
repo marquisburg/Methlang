@@ -68,3 +68,26 @@ jobs:
           path: ${{ steps.artifacts.outputs.dir }}/**
           if-no-files-found: ignore
           retention-days: 7
+
+  # Exercises the native ELF/SysV backend: builds the compiler on Linux, then
+  # compiles small Mettle programs to standalone statically-linked executables
+  # (the compiler's own _start, no libc) and asserts their exit codes. This is
+  # the regression net for the Linux codegen path the Windows suite can't cover.
+  elf-native:
+    name: Build & test (linux ELF)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain versions
+        run: |
+          gcc --version
+          ld --version | head -1
+          make --version | head -1
+
+      - name: Build compiler
+        run: make -j"$(nproc)"
+
+      - name: Native ELF backend tests
+        run: bash tools/test-elf-native.sh

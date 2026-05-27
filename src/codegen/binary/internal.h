@@ -40,6 +40,10 @@ typedef enum {
   BINARY_XMM1 = 1,
   BINARY_XMM2 = 2,
   BINARY_XMM3 = 3,
+  BINARY_XMM4 = 4,
+  BINARY_XMM5 = 5,
+  BINARY_XMM6 = 6,
+  BINARY_XMM7 = 7,
 } BinaryXmmRegister;
 
 typedef struct {
@@ -211,13 +215,71 @@ typedef struct {
 
 
 
-
-
-
-
-
 extern const BinaryGpRegister BINARY_WIN64_INT_PARAM_REGISTERS[];
 extern const BinaryXmmRegister BINARY_WIN64_FLOAT_PARAM_REGISTERS[];
+
+/* --- Calling-convention descriptor -------------------------------------- *
+ *
+ * The binary backend supports two x86-64 conventions: Microsoft x64 (used with
+ * COFF/Windows) and System V AMD64 (used with ELF/Linux). They differ in more
+ * than register names:
+ *   - MS-x64 passes the first 4 args in registers using ONE positional slot
+ *     index shared by int and float classes, reserves 32 bytes of "shadow
+ *     space" the callee owns, and returns INDIRECT-struct out-pointers in RCX.
+ *   - SysV passes up to 6 integer args (RDI,RSI,RDX,RCX,R8,R9) and up to 8
+ *     float args (XMM0..7) using SEPARATE per-class counters, has no shadow
+ *     space (but a 128-byte red zone), and returns the out-pointer in RDI.
+ *
+ * BinaryAbi captures the differences; code consults the active descriptor
+ * instead of the BINARY_WIN64_* macros so a single backend serves both. */
+typedef struct {
+  const BinaryGpRegister *int_param_registers;
+  size_t int_param_count;
+  const BinaryXmmRegister *float_param_registers;
+  size_t float_param_count;
+  /* Bytes the caller reserves below the return address that the callee owns
+   * (MS-x64 = 32, SysV = 0). */
+  int shadow_space_size;
+  /* Register carrying the hidden out-pointer for INDIRECT struct returns. */
+  BinaryGpRegister indirect_return_register;
+  /* When nonzero, int and float arguments consume independent register
+   * sequences (SysV). When zero, a single positional slot indexes both
+   * sequences (MS-x64). */
+  int counts_classes_separately;
+} BinaryAbi;
+
+/* The active descriptor for the current build, selected from the code
+ * generator's target object format. Defined in abi_spec.c. */
+const BinaryAbi *code_generator_binary_active_abi(void);
+void code_generator_binary_select_abi(BinaryTargetFormat format);
+
+/* Where a single argument or parameter is passed under the active ABI. */
+typedef enum {
+  BINARY_ARG_IN_GP_REGISTER,
+  BINARY_ARG_IN_XMM_REGISTER,
+  BINARY_ARG_ON_STACK,
+} BinaryArgLocationKind;
+
+typedef struct {
+  BinaryArgLocationKind kind;
+  BinaryGpRegister gp_register;  /* valid when kind == GP */
+  BinaryXmmRegister xmm_register; /* valid when kind == XMM */
+  /* Byte offset of this argument's home, relative to the start of the
+   * outgoing stack-argument region (i.e. above shadow space). Valid when
+   * kind == ON_STACK. */
+  int stack_offset;
+} BinaryArgLocation;
+
+/* Computes, for an argument sequence, where each argument lands under the
+ * active ABI. is_float[i] marks float/double args (passed in XMM). The hidden
+ * INDIRECT-return out-pointer, if present, must be modeled by the caller as a
+ * leading integer argument (it is for both conventions). Returns the total
+ * bytes of stack-argument space needed (above shadow space), or -1 on error.
+ * locations_out must have room for `count` entries. */
+int code_generator_binary_compute_arg_layout(const BinaryAbi *abi,
+                                              const int *is_float, size_t count,
+                                              BinaryArgLocation *locations_out,
+                                              int *stack_bytes_out);
 
 extern BinaryGlobalConstTable g_binary_global_consts;
 extern BinaryIRFunctionIndex g_binary_ir_function_index;
@@ -272,6 +334,7 @@ int binary_emit_je_placeholder(BinaryCodeBuffer *buffer, size_t *displacement_of
 int binary_emit_jmp_placeholder(BinaryCodeBuffer *buffer, size_t *displacement_offset_out);
 int binary_emit_lea_reg_base_index_scale_disp( BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister base, BinaryGpRegister index, int scale, int displacement);
 int binary_emit_lea_reg_mem(BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister base, int displacement);
+int binary_emit_syscall(BinaryCodeBuffer *buffer);
 int binary_emit_lea_reg_reg(BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister lhs, BinaryGpRegister rhs);
 int binary_emit_lea_reg_rip_placeholder(BinaryCodeBuffer *buffer, BinaryGpRegister destination, size_t *displacement_offset_out);
 int binary_emit_memory_access(BinaryCodeBuffer *buffer, unsigned char opcode, BinaryGpRegister reg, BinaryGpRegister base, int displacement);

@@ -21,8 +21,8 @@
 </p>
 
 Mettle is a low-level language with a compiler it owns end to end: source, IR,
-optimization, x86-64 codegen, and on Windows, native COFF output plus a built-in
-PE linker.
+optimization, and x86-64 codegen with native object output. COFF plus a
+built-in PE linker on Windows, and ELF with a self-contained `_start` on Linux.
 
 No LLVM. No C backend. No managed runtime.
 
@@ -34,31 +34,59 @@ No LLVM. No C backend. No managed runtime.
 - C interop through `extern` and `cstring`, with no FFI runtime
 - A bundled standard library for I/O, conversion, networking, processes, and threads
 - Strong diagnostics with source snippets, stable error codes, and typo suggestions
-- Windows `--build` mode that needs no NASM, gcc, or `link.exe`
+- `--build` mode that produces native executables directly: COFF and the
+  built-in PE linker on Windows, ELF and `ld` on Linux, with no NASM, gcc, or
+  `link.exe` needed
+
+## Install
+
+Linux (x86-64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/The-Mettle-Project/Mettle/main/install.sh | sh
+```
+
+Windows (x86-64), in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/The-Mettle-Project/Mettle/main/install.ps1 | iex
+```
+
+The installer downloads the latest release for your platform, installs it to a
+per-user directory (`~/.mettle` on Linux, `%LOCALAPPDATA%\Mettle` on Windows),
+adds the compiler to your PATH, and checks for the C toolchain Mettle links
+with. No root or administrator rights required. Pin a version with
+`--version v0.3.0` (or `-Version v0.3.0` on Windows).
+
+After installing, open a new terminal and confirm:
+
+```bash
+mettle --version
+```
 
 ## Quick Start
 
-Build the compiler:
-
-```powershell
-.\build.bat
-```
-
-Build and run a Mettle program on Windows:
-
-```powershell
-.\bin\mettle.exe --build hello.mettle -o hello.exe
-.\hello.exe
-```
-
-Build and run on Linux:
+Compile and run a program:
 
 ```bash
-make
-./bin/mettle hello.mettle -o hello.s
-nasm -f elf64 hello.s -o hello.o
-gcc -nostartfiles hello.o -o hello
-./hello
+echo 'function main() -> int32 { return 0; }' > hello.mettle
+mettle --build hello.mettle -o hello
+./hello          # on Windows: .\hello.exe
+```
+
+The Linux `--build` path emits a native ELF object with the compiler's own
+`_start` and links it with `ld` into a statically linked executable, with no
+libc, CRT, or assembler. Programs that use the standard library (`std/io`,
+`std/bench`) are not yet supported on Linux and fail at link time.
+
+## Build from source
+
+```powershell
+.\build.bat        # Windows
+```
+
+```bash
+make               # Linux
 ```
 
 Production build:
@@ -93,8 +121,17 @@ Production build:
 
 ## Development
 
+Run the test suite (Windows):
+
 ```powershell
-.\build.bat
-.\tests\run_tests.ps1
+.\build.bat                        # build + full suite
+.\tests\run_tests.ps1              # suite against the current bin\mettle.exe
 .\tests\run_tests.ps1 -BuildCompiler
+```
+
+Native ELF backend tests (Linux):
+
+```bash
+make
+bash tools/test-elf-native.sh
 ```

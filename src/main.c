@@ -42,6 +42,13 @@ __declspec(dllimport) int __stdcall QueryPerformanceCounter(MettleQpcTicks *coun
 #endif
 #endif
 
+/* Compiler version string. Release builds stamp the real tag by defining
+ * METTLE_VERSION at compile time (e.g. -DMETTLE_VERSION=\"v0.3.0\"); local and
+ * dev builds report this default. */
+#ifndef METTLE_VERSION
+#define METTLE_VERSION "v0.9.0-dev"
+#endif
+
 #define PROFILE_PHASE_READ_INPUT METTLE_COMPILER_PHASE_READ_INPUT
 #define PROFILE_PHASE_LEXICAL_VALIDATION METTLE_COMPILER_PHASE_LEXICAL_VALIDATION
 #define PROFILE_PHASE_INIT METTLE_COMPILER_PHASE_INIT
@@ -535,6 +542,78 @@ static int parse_linker_mode(const char *text, LinkerMode *mode_out) {
 
   return 0;
 }
+
+#ifndef _WIN32
+/* Links a native ELF executable: emits the self-contained _start object, then
+ * invokes `ld` to combine it with the program object into a statically linked
+ * binary that needs no libc/CRT. Used on ELF hosts (Linux); does not depend on
+ * the Windows-only link helpers below. Returns 0 on success. */
+static int mettle_link_elf_executable(const char *object_filename,
+                                      const char *executable_filename,
+                                      const CompilerOptions *options) {
+  char *startup_object = NULL;
+  char *command = NULL;
+  int result = 1;
+  int profile_runtime =
+      options && compiler_options_use_profile_runtime(options) ? 1 : 0;
+  int stack_trace = options && options->generate_stack_trace_support ? 1 : 0;
+  int wants_argv = options && options->main_wants_argc_argv ? 1 : 0;
+
+  /* The crash-handler/profile runtime objects are not yet built for ELF, so
+   * those features can't be linked on Linux. Fail clearly rather than emit a
+   * _start that references missing symbols. */
+  if (profile_runtime || stack_trace) {
+    fprintf(stderr,
+            "Error: stack-trace and profile runtime are not yet supported on "
+            "the native ELF backend\n");
+    return 1;
+  }
+
+  startup_object = replace_extension(executable_filename, ".startup.o");
+  if (!startup_object) {
+    fprintf(stderr, "Error: Failed to allocate ELF startup object path\n");
+    return 1;
+  }
+
+  if (binary_write_program_startup_object(startup_object, profile_runtime,
+                                          stack_trace, wants_argv) != 0) {
+    fprintf(stderr, "Error: Failed to generate ELF _start object\n");
+    free(startup_object);
+    return 1;
+  }
+
+  /* ld -static <startup> <program> -o <exe>: dependency-free; the program
+   * currently links no dynamic libraries. */
+  {
+    const char *fmt = "ld -static \"%s\" \"%s\" -o \"%s\"";
+    int needed = snprintf(NULL, 0, fmt, startup_object, object_filename,
+                          executable_filename);
+    if (needed > 0) {
+      command = malloc((size_t)needed + 1u);
+      if (command) {
+        snprintf(command, (size_t)needed + 1u, fmt, startup_object,
+                 object_filename, executable_filename);
+      }
+    }
+  }
+  if (!command) {
+    fprintf(stderr, "Error: Failed to build ELF link command\n");
+    free(startup_object);
+    return 1;
+  }
+
+  if (system(command) == 0) {
+    result = 0;
+  } else {
+    fprintf(stderr, "Error: ld failed to produce an ELF executable\n");
+  }
+
+  remove(startup_object);
+  free(startup_object);
+  free(command);
+  return result;
+}
+#endif /* !_WIN32 */
 
 #ifdef _WIN32
 typedef struct {
@@ -2234,6 +2313,16 @@ int main(int argc, char *argv[]) {
   options.debug_format = "dwarf";
 
   if (argc >= 2) {
+    if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0 ||
+        strcmp(argv[1], "version") == 0) {
+      const char *target =
+          binary_target_format_host_default() == BINARY_TARGET_FORMAT_ELF_X64
+              ? "x86_64-linux (ELF)"
+              : "x86_64-windows (COFF)";
+      printf("mettle %s\n", METTLE_VERSION);
+      printf("target: %s\n", target);
+      return 0;
+    }
     if (strcmp(argv[1], "help") == 0) {
       return print_help_topic(argv[0], argv[0], argc >= 3 ? argv[2] : NULL);
     }
@@ -2391,15 +2480,25 @@ int main(int argc, char *argv[]) {
 
   auto_runtime_directory = infer_default_runtime_directory(argv[0]);
 
+  /* The native ELF backend supports --build on Linux via an ld-based link of
+   * the emitted ELF object plus a self-contained _start. On Linux --build
+   * always uses the direct-object backend (no asm/NASM path). */
+  int elf_build = (binary_target_format_host_default() ==
+                   BINARY_TARGET_FORMAT_ELF_X64);
+
   if (build_executable) {
 #ifndef _WIN32
-    fprintf(stderr,
-            "Error: --build is currently supported only on Windows\n");
-    free((void *)options.import_directories);
-    free((void *)options.link_arguments);
-    free(auto_stdlib_directory);
-    free(auto_runtime_directory);
-    return 1;
+    if (!elf_build) {
+      fprintf(stderr,
+              "Error: --build is supported on Windows and Linux (ELF) only\n");
+      free((void *)options.import_directories);
+      free((void *)options.link_arguments);
+      free(auto_stdlib_directory);
+      free(auto_runtime_directory);
+      return 1;
+    }
+    /* Linux: force direct-object emission; there is no NASM/asm link path. */
+    options.emit_object = 1;
 #else
     if (!auto_runtime_directory) {
       fprintf(stderr,
@@ -2410,7 +2509,7 @@ int main(int argc, char *argv[]) {
       free(auto_runtime_directory);
       return 1;
     }
-
+#endif
     if (output_filename_explicit) {
       build_output_filename = strdup(options.output_filename);
     } else {
@@ -2426,7 +2525,9 @@ int main(int argc, char *argv[]) {
     }
 
     if (options.emit_object) {
-      object_output_filename = replace_extension(build_output_filename, ".obj");
+      /* ELF objects conventionally use .o; COFF uses .obj. */
+      object_output_filename = replace_extension(
+          build_output_filename, elf_build ? ".o" : ".obj");
       if (!object_output_filename) {
         fprintf(stderr, "Error: Failed to determine object output path\n");
         free(build_output_filename);
@@ -2450,7 +2551,6 @@ int main(int argc, char *argv[]) {
       }
       options.output_filename = assembly_output_filename;
     }
-#endif
   }
 
   double command_profile_start =
@@ -2458,9 +2558,14 @@ int main(int argc, char *argv[]) {
   int result =
       compile_file(options.input_filename, options.output_filename, &options);
   if (result == 0 && build_executable) {
-#ifdef _WIN32
     double build_profile_start =
         options.profile ? compiler_profile_now_ms() : 0.0;
+#ifndef _WIN32
+    /* Linux: emit the ELF object (done by compile_file above) then link it
+     * with our self-contained _start via ld. */
+    result = mettle_link_elf_executable(options.output_filename,
+                                        build_output_filename, &options);
+#else
     if (options.emit_object) {
       result = mettle_link_object_file(options.output_filename,
                                          build_output_filename,
@@ -2470,6 +2575,7 @@ int main(int argc, char *argv[]) {
                                          build_output_filename,
                                          auto_runtime_directory, &options);
     }
+#endif
     if (result == 0) {
       printf("Built executable '%s'\n", build_output_filename);
     }
@@ -2479,7 +2585,6 @@ int main(int argc, char *argv[]) {
       fprintf(stderr, "  %-20s %9.3f ms\n", "assemble/link",
               compiler_profile_now_ms() - build_profile_start);
     }
-#endif
   } else if (result == 0 && auto_runtime_directory && !options.debug_mode &&
              !options.dump_ir) {
     fprintf(stderr,

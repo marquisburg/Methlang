@@ -1,5 +1,8 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc -fno-omit-frame-pointer
+# EXTRA_CFLAGS lets release builds stamp the version, e.g.
+#   make EXTRA_CFLAGS='-DMETTLE_VERSION=\"v0.3.0\"'
+EXTRA_CFLAGS =
+CFLAGS = -Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc -fno-omit-frame-pointer $(EXTRA_CFLAGS)
 LDFLAGS =
 ifneq ($(filter Linux linux-gnu,$(shell uname -s 2>/dev/null)),)
 LDFLAGS = -rdynamic

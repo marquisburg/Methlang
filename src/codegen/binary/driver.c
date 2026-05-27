@@ -298,6 +298,10 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
     return 0;
   }
 
+  /* Pin the calling convention to the target object format before emitting any
+   * code: COFF -> MS-x64, ELF -> SysV. */
+  code_generator_binary_select_abi(generator->binary_emitter->target_format);
+
   binary_emitter_reset(generator->binary_emitter);
   program_data = (Program *)program->data;
   if (!program_data) {

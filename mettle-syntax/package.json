@@ -1,20 +1,69 @@
 {
   "name": "mettle-syntax",
-  "displayName": "Mettle Syntax Highlighting",
-  "description": "Syntax highlighting, folding, bracket matching, and linting for Mettle (.mettle) — a typed language that compiles to x86-64 assembly. See README for links to the language docs.",
-  "version": "0.5.1",
-  "publisher": "GhostDragonWasTaken",
-  "engines": { "vscode": "^1.74.0" },
-  "categories": ["Programming Languages"],
-  "keywords": ["mettle", "assembly", "x86-64"],
-  "activationEvents": ["onLanguage:mettle"],
+  "displayName": "Mettle Language Support",
+  "description": "Syntax highlighting, editing support, snippets, and compiler-backed diagnostics for Mettle (.mettle).",
+  "version": "0.9.0-dev",
+  "publisher": "TheMettleProject",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/The-Mettle-Project/Mettle.git",
+    "directory": "mettle-syntax"
+  },
+  "bugs": {
+    "url": "https://github.com/The-Mettle-Project/Mettle/issues"
+  },
+  "homepage": "https://github.com/The-Mettle-Project/Mettle/tree/main/mettle-syntax",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Snippets"
+  ],
+  "keywords": [
+    "mettle",
+    "language",
+    "compiler",
+    "systems",
+    "x86-64"
+  ],
+  "activationEvents": [
+    "onLanguage:mettle"
+  ],
   "main": "extension.js",
+  "scripts": {
+    "check": "node ./scripts/check-extension.js",
+    "vscode:prepublish": "npm run check"
+  },
   "contributes": {
+    "commands": [
+      {
+        "command": "mettle.lintActiveFile",
+        "title": "Mettle: Lint Active File",
+        "category": "Mettle"
+      },
+      {
+        "command": "mettle.clearDiagnostics",
+        "title": "Mettle: Clear Diagnostics",
+        "category": "Mettle"
+      },
+      {
+        "command": "mettle.showOutput",
+        "title": "Mettle: Show Output",
+        "category": "Mettle"
+      }
+    ],
     "languages": [
       {
         "id": "mettle",
-        "aliases": ["Mettle"],
-        "extensions": [".mettle"],
+        "aliases": [
+          "Mettle"
+        ],
+        "extensions": [
+          ".mettle"
+        ],
         "configuration": "./language-configuration.json",
         "icon": {
           "light": "./icons/mettle-light.svg",
@@ -29,26 +78,47 @@
         "path": "./syntaxes/mettle.tmLanguage.json"
       }
     ],
+    "snippets": [
+      {
+        "language": "mettle",
+        "path": "./snippets/mettle.json"
+      }
+    ],
     "configuration": {
       "title": "Mettle",
       "properties": {
         "mettle.linter.compilerEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Run the Mettle compiler on save for semantic diagnostics (types, scope, undefined symbols).",
-          "markdownDescription": "When enabled, the extension runs the `mettle` compiler **on save** and shows real compiler errors and warnings in the Problems panel. Regex-based checks still run while you type.\n\nRequires a `mettle` binary (workspace `bin/` or `PATH`)."
+          "description": "Run the Mettle compiler on save for semantic diagnostics.",
+          "markdownDescription": "When enabled, the extension runs the `mettle` compiler on open/save and shows compiler errors and warnings in the Problems panel. Fast syntax checks still run while you type.\n\nRequires a `mettle` binary from workspace `bin/`, a configured path, or `PATH`."
         },
         "mettle.linter.compilerPath": {
           "type": "string",
           "default": "",
           "description": "Path to the mettle executable. Empty: auto-detect workspace bin/, then PATH.",
-          "markdownDescription": "Path to the Mettle executable. Can be relative to the workspace folder or absolute.\n\nIf empty, the extension looks for `bin/mettle` or `bin/mettle.exe` (and a few fallbacks) under the workspace, then uses `mettle` / `mettle.exe` on your `PATH`.\n\nSee the repo `docs/compilation.md` for how to build or install the compiler."
+          "markdownDescription": "Path to the Mettle executable. Can be relative to the workspace folder or absolute.\n\nIf empty, the extension looks for `bin/mettle` or `bin/mettle.exe` under the workspace and parent folders, then uses `mettle` / `mettle.exe` on `PATH`."
         },
         "mettle.linter.stdlibPath": {
           "type": "string",
           "default": "",
           "description": "Optional --stdlib directory override for the linter invocation.",
-          "markdownDescription": "If set, passed to the compiler as `--stdlib <dir>` when linting. Use when you maintain a custom standard library layout.\n\nLeave empty to use the compiler’s default bundled stdlib resolution (see `docs/compilation.md`)."
+          "markdownDescription": "If set, passed to the compiler as `--stdlib <dir>` when linting. Use when you maintain a custom standard library layout.\n\nLeave empty to use the compiler's default bundled stdlib resolution."
+        },
+        "mettle.linter.extraIncludePaths": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional include directories passed as -I when compiler diagnostics run.",
+          "markdownDescription": "Additional include directories passed as `-I <dir>` when compiler diagnostics run. Relative paths resolve from the workspace folder."
+        },
+        "mettle.linter.compilerTimeoutMs": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 1000,
+          "description": "Maximum time in milliseconds to wait for one compiler diagnostics run."
         }
       }
     }

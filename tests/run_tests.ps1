@@ -33,6 +33,31 @@ function Write-CaseResult {
   }
 }
 
+function Get-Sha256FileHash {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $stream = $null
+  $sha256 = $null
+  try {
+    $resolvedPath = (Resolve-Path -LiteralPath $Path).ProviderPath
+    $stream = [System.IO.File]::OpenRead($resolvedPath)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $bytes = $sha256.ComputeHash($stream)
+    return ([System.BitConverter]::ToString($bytes) -replace "-", "")
+  }
+  finally {
+    if ($stream) {
+      $stream.Dispose()
+    }
+    if ($sha256) {
+      $sha256.Dispose()
+    }
+  }
+}
+
 function Test-AssemblyOutput {
   param(
     [string]$AsmPath,
@@ -1050,8 +1075,8 @@ foreach ($case in $cases) {
             }
           }
           else {
-            $hash1 = (Get-FileHash -Algorithm SHA256 -Path $outFile).Hash
-            $hash2 = (Get-FileHash -Algorithm SHA256 -Path $outFile2).Hash
+            $hash1 = Get-Sha256FileHash -Path $outFile
+            $hash2 = Get-Sha256FileHash -Path $outFile2
             if ($hash1 -ne $hash2) {
               $passed = $false
               $reason = "Determinism check failed: outputs differ between identical runs"
@@ -1465,7 +1490,7 @@ try {
   $dupBObj = Join-Path $tmpDir "linker_duplicate_b.obj"
   $unresolvedObj = Join-Path $tmpDir "linker_unresolved_entry.obj"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\symbol_resolve_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $symbolResolveExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\symbol_resolve_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\codegen\binary_emitter.c src\codegen\elf_emitter.c -Isrc -Isrc\codegen -o $symbolResolveExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Symbol-resolve harness compile failed: $compileHarness"
   }
@@ -1509,7 +1534,7 @@ $total++
 try {
   $relocationExe = Join-Path $tmpDir "relocation_test.exe"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\relocation_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $relocationExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\relocation_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\codegen\binary_emitter.c src\codegen\elf_emitter.c -Isrc -Isrc\codegen -o $relocationExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "Relocation harness compile failed: $compileHarness"
   }
@@ -1531,7 +1556,7 @@ $total++
 try {
   $peEmitterExe = Join-Path $tmpDir "pe_emitter_test.exe"
 
-  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\pe_emitter_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\linker\pe_emitter.c src\linker\import_lib.c src\codegen\binary_emitter.c -Isrc -Isrc\codegen -o $peEmitterExe 2>&1 | Out-String
+  $compileHarness = & gcc -Wall -Wextra -std=c99 -g -O0 -D_GNU_SOURCE tests\pe_emitter_test.c src\common.c src\lexer\lexer.c src\error\error_reporter.c src\linker\coff_reader.c src\linker\symbol_resolve.c src\linker\relocation.c src\linker\pe_emitter.c src\linker\import_lib.c src\codegen\binary_emitter.c src\codegen\elf_emitter.c -Isrc -Isrc\codegen -o $peEmitterExe 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) {
     throw "PE-emitter harness compile failed: $compileHarness"
   }

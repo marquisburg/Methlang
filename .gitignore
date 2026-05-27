@@ -7,7 +7,6 @@ web/
 lib/
 tests/_tmp_*
 .html
-
 *.exe
 *.o
 *.obj
@@ -17,3 +16,7 @@ tests/_tmp_*
 docs/linker-implementation-todo.md
 examples/tracy_demo/tracy_dir.local.bat
 .mettle/
+
+# Native-ELF dev scratch: keep the test script, ignore build artifacts.
+.elfwork/*
+!.elfwork/build_and_test.sh

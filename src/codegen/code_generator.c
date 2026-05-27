@@ -64,7 +64,7 @@ CodeGenerator *code_generator_create(SymbolTable *symbol_table,
   generator->profile_function_count = 0;
   generator->profile_function_capacity = 0;
   generator->binary_emitter =
-      binary_emitter_create(BINARY_TARGET_FORMAT_COFF_WIN64);
+      binary_emitter_create(binary_target_format_host_default());
 
   if (!generator->output_buffer || !generator->global_variables_buffer ||
       !generator->binary_emitter) {

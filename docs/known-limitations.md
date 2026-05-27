@@ -68,7 +68,7 @@ Structs work normally as **locals**: field access, whole-struct assignment, and 
 **Practical guidance:**
 
 - Struct-by-value **arguments and returns** are safe in the text-asm backend and in `--emit-obj` mode.
-- For C interop, struct passing and returning matches the Microsoft x64 C ABI on Windows for the covered Mettle-calls-C direction. See [C Interoperability - Passing Structs to C](c-interop.md).
+- For C interop, the backend follows the platform C ABI: Microsoft x64 on Windows (COFF) and System V AMD64 on Linux (ELF). Scalar and pointer arguments, return values, register-and-stack argument passing, and the hidden struct-return pointer all match the target convention. Struct-by-value passing and returning is covered for the Mettle-calls-C direction. See [C Interoperability - Passing Structs to C](c-interop.md).
 - With `--linker internal`, raw COFF `.o` / `.obj` files can be supplied through `--link-arg`; the final executable link remains inside Mettle.
 
 Arrays follow the same rule as in [Types - Array Types](types.md#array-types): they are not passed by value; use `&arr[0]` or a `T`* parameter.

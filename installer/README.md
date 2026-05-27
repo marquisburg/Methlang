@@ -11,10 +11,16 @@ This directory contains the files needed to build a native Windows installer (`.
 - Provides a clean uninstaller that removes Mettle and cleans up your `%PATH%`.
 
 ## How to Build the Installer
-1. Download and install [Inno Setup](https://jrsoftware.org/isinfo.php) (the QuickStart Pack or the standard installer). 
-2. Open `Mettle.iss` in the Inno Setup Compiler.
-3. Click "Compile" (or press Ctrl+F9).
+1. Download and install [Inno Setup](https://jrsoftware.org/isinfo.php) (the QuickStart Pack or the standard installer).
+2. If you changed `mettle-syntax/icons/*.svg`, regenerate wizard artwork (requires [ImageMagick](https://imagemagick.org)):
+   ```powershell
+   cd installer
+   .\build-assets.ps1
+   ```
+3. Open `Mettle.iss` in the Inno Setup Compiler (or run `iscc Mettle.iss`).
 4. A `out\Mettle-Setup.exe` file will be generated in `installer/out`.
+
+Branding uses `mettle-dark.svg` on the installer sidebar and `mettle-light.svg` in the wizard header chip. Committed `assets/*.bmp` files are what CI compiles; rerun the script when icons change.
 
 You can now distribute `Mettle-Setup.exe`!
 

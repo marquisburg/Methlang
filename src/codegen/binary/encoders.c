@@ -9,6 +9,17 @@ const BinaryGpRegister BINARY_WIN64_INT_PARAM_REGISTERS[] = {
     BINARY_GP_RCX, BINARY_GP_RDX, BINARY_GP_R8, BINARY_GP_R9};
 const BinaryXmmRegister BINARY_WIN64_FLOAT_PARAM_REGISTERS[] = {
     BINARY_XMM0, BINARY_XMM1, BINARY_XMM2, BINARY_XMM3};
+
+/* SYSCALL (0F 05): invoke a kernel system call on x86-64. Used by the Linux
+ * self-contained _start to call exit() without libc. */
+int binary_emit_syscall(BinaryCodeBuffer *buffer) {
+  if (!buffer) {
+    return 0;
+  }
+  return binary_code_buffer_append_u8(buffer, 0x0f) &&
+         binary_code_buffer_append_u8(buffer, 0x05);
+}
+
 int binary_emit_rex(BinaryCodeBuffer *buffer, int w, int r, int x,
                            int b) {
   unsigned char rex = (unsigned char)(0x40 | (w ? 0x08 : 0) |
