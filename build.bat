@@ -1,14 +1,41 @@
 @echo off
 REM Windows build script for Mettle
-REM Usage: build.bat [gcc|clang]
+REM Usage: build.bat [gcc|clang] [--skip-tests]
 REM   Or set CC=clang before invoking (defaults to gcc).
 
 setlocal
 
-REM Select compiler: first arg overrides CC env var; default gcc.
-if /I "%~1"=="clang" set "CC=clang"
-if /I "%~1"=="gcc" set "CC=gcc"
+REM Select compiler: args override CC env var; default gcc.
+set "SKIP_TESTS="
+:parse_args
+if "%~1"=="" goto args_done
+if /I "%~1"=="clang" (
+    set "CC=clang"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="gcc" (
+    set "CC=gcc"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="--skip-tests" (
+    set "SKIP_TESTS=1"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="--no-tests" (
+    set "SKIP_TESTS=1"
+    shift
+    goto parse_args
+)
+echo Error: unknown argument '%~1'
+echo Usage: build.bat [gcc^|clang] [--skip-tests]
+exit /b 1
+
+:args_done
 if not defined CC set "CC=gcc"
+if defined METTLE_SKIP_TESTS set "SKIP_TESTS=1"
 
 set CFLAGS=-Wall -Wextra -std=c99 -g -O2 -D_GNU_SOURCE -Isrc -fno-omit-frame-pointer
 if /I "%CC%"=="clang" set "CFLAGS=%CFLAGS% -D_CRT_NONSTDC_NO_DEPRECATE -D_CRT_SECURE_NO_WARNINGS"
@@ -182,6 +209,10 @@ copy /Y obj\runtime\tracy_helpers.o bin\runtime\tracy_helpers.obj >nul
 if exist installer\mettle-build.bat copy /Y installer\mettle-build.bat bin\mettle-build.bat >nul
 
 echo Build successful! Executable created at bin\mettle.exe
+if defined SKIP_TESTS (
+    echo Tests skipped.
+    exit /b 0
+)
 echo.
 echo Running tests...
 powershell -ExecutionPolicy Bypass -File tests\run_tests.ps1
