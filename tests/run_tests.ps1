@@ -190,6 +190,12 @@ $cases = @(
   @{ Name = "elseif_chaining"; Path = "tests/test_elseif.mettle"; ShouldSucceed = $true },
   @{ Name = "switch_const_expr"; Path = "tests/test_switch_const_expr.mettle"; ShouldSucceed = $true },
   @{ Name = "switch_continue_loop"; Path = "tests/test_switch_continue_loop.mettle"; ShouldSucceed = $true },
+  @{ Name = "switch_range"; Path = "tests/test_switch_range.mettle"; ShouldSucceed = $true },
+  @{ Name = "const_top_level"; Path = "tests/test_const_top_level.mettle"; ShouldSucceed = $true },
+  @{ Name = "err_const_no_init"; Path = "tests/err_const_no_init.mettle"; ShouldSucceed = $false; Pattern = "Constant declaration requires an initializer" },
+  @{ Name = "err_const_assign"; Path = "tests/err_const_assign.mettle"; ShouldSucceed = $false; Pattern = "is a constant and cannot be assigned to" },
+  @{ Name = "err_const_nonconst"; Path = "tests/err_const_nonconst.mettle"; ShouldSucceed = $false; Pattern = "compile-time integer constant expression" },
+  @{ Name = "err_import_guard_bad_platform"; Path = "tests/err_import_guard_bad_platform.mettle"; ShouldSucceed = $false; Pattern = "Import guard platform must be 'windows' or 'linux'" },
   @{ Name = "block_comment"; Path = "tests/test_block_comment.mettle"; ShouldSucceed = $true },
   @{ Name = "compound_assign"; Path = "tests/test_compound_assign.mettle"; ShouldSucceed = $true },
   @{ Name = "compound_assign_for"; Path = "tests/test_compound_assign_for.mettle"; ShouldSucceed = $true },
@@ -361,6 +367,25 @@ $cases = @(
   @{ Name = "traits_generic_bound"; Path = "tests/test_traits_generic_bound.mettle"; ShouldSucceed = $true },
   @{ Name = "traits_multiple_where_bounds"; Path = "tests/test_traits_multiple_where_bounds.mettle"; ShouldSucceed = $true },
   @{ Name = "trait_methods_generic_dispatch"; Path = "tests/test_trait_methods_generic_dispatch.mettle"; ShouldSucceed = $true },
+  @{ Name = "generic_function"; Path = "tests/test_generic_function.mettle"; ShouldSucceed = $true },
+  @{ Name = "generic_struct"; Path = "tests/test_generic_struct.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_full"; Path = "tests/test_generics_full.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_swap"; Path = "tests/test_generics_swap.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_struct_param"; Path = "tests/test_generics_struct_param.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_nested_call"; Path = "tests/test_generics_nested_call.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_pair_mixed"; Path = "tests/test_generics_pair_mixed.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_pointer_type_arg"; Path = "tests/test_generics_pointer_type_arg.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_same_generic_diff_args"; Path = "tests/test_generics_same_generic_diff_args.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_unused"; Path = "tests/test_generics_unused.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_in_control_flow"; Path = "tests/test_generics_in_control_flow.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_list"; Path = "tests/test_generics_list.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_list_push"; Path = "tests/test_generics_list_push.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_multiple_instantiations"; Path = "tests/test_generics_multiple_instantiations.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_nested_struct"; Path = "tests/test_generics_nested_struct.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_generic_enum"; Path = "tests/test_generics_generic_enum.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_return_struct"; Path = "tests/test_generics_return_struct.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_float"; Path = "tests/test_generics_float.mettle"; ShouldSucceed = $true },
+  @{ Name = "generics_new_heap"; Path = "tests/test_generics_new_heap.mettle"; ShouldSucceed = $true },
   @{
     Name          = "import_trait_bound"
     Path          = "tests/test_import_trait_bound.mettle"
@@ -378,6 +403,11 @@ $cases = @(
   @{ Name = "tagged_enum_bare_none"; Path = "tests/test_tagged_enum_bare_none.mettle"; ShouldSucceed = $true },
   @{ Name = "tagged_enum_qualified_ctor"; Path = "tests/test_tagged_enum_qualified_ctor.mettle"; ShouldSucceed = $true },
   @{ Name = "plain_enum_qualified"; Path = "tests/test_plain_enum_qualified.mettle"; ShouldSucceed = $true },
+  @{ Name = "arena_basic"; Path = "tests/test_arena_basic.mettle"; ShouldSucceed = $true },
+  @{ Name = "arena_align"; Path = "tests/test_arena_align.mettle"; ShouldSucceed = $true },
+  @{ Name = "arena_oversized"; Path = "tests/test_arena_oversized.mettle"; ShouldSucceed = $true },
+  @{ Name = "arena_savepoint"; Path = "tests/test_arena_savepoint.mettle"; ShouldSucceed = $true },
+  @{ Name = "arena_reset_reuse"; Path = "tests/test_arena_reset_reuse.mettle"; ShouldSucceed = $true },
   @{ Name = "extern_signed_param"; Path = "tests/test_extern_signed_param.mettle"; ShouldSucceed = $true },
   @{ Name = "extern_signed_return"; Path = "tests/test_extern_signed_return.mettle"; ShouldSucceed = $true },
   @{ Name = "extern_cstring"; Path = "tests/test_extern_cstring.mettle"; ShouldSucceed = $true },
@@ -861,6 +891,7 @@ $cases = @(
   @{ Name = "err_break_outside_loop"; Path = "tests/err_break_outside_loop.mettle"; ShouldSucceed = $false; Pattern = "'break' can only be used inside a loop or switch" },
   @{ Name = "err_break_unknown_label"; Path = "tests/err_break_unknown_label.mettle"; ShouldSucceed = $false; Pattern = "no matching labeled loop" },
   @{ Name = "err_continue_in_switch"; Path = "tests/err_continue_in_switch.mettle"; ShouldSucceed = $false; Pattern = "'continue' can only be used inside a loop" },
+  @{ Name = "err_switch_range_inverted"; Path = "tests/err_switch_range_inverted.mettle"; ShouldSucceed = $false; Pattern = "Range lower bound" },
   @{ Name = "err_switch_duplicate_case"; Path = "tests/err_switch_duplicate_case.mettle"; ShouldSucceed = $false; Pattern = "Duplicate case value|duplicate case" },
   @{ Name = "err_switch_nonconst_case"; Path = "tests/err_switch_nonconst_case.mettle"; ShouldSucceed = $false; Pattern = "compile-time integer constant expression" },
   @{ Name = "err_forward_decl_mismatch"; Path = "tests/err_forward_decl_mismatch.mettle"; ShouldSucceed = $false; Pattern = "does not match existing declaration" },
@@ -884,6 +915,7 @@ $cases = @(
   @{ Name = "err_trait_bound_missing_impl"; Path = "tests/err_trait_bound_missing_impl.mettle"; ShouldSucceed = $false; Pattern = "does not implement trait 'Addable'" },
   @{ Name = "err_trait_bound_missing_second_impl"; Path = "tests/err_trait_bound_missing_second_impl.mettle"; ShouldSucceed = $false; Pattern = "does not implement trait 'SignedNumber'" },
   @{ Name = "err_trait_method_missing_impl"; Path = "tests/err_trait_method_missing_impl.mettle"; ShouldSucceed = $false; Pattern = "missing trait method 'next_value'" },
+  @{ Name = "err_generics_generic_fn_ptr_address"; Path = "tests/err_generics_generic_fn_ptr_address.mettle"; ShouldSucceed = $false; Pattern = "Expected primary expression" },
   @{ Name = "err_member_on_non_struct"; Path = "tests/err_member_on_non_struct.mettle"; ShouldSucceed = $false; Pattern = "Cannot access field on non-struct type" },
   @{ Name = "err_switch_multiple_default"; Path = "tests/err_switch_multiple_default.mettle"; ShouldSucceed = $false; Pattern = "Only one default case is allowed|only contain one default clause" },
   @{ Name = "err_return_type_mismatch"; Path = "tests/err_return_type_mismatch.mettle"; ShouldSucceed = $false; Pattern = "Type mismatch" },
@@ -1141,6 +1173,131 @@ foreach ($case in $cases) {
     $failed++
     Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
   }
+}
+
+# Generics runtime: compile with --build and verify monomorphized return values.
+$total++
+try {
+  $genericRuntimeCases = @(
+    @{ Path = "tests\test_generics_nested_struct.mettle"; ExitCode = 99; Label = "nested-struct" },
+    @{ Path = "tests\test_generics_generic_enum.mettle"; ExitCode = 42; Label = "generic-enum" },
+    @{ Path = "tests\test_generics_return_struct.mettle"; ExitCode = 30; Label = "return-struct" },
+    @{ Path = "tests\test_generics_float.mettle"; ExitCode = 4; Label = "float" },
+    @{ Path = "tests\test_generics_new_heap.mettle"; ExitCode = 42; Label = "new-heap" },
+    @{ Path = "tests\test_generics_full.mettle"; ExitCode = 30; Label = "full" },
+    @{ Path = "tests\test_generics_in_control_flow.mettle"; ExitCode = 24; Label = "control-flow" },
+    @{ Path = "tests\test_trait_methods_generic_dispatch.mettle"; ExitCode = 42; Label = "trait-dispatch" }
+  )
+
+  foreach ($case in $genericRuntimeCases) {
+    $exePath = Join-Path $tmpDir ("generics_runtime_{0}.exe" -f $case.Label)
+    $buildOut = & $CompilerPath --build $case.Path -o $exePath 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "Generics runtime $($case.Label) build failed: $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "Generics runtime $($case.Label) build did not produce an executable"
+    }
+
+    & $exePath 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne $case.ExitCode) {
+      throw "Generics runtime $($case.Label) exited with $LASTEXITCODE (expected $($case.ExitCode))"
+    }
+  }
+
+  Write-CaseResult -Name "generics_runtime" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "generics_runtime" -Passed $false -Reason $_.Exception.Message
+}
+
+# Switch range cases: compile with --build and verify inclusive-interval dispatch.
+$total++
+try {
+  $exePath = Join-Path $tmpDir "switch_range.exe"
+  $buildOut = & $CompilerPath --build "tests\test_switch_range.mettle" -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Switch range build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Switch range build did not produce an executable"
+  }
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Switch range exited with $LASTEXITCODE (expected 42)"
+  }
+  Write-CaseResult -Name "switch_range_runtime" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "switch_range_runtime" -Passed $false -Reason $_.Exception.Message
+}
+
+# Top-level constants: compile with --build and verify folded compile-time value.
+$total++
+try {
+  $exePath = Join-Path $tmpDir "const_top_level.exe"
+  $buildOut = & $CompilerPath --build "tests\test_const_top_level.mettle" -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Const top-level build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Const top-level build did not produce an executable"
+  }
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 42) {
+    throw "Const top-level exited with $LASTEXITCODE (expected 42)"
+  }
+  Write-CaseResult -Name "const_top_level_runtime" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "const_top_level_runtime" -Passed $false -Reason $_.Exception.Message
+}
+
+# Conditional imports: --build and verify off-target guarded imports are dropped.
+$total++
+try {
+  $exePath = Join-Path $tmpDir "import_conditional.exe"
+  $buildOut = & $CompilerPath --build "tests\test_import_conditional.mettle" -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Conditional import build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Conditional import build did not produce an executable"
+  }
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 7) {
+    throw "Conditional import exited with $LASTEXITCODE (expected 7)"
+  }
+  Write-CaseResult -Name "import_conditional_runtime" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "import_conditional_runtime" -Passed $false -Reason $_.Exception.Message
+}
+
+# Deferred calls capture arguments by value at the defer point.
+$total++
+try {
+  $exePath = Join-Path $tmpDir "defer_by_value.exe"
+  $buildOut = & $CompilerPath --build "tests\test_defer_by_value.mettle" -o $exePath 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    throw "Defer by-value build failed: $buildOut"
+  }
+  if (-not (Test-Path $exePath)) {
+    throw "Defer by-value build did not produce an executable"
+  }
+  & $exePath 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 12) {
+    throw "Defer by-value exited with $LASTEXITCODE (expected 12 - by-value; 123 would mean by-reference)"
+  }
+  Write-CaseResult -Name "defer_by_value_runtime" -Passed $true
+}
+catch {
+  $failed++
+  Write-CaseResult -Name "defer_by_value_runtime" -Passed $false -Reason $_.Exception.Message
 }
 
 # Bundled stdlib resolution test: compile from a project directory with no local stdlib.

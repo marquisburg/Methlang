@@ -359,6 +359,10 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
       if (var_data->is_extern) {
         break;
       }
+      // `const` declarations are folded at use sites and carry no storage.
+      if (var_data->is_const) {
+        break;
+      }
       if (!code_generator_emit_binary_global_variable(generator, var_data)) {
         return 0;
       }

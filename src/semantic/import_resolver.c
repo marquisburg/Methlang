@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "import_resolver.h"
+#include "../codegen/binary_emitter.h"
 #include "../compiler/compiler_context.h"
 #include "../lexer/lexer.h"
 #include "../parser/parser.h"
@@ -2546,6 +2547,20 @@ static void process_import_strs_in_node(ImportContext *ctx, ASTNode *node,
   }
 }
 
+// A guarded import (`import "..." if windows|linux;`) is included only when its
+// platform matches the build target. The compiler targets its host, so the
+// active platform follows the host object format (ELF => linux, else windows).
+static int import_platform_matches(const char *guard) {
+  if (!guard) {
+    return 1; // unconditional import
+  }
+  const char *target =
+      (binary_target_format_host_default() == BINARY_TARGET_FORMAT_ELF_X64)
+          ? "linux"
+          : "windows";
+  return strcmp(guard, target) == 0;
+}
+
 static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
                                           const char *current_file_path,
                                           int *had_error, int is_nested) {
@@ -2582,6 +2597,14 @@ static ASTNode *process_imports_recursive(ImportContext *ctx, ASTNode *program,
     ASTNode *decl = prog_data->declarations[i];
     if (decl->type == AST_IMPORT) {
       ImportDeclaration *import_decl = (ImportDeclaration *)decl->data;
+
+      // Drop imports guarded for a different platform before resolving them,
+      // so a platform-specific module is never even looked up off-target.
+      if (!import_platform_matches(import_decl->platform_guard)) {
+        ast_destroy_node(decl);
+        continue;
+      }
+
       char *full_path =
           resolve_import_path(ctx, current_file_path, import_decl->module_name);
 
