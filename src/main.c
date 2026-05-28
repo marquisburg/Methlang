@@ -553,73 +553,220 @@ static int parse_linker_mode(const char *text, LinkerMode *mode_out) {
 }
 
 #ifndef _WIN32
-/* Links a native ELF executable: emits the self-contained _start object, then
- * invokes `ld` to combine it with the program object into a statically linked
- * binary that needs no libc/CRT. Used on ELF hosts (Linux); does not depend on
- * the Windows-only link helpers below. Returns 0 on success. */
+/* Links a native ELF executable by invoking the system C compiler (gcc). gcc
+ * supplies the C runtime startup (crt1.o/crti.o/crtn.o, hence `_start`), the
+ * dynamic linker, and libc, so the program runs on the same C runtime routines
+ * (allocator, stdio, errno) as the Windows build links against MSVCRT. The
+ * resulting binary is dynamically linked against the target's libc — the
+ * accepted tradeoff for a consistent runtime across Windows and Linux.
+ * Used on ELF hosts (Linux); does not depend on the Windows-only link helpers
+ * below. Returns 0 on success. */
 static int mettle_link_elf_executable(const char *object_filename,
                                       const char *executable_filename,
-                                      const CompilerOptions *options) {
-  char *startup_object = NULL;
+                                      const CompilerOptions *options,
+                                      const char *runtime_directory) {
   char *command = NULL;
+  char *posix_helpers_object = NULL;
+  char *atomics_object = NULL;
+  char *crash_handler_object = NULL;
+  char *profile_object = NULL;
+  const char *cc = (options && options->musl_link) ? "musl-gcc" : "gcc";
+  size_t capacity = 0;
+  size_t length = 0;
   int result = 1;
   int profile_runtime =
       options && compiler_options_use_profile_runtime(options) ? 1 : 0;
   int stack_trace = options && options->generate_stack_trace_support ? 1 : 0;
-  int wants_argv = options && options->main_wants_argc_argv ? 1 : 0;
 
-  /* The crash-handler/profile runtime objects are not yet built for ELF, so
-   * those features can't be linked on Linux. Fail clearly rather than emit a
-   * _start that references missing symbols. */
-  if (profile_runtime || stack_trace) {
-    fprintf(stderr,
-            "Error: stack-trace and profile runtime are not yet supported on "
-            "the native ELF backend\n");
-    return 1;
-  }
-
-  startup_object = replace_extension(executable_filename, ".startup.o");
-  if (!startup_object) {
-    fprintf(stderr, "Error: Failed to allocate ELF startup object path\n");
-    return 1;
-  }
-
-  if (binary_write_program_startup_object(startup_object, profile_runtime,
-                                          stack_trace, wants_argv) != 0) {
-    fprintf(stderr, "Error: Failed to generate ELF _start object\n");
-    free(startup_object);
-    return 1;
-  }
-
-  /* ld -static <startup> <program> -o <exe>: dependency-free; the program
-   * currently links no dynamic libraries. */
-  {
-    const char *fmt = "ld -static \"%s\" \"%s\" -o \"%s\"";
-    int needed = snprintf(NULL, 0, fmt, startup_object, object_filename,
-                          executable_filename);
-    if (needed > 0) {
-      command = malloc((size_t)needed + 1u);
-      if (command) {
-        snprintf(command, (size_t)needed + 1u, fmt, startup_object,
-                 object_filename, executable_filename);
-      }
+  /* Auto-link the Linux-side runtime helpers so users don't have to manage
+   * link flags themselves (mirroring how the Windows internal PE linker
+   * resolves ws2_32.dll / kernel32.dll automatically). Specifically:
+   *  - bin/runtime/posix_helpers.o provides posix_get_errno + the Win32-style
+   *    threading shims (mettle_thread_create etc.) std/thread (Linux variant)
+   *    binds to.
+   *  - bin/runtime/atomics.o provides mettle_atomic_* used by std/thread.
+   *  - -lpthread provides pthread_create/join/mutex/etc. (no cost when
+   *    unreferenced — libpthread is merged into libc on modern glibc).
+   * The unused-section elimination in ld drops anything the program does not
+   * reference, so always-linking these is essentially free. */
+  if (runtime_directory) {
+    posix_helpers_object = join_paths(runtime_directory, "posix_helpers.o");
+    atomics_object = join_paths(runtime_directory, "atomics.o");
+    if (stack_trace || profile_runtime) {
+      crash_handler_object = join_paths(runtime_directory, "crash_handler.o");
+    }
+    if (profile_runtime) {
+      profile_object = join_paths(runtime_directory, "profile.o");
     }
   }
-  if (!command) {
-    fprintf(stderr, "Error: Failed to build ELF link command\n");
-    free(startup_object);
+
+  /* gcc -no-pie "<program.o>" "<posix_helpers.o>" "<atomics.o>" -o "<exe>"
+   * -lpthread [user link args]. crt1.o (supplied by gcc) provides `_start`,
+   * which calls the program's `main` directly per the SysV C startup contract;
+   * the backend's `main` already takes argc(RDI)/argv(RSI) in SysV order.
+   * `-no-pie` is required because the backend emits non-position-independent
+   * code (direct R_X86_64_PC32 relocations), which a PIE link (the default on
+   * modern gcc) rejects. */
+  if ((stack_trace || profile_runtime) && !crash_handler_object) {
+    fprintf(stderr,
+            "Error: Could not locate bundled crash_handler.o for Linux runtime "
+            "support\n");
+    free(posix_helpers_object);
+    free(atomics_object);
     return 1;
+  }
+  if (profile_runtime && !profile_object) {
+    fprintf(stderr,
+            "Error: Could not locate bundled profile.o for Linux runtime "
+            "profiling\n");
+    free(posix_helpers_object);
+    free(atomics_object);
+    free(crash_handler_object);
+    return 1;
+  }
+
+  capacity = strlen(cc) + strlen(object_filename) +
+             strlen(executable_filename) + 256u;
+  if (posix_helpers_object) capacity += strlen(posix_helpers_object) + 4u;
+  if (atomics_object) capacity += strlen(atomics_object) + 4u;
+  if (crash_handler_object) capacity += strlen(crash_handler_object) + 4u;
+  if (profile_object) capacity += strlen(profile_object) + 4u;
+  if (options) {
+    for (size_t i = 0; i < options->link_argument_count; i++) {
+      const char *arg = options->link_arguments[i];
+      capacity += (arg ? strlen(arg) : 0u) + 1u;
+    }
+  }
+  command = malloc(capacity);
+  if (!command) {
+    fprintf(stderr, "Error: Failed to allocate ELF link command\n");
+    free(posix_helpers_object);
+    free(atomics_object);
+    free(crash_handler_object);
+    free(profile_object);
+    return 1;
+  }
+
+  length = (size_t)snprintf(command, capacity, "%s -no-pie%s \"%s\"", cc,
+                            (options && (options->static_link ||
+                                         options->musl_link))
+                                ? " -static"
+                                : "",
+                            object_filename);
+  if (length >= capacity) {
+    fprintf(stderr, "Error: Failed to build ELF link command\n");
+    free(command);
+    free(posix_helpers_object);
+    free(atomics_object);
+    free(crash_handler_object);
+    free(profile_object);
+    return 1;
+  }
+
+  if (posix_helpers_object) {
+    int written = snprintf(command + length, capacity - length, " \"%s\"",
+                           posix_helpers_object);
+    if (written < 0 || (size_t)written >= capacity - length) {
+      fprintf(stderr, "Error: Failed to append posix_helpers.o\n");
+      free(command);
+      free(posix_helpers_object);
+      free(atomics_object);
+      free(crash_handler_object);
+      free(profile_object);
+      return 1;
+    }
+    length += (size_t)written;
+  }
+  if (atomics_object) {
+    int written = snprintf(command + length, capacity - length, " \"%s\"",
+                           atomics_object);
+    if (written < 0 || (size_t)written >= capacity - length) {
+      fprintf(stderr, "Error: Failed to append atomics.o\n");
+      free(command);
+      free(posix_helpers_object);
+      free(atomics_object);
+      free(crash_handler_object);
+      free(profile_object);
+      return 1;
+    }
+    length += (size_t)written;
+  }
+  if (crash_handler_object) {
+    int written = snprintf(command + length, capacity - length, " \"%s\"",
+                           crash_handler_object);
+    if (written < 0 || (size_t)written >= capacity - length) {
+      fprintf(stderr, "Error: Failed to append crash_handler.o\n");
+      free(command);
+      free(posix_helpers_object);
+      free(atomics_object);
+      free(crash_handler_object);
+      free(profile_object);
+      return 1;
+    }
+    length += (size_t)written;
+  }
+  if (profile_object) {
+    int written = snprintf(command + length, capacity - length, " \"%s\"",
+                           profile_object);
+    if (written < 0 || (size_t)written >= capacity - length) {
+      fprintf(stderr, "Error: Failed to append profile.o\n");
+      free(command);
+      free(posix_helpers_object);
+      free(atomics_object);
+      free(crash_handler_object);
+      free(profile_object);
+      return 1;
+    }
+    length += (size_t)written;
+  }
+
+  {
+    int written = snprintf(command + length, capacity - length,
+                           " -o \"%s\" -lpthread", executable_filename);
+    if (written < 0 || (size_t)written >= capacity - length) {
+      fprintf(stderr, "Error: Failed to append output + -lpthread\n");
+      free(command);
+      free(posix_helpers_object);
+      free(atomics_object);
+      free(crash_handler_object);
+      free(profile_object);
+      return 1;
+    }
+    length += (size_t)written;
+  }
+
+  if (options) {
+    for (size_t i = 0; i < options->link_argument_count; i++) {
+      const char *arg = options->link_arguments[i];
+      int written;
+      if (!arg || arg[0] == '\0') {
+        continue;
+      }
+      written = snprintf(command + length, capacity - length, " %s", arg);
+      if (written < 0 || (size_t)written >= capacity - length) {
+        fprintf(stderr, "Error: Failed to append ELF link argument\n");
+        free(command);
+        free(posix_helpers_object);
+        free(atomics_object);
+        free(crash_handler_object);
+        free(profile_object);
+        return 1;
+      }
+      length += (size_t)written;
+    }
   }
 
   if (system(command) == 0) {
     result = 0;
   } else {
-    fprintf(stderr, "Error: ld failed to produce an ELF executable\n");
+    fprintf(stderr, "Error: %s failed to produce an ELF executable\n", cc);
   }
 
-  remove(startup_object);
-  free(startup_object);
   free(command);
+  free(posix_helpers_object);
+  free(atomics_object);
+  free(crash_handler_object);
+  free(profile_object);
   return result;
 }
 #endif /* !_WIN32 */
@@ -2429,6 +2576,11 @@ int main(int argc, char *argv[]) {
       options.profile_runtime = 1;
     } else if (strcmp(argv[i], "--profile-runtime-ops") == 0) {
       options.profile_runtime_ops = 1;
+    } else if (strcmp(argv[i], "--static") == 0) {
+      options.static_link = 1;
+    } else if (strcmp(argv[i], "--musl") == 0) {
+      options.musl_link = 1;
+      options.static_link = 1;
     } else if (strcmp(argv[i], "--tracy") == 0) {
       options.tracy = 1;
     } else if (strcmp(argv[i], "--tracy-dir") == 0 && i + 1 < argc) {
@@ -2573,7 +2725,8 @@ int main(int argc, char *argv[]) {
     /* Linux: emit the ELF object (done by compile_file above) then link it
      * with our self-contained _start via ld. */
     result = mettle_link_elf_executable(options.output_filename,
-                                        build_output_filename, &options);
+                                        build_output_filename, &options,
+                                        auto_runtime_directory);
 #else
     if (options.emit_object) {
       result = mettle_link_object_file(options.output_filename,
@@ -2899,25 +3052,6 @@ int compile_file(const char *input_filename, const char *output_filename,
   int result = 0;
 
   if (options->emit_object) {
-    if ((options->debug_mode || options->generate_debug_symbols ||
-         options->generate_line_mapping) &&
-        !compiler_options_use_profile_runtime(options)) {
-      fprintf(stderr,
-              "Error: direct object emission does not yet support debug "
-              "metadata sidecars (DWARF/stabs/debug-map)\n");
-      result = 1;
-      goto cleanup;
-    }
-    if ((options->debug_mode || options->generate_debug_symbols ||
-         options->generate_line_mapping ||
-         options->generate_stack_trace_support) &&
-        compiler_options_use_profile_runtime(options)) {
-      fprintf(stderr,
-              "Error: --profile-runtime cannot be combined with debug metadata "
-              "or runtime trace instrumentation on the direct object backend\n");
-      result = 1;
-      goto cleanup;
-    }
     code_generator_set_backend_mode(code_generator,
                                     CODEGEN_BACKEND_BINARY_OBJECT);
   } else if (compiler_options_use_profile_runtime(options)) {
@@ -2949,6 +3083,12 @@ int compile_file(const char *input_filename, const char *output_filename,
   } else {
     import_options.stdlib_directory = "stdlib";
   }
+  /* Prefer `<name>.linux.mettle` std variants when targeting native ELF so the
+   * stdlib resolves syscall-based modules on Linux. Mirrors the elf_build check
+   * used elsewhere in main(). */
+  import_options.target_is_elf =
+      (binary_target_format_host_default() == BINARY_TARGET_FORMAT_ELF_X64) ? 1
+                                                                            : 0;
 
   // Auto-inject the standard prelude only when --prelude was specified.
   compiler_set_phase(PROFILE_PHASE_PRELUDE);
@@ -3220,9 +3360,9 @@ void print_usage(const char *program_name) {
   printf("  -I <dir>            Add import search directory (repeatable)\n");
   printf("  --stdlib <dir>      Set stdlib root directory (default: auto-detect "
          "bundled stdlib, then ./stdlib)\n");
-  printf("  --build             Compile and link to an executable (Windows; "
-         "COFF + internal linker by default)\n");
-  printf("  --emit-obj          Emit a Win64 COFF object directly "
+  printf("  --build             Compile and link to an executable (COFF/PE on "
+         "Windows, ELF on Linux)\n");
+  printf("  --emit-obj          Emit a native object directly "
          "(default with --build)\n");
   printf("  --emit-asm          Emit NASM assembly instead of COFF "
          "(legacy; use with --build)\n");
@@ -3253,6 +3393,8 @@ void print_usage(const char *program_name) {
          "(disables inlining)\n");
   printf("  --profile-runtime-ops  Emit runtime op-class counters per function "
          "(after optimization)\n");
+  printf("  --static            On Linux, link executable statically\n");
+  printf("  --musl              On Linux, link statically with musl-gcc\n");
   printf("  --debug-compiler    Track compiler context for internal error reports\n");
   printf("  -h, --help          Show this help message\n");
   printf("\nExamples:\n");

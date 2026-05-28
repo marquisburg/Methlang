@@ -1724,6 +1724,14 @@ int code_generator_binary_emit_runtime_trap_call(
         instruction->argument_count > message_arg_index
             ? &instruction->arguments[message_arg_index]
             : &instruction->arguments[0];
+    /* Abort via libc puts(message) + exit(1). The first argument register and
+     * the shadow-space reservation come from the active ABI (MS-x64 RCX + 32B
+     * shadow; SysV RDI + no shadow) so the calls into the C runtime are correct
+     * on both platforms. */
+    const BinaryAbi *abi = code_generator_binary_active_abi();
+    BinaryGpRegister arg0 = abi->int_param_registers[0];
+    int shadow = abi->shadow_space_size;
+
     if (!code_generator_binary_declare_external_symbol(generator, puts_symbol) ||
         !code_generator_binary_declare_external_symbol(generator, exit_symbol)) {
       return 0;
@@ -1731,29 +1739,24 @@ int code_generator_binary_emit_runtime_trap_call(
     if (message_operand->kind == IR_OPERAND_STRING) {
       if (!code_generator_binary_emit_cstring_literal_address(
               generator, context,
-              message_operand->name ? message_operand->name : "",
-              BINARY_GP_RCX)) {
+              message_operand->name ? message_operand->name : "", arg0)) {
         return 0;
       }
     } else if (!code_generator_binary_emit_operand_load(
-                   generator, context, message_operand, BINARY_GP_RCX)) {
+                   generator, context, message_operand, arg0)) {
       return 0;
     }
-    if (!binary_emit_sub_rsp_imm32(&context->code,
-                                   BINARY_WIN64_SHADOW_SPACE_SIZE) ||
+    if (!binary_emit_sub_rsp_imm32(&context->code, shadow) ||
         !binary_emit_call_placeholder(&context->code, &displacement_offset) ||
         !binary_call_relocation_table_add(&context->call_relocations,
                                           puts_symbol, displacement_offset) ||
-        !binary_emit_add_rsp_imm32(&context->code,
-                                   BINARY_WIN64_SHADOW_SPACE_SIZE) ||
-        !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX, 1) ||
-        !binary_emit_sub_rsp_imm32(&context->code,
-                                   BINARY_WIN64_SHADOW_SPACE_SIZE) ||
+        !binary_emit_add_rsp_imm32(&context->code, shadow) ||
+        !binary_emit_mov_reg_imm64(&context->code, arg0, 1) ||
+        !binary_emit_sub_rsp_imm32(&context->code, shadow) ||
         !binary_emit_call_placeholder(&context->code, &displacement_offset) ||
         !binary_call_relocation_table_add(&context->call_relocations,
                                           exit_symbol, displacement_offset) ||
-        !binary_emit_add_rsp_imm32(&context->code,
-                                   BINARY_WIN64_SHADOW_SPACE_SIZE)) {
+        !binary_emit_add_rsp_imm32(&context->code, shadow)) {
       if (!generator->has_error) {
         code_generator_set_error(generator,
                                  "Out of memory while emitting runtime trap "
@@ -2274,6 +2277,13 @@ int code_generator_binary_emit_new(CodeGenerator *generator,
                                           const IRInstruction *instruction) {
   size_t displacement_offset = 0;
   const char *allocator_name = "calloc";
+  /* calloc(count, size): count is arg 0, size is arg 1. Use the active ABI's
+   * integer parameter registers (MS-x64 RCX/RDX + 32B shadow; SysV RDI/RSI +
+   * no shadow) so the call is correct on both platforms' C runtimes. */
+  const BinaryAbi *abi = code_generator_binary_active_abi();
+  BinaryGpRegister count_register = abi->int_param_registers[0];
+  BinaryGpRegister size_register = abi->int_param_registers[1];
+  int shadow = abi->shadow_space_size;
 
   if (!generator || !context || !instruction) {
     return 0;
@@ -2284,7 +2294,7 @@ int code_generator_binary_emit_new(CodeGenerator *generator,
   }
 
   if (instruction->rhs.kind == IR_OPERAND_INT && instruction->rhs.int_value > 0) {
-    if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RDX,
+    if (!binary_emit_mov_reg_imm64(&context->code, size_register,
                                    (uint64_t)instruction->rhs.int_value)) {
       code_generator_set_error(generator,
                                 "Out of memory while emitting allocation size");
@@ -2293,24 +2303,22 @@ int code_generator_binary_emit_new(CodeGenerator *generator,
   } else if (instruction->rhs.kind == IR_OPERAND_NONE ||
              (instruction->rhs.kind == IR_OPERAND_INT &&
                instruction->rhs.int_value <= 0)) {
-    if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RDX, 8)) {
+    if (!binary_emit_mov_reg_imm64(&context->code, size_register, 8)) {
       code_generator_set_error(generator,
                                 "Out of memory while emitting allocation size");
       return 0;
     }
   } else if (!code_generator_binary_emit_operand_load(
-                  generator, context, &instruction->rhs, BINARY_GP_RDX)) {
+                  generator, context, &instruction->rhs, size_register)) {
     return 0;
   }
 
-  if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX, 1) ||
-      !binary_emit_sub_rsp_imm32(&context->code,
-                                  BINARY_WIN64_SHADOW_SPACE_SIZE) ||
+  if (!binary_emit_mov_reg_imm64(&context->code, count_register, 1) ||
+      !binary_emit_sub_rsp_imm32(&context->code, shadow) ||
       !binary_emit_call_placeholder(&context->code, &displacement_offset) ||
       !binary_call_relocation_table_add(&context->call_relocations,
                                         allocator_name, displacement_offset) ||
-      !binary_emit_add_rsp_imm32(&context->code,
-                                 BINARY_WIN64_SHADOW_SPACE_SIZE) ||
+      !binary_emit_add_rsp_imm32(&context->code, shadow) ||
       !code_generator_binary_emit_destination_store(generator, context,
                                                     &instruction->dest,
                                                     BINARY_GP_RAX)) {

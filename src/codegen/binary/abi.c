@@ -678,6 +678,18 @@ int code_generator_binary_function_can_promote_rsi_rdi(
     return 0;
   }
 
+  /* RSI/RDI are callee-saved (non-volatile) only under the MS-x64 ABI, where a
+   * value promoted into them survives a call because the callee preserves them.
+   * Under SysV (Linux/ELF) RSI/RDI are CALLER-saved: any call clobbers them, so
+   * a hot local promoted there would be silently destroyed across the call.
+   * On SysV, therefore, allow RSI/RDI promotion only when the function makes no
+   * calls at all. (The promoter has a separate no-calls fast path; this guard
+   * covers the with-calls case.) */
+  if (code_generator_binary_active_abi()->counts_classes_separately &&
+      code_generator_binary_function_has_calls(function)) {
+    return 0;
+  }
+
   for (size_t i = 0; i < function->instruction_count; i++) {
     const IRInstruction *instruction = &function->instructions[i];
     if (!instruction) {

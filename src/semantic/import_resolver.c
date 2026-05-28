@@ -1848,6 +1848,33 @@ static char *resolve_import_path_uncached(ImportContext *ctx,
 
   if (ctx && ctx->options && ctx->options->stdlib_directory &&
       import_uses_std_namespace(import_path)) {
+    /* On the native ELF (Linux) target, prefer an OS-specific
+     * `<name>.linux.mettle` sibling so std modules like io/bench/process can
+     * ship syscall-based variants while Windows keeps the plain `.mettle`
+     * file. The import path has no extension (e.g. "std/io"), so we append
+     * ".linux" and let resolve_candidate_path add the ".mettle" extension. */
+    if (ctx->options->target_is_elf && !path_has_extension(import_path)) {
+      size_t base_len = strlen(import_path);
+      /* ".linux.mettle" + NUL. The `.linux` infix makes path_has_extension
+       * true, so resolve_candidate_path would not auto-append `.mettle`; spell
+       * out the full extension here. */
+      char *linux_import = malloc(base_len + 14);
+      if (linux_import) {
+        memcpy(linux_import, import_path, base_len);
+        memcpy(linux_import + base_len, ".linux.mettle", 14);
+        char *linux_candidate =
+            join_paths(ctx->options->stdlib_directory, linux_import);
+        free(linux_import);
+        if (linux_candidate) {
+          char *resolved = resolve_candidate_path(linux_candidate);
+          free(linux_candidate);
+          if (resolved) {
+            return resolved;
+          }
+        }
+      }
+    }
+
     char *std_candidate =
         join_paths(ctx->options->stdlib_directory, import_path);
     if (std_candidate) {

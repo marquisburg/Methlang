@@ -474,8 +474,10 @@ int code_generator_binary_emit_profile_op(CodeGenerator *generator,
 int code_generator_binary_emit_profile_exit(CodeGenerator *generator,
                                             BinaryFunctionContext *context);
 int code_generator_binary_emit_profile_tables(CodeGenerator *generator);
+int code_generator_binary_emit_dwarf_debug_sections(CodeGenerator *generator);
 int code_generator_binary_emit_runtime_debug_tables(CodeGenerator *generator);
 int code_generator_binary_emit_crash_startup(CodeGenerator *generator);
+int code_generator_binary_emit_elf_runtime_hooks(CodeGenerator *generator);
 int code_generator_binary_emit_runtime_location_marker(
     CodeGenerator *generator, BinaryFunctionContext *context,
     size_t source_line, size_t source_column, const char *filename);

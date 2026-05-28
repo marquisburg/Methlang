@@ -290,14 +290,6 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
                              "IR program not attached to code generator");
     return 0;
   }
-  if (generator->generate_debug_info) {
-    code_generator_set_error(
-        generator,
-        "Direct object backend does not yet support debug info sidecar "
-        "emission (DWARF/stabs/debug-map)");
-    return 0;
-  }
-
   /* Pin the calling convention to the target object format before emitting any
    * code: COFF -> MS-x64, ELF -> SysV. */
   code_generator_binary_select_abi(generator->binary_emitter->target_format);
@@ -398,6 +390,16 @@ int code_generator_generate_program_binary_object(CodeGenerator *generator,
 
   if (generator->generate_stack_trace_support &&
       !code_generator_binary_emit_crash_startup(generator)) {
+    return 0;
+  }
+
+  if ((generator->generate_stack_trace_support || generator->profile_runtime) &&
+      !code_generator_binary_emit_elf_runtime_hooks(generator)) {
+    return 0;
+  }
+
+  if (generator->generate_debug_info &&
+      !code_generator_binary_emit_dwarf_debug_sections(generator)) {
     return 0;
   }
 

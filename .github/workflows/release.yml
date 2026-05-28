@@ -154,4 +154,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.stage.outputs.tar }}
-          generate_release_notes: true
+          # Notes are generated once by the windows job; regenerating here would
+          # append a duplicate auto-notes block to the release body.
+          generate_release_notes: false

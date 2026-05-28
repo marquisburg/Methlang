@@ -1,23 +1,11 @@
-// Mettle standard library: I/O
+// Mettle standard library: I/O (native ELF / Linux)
 //
-// Console output, file operations, and formatted printing.
-//
-// File I/O pattern with defer for automatic cleanup:
-//   var file: cstring = fopen("data.txt", "r");
-//   if (file != 0) {
-//     defer fclose(file);
-//     ... read/write operations ...
-//   }
-//
-// Multiple resources with LIFO cleanup:
-//   var src: cstring = fopen("input.txt", "r");
-//   if (src == 0) { return err(); }
-//   defer fclose(src);
-//   
-//   var dst: cstring = fopen("output.txt", "w");
-//   if (dst == 0) { return err(); }
-//   defer fclose(dst);  // Runs first (LIFO)
-//   
+// Linux counterpart to std/io. Identical libc-backed implementation, except the
+// standard streams come from glibc's `stdin`/`stdout`/`stderr` globals rather
+// than the MSVCRT `__acrt_iob_func` accessor used on Windows. The import
+// resolver picks this file over io.mettle automatically on the native ELF
+// target, so `import "std/io"` works unchanged on both platforms and routes
+// through the same C runtime routines.
 
 // ─── Console output ─────────────────────────────────────────────────────────
 export extern function puts(msg: cstring) -> int32;
@@ -30,7 +18,6 @@ export function cstr(s: string) -> cstring {
 }
 
 // Output a null-terminated string exactly as-is (no trailing newline)
-// Uses fputs for bulk write instead of N putchar syscalls.
 export function print(msg: cstring) {
   fputs(msg, get_stdout());
 }
@@ -46,7 +33,6 @@ export function newline() {
 }
 
 // Print an integer to stdout (base 10, handles negatives)
-// Builds digit string in buffer, single fputs instead of N putchar syscalls.
 export function print_int(n: int64) {
   var buf: uint8[22];
   var pos: int32 = 21;
@@ -90,14 +76,16 @@ export extern function fputs(s: cstring, fp: cstring) -> int32 = "fputs";
 export extern function fgets(buf: cstring, size: int32, fp: cstring) -> cstring = "fgets";
 export extern function fflush(fp: cstring) -> int32 = "fflush";
 
-// ─── Standard streams (accessed via C helpers) ──────────────────────────────
-// On Windows, stdin/stdout/stderr are macros expanding to __acrt_iob_func(n).
-// We expose them through the C runtime's _iob accessor.
-export extern function __acrt_iob_func(index: int32) -> cstring = "__acrt_iob_func";
+// ─── Standard streams ─────────────────────────────────────────────────────────
+// On Linux, glibc exposes stdin/stdout/stderr as FILE* global variables.
+// We bind them directly as extern data symbols (no MSVCRT __acrt_iob_func).
+extern var libc_stdin: cstring = "stdin";
+extern var libc_stdout: cstring = "stdout";
+extern var libc_stderr: cstring = "stderr";
 
-export function get_stdin() -> cstring  { return __acrt_iob_func(0); }
-export function get_stdout() -> cstring { return __acrt_iob_func(1); }
-export function get_stderr() -> cstring { return __acrt_iob_func(2); }
+export function get_stdin() -> cstring  { return libc_stdin; }
+export function get_stdout() -> cstring { return libc_stdout; }
+export function get_stderr() -> cstring { return libc_stderr; }
 
 // Write message to stderr (no newline)
 export function print_err(msg: cstring) {
