@@ -135,6 +135,12 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
                                                  ASTNode *expression,
                                                  Symbol *constructor_symbol,
                                                  IROperand *out_value);
+static int ir_emit_tagged_enum_construct(IRLoweringContext *context,
+                                         IRFunction *function,
+                                         Symbol *constructor_symbol,
+                                         ASTNode *payload_arg,
+                                         SourceLocation location,
+                                         IROperand *out_value);
 static int ir_emit_jump_instruction(IRLoweringContext *context,
                                     IRFunction *function, const char *label,
                                     SourceLocation location) {
@@ -1223,27 +1229,35 @@ cleanup:
   return ok;
 }
 
-static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
-                                                 IRFunction *function,
-                                                 ASTNode *expression,
-                                                 Symbol *constructor_symbol,
-                                                 IROperand *out_value) {
-  CallExpression *call = NULL;
+static int ir_emit_tagged_enum_construct(IRLoweringContext *context,
+                                         IRFunction *function,
+                                         Symbol *constructor_symbol,
+                                         ASTNode *payload_arg,
+                                         SourceLocation location,
+                                         IROperand *out_value) {
   Type *enum_type = NULL;
   Type *payload_type = NULL;
   char *local_name = NULL;
   IROperand enum_address = ir_operand_none();
 
-  if (!context || !function || !expression || !constructor_symbol ||
-      !out_value) {
+  if (!context || !function || !constructor_symbol || !out_value) {
     return 0;
   }
 
-  call = (CallExpression *)expression->data;
   enum_type = constructor_symbol->data.constructor.enum_type;
   payload_type = constructor_symbol->data.constructor.payload_type;
-  if (!call || !enum_type || !enum_type->name) {
-    ir_set_error(context, "Malformed tagged-enum constructor call");
+  if (!enum_type || !enum_type->name) {
+    ir_set_error(context, "Malformed tagged-enum constructor");
+    return 0;
+  }
+
+  /* Nullary constructor referenced bare (e.g. `var x: Option = None`) reaches
+   * here with payload_arg == NULL and payload_type == NULL; that is valid. A
+   * payload_arg without a payload_type, or vice versa, is a type-checker bug. */
+  if ((payload_type != NULL) != (payload_arg != NULL)) {
+    ir_set_error(context,
+                 "Tagged-enum constructor arity mismatch (variant '%s')",
+                 constructor_symbol->name ? constructor_symbol->name : "?");
     return 0;
   }
 
@@ -1255,9 +1269,9 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
   }
 
   if (!ir_emit_local_declaration(context, function, local_name, enum_type->name,
-                                 expression->location) ||
+                                 location) ||
       !ir_emit_address_of_symbol(context, function, local_name,
-                                 expression->location, &enum_address)) {
+                                 location, &enum_address)) {
     ir_operand_destroy(&enum_address);
     free(local_name);
     return 0;
@@ -1266,7 +1280,7 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
   {
     IRInstruction store_tag = {0};
     store_tag.op = IR_OP_STORE;
-    store_tag.location = expression->location;
+    store_tag.location = location;
     store_tag.dest = enum_address;
     store_tag.lhs =
         ir_operand_int((long long)constructor_symbol->data.constructor.tag_value);
@@ -1287,12 +1301,11 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
     IROperand payload_source = ir_operand_none();
     char *payload_temp_name = NULL;
 
-    if (call->argument_count != 1 ||
-        !ir_lower_expression(context, function, call->arguments[0],
+    if (!ir_lower_expression(context, function, payload_arg,
                              &payload_value) ||
         !ir_emit_address_with_offset(context, function, &enum_address,
                                      enum_type->tagged_data_offset,
-                                     expression->location, &payload_address)) {
+                                     location, &payload_address)) {
       ir_operand_destroy(&payload_address);
       ir_operand_destroy(&payload_value);
       ir_operand_destroy(&enum_address);
@@ -1304,11 +1317,11 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
       payload_temp_name = ir_new_label_name(context, "tagged_payload");
       if (!payload_temp_name ||
           !ir_emit_local_declaration(context, function, payload_temp_name,
-                                     payload_type->name, expression->location) ||
+                                     payload_type->name, location) ||
           !ir_emit_symbol_assignment(context, function, payload_temp_name,
-                                     &payload_value, expression->location) ||
+                                     &payload_value, location) ||
           !ir_emit_address_of_symbol(context, function, payload_temp_name,
-                                     expression->location, &payload_source)) {
+                                     location, &payload_source)) {
         free(payload_temp_name);
         ir_operand_destroy(&payload_source);
         ir_operand_destroy(&payload_address);
@@ -1324,7 +1337,7 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
     {
       IRInstruction store_payload = {0};
       store_payload.op = IR_OP_STORE;
-      store_payload.location = expression->location;
+      store_payload.location = location;
       store_payload.dest = payload_address;
       store_payload.lhs = payload_source;
       store_payload.rhs = ir_operand_int(payload_size);
@@ -1357,6 +1370,48 @@ static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
   }
 
   return 1;
+}
+
+static int ir_lower_tagged_enum_constructor_call(IRLoweringContext *context,
+                                                 IRFunction *function,
+                                                 ASTNode *expression,
+                                                 Symbol *constructor_symbol,
+                                                 IROperand *out_value) {
+  CallExpression *call = NULL;
+  Type *payload_type = NULL;
+  ASTNode *payload_arg = NULL;
+
+  if (!context || !function || !expression || !constructor_symbol ||
+      !out_value) {
+    return 0;
+  }
+
+  call = (CallExpression *)expression->data;
+  payload_type = constructor_symbol->data.constructor.payload_type;
+  if (!call) {
+    ir_set_error(context, "Malformed tagged-enum constructor call");
+    return 0;
+  }
+
+  if (payload_type) {
+    if (call->argument_count != 1 || !call->arguments ||
+        !call->arguments[0]) {
+      ir_set_error(context,
+                   "Tagged-enum variant '%s' expects exactly one payload argument",
+                   constructor_symbol->name ? constructor_symbol->name : "?");
+      return 0;
+    }
+    payload_arg = call->arguments[0];
+  } else if (call->argument_count != 0) {
+    ir_set_error(context,
+                 "Tagged-enum variant '%s' is nullary; pass no arguments",
+                 constructor_symbol->name ? constructor_symbol->name : "?");
+    return 0;
+  }
+
+  return ir_emit_tagged_enum_construct(context, function, constructor_symbol,
+                                       payload_arg, expression->location,
+                                       out_value);
 }
 
 static int ir_emit_deferred_calls(IRLoweringContext *context,
@@ -2982,6 +3037,16 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
       return 1;
     }
 
+    /* A bare nullary tagged-enum variant (e.g. `var a: Option = None`) names
+     * a constructor symbol, not a runtime value. Construct an enum local with
+     * just the tag set; payloadful variants must use call syntax `Some(x)`. */
+    if (symbol && symbol->kind == SYMBOL_TAGGED_ENUM_CONSTRUCTOR &&
+        symbol->data.constructor.payload_type == NULL) {
+      return ir_emit_tagged_enum_construct(context, function, symbol,
+                                           NULL, expression->location,
+                                           out_value);
+    }
+
     *out_value = ir_operand_symbol(identifier->name);
     if (!out_value->name) {
       ir_set_error(context, "Out of memory while lowering identifier");
@@ -3417,7 +3482,35 @@ static int ir_lower_expression(IRLoweringContext *context, IRFunction *function,
     return 1;
   }
 
-  case AST_MEMBER_ACCESS:
+  case AST_MEMBER_ACCESS: {
+    MemberAccess *m = (MemberAccess *)expression->data;
+    /* Qualified enum variant: `EnumName.Variant` lowers to either an integer
+     * constant (plain enum) or a tagged-enum construction (tagged enum). */
+    if (m && m->object && m->object->type == AST_IDENTIFIER && m->member) {
+      Identifier *obj_id = (Identifier *)m->object->data;
+      if (obj_id && obj_id->name && context->symbol_table) {
+        Symbol *enum_sym =
+            symbol_table_lookup(context->symbol_table, obj_id->name);
+        if (enum_sym && enum_sym->kind == SYMBOL_ENUM) {
+          Symbol *variant_sym =
+              symbol_table_lookup(context->symbol_table, m->member);
+          if (variant_sym && variant_sym->kind == SYMBOL_CONSTANT) {
+            *out_value = ir_operand_int(variant_sym->data.constant.value);
+            return 1;
+          }
+          if (variant_sym &&
+              variant_sym->kind == SYMBOL_TAGGED_ENUM_CONSTRUCTOR &&
+              variant_sym->data.constructor.payload_type == NULL) {
+            return ir_emit_tagged_enum_construct(context, function, variant_sym,
+                                                 NULL, expression->location,
+                                                 out_value);
+          }
+        }
+      }
+    }
+    /* Fall through to the lvalue-load path for struct/array member access. */
+  }
+  /* fallthrough */
   case AST_INDEX_EXPRESSION: {
     IROperand address = ir_operand_none();
     Type *value_type = NULL;

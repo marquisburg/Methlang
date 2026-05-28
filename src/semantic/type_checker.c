@@ -1724,6 +1724,25 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
 
     }
 
+    /* Qualified tagged-enum constructor `EnumName.Variant(args)`: the parser
+     * shapes this as a method call whose receiver is the enum-name identifier.
+     * Strip the receiver so downstream code treats it as a direct constructor
+     * call on `Variant` — the variant constructor symbol already exists in the
+     * global scope (registered at enum-decl time). */
+    if (call && call->object && call->object->type == AST_IDENTIFIER &&
+        call->function_name) {
+      Identifier *recv_id = (Identifier *)call->object->data;
+      if (recv_id && recv_id->name) {
+        Symbol *recv_sym =
+            symbol_table_lookup(checker->symbol_table, recv_id->name);
+        if (recv_sym && recv_sym->kind == SYMBOL_ENUM) {
+          /* Drop the receiver — leak-free: the identifier node is owned by
+           * the AST tree and freed when the program is freed. */
+          call->object = NULL;
+        }
+      }
+    }
+
     // Method calls on threading types:
     // Thread.join(), Mutex.new(), mutex.lock(), guard (unlock via drop),
     // Atomic.new(), atomic.load/store/fetch_add/fetch_sub/cas(),
@@ -1941,6 +1960,57 @@ static Type *type_checker_infer_type_internal(TypeChecker *checker,
 
   case AST_MEMBER_ACCESS: {
     MemberAccess *member = (MemberAccess *)expression->data;
+
+    /* Qualified enum access: `EnumName.Variant`.
+     *  - Plain enum:  yields the variant's integer value, typed as the enum.
+     *  - Tagged enum, nullary variant: yields a tagged-enum value.
+     *  - Tagged enum, payloadful variant: only valid as the callee of a
+     *    CallExpression (handled by the call type-checker, which sees the
+     *    member-access and looks up the constructor symbol). Here we still
+     *    return the enum type so downstream code keeps making progress; the
+     *    constructor arity is enforced at call-check time.
+     * The object must be an identifier naming an ENUM symbol. */
+    if (member->object && member->object->type == AST_IDENTIFIER) {
+      Identifier *obj_id = (Identifier *)member->object->data;
+      if (obj_id && obj_id->name) {
+        Symbol *enum_sym =
+            symbol_table_lookup(checker->symbol_table, obj_id->name);
+        if (enum_sym && enum_sym->kind == SYMBOL_ENUM && enum_sym->type) {
+          Type *enum_ty = enum_sym->type;
+          if (enum_ty->kind == TYPE_ENUM) {
+            /* Plain enum variants live as global SYMBOL_CONSTANTs of the enum
+             * type. Look up the variant by its bare name and confirm it
+             * belongs to this enum. */
+            Symbol *variant_sym =
+                symbol_table_lookup(checker->symbol_table, member->member);
+            if (variant_sym && variant_sym->kind == SYMBOL_CONSTANT &&
+                variant_sym->type == enum_ty) {
+              return enum_ty;
+            }
+            type_checker_set_error_at_location(
+                checker, expression->location,
+                "Enum '%s' has no variant '%s'", obj_id->name, member->member);
+            return NULL;
+          }
+          if (enum_ty->kind == TYPE_TAGGED_ENUM) {
+            for (size_t i = 0; i < enum_ty->tagged_variant_count; i++) {
+              if (enum_ty->tagged_variant_names &&
+                  enum_ty->tagged_variant_names[i] &&
+                  strcmp(enum_ty->tagged_variant_names[i], member->member) ==
+                      0) {
+                return enum_ty;
+              }
+            }
+            type_checker_set_error_at_location(
+                checker, expression->location,
+                "Tagged enum '%s' has no variant '%s'", obj_id->name,
+                member->member);
+            return NULL;
+          }
+        }
+      }
+    }
+
     Type *object_type = type_checker_infer_type(checker, member->object);
     if (object_type && (object_type->kind == TYPE_STRUCT ||
                         object_type->kind == TYPE_STRING)) {
@@ -4764,6 +4834,27 @@ static int type_checker_check_switch_statement(TypeChecker *checker,
         if (csym && csym->kind == SYMBOL_CONSTANT) {
           case_value = csym->data.constant.value;
           case_eval_ok = 1;
+        }
+      }
+      /* Qualified plain-enum variant in a case: `case EnumName.Variant:`. */
+      if (!case_eval_ok &&
+          case_clause->value->type == AST_MEMBER_ACCESS) {
+        MemberAccess *cma = (MemberAccess *)case_clause->value->data;
+        if (cma && cma->object && cma->object->type == AST_IDENTIFIER &&
+            cma->member) {
+          Identifier *cma_obj = (Identifier *)cma->object->data;
+          if (cma_obj && cma_obj->name) {
+            Symbol *enum_sym =
+                symbol_table_lookup(checker->symbol_table, cma_obj->name);
+            if (enum_sym && enum_sym->kind == SYMBOL_ENUM) {
+              Symbol *vsym =
+                  symbol_table_lookup(checker->symbol_table, cma->member);
+              if (vsym && vsym->kind == SYMBOL_CONSTANT) {
+                case_value = vsym->data.constant.value;
+                case_eval_ok = 1;
+              }
+            }
+          }
         }
       }
       if (!case_eval_ok) {

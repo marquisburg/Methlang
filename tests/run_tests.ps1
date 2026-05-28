@@ -374,6 +374,10 @@ $cases = @(
     Args          = @("-I", "tests/lib")
   },
   @{ Name = "tagged_enum_match"; Path = "tests/test_tagged_enum_match.mettle"; ShouldSucceed = $true },
+  @{ Name = "tagged_enum_return"; Path = "tests/test_tagged_enum_return.mettle"; ShouldSucceed = $true },
+  @{ Name = "tagged_enum_bare_none"; Path = "tests/test_tagged_enum_bare_none.mettle"; ShouldSucceed = $true },
+  @{ Name = "tagged_enum_qualified_ctor"; Path = "tests/test_tagged_enum_qualified_ctor.mettle"; ShouldSucceed = $true },
+  @{ Name = "plain_enum_qualified"; Path = "tests/test_plain_enum_qualified.mettle"; ShouldSucceed = $true },
   @{ Name = "extern_signed_param"; Path = "tests/test_extern_signed_param.mettle"; ShouldSucceed = $true },
   @{ Name = "extern_signed_return"; Path = "tests/test_extern_signed_return.mettle"; ShouldSucceed = $true },
   @{ Name = "extern_cstring"; Path = "tests/test_extern_cstring.mettle"; ShouldSucceed = $true },
