@@ -135,8 +135,12 @@ jobs:
           cp bin/mettle "$out/bin/"
           cp -r bin/stdlib "$out/stdlib"
           cp -r bin/runtime "$out/runtime"
-          [ -f LICENSE ] && cp LICENSE "$out/" || true
-          [ -f README.md ] && cp README.md "$out/" || true
+          if [ -f LICENSE ]; then
+            cp LICENSE "$out/"
+          fi
+          if [ -f README.md ]; then
+            cp README.md "$out/"
+          fi
           tar="$out.tar.gz"
           tar -czf "$tar" "$out"
           echo "tar=$tar" >> "$GITHUB_OUTPUT"

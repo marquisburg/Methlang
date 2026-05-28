@@ -208,6 +208,11 @@ jobs:
           make -j"$(nproc)" \
             EXTRA_CFLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all" \
             LDFLAGS="-rdynamic -fsanitize=address,undefined"
+          # Keep the compiler binary instrumented, but bundle normal runtime
+          # objects for programs the compiler builds. Generated executables do
+          # not link the sanitizer runtimes, so sanitized helper objects would
+          # fail at link time before the compiler itself gets exercised.
+          make bundle-runtime EXTRA_CFLAGS=""
 
       - name: Exercise sanitized compiler
         run: |
