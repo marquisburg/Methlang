@@ -4284,6 +4284,65 @@ int code_generator_binary_emit_instruction(
         return 1;
       }
     }
+    /* Whole-struct copy: source is an aggregate symbol (a struct local/param/
+     * global being copied by value, e.g. the inliner's lowering of `return
+     * rect`). The default RAX round-trip below would copy only the low 8 bytes,
+     * silently truncating any struct wider than a register. Handle the two
+     * destinations the inliner produces:
+     *   - dest is a TEMP: stash &source in the temp slot and tag the temp with
+     *     the struct size, so the downstream TEMP->SYMBOL assign (handled just
+     *     below) memcpys the full struct -- mirrors INDIRECT-return temps.
+     *   - dest is an aggregate SYMBOL: memcpy &source -> &dest directly. */
+    if (instruction->lhs.kind == IR_OPERAND_SYMBOL && instruction->lhs.name) {
+      Type *src_type = code_generator_binary_get_operand_type_in_context(
+          generator, context, &instruction->lhs);
+      if (src_type && code_generator_type_is_aggregate(src_type)) {
+        size_t struct_bytes = code_generator_abi_type_size(src_type);
+        if (struct_bytes > 8 && instruction->dest.kind == IR_OPERAND_TEMP &&
+            instruction->dest.name) {
+          if (!code_generator_binary_emit_struct_destination_address(
+                  generator, context, instruction->lhs.name, BINARY_GP_RAX)) {
+            return 0;
+          }
+          if (!binary_indirect_temp_add(context, instruction->dest.name,
+                                        struct_bytes)) {
+            code_generator_set_error(
+                generator, "Out of memory tagging struct-copy temp");
+            return 0;
+          }
+          /* 8-byte spill keeps the pointer alive in the temp's slot. */
+          if (!code_generator_binary_emit_destination_store(
+                  generator, context, &instruction->dest, BINARY_GP_RAX)) {
+            return 0;
+          }
+          return 1;
+        }
+        if (struct_bytes > 8 && instruction->dest.kind == IR_OPERAND_SYMBOL &&
+            instruction->dest.name) {
+          Symbol *dest_sym = symbol_table_lookup(generator->symbol_table,
+                                                 instruction->dest.name);
+          if (!dest_sym || !dest_sym->type ||
+              code_generator_type_is_aggregate(dest_sym->type)) {
+            if (!code_generator_binary_emit_struct_destination_address(
+                    generator, context, instruction->lhs.name, BINARY_GP_RAX) ||
+                !code_generator_binary_emit_struct_destination_address(
+                    generator, context, instruction->dest.name,
+                    BINARY_GP_RDX) ||
+                !code_generator_binary_emit_rep_movsb(generator, context,
+                                                      BINARY_GP_RAX,
+                                                      BINARY_GP_RDX,
+                                                      struct_bytes)) {
+              if (!generator->has_error) {
+                code_generator_set_error(
+                    generator, "Out of memory copying struct-to-struct assign");
+              }
+              return 0;
+            }
+            return 1;
+          }
+        }
+      }
+    }
     /* Indirect-return propagation: source is a temp tagged as holding a
      * pointer to a struct returned from an INDIRECT-returning call; dest
      * is a struct symbol. Memcpy from *src_ptr into &dest. */

@@ -54,7 +54,7 @@ __declspec(dllimport) int __stdcall QueryPerformanceCounter(MettleQpcTicks *coun
 #ifdef METTLE_VERSION_RAW
 #define METTLE_VERSION METTLE_STRINGIFY(METTLE_VERSION_RAW)
 #else
-#define METTLE_VERSION "v0.9.0-dev"
+#define METTLE_VERSION "v0.9.2"
 #endif
 #endif
 

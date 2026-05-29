@@ -9,35 +9,29 @@
 <h1 align="center">Mettle</h1>
 
 <p align="center">
-  <b>Static types. Native x86-64. A compiler you can read.</b>
+  A statically typed systems language that compiles to native x86-64.
 </p>
 
 <p align="center">
   <a href="https://github.com/The-Mettle-Project/Mettle">GitHub</a> |
   <a href="https://github.com/The-Mettle-Project/Mettle/releases">Releases</a> |
-  <a href="docs/LANGUAGE.md">Language reference</a>
+  <a href="docs/LANGUAGE.md">Language reference</a> |
+  Apache-2.0
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0">
-  <img src="https://img.shields.io/badge/target-x86--64-orange.svg" alt="Target: x86-64">
-  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-success.svg" alt="Platforms: Windows | Linux">
-  <img src="https://img.shields.io/badge/runtime-none-lightgrey.svg" alt="Runtime: none">
-</p>
+Mettle compiles `.mettle` source to native x86-64. On Windows, `mettle --build` produces a PE executable using a built-in linker. On Linux, it produces ELF and links with the system toolchain. There is no LLVM dependency, no VM, and no managed runtime.
 
-Mettle is a systems language with a compiler that owns the full path from source to native x86-64. On Windows, `mettle --build` produces a PE executable with a built-in linker. On Linux, it produces ELF and links with the system toolchain. No LLVM, no VM, and no managed runtime.
+## Features
 
-## At a glance
-
-- Low-level programs with static types, pointers, structs, and enums
-- One command from `.mettle` to a native binary on Windows or Linux
-- Call C and OS APIs directly; bundled stdlib for I/O, memory, math, and more
-- `defer` / `errdefer` for scope cleanup; clear errors with source snippets
+- Static types, pointers, structs, and enums
+- A single command from source to a native binary on Windows or Linux
+- Direct calls to C and OS APIs; a bundled stdlib for I/O, memory, math, and more
+- `defer` / `errdefer` for scope cleanup; compile errors with source snippets
 - Optional Tracy profiling, runtime timing, and debug stack traces
 
-Windows is the most polished target (internal PE linker, Win32 GUI via `std/ui`). Linux is supported for builds, libc-backed stdlib, and compiler development. Details and caveats: [known limitations](docs/known-limitations.md).
+Windows is the most complete target (internal PE linker, Win32 GUI via `std/ui`). Linux supports builds, a libc-backed stdlib, and compiler development. See [known limitations](docs/known-limitations.md) for caveats.
 
-## Hello, native
+## Example
 
 Save as `hello.mettle`:
 
@@ -93,7 +87,7 @@ Installs to `~/.mettle` (Linux) or `%LOCALAPPDATA%\Mettle` (Windows), updates us
 mettle --version
 ```
 
-Dev builds from source report `v0.9.0-dev` unless `METTLE_VERSION_RAW` is set at compile time.
+Dev builds from source report `v0.9.2` unless `METTLE_VERSION_RAW` is set at compile time.
 
 ## Build from source
 
