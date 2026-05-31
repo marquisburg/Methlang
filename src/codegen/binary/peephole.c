@@ -451,6 +451,29 @@ int code_generator_binary_emit_integer_binary_to_rax(
                                        (uint32_t)(int32_t)immediate);
     }
     if (strcmp(op, "*") == 0) {
+      if (immediate == 1) {
+        return 1;
+      }
+      if (immediate == -1) {
+        return binary_emit_neg_reg(&context->code, BINARY_GP_RAX);
+      }
+      if (immediate == 2 || immediate == 4 || immediate == 8) {
+        unsigned char shift = immediate == 2 ? 1 : (immediate == 4 ? 2 : 3);
+        return binary_emit_shift_reg_imm8(&context->code, 4, BINARY_GP_RAX,
+                                          shift);
+      }
+      if (immediate == -2 || immediate == -4 || immediate == -8) {
+        unsigned char shift = immediate == -2 ? 1 : (immediate == -4 ? 2 : 3);
+        return binary_emit_shift_reg_imm8(&context->code, 4, BINARY_GP_RAX,
+                                          shift) &&
+               binary_emit_neg_reg(&context->code, BINARY_GP_RAX);
+      }
+      if (immediate == 3 || immediate == 5 || immediate == 9) {
+        int scale = immediate == 3 ? 2 : (immediate == 5 ? 4 : 8);
+        return binary_emit_lea_reg_base_index_scale_disp(
+            &context->code, BINARY_GP_RAX, BINARY_GP_RAX, BINARY_GP_RAX,
+            scale, 0);
+      }
       return binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
                                             BINARY_GP_RAX,
                                             (uint32_t)(int32_t)immediate);
@@ -493,6 +516,29 @@ int code_generator_binary_emit_integer_binary_to_rax(
                                        (uint32_t)(int32_t)immediate);
     }
     if (strcmp(op, "*") == 0) {
+      if (immediate == 1) {
+        return 1;
+      }
+      if (immediate == -1) {
+        return binary_emit_neg_reg(&context->code, BINARY_GP_RAX);
+      }
+      if (immediate == 2 || immediate == 4 || immediate == 8) {
+        unsigned char shift = immediate == 2 ? 1 : (immediate == 4 ? 2 : 3);
+        return binary_emit_shift_reg_imm8(&context->code, 4, BINARY_GP_RAX,
+                                          shift);
+      }
+      if (immediate == -2 || immediate == -4 || immediate == -8) {
+        unsigned char shift = immediate == -2 ? 1 : (immediate == -4 ? 2 : 3);
+        return binary_emit_shift_reg_imm8(&context->code, 4, BINARY_GP_RAX,
+                                          shift) &&
+               binary_emit_neg_reg(&context->code, BINARY_GP_RAX);
+      }
+      if (immediate == 3 || immediate == 5 || immediate == 9) {
+        int scale = immediate == 3 ? 2 : (immediate == 5 ? 4 : 8);
+        return binary_emit_lea_reg_base_index_scale_disp(
+            &context->code, BINARY_GP_RAX, BINARY_GP_RAX, BINARY_GP_RAX,
+            scale, 0);
+      }
       return binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
                                             BINARY_GP_RAX,
                                             (uint32_t)(int32_t)immediate);

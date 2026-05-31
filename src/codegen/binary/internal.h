@@ -61,6 +61,8 @@ typedef struct {
   BinaryNamedSlot *items;
   size_t count;
   size_t capacity;
+  size_t *slots;
+  size_t slot_count;
 } BinaryNamedSlotTable;
 
 typedef struct {
@@ -72,6 +74,8 @@ typedef struct {
   BinaryLabelEntry *items;
   size_t count;
   size_t capacity;
+  size_t *slots;
+  size_t slot_count;
 } BinaryLabelTable;
 
 typedef struct {
@@ -111,6 +115,8 @@ typedef struct {
   BinarySymbolAliasEntry *items;
   size_t count;
   size_t capacity;
+  size_t *slots;
+  size_t slot_count;
 } BinarySymbolAliasTable;
 
 typedef struct {

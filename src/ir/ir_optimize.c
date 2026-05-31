@@ -2855,6 +2855,20 @@ static int ir_try_fold_integer_binary(IRInstruction *instruction, int *changed) 
       return ir_rewrite_to_assign_operand(instruction, &instruction->lhs,
                                           changed);
     }
+  } else if (strcmp(instruction->text, "&&") == 0) {
+    if ((instruction->lhs.kind == IR_OPERAND_INT &&
+         instruction->lhs.int_value == 0) ||
+        (instruction->rhs.kind == IR_OPERAND_INT &&
+         instruction->rhs.int_value == 0)) {
+      return ir_rewrite_to_assign_int(instruction, 0, changed);
+    }
+  } else if (strcmp(instruction->text, "||") == 0) {
+    if ((instruction->lhs.kind == IR_OPERAND_INT &&
+         instruction->lhs.int_value != 0) ||
+        (instruction->rhs.kind == IR_OPERAND_INT &&
+         instruction->rhs.int_value != 0)) {
+      return ir_rewrite_to_assign_int(instruction, 1, changed);
+    }
   }
 
   return 1;

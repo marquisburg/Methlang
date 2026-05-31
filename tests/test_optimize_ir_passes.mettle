@@ -12,6 +12,11 @@ function main() -> int32 {
   result = result + 42;
   var bits: int32 = folded ^ folded;
   result = result + bits;
+  var bool_sink: int32 = same && 0;
+  result = result + bool_sink;
+  bool_sink = 1 || same;
+  result = result + bool_sink;
+  result = result - 1;
 
   if (0) {
     result = cold_path();
