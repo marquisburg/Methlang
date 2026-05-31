@@ -343,6 +343,95 @@ int code_generator_binary_emit_compare_false_branch(
   return 1;
 }
 
+int code_generator_binary_try_emit_reg_multiply_immediate(
+    BinaryFunctionContext *context, BinaryGpRegister target_register,
+    long long immediate, int *handled_out) {
+  unsigned long long magnitude = 0;
+  int negate = 0;
+  BinaryGpRegister scratch =
+      target_register == BINARY_GP_R10 ? BINARY_GP_R11 : BINARY_GP_R10;
+
+  if (handled_out) {
+    *handled_out = 0;
+  }
+  if (!context || !handled_out) {
+    return 0;
+  }
+
+  if (immediate == 0) {
+    *handled_out = 1;
+    return binary_emit_mov_reg_imm64(&context->code, target_register, 0);
+  }
+  if (immediate == 1) {
+    *handled_out = 1;
+    return 1;
+  }
+  if (immediate == -1) {
+    *handled_out = 1;
+    return binary_emit_neg_reg(&context->code, target_register);
+  }
+
+  if (immediate < 0) {
+    negate = 1;
+    magnitude = (unsigned long long)(-(immediate + 1)) + 1ull;
+  } else {
+    magnitude = (unsigned long long)immediate;
+  }
+
+  if ((magnitude & (magnitude - 1ull)) == 0ull) {
+    unsigned char shift = 0;
+    while ((1ull << shift) != magnitude) {
+      shift++;
+    }
+    *handled_out = 1;
+    return binary_emit_shift_reg_imm8(&context->code, 4, target_register,
+                                      shift) &&
+           (!negate || binary_emit_neg_reg(&context->code, target_register));
+  }
+
+  if (magnitude == 3 || magnitude == 5 || magnitude == 9) {
+    int scale = magnitude == 3 ? 2 : (magnitude == 5 ? 4 : 8);
+    *handled_out = 1;
+    return binary_emit_lea_reg_base_index_scale_disp(
+               &context->code, target_register, target_register,
+               target_register, scale, 0) &&
+           (!negate || binary_emit_neg_reg(&context->code, target_register));
+  }
+
+  for (unsigned char shift = 4; shift < 63; shift++) {
+    unsigned long long power = 1ull << shift;
+    int add_original = 0;
+    if (magnitude == power + 1ull) {
+      add_original = 1;
+    } else if (magnitude != power - 1ull) {
+      continue;
+    }
+
+    *handled_out = 1;
+    if (!binary_emit_mov_reg_reg(&context->code, scratch, target_register) ||
+        !binary_emit_shift_reg_imm8(&context->code, 4, target_register,
+                                    shift)) {
+      return 0;
+    }
+
+    if (add_original) {
+      if (!binary_emit_lea_reg_reg(&context->code, target_register,
+                                   target_register, scratch) &&
+          !binary_emit_alu_reg_reg(&context->code, 0x01, target_register,
+                                   scratch)) {
+        return 0;
+      }
+    } else if (!binary_emit_alu_reg_reg(&context->code, 0x29, target_register,
+                                        scratch)) {
+      return 0;
+    }
+
+    return !negate || binary_emit_neg_reg(&context->code, target_register);
+  }
+
+  return 1;
+}
+
 int code_generator_binary_emit_integer_binary_to_rax(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IRInstruction *instruction) {
@@ -451,28 +540,13 @@ int code_generator_binary_emit_integer_binary_to_rax(
                                        (uint32_t)(int32_t)immediate);
     }
     if (strcmp(op, "*") == 0) {
-      if (immediate == 1) {
+      int handled = 0;
+      if (!code_generator_binary_try_emit_reg_multiply_immediate(
+              context, BINARY_GP_RAX, immediate, &handled)) {
+        return 0;
+      }
+      if (handled) {
         return 1;
-      }
-      if (immediate == -1) {
-        return binary_emit_neg_reg(&context->code, BINARY_GP_RAX);
-      }
-      if (immediate == 2 || immediate == 4 || immediate == 8) {
-        unsigned char shift = immediate == 2 ? 1 : (immediate == 4 ? 2 : 3);
-        return binary_emit_shift_reg_imm8(&context->code, 4, BINARY_GP_RAX,
-                                          shift);
-      }
-      if (immediate == -2 || immediate == -4 || immediate == -8) {
-        unsigned char shift = immediate == -2 ? 1 : (immediate == -4 ? 2 : 3);
-        return binary_emit_shift_reg_imm8(&context->code, 4, BINARY_GP_RAX,
-                                          shift) &&
-               binary_emit_neg_reg(&context->code, BINARY_GP_RAX);
-      }
-      if (immediate == 3 || immediate == 5 || immediate == 9) {
-        int scale = immediate == 3 ? 2 : (immediate == 5 ? 4 : 8);
-        return binary_emit_lea_reg_base_index_scale_disp(
-            &context->code, BINARY_GP_RAX, BINARY_GP_RAX, BINARY_GP_RAX,
-            scale, 0);
       }
       return binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
                                             BINARY_GP_RAX,
@@ -516,28 +590,13 @@ int code_generator_binary_emit_integer_binary_to_rax(
                                        (uint32_t)(int32_t)immediate);
     }
     if (strcmp(op, "*") == 0) {
-      if (immediate == 1) {
+      int handled = 0;
+      if (!code_generator_binary_try_emit_reg_multiply_immediate(
+              context, BINARY_GP_RAX, immediate, &handled)) {
+        return 0;
+      }
+      if (handled) {
         return 1;
-      }
-      if (immediate == -1) {
-        return binary_emit_neg_reg(&context->code, BINARY_GP_RAX);
-      }
-      if (immediate == 2 || immediate == 4 || immediate == 8) {
-        unsigned char shift = immediate == 2 ? 1 : (immediate == 4 ? 2 : 3);
-        return binary_emit_shift_reg_imm8(&context->code, 4, BINARY_GP_RAX,
-                                          shift);
-      }
-      if (immediate == -2 || immediate == -4 || immediate == -8) {
-        unsigned char shift = immediate == -2 ? 1 : (immediate == -4 ? 2 : 3);
-        return binary_emit_shift_reg_imm8(&context->code, 4, BINARY_GP_RAX,
-                                          shift) &&
-               binary_emit_neg_reg(&context->code, BINARY_GP_RAX);
-      }
-      if (immediate == 3 || immediate == 5 || immediate == 9) {
-        int scale = immediate == 3 ? 2 : (immediate == 5 ? 4 : 8);
-        return binary_emit_lea_reg_base_index_scale_disp(
-            &context->code, BINARY_GP_RAX, BINARY_GP_RAX, BINARY_GP_RAX,
-            scale, 0);
       }
       return binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
                                             BINARY_GP_RAX,
@@ -1780,6 +1839,14 @@ int code_generator_binary_emit_rax_binary_rhs(
                                        (uint32_t)(int32_t)immediate);
     }
     if (strcmp(op, "*") == 0) {
+      int handled = 0;
+      if (!code_generator_binary_try_emit_reg_multiply_immediate(
+              context, BINARY_GP_RAX, immediate, &handled)) {
+        return 0;
+      }
+      if (handled) {
+        return 1;
+      }
       return binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
                                             BINARY_GP_RAX,
                                             (uint32_t)(int32_t)immediate);

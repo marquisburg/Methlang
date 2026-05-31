@@ -3786,9 +3786,14 @@ static int binary_emit_binary_integer(CodeGenerator *generator,
             ok = binary_emit_sub_reg_imm32(&context->code, dest_reg,
                                            (uint32_t)(int32_t)immediate);
           } else if (strcmp(op, "*") == 0) {
-            ok = binary_emit_imul_reg_reg_imm32(&context->code, dest_reg,
-                                                dest_reg,
-                                                (uint32_t)(int32_t)immediate);
+            int multiply_handled = 0;
+            ok = code_generator_binary_try_emit_reg_multiply_immediate(
+                context, dest_reg, immediate, &multiply_handled);
+            if (ok && !multiply_handled) {
+              ok = binary_emit_imul_reg_reg_imm32(
+                  &context->code, dest_reg, dest_reg,
+                  (uint32_t)(int32_t)immediate);
+            }
           } else if (strcmp(op, "&") == 0) {
             ok = binary_emit_and_reg_imm32(&context->code, dest_reg,
                                            (uint32_t)(int32_t)immediate);
@@ -3827,7 +3832,13 @@ static int binary_emit_binary_integer(CodeGenerator *generator,
           goto emit_failure;
         }
       } else if (strcmp(op, "*") == 0) {
-        if (!binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
+        int multiply_handled = 0;
+        if (!code_generator_binary_try_emit_reg_multiply_immediate(
+                context, BINARY_GP_RAX, immediate, &multiply_handled)) {
+          goto emit_failure;
+        }
+        if (!multiply_handled &&
+            !binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
                                             BINARY_GP_RAX,
                                             (uint32_t)(int32_t)immediate)) {
           goto emit_failure;

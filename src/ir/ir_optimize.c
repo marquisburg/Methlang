@@ -2168,6 +2168,181 @@ static int ir_inline_small_functions_pass(IRProgram *program, int *changed) {
   return 1;
 }
 
+static int ir_builtin_integer_type_info(const char *name, int *size_out,
+                                        int *is_unsigned_out) {
+  int size = 0;
+  int is_unsigned = 0;
+
+  if (!name) {
+    return 0;
+  }
+
+  if (strcmp(name, "int8") == 0) {
+    size = 1;
+  } else if (strcmp(name, "uint8") == 0) {
+    size = 1;
+    is_unsigned = 1;
+  } else if (strcmp(name, "int16") == 0) {
+    size = 2;
+  } else if (strcmp(name, "uint16") == 0) {
+    size = 2;
+    is_unsigned = 1;
+  } else if (strcmp(name, "int32") == 0) {
+    size = 4;
+  } else if (strcmp(name, "uint32") == 0) {
+    size = 4;
+    is_unsigned = 1;
+  } else if (strcmp(name, "int64") == 0) {
+    size = 8;
+  } else if (strcmp(name, "uint64") == 0) {
+    size = 8;
+    is_unsigned = 1;
+  } else {
+    return 0;
+  }
+
+  if (size_out) {
+    *size_out = size;
+  }
+  if (is_unsigned_out) {
+    *is_unsigned_out = is_unsigned;
+  }
+  return 1;
+}
+
+static int ir_find_temp_producer_index_in_current_block(
+    const IRFunction *function, size_t before_index, const char *temp_name,
+    size_t *producer_index_out) {
+  if (!function || !temp_name || !producer_index_out ||
+      before_index > function->instruction_count) {
+    return 0;
+  }
+
+  for (size_t i = before_index; i > 0;) {
+    i--;
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_NOP) {
+      continue;
+    }
+    if (instruction->op == IR_OP_LABEL) {
+      return 0;
+    }
+    if (ir_instruction_writes_temp(instruction) && instruction->dest.name &&
+        strcmp(instruction->dest.name, temp_name) == 0) {
+      *producer_index_out = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int ir_try_compose_single_use_cast(IRFunction *function,
+                                          const IRTempUseMap *uses,
+                                          size_t cast_index, int *changed) {
+  IRInstruction *cast = NULL;
+  IRInstruction *producer = NULL;
+  size_t producer_index = 0;
+  int producer_size = 0;
+  int cast_size = 0;
+  const char *composed_type = NULL;
+  char *type_copy = NULL;
+  IROperand source = ir_operand_none();
+
+  if (!function || !uses || cast_index >= function->instruction_count) {
+    return 0;
+  }
+
+  cast = &function->instructions[cast_index];
+  if (cast->op != IR_OP_CAST || cast->is_float || !cast->text ||
+      cast->lhs.kind != IR_OPERAND_TEMP || !cast->lhs.name ||
+      ir_temp_use_map_get(uses, cast->lhs.name) != 1 ||
+      !ir_builtin_integer_type_info(cast->text, &cast_size, NULL) ||
+      !ir_find_temp_producer_index_in_current_block(function, cast_index,
+                                                    cast->lhs.name,
+                                                    &producer_index)) {
+    return 1;
+  }
+
+  producer = &function->instructions[producer_index];
+  if (producer->op != IR_OP_CAST || producer->is_float || !producer->text ||
+      !ir_builtin_integer_type_info(producer->text, &producer_size, NULL)) {
+    return 1;
+  }
+
+  /* Compose integer cast chains by keeping only the narrower conversion.
+   * Equal-width chains keep the later cast so signed/unsigned reinterpretation
+   * at that width remains visible. A later dead-temp pass removes the first
+   * cast, but nopping it here lets this same pass continue coalescing through
+   * the new source. */
+  composed_type = (cast_size <= producer_size) ? cast->text : producer->text;
+  type_copy = mettle_strdup(composed_type);
+  if (!type_copy || !ir_operand_clone(&producer->lhs, &source)) {
+    free(type_copy);
+    ir_operand_destroy(&source);
+    return 0;
+  }
+
+  ir_operand_destroy(&cast->lhs);
+  cast->lhs = source;
+  free(cast->text);
+  cast->text = type_copy;
+  ir_instruction_make_nop(producer);
+
+  if (changed) {
+    *changed = 1;
+  }
+  return 1;
+}
+
+static int ir_try_coalesce_unsigned_load_cast(IRFunction *function,
+                                              const IRTempUseMap *uses,
+                                              size_t cast_index,
+                                              int *changed) {
+  IRInstruction *cast = NULL;
+  IRInstruction *producer = NULL;
+  size_t producer_index = 0;
+  int cast_size = 0;
+  int is_unsigned = 0;
+  IROperand rewritten_dest = ir_operand_none();
+
+  if (!function || !uses || cast_index >= function->instruction_count) {
+    return 0;
+  }
+
+  cast = &function->instructions[cast_index];
+  if (cast->op != IR_OP_CAST || cast->is_float || !cast->text ||
+      cast->lhs.kind != IR_OPERAND_TEMP || !cast->lhs.name ||
+      ir_temp_use_map_get(uses, cast->lhs.name) != 1 ||
+      !ir_builtin_integer_type_info(cast->text, &cast_size, &is_unsigned) ||
+      !is_unsigned || cast_size > 2 ||
+      !ir_find_temp_producer_index_in_current_block(function, cast_index,
+                                                    cast->lhs.name,
+                                                    &producer_index)) {
+    return 1;
+  }
+
+  producer = &function->instructions[producer_index];
+  if (producer->op != IR_OP_LOAD || producer->is_float ||
+      producer->rhs.kind != IR_OPERAND_INT ||
+      producer->rhs.int_value != cast_size) {
+    return 1;
+  }
+
+  if (!ir_operand_clone(&cast->dest, &rewritten_dest)) {
+    return 0;
+  }
+
+  ir_operand_destroy(&producer->dest);
+  producer->dest = rewritten_dest;
+  ir_instruction_make_nop(cast);
+
+  if (changed) {
+    *changed = 1;
+  }
+  return 1;
+}
+
 static int ir_coalesce_single_use_temp_assign_pass(IRFunction *function,
                                                    int *changed) {
   if (!function) {
@@ -2226,6 +2401,34 @@ static int ir_coalesce_single_use_temp_assign_pass(IRFunction *function,
     ir_instruction_make_nop(assign_instruction);
     if (changed) {
       *changed = 1;
+    }
+  }
+
+  for (size_t i = 1; i < function->instruction_count; i++) {
+    IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op != IR_OP_CAST || instruction->is_float ||
+        instruction->lhs.kind != IR_OPERAND_TEMP ||
+        !instruction->lhs.name) {
+      continue;
+    }
+
+    if (!ir_try_compose_single_use_cast(function, &uses, i, changed)) {
+      ir_temp_use_map_destroy(&uses);
+      return 0;
+    }
+  }
+
+  for (size_t i = 1; i < function->instruction_count; i++) {
+    IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op != IR_OP_CAST || instruction->is_float ||
+        instruction->lhs.kind != IR_OPERAND_TEMP ||
+        !instruction->lhs.name) {
+      continue;
+    }
+
+    if (!ir_try_coalesce_unsigned_load_cast(function, &uses, i, changed)) {
+      ir_temp_use_map_destroy(&uses);
+      return 0;
     }
   }
 
