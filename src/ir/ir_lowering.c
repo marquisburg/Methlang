@@ -2315,6 +2315,28 @@ static int ir_symbol_float_bits(IRLoweringContext *context, const char *name) {
   return ir_type_float_bits(symbol->type);
 }
 
+/* Recover a local's declared float width (0/32/64) from the DECLARE_LOCAL the
+ * lowering already emitted for it. The function-body symbol-table scope is
+ * usually popped by lowering time, so symbol_table_lookup misses locals; the
+ * emitted IR is the reliable record of a local's declared type name. Caller
+ * should gate this on a floating RHS to avoid an O(n) scan on every assign. */
+static int ir_local_declared_float_bits(IRLoweringContext *context,
+                                        const IRFunction *function,
+                                        const char *name) {
+  if (!context || !function || !name) {
+    return 0;
+  }
+  for (size_t i = function->instruction_count; i-- > 0;) {
+    const IRInstruction *insn = &function->instructions[i];
+    if (insn->op == IR_OP_DECLARE_LOCAL &&
+        insn->dest.kind == IR_OPERAND_SYMBOL && insn->dest.name &&
+        insn->text && strcmp(insn->dest.name, name) == 0) {
+      return ir_named_type_float_bits(context, insn->text);
+    }
+  }
+  return 0;
+}
+
 /* Record, on an ASSIGN/STORE, the TARGET float precision (bits = 32/64) of the
  * destination. instruction->float_bits is the destination width; the source
  * value operand keeps its own width so the backend can detect a precision
@@ -4211,9 +4233,22 @@ static int ir_lower_statement_with_defers(IRLoweringContext *context,
         assign.location = statement->location;
         assign.dest = ir_operand_symbol(assignment->variable_name);
         assign.lhs = value;
-        ir_assign_apply_float_bits(
-            &assign, &assign.lhs,
-            ir_symbol_float_bits(context, assignment->variable_name));
+        /* Target float width for the narrowing/widening on store. Prefer the
+         * symbol table, but its function scope is usually popped by lowering
+         * time, so fall back to the declared type recorded on the emitted
+         * DECLARE_LOCAL. Without this, a float64 expression assigned into a
+         * float32 local kept the float64 width and stored the wrong 4 bytes.
+         * Gate the IR scan on a floating RHS so non-float assigns stay O(1). */
+        int target_float_bits =
+            ir_symbol_float_bits(context, assignment->variable_name);
+        if (target_float_bits == 0 && assignment->value &&
+            assignment->value->resolved_type &&
+            (assignment->value->resolved_type->kind == TYPE_FLOAT32 ||
+             assignment->value->resolved_type->kind == TYPE_FLOAT64)) {
+          target_float_bits = ir_local_declared_float_bits(
+              context, function, assignment->variable_name);
+        }
+        ir_assign_apply_float_bits(&assign, &assign.lhs, target_float_bits);
         if (!assign.dest.name) {
           ir_operand_destroy(&value);
           ir_set_error(context, "Out of memory while lowering assignment target");

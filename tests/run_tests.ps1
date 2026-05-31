@@ -1580,6 +1580,42 @@ foreach ($relFlag in @($true, $false)) {
   }
 }
 
+# float32 narrowing equivalence: a float64 expression assigned/returned into a
+# float32 destination must narrow (cvtsd2ss). Built both with and without
+# --release because the two miscompiles surfaced on different paths -- the
+# assignment-statement narrowing at -O0, and the inliner + single-use assign
+# coalesce at --release. The program self-checks and returns nonzero on any
+# mismatch.
+foreach ($relFlag in @($true, $false)) {
+  $total++
+  $variant = if ($relFlag) { "release" } else { "debug" }
+  try {
+    $exePath = Join-Path $tmpDir "test_float32_narrowing_$variant.exe"
+    $buildArgs = @("--build", "--emit-obj", "--linker", "internal")
+    if ($relFlag) { $buildArgs += "--release" }
+    $buildArgs += @("tests\test_float32_narrowing.mettle", "-o", $exePath)
+
+    $buildOut = & $CompilerPath @buildArgs 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "float32-narrowing build ($variant) failed: $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "float32-narrowing build ($variant) did not produce an executable"
+    }
+
+    & $exePath 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 1) {
+      throw "float32-narrowing ($variant) reported a mismatch (exit $LASTEXITCODE)"
+    }
+
+    Write-CaseResult -Name "float32_narrowing_$variant" -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "float32_narrowing_$variant" -Passed $false -Reason $_.Exception.Message
+  }
+}
+
 # COFF reader test: parse Mettle and GCC-produced COFF objects
 $total++
 try {

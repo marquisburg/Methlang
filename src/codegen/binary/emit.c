@@ -905,13 +905,19 @@ int code_generator_binary_instruction_result_is_float64(
            (strcmp(op, "+") == 0 || strcmp(op, "-") == 0);
 
   case IR_OP_CALL:
+    /* Any floating return (float32 or float64) lands in XMM0 and must mark the
+     * dest temp as float so downstream loads bit-copy via movd/movq instead of
+     * treating the slot as an integer. resolved_type_float_bits returns 32 for
+     * float32, which result_float_bits then narrows correctly. Using the
+     * float64-only predicate here dropped float32 returns to the integer path
+     * and lost the value. */
     symbol = generator && generator->symbol_table && instruction->text
                  ? symbol_table_lookup(generator->symbol_table,
                                        instruction->text)
                  : NULL;
     return symbol && symbol->kind == SYMBOL_FUNCTION &&
-           code_generator_binary_resolved_type_is_float64(
-               symbol->data.function.return_type);
+           code_generator_binary_resolved_type_float_bits(
+               symbol->data.function.return_type) != 0;
 
   case IR_OP_CALL_INDIRECT:
     symbol = generator && generator->symbol_table &&
@@ -924,8 +930,8 @@ int code_generator_binary_instruction_result_is_float64(
         (symbol && symbol->type && symbol->type->kind == TYPE_FUNCTION_POINTER)
             ? symbol->type
             : NULL;
-    return code_generator_binary_resolved_type_is_float64(
-        function_type ? function_type->fn_return_type : NULL);
+    return code_generator_binary_resolved_type_float_bits(
+               function_type ? function_type->fn_return_type : NULL) != 0;
 
   case IR_OP_CAST:
     return code_generator_binary_named_type_is_float64(generator,

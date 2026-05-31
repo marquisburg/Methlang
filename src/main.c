@@ -969,7 +969,7 @@ static int collect_internal_link_imports(const CompilerOptions *options,
                                           char **error_message_out) {
   static const char *default_import_dlls[] = {
       "kernel32.dll", "ucrtbase.dll", "msvcrt.dll", "ws2_32.dll",
-      "user32.dll",   "gdi32.dll",    "advapi32.dll"};
+      "user32.dll",   "gdi32.dll",    "advapi32.dll", "winmm.dll"};
   size_t i = 0u;
   StringList search_directories = {0};
 

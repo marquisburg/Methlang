@@ -25,6 +25,7 @@ import "std/io";
 import "std/mem";
 import "std/process";
 import "std/win32";
+import "std/bench";   // bench_time_us(): QueryPerformanceCounter high-res clock
 
 // --- Tunables ----------------------------------------------------------------
 const NUM_PARTICLES = 300;
@@ -35,7 +36,13 @@ const PAL           = 64;    // gradient brush count
 const NUM_STARS     = 150;
 const WIN_W         = 1180;
 const WIN_H         = 760;
-const TIMER_ID      = 1;
+
+// Fixed-timestep frame pacing (microseconds). Physics advances in discrete
+// FRAME_US chunks via an accumulator, so motion speed is identical regardless
+// of how fast frames actually render. MAX_STEPS caps catch-up after a stall so
+// the sim can't enter a spiral of death.
+const FRAME_US      = 16667;   // 60 simulation steps per second
+const MAX_STEPS     = 5;       // clamp catch-up to 5 physics steps per frame
 
 // Float "constants" (const must be integer, so these are globals).
 var G_SOFTEN: float64    = 260.0;   // softening added to r^2 (avoids singularity)
@@ -56,6 +63,18 @@ extern function Gdi_CreateCompatibleDC(hdc: int64) -> int64 = "CreateCompatibleD
 extern function Gdi_CreateCompatibleBitmap(hdc: int64, w: int32, h: int32) -> int64 = "CreateCompatibleBitmap";
 extern function Gdi_BitBlt(dst: int64, x: int32, y: int32, w: int32, h: int32, src: int64, sx: int32, sy: int32, rop: uint32) -> int32 = "BitBlt";
 extern function Gdi_DeleteDC(hdc: int64) -> int32 = "DeleteDC";
+
+// winmm: raise the system timer resolution to 1ms so a short WM_TIMER period is
+// actually honored. Without this, Windows rounds timers up to the ~15.6ms
+// scheduler tick, which caps the sim near 40 fps regardless of how cheap a
+// frame is.
+extern function Win_timeBeginPeriod(ms: uint32) -> uint32 = "timeBeginPeriod";
+extern function Win_timeEndPeriod(ms: uint32) -> uint32   = "timeEndPeriod";
+
+// kernel32 Sleep: yield the rest of a frame's budget so the idle loop paces
+// itself to the target rate without pinning a CPU core (timeBeginPeriod(1)
+// makes the 1ms granularity accurate).
+extern function Win_Sleep(ms: uint32) = "Sleep";
 
 function SRCCOPY() -> uint32 { return 0x00CC0020; }
 
@@ -93,6 +112,15 @@ var repel_brush: int64 = 0;
 var null_pen: int64 = 0;
 var title_font: int64 = 0;
 var hud_font: int64 = 0;
+
+// Cached off-screen back buffer. Recreating a DC + bitmap every frame is the
+// single most expensive thing render() did; we now build it once and only
+// rebuild when the window size changes.
+var back_dc: int64  = 0;
+var back_bmp: int64 = 0;
+var back_old: int64 = 0;   // original bitmap selected into back_dc
+var back_w: int32   = 0;
+var back_h: int32   = 0;
 
 var view_w: int32 = WIN_W;
 var view_h: int32 = WIN_H;
@@ -339,16 +367,39 @@ function draw_hud(hdc: int64) {
   Ui_SelectObject(hdc, oldf);
 }
 
-function render(hwnd: int64) {
-  var ps: UiPaintStruct;
-  var hdc: int64 = Ui_BeginPaint(hwnd, &ps);
-  var w: int32 = ui_client_width(hwnd);
-  var h: int32 = ui_client_height(hwnd);
+// Free the cached back buffer (on resize or shutdown).
+function free_back_buffer() {
+  if (back_dc != 0) {
+    Ui_SelectObject(back_dc, back_old);
+    Ui_DeleteObject(back_bmp);
+    Gdi_DeleteDC(back_dc);
+    back_dc = 0;
+    back_bmp = 0;
+    back_old = 0;
+    back_w = 0;
+    back_h = 0;
+  }
+}
 
-  // Off-screen back buffer for flicker-free animation.
-  var mem: int64 = Gdi_CreateCompatibleDC(hdc);
-  var bmp: int64 = Gdi_CreateCompatibleBitmap(hdc, w, h);
-  var oldbmp: int64 = Ui_SelectObject(mem, bmp);
+// Return a memory DC sized w x h, reusing the cached one when the size matches.
+function get_back_buffer(hdc: int64, w: int32, h: int32) -> int64 {
+  if (back_dc != 0 && back_w == w && back_h == h) {
+    return back_dc;
+  }
+  free_back_buffer();
+  back_dc  = Gdi_CreateCompatibleDC(hdc);
+  back_bmp = Gdi_CreateCompatibleBitmap(hdc, w, h);
+  back_old = Ui_SelectObject(back_dc, back_bmp);
+  back_w = w;
+  back_h = h;
+  return back_dc;
+}
+
+// Draw one full frame into the back buffer and blit it to the given window DC.
+// Shared by the WM_PAINT handler (BeginPaint DC) and the idle loop (GetDC).
+function render_to(hdc: int64, w: int32, h: int32) {
+  // Reuse the off-screen back buffer across frames; rebuilt only on resize.
+  var mem: int64 = get_back_buffer(hdc, w, h);
 
   ui_fill_rect_color(mem, 0, 0, w, h, ui_rgb(8, 10, 24));
 
@@ -386,10 +437,23 @@ function render(hwnd: int64) {
   }
 
   Gdi_BitBlt(hdc, 0, 0, w, h, mem, 0, 0, SRCCOPY());
+  // The back buffer is cached; leave it selected for the next frame.
+}
 
-  Ui_SelectObject(mem, oldbmp);
-  Ui_DeleteObject(bmp);
-  Gdi_DeleteDC(mem);
+// Idle-loop frame: paint straight to the window DC (no BeginPaint, which is
+// only valid while handling WM_PAINT).
+function render_frame(hwnd: int64) {
+  var hdc: int64 = Ui_GetDC(hwnd);
+  render_to(hdc, view_w, view_h);
+  Ui_ReleaseDC(hwnd, hdc);
+}
+
+// WM_PAINT frame: satisfy the OS paint request (resize/expose) and validate
+// the region via EndPaint.
+function render(hwnd: int64) {
+  var ps: UiPaintStruct;
+  var hdc: int64 = Ui_BeginPaint(hwnd, &ps);
+  render_to(hdc, view_w, view_h);
   Ui_EndPaint(hwnd, &ps);
 }
 
@@ -410,15 +474,9 @@ function window_proc(hwnd: int64, msg: uint32, wparam: int64, lparam: int64) -> 
     return 1;   // we paint the whole client area ourselves
   }
   if (msg == UI_WM_PAINT()) {
+    // The idle loop drives painting directly via render(); just validate the
+    // region so Windows stops re-posting WM_PAINT (e.g. after a resize/expose).
     render(hwnd);
-    return 0;
-  }
-  if (msg == UI_WM_TIMER()) {
-    if (ready != 0) {
-      if (paused == 0) { update_physics(); }
-      tick_fps();
-      Ui_InvalidateRect(hwnd, 0, 0);
-    }
     return 0;
   }
   if (msg == UI_WM_LBUTTONDOWN()) {
@@ -439,9 +497,11 @@ function window_proc(hwnd: int64, msg: uint32, wparam: int64, lparam: int64) -> 
   if (msg == UI_WM_SIZE()) {
     view_w = ui_size_width(lparam);
     view_h = ui_size_height(lparam);
+    free_back_buffer();   // rebuilt at the new size on the next paint
     return 0;
   }
   if (msg == UI_WM_DESTROY()) {
+    free_back_buffer();
     ui_quit(0);
     return 0;
   }
@@ -480,6 +540,61 @@ function main() -> int32 {
   frame_count = 0;
   ready = 1;
 
-  ui_timer_start(hwnd, TIMER_ID, 16);   // ~60 FPS
-  return ui_run_message_loop();
+  // 1ms scheduler granularity so the Sleep() at the end of each frame is precise
+  // rather than rounding up to the ~15.6ms tick.
+  Win_timeBeginPeriod(1);
+
+  // --- Fixed-timestep idle loop --------------------------------------------
+  // Instead of WM_TIMER (low priority, jittery delivery, coalesced messages),
+  // we pump messages non-blocking, advance physics in fixed FRAME_US chunks
+  // driven by a high-resolution clock, render once, then sleep off the slack.
+  // Result: steady frame pacing and frame-rate-independent motion.
+  var msg: UiMsg;
+  var running: int32 = 1;
+  var prev_us: uint64 = bench_time_us();
+  var accum_us: uint64 = 0;
+
+  while (running != 0) {
+    // Drain every pending message without blocking.
+    while (Ui_PeekMessageA(&msg, 0, 0, 0, UI_PM_REMOVE()) != 0) {
+      if (msg.message == UI_WM_QUIT()) {
+        running = 0;
+      }
+      Ui_TranslateMessage(&msg);
+      Ui_DispatchMessageA(&msg);
+    }
+    if (running == 0) { break; }
+
+    var now_us: uint64 = bench_time_us();
+    var dt_us: uint64 = now_us - prev_us;
+    prev_us = now_us;
+
+    // Guard against a huge dt after a stall/drag so we don't spiral.
+    if (dt_us > (uint64)(FRAME_US * MAX_STEPS)) {
+      dt_us = (uint64)(FRAME_US * MAX_STEPS);
+    }
+    accum_us = accum_us + dt_us;
+
+    var steps: int32 = 0;
+    while (accum_us >= (uint64)FRAME_US && steps < MAX_STEPS) {
+      if (paused == 0) { update_physics(); }
+      accum_us = accum_us - (uint64)FRAME_US;
+      steps = steps + 1;
+    }
+    // If we hit the step cap, drop the backlog rather than carry it forward.
+    if (steps >= MAX_STEPS) { accum_us = 0; }
+
+    render_frame(hwnd);
+    tick_fps();
+
+    // Yield the rest of the frame budget instead of busy-spinning a core.
+    var spent_us: uint64 = bench_time_us() - now_us;
+    if (spent_us < (uint64)FRAME_US) {
+      var sleep_us: uint64 = (uint64)FRAME_US - spent_us;
+      Win_Sleep((uint32)(sleep_us / 1000));
+    }
+  }
+
+  Win_timeEndPeriod(1);
+  return (int32)msg.wparam;
 }

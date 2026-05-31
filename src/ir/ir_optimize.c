@@ -1742,6 +1742,10 @@ static int ir_inline_rewrite_operand(const IROperand *source, IROperand *out,
     const char *mapped = ir_name_map_lookup(symbol_map, source->name);
     if (mapped) {
       *out = ir_operand_symbol(mapped);
+      /* Preserve the float width carried by the original operand; the symbol
+       * constructor does not copy it, and losing it makes a float32 value look
+       * like a plain copy to later coalescing (dropping an f64->f32 narrow). */
+      out->float_bits = source->float_bits;
       return out->kind == IR_OPERAND_SYMBOL && out->name;
     }
   } else if (source->kind == IR_OPERAND_TEMP && source->name) {
@@ -1751,6 +1755,7 @@ static int ir_inline_rewrite_operand(const IROperand *source, IROperand *out,
       return 0;
     }
     *out = ir_operand_temp(mapped);
+    out->float_bits = source->float_bits;
     return out->kind == IR_OPERAND_TEMP && out->name;
   } else if (source->kind == IR_OPERAND_LABEL && source->name) {
     const char *mapped = ir_name_map_get_or_create(label_map, source->name,
@@ -2029,6 +2034,13 @@ static int ir_inline_call_instruction(IRInstructionVector *vector,
           call_instruction->dest.kind != IR_OPERAND_NONE) {
         emitted.op = IR_OP_ASSIGN;
         emitted.location = call_instruction->location;
+        /* The RETURN carries the narrowing contract: float_bits is the return
+         * type's width (the destination precision) and lhs.float_bits is the
+         * value's own width. Propagate both so the synthesized assign performs
+         * any f64->f32 conversion the return ABI would have, and so a later
+         * coalescing pass cannot mistake it for a width-preserving copy. */
+        emitted.is_float = source->is_float;
+        emitted.float_bits = source->float_bits;
         if (!ir_operand_clone(&call_instruction->dest, &emitted.dest) ||
             !ir_inline_rewrite_operand(&source->lhs, &emitted.lhs, &symbol_map,
                                        &temp_map, &label_map, inline_prefix) ||
@@ -2388,6 +2400,21 @@ static int ir_coalesce_single_use_temp_assign_pass(IRFunction *function,
         producer->dest.kind != IR_OPERAND_TEMP || !producer->dest.name ||
         strcmp(producer->dest.name, assign_instruction->lhs.name) != 0) {
       continue;
+    }
+
+    /* A float ASSIGN may encode an IEEE-754 width conversion (e.g. a float64
+     * expression narrowed into a float32 destination on return/assignment).
+     * Folding the producer's dest forward would drop that cvtsd2ss/cvtss2sd and
+     * store the wrong half of the value. Only coalesce when no width change is
+     * implied: the producer must itself be float at the same width as the
+     * assign's target. */
+    if (assign_instruction->is_float) {
+      int assign_bits = (assign_instruction->float_bits == 32) ? 32 : 64;
+      int producer_bits =
+          producer->is_float ? ((producer->float_bits == 32) ? 32 : 64) : 0;
+      if (!producer->is_float || producer_bits != assign_bits) {
+        continue;
+      }
     }
 
     IROperand rewritten_dest = ir_operand_none();

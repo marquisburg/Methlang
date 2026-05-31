@@ -1,30 +1,16 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="mettle-syntax/icons/mettle-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="mettle.svg">
-    <img src="mettle.svg" alt="Mettle" width="128" height="128">
-  </picture>
-</p>
 
-<h1 align="center">Mettle</h1>
 
-<p align="center">
-  A statically typed systems language that compiles to native x86-64.
-</p>
+# Mettle
 
-<p align="center">
-  <a href="https://github.com/The-Mettle-Project/Mettle">GitHub</a> |
-  <a href="https://github.com/The-Mettle-Project/Mettle/releases">Releases</a> |
-  <a href="docs/LANGUAGE.md">Language reference</a> |
-  Apache-2.0
-</p>
+A statically typed systems language that compiles to native x86-64.
+
+[GitHub](https://github.com/The-Mettle-Project/Mettle) | [Releases](https://github.com/The-Mettle-Project/Mettle/releases) | Language reference | Apache-2.0
 
 Mettle compiles `.mettle` source to native x86-64. On Windows, `mettle --build` produces a PE executable using a built-in linker. On Linux, it produces ELF and links with the system toolchain. There is no LLVM dependency, no VM, and no managed runtime.
 
 ## Features
 
 - Static types, pointers, structs, and enums
-- A single command from source to a native binary on Windows or Linux
 - Direct calls to C and OS APIs; a bundled stdlib for I/O, memory, math, and more
 - `defer` / `errdefer` for scope cleanup; compile errors with source snippets
 - Optional Tracy profiling, runtime timing, and debug stack traces
@@ -144,13 +130,13 @@ docs/           language and tooling reference
 
 ## Examples and benchmarks
 
-Runnable samples live under [`examples/`](examples/). Benchmark suites pair Mettle, C, and Rust; run them with:
+Runnable samples live under `[examples/](examples/)`. Benchmark suites pair Mettle, C, and Rust; run them with:
 
 ```powershell
 .\tools\benchmark\run-benchmarks.ps1
 ```
 
-See [`examples/README.md`](examples/README.md) for `fib`, `grep`, `ui_demo`, `tracy_demo`, and others.
+See `[examples/README.md](examples/README.md)` for `fib`, `grep`, `ui_demo`, `tracy_demo`, and others.
 
 ## Development
 
@@ -173,7 +159,7 @@ Optional: `tools/fuzz/` (nightly workflow). Crash-handler unit test: `make test`
 
 ## Editor support
 
-Install the [`mettle-syntax`](mettle-syntax/) extension for `.mettle` syntax highlighting, snippets, and compiler-backed diagnostics in VS Code or Cursor.
+Install the `[mettle-syntax](mettle-syntax/)` extension for `.mettle` syntax highlighting, snippets, and compiler-backed diagnostics in VS Code or Cursor.
 
 ## License
 
