@@ -719,11 +719,11 @@ $cases = @(
     IrMustMatch     = @("dot_i32")
   },
   @{
-    Name            = "opt_simd_matmul_n32"
+    Name            = "opt_no_hidden_matmul_n32"
     Path            = "tests/test_opt_simd_matmul_n32.mettle"
     ShouldSucceed   = $true
     Args            = @("--build", "--emit-obj", "--linker", "internal", "--release", "--dump-ir")
-    IrMustMatch     = @("matmul_n32")
+    IrMustNotMatch  = @("matmul_n32")
   },
   @{
     Name          = "codegen_ir_fastpaths"
@@ -1172,6 +1172,67 @@ foreach ($case in $cases) {
   catch {
     $failed++
     Write-CaseResult -Name $caseName -Passed $false -Reason $_.Exception.Message
+  }
+}
+
+# SIMD correctness: build release binaries with the direct object backend and
+# run adversarial runtime harnesses for each fused AVX2 family.
+$simdRuntimeCases = @(
+  @{
+    Name            = "simd_correctness_int"
+    Path            = "tests\simd_correctness\simd_int_check.mettle"
+    OutputMustMatch = "INT SIMD: ALL OK"
+    IrMustMatch     = @("sum_i32", "dot_i32", "scale_i32", "clamp_i32", "reverse_copy_i32", "minmax_i32")
+  },
+  @{
+    Name            = "simd_correctness_float"
+    Path            = "tests\simd_correctness\simd_float_check.mettle"
+    OutputMustMatch = "FLOAT SIMD: ALL OK"
+    IrMustMatch     = @("simd_sum_f64", "simd_sum_f32", "simd_dot_f64", "simd_dot_f32")
+  }
+)
+
+foreach ($case in $simdRuntimeCases) {
+  $total++
+  try {
+    $exePath = Join-Path $tmpDir ("{0}.exe" -f $case.Name)
+    $objPath = [System.IO.Path]::ChangeExtension($exePath, ".obj")
+    $irPath = "$objPath.ir"
+    foreach ($artifactPath in @($exePath, $objPath, $irPath)) {
+      if (Test-Path $artifactPath) {
+        Remove-Item -Path $artifactPath -Force -ErrorAction SilentlyContinue
+      }
+    }
+
+    $buildOut = & $CompilerPath --build --linker internal --release --dump-ir $case.Path -o $exePath 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "SIMD correctness build failed: $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "SIMD correctness build did not produce an executable"
+    }
+    if (-not (Test-Path $irPath)) {
+      throw "SIMD correctness IR output file not produced"
+    }
+    $irText = Get-Content -Path $irPath -Raw
+    foreach ($pattern in @($case.IrMustMatch)) {
+      if ($irText -notmatch $pattern) {
+        throw "SIMD correctness IR missing required pattern '$pattern'"
+      }
+    }
+
+    $runOut = & $exePath 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "SIMD correctness executable exited with $LASTEXITCODE`: $runOut"
+    }
+    if ($runOut -notmatch $case.OutputMustMatch) {
+      throw "SIMD correctness output missing expected marker '$($case.OutputMustMatch)': $runOut"
+    }
+    Write-CaseResult -Name $case.Name -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name $case.Name -Passed $false -Reason $_.Exception.Message
   }
 }
 

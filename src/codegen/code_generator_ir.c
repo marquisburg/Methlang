@@ -4452,6 +4452,10 @@ static int code_generator_emit_ir_instruction(CodeGenerator *generator,
   case IR_OP_LOWER_BOUND_I32:
   case IR_OP_PREFIX_SUM_I32:
   case IR_OP_SIMD_MINMAX_I32:
+  case IR_OP_SIMD_SUM_F64:
+  case IR_OP_SIMD_SUM_F32:
+  case IR_OP_SIMD_DOT_F64:
+  case IR_OP_SIMD_DOT_F32:
     code_generator_set_error(
         generator,
         "IR opcode %d requires the direct object (--emit-obj) backend",

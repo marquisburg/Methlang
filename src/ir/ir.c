@@ -717,6 +717,10 @@ static const char *ir_opcode_name(IROpcode op) {
   case IR_OP_LOWER_BOUND_I32: return "lower_bound_i32";
   case IR_OP_PREFIX_SUM_I32: return "prefix_sum_i32";
   case IR_OP_SIMD_MINMAX_I32: return "simd_minmax_i32";
+  case IR_OP_SIMD_SUM_F64: return "simd_sum_f64";
+  case IR_OP_SIMD_SUM_F32: return "simd_sum_f32";
+  case IR_OP_SIMD_DOT_F64: return "simd_dot_f64";
+  case IR_OP_SIMD_DOT_F32: return "simd_dot_f32";
   default:
     return "unknown";
   }
@@ -964,6 +968,21 @@ static int ir_format_instruction_line(const IRInstruction *instruction,
     written = snprintf(buffer, buffer_size,
                        "%s = minmax_i32(arr=%s, n=%s, max=%s)", dest, lhs, rhs,
                        maxv);
+    break;
+  }
+  case IR_OP_SIMD_SUM_F64:
+  case IR_OP_SIMD_SUM_F32:
+    written = snprintf(buffer, buffer_size, "%s += %s(base=%s, len=%s)", dest,
+                       ir_opcode_name(instruction->op), lhs, rhs);
+    break;
+  case IR_OP_SIMD_DOT_F64:
+  case IR_OP_SIMD_DOT_F32: {
+    char len[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    written = snprintf(buffer, buffer_size, "%s += %s(a=%s, b=%s, len=%s)", dest,
+                       ir_opcode_name(instruction->op), lhs, rhs, len);
     break;
   }
   case IR_OP_NOP:

@@ -4908,6 +4908,19 @@ int code_generator_binary_emit_instruction(
     return code_generator_binary_emit_simd_minmax_i32(generator, context,
                                                       instruction);
 
+  case IR_OP_SIMD_SUM_F64:
+    return code_generator_binary_emit_simd_sum_f64(generator, context,
+                                                   instruction);
+  case IR_OP_SIMD_SUM_F32:
+    return code_generator_binary_emit_simd_sum_f32(generator, context,
+                                                   instruction);
+  case IR_OP_SIMD_DOT_F64:
+    return code_generator_binary_emit_simd_dot_f64(generator, context,
+                                                   instruction);
+  case IR_OP_SIMD_DOT_F32:
+    return code_generator_binary_emit_simd_dot_f32(generator, context,
+                                                   instruction);
+
   default:
     code_generator_set_error(
         generator,

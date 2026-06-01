@@ -70,6 +70,8 @@ typedef enum {
    * (added to prior value), lhs = base pointer, rhs = element count. */
   IR_OP_SIMD_SUM_I32,
   /* Fixed 32x32 int32 matrix multiply. dest = c, lhs = a, rhs = b (pointers). */
+  /* Reserved for an explicit 32x32 int32 SIMD matmul API. Do not introduce
+   * this from ordinary source by function name or benchmark-shaped matching. */
   IR_OP_SIMD_MATMUL_N32,
   /* In-place signed int32 insertion sort. dest = base pointer, rhs = len. */
   IR_OP_SIMD_INSERTION_SORT_I32,
@@ -93,7 +95,15 @@ typedef enum {
   IR_OP_PREFIX_SUM_I32,
   /* Min/max scan over arr[1..n-1] updating dest=minv and arguments[0]=maxv;
    * caller initializes both from arr[0]. lhs=arr, rhs=n. */
-  IR_OP_SIMD_MINMAX_I32
+  IR_OP_SIMD_MINMAX_I32,
+  /* Horizontal sum of a float64/float32 array into the dest float accumulator
+   * (added to dest's prior value). lhs = base pointer, rhs = element count. */
+  IR_OP_SIMD_SUM_F64,
+  IR_OP_SIMD_SUM_F32,
+  /* Float64/float32 dot product into the dest float accumulator (added to
+   * dest's prior value). lhs = a, rhs = b, arguments[0] = element count. */
+  IR_OP_SIMD_DOT_F64,
+  IR_OP_SIMD_DOT_F32
 } IROpcode;
 
 typedef struct {

@@ -321,6 +321,10 @@ static int ir_instruction_writes_symbol(const IRInstruction *instruction) {
   case IR_OP_LOWER_BOUND_I32:
   case IR_OP_PREFIX_SUM_I32:
   case IR_OP_SIMD_MINMAX_I32:
+  case IR_OP_SIMD_SUM_F64:
+  case IR_OP_SIMD_SUM_F32:
+  case IR_OP_SIMD_DOT_F64:
+  case IR_OP_SIMD_DOT_F32:
     return 1;
   default:
     return 0;
@@ -355,6 +359,10 @@ static int ir_instruction_writes_destination(const IRInstruction *instruction) {
   case IR_OP_LOWER_BOUND_I32:
   case IR_OP_PREFIX_SUM_I32:
   case IR_OP_SIMD_MINMAX_I32:
+  case IR_OP_SIMD_SUM_F64:
+  case IR_OP_SIMD_SUM_F32:
+  case IR_OP_SIMD_DOT_F64:
+  case IR_OP_SIMD_DOT_F32:
     return 1;
   default:
     return 0;
@@ -1418,6 +1426,10 @@ static int ir_collect_instruction_temp_uses(IRTempUseMap *uses,
   case IR_OP_LOWER_BOUND_I32:
   case IR_OP_PREFIX_SUM_I32:
   case IR_OP_SIMD_MINMAX_I32:
+  case IR_OP_SIMD_SUM_F64:
+  case IR_OP_SIMD_SUM_F32:
+  case IR_OP_SIMD_DOT_F64:
+  case IR_OP_SIMD_DOT_F32:
     if (!ir_collect_operand_temp_use(uses, &instruction->dest) ||
         !ir_collect_operand_temp_use(uses, &instruction->lhs) ||
         !ir_collect_operand_temp_use(uses, &instruction->rhs)) {
@@ -4185,6 +4197,10 @@ static int ir_instruction_has_side_effect(const IRInstruction *instruction) {
   case IR_OP_LOWER_BOUND_I32:
   case IR_OP_PREFIX_SUM_I32:
   case IR_OP_SIMD_MINMAX_I32:
+  case IR_OP_SIMD_SUM_F64:
+  case IR_OP_SIMD_SUM_F32:
+  case IR_OP_SIMD_DOT_F64:
+  case IR_OP_SIMD_DOT_F32:
   case IR_OP_RETURN:
   case IR_OP_INLINE_ASM:
     return 1;
@@ -6911,56 +6927,387 @@ static int ir_simd_sum_i32_pass(IRFunction *function, int *changed) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* matmul(a,b,c) -> IR_OP_SIMD_MATMUL_N32 when function matches benchmark     */
+/* float64/float32 horizontal sum -> IR_OP_SIMD_SUM_F64/F32                    */
+/* float64/float32 dot product   -> IR_OP_SIMD_DOT_F64/F32                     */
 /* -------------------------------------------------------------------------- */
 
-static int ir_simd_matmul_pass(IRFunction *function, int *changed) {
-  IRInstruction fused = {0};
-  IRInstruction ret = {0};
-  size_t i = 0;
+/* Decode a temp that must be the value of `*(base + (iv << shift)) [size]`,
+ * the canonical lowering of `base[iv]` for a float array. On success records
+ * the array base symbol and the element width in bits: 64 for the float64
+ * shape (iv<<3, load size 8) and 32 for the float32 shape (iv<<2, load size 4).
+ * Any other shape is rejected so the recognizer cannot mistake an int32 index
+ * expression (or a differently-strided access) for a float reduction. */
+static int ir_decode_float_indexed_load(IRFunction *function, size_t before,
+                                        const char *load_temp, const char *iv,
+                                        const char **base_out, int *bits_out) {
+  const IRInstruction *load = NULL;
+  const IRInstruction *addr = NULL;
+  const IRInstruction *shl = NULL;
+  long long size = 0;
+  long long shift = 0;
 
-  if (!function || !function->name || strcmp(function->name, "matmul") != 0 ||
-      function->parameter_count != 3 || !function->parameter_names ||
-      ir_function_non_nop_instruction_count(function) < 80) {
+  if (!load_temp || !iv || !base_out || !bits_out) {
+    return 0;
+  }
+  load = ir_find_temp_producer_before(function, before, load_temp);
+  if (!load || load->op != IR_OP_LOAD || load->lhs.kind != IR_OPERAND_TEMP ||
+      !load->lhs.name || load->rhs.kind != IR_OPERAND_INT) {
+    return 0;
+  }
+  size = load->rhs.int_value;
+  addr = ir_find_temp_producer_before(function, before, load->lhs.name);
+  if (!addr || addr->op != IR_OP_BINARY || addr->is_float || !addr->text ||
+      strcmp(addr->text, "+") != 0 || addr->lhs.kind != IR_OPERAND_SYMBOL ||
+      !addr->lhs.name || addr->rhs.kind != IR_OPERAND_TEMP || !addr->rhs.name) {
+    return 0;
+  }
+  shl = ir_find_temp_producer_before(function, before, addr->rhs.name);
+  if (!shl || shl->op != IR_OP_BINARY || shl->is_float || !shl->text ||
+      strcmp(shl->text, "<<") != 0 ||
+      !ir_operand_is_symbol_named(&shl->lhs, iv) ||
+      shl->rhs.kind != IR_OPERAND_INT) {
+    return 0;
+  }
+  shift = shl->rhs.int_value;
+  if (shift == 3 && size == 8) {
+    *bits_out = 64;
+  } else if (shift == 2 && size == 4) {
+    *bits_out = 32;
+  } else {
+    return 0;
+  }
+  *base_out = addr->lhs.name;
+  return 1;
+}
+
+/* A symbol is an acceptable float-array base if it is a function parameter or a
+ * declared local (covers inlined-callee parameter copies). The strict
+ * load-shape decode above already pins element width and float-ness, so this
+ * stays permissive like ir_symbol_is_sum_array_base. */
+static int ir_symbol_is_float_array_base(IRFunction *function,
+                                         const char *symbol_name) {
+  return ir_function_symbol_is_parameter(function, symbol_name) ||
+         ir_function_local_declared_type(function, symbol_name) != NULL;
+}
+
+static int ir_float_sum_type_matches(const char *sum_type, int width_bits) {
+  if (!sum_type) {
+    return 0;
+  }
+  if (width_bits == 64) {
+    return strcmp(sum_type, "float64") == 0;
+  }
+  return strcmp(sum_type, "float32") == 0;
+}
+
+/* Shared loop-frame matcher for the float reductions. Confirms `header_index`
+ * begins a `while (iv < bound)` loop with a unit increment of `iv`, no nested
+ * while, and a back-jump, returning the body bounds and key symbols. Returns 1
+ * with *matched=1 on a clean frame; *matched=0 means "not this shape, skip". */
+static int ir_float_reduction_frame(IRFunction *function, size_t header_index,
+                                    const char **iv_out, size_t *branch_out,
+                                    size_t *jump_out, IROperand *bound_compare,
+                                    int *matched) {
+  size_t compare_index = 0;
+  size_t branch_index = 0;
+  size_t jump_index = (size_t)-1;
+  size_t increment_index = 0;
+  const char *loop_label = NULL;
+  const char *exit_label = NULL;
+
+  *matched = 0;
+  if (!function || header_index + 4 >= function->instruction_count) {
     return 1;
   }
+  IRInstruction *header = &function->instructions[header_index];
+  if (header->op != IR_OP_LABEL || !ir_label_is_while_header(header->text)) {
+    return 1;
+  }
+  loop_label = header->text;
 
-  for (i = 0; i < function->instruction_count; i++) {
+  if (!ir_find_next_non_nop(function, header_index + 1, &compare_index) ||
+      !ir_find_next_non_nop(function, compare_index + 1, &branch_index)) {
+    return 1;
+  }
+  IRInstruction *compare = &function->instructions[compare_index];
+  IRInstruction *branch = &function->instructions[branch_index];
+  if (compare->op != IR_OP_BINARY || compare->is_float || !compare->text ||
+      strcmp(compare->text, "<") != 0 ||
+      compare->dest.kind != IR_OPERAND_TEMP || !compare->dest.name ||
+      compare->lhs.kind != IR_OPERAND_SYMBOL || !compare->lhs.name ||
+      compare->rhs.kind != IR_OPERAND_SYMBOL || !compare->rhs.name ||
+      branch->op != IR_OP_BRANCH_ZERO ||
+      !ir_operand_is_temp_named(&branch->lhs, compare->dest.name) ||
+      !branch->text) {
+    return 1;
+  }
+  if (!ir_symbol_is_sum_loop_bound(function, compare->rhs.name)) {
+    return 1;
+  }
+  exit_label = branch->text;
+
+  for (size_t i = branch_index + 1; i < function->instruction_count; i++) {
+    if (function->instructions[i].op == IR_OP_JUMP &&
+        function->instructions[i].text &&
+        strcmp(function->instructions[i].text, loop_label) == 0) {
+      jump_index = i;
+      break;
+    }
     if (function->instructions[i].op == IR_OP_LABEL &&
         function->instructions[i].text &&
-        strncmp(function->instructions[i].text, "ir_while_", 9) == 0) {
+        strcmp(function->instructions[i].text, exit_label) == 0) {
       break;
     }
   }
-  if (i >= function->instruction_count) {
+  if (jump_index == (size_t)-1) {
+    return 1;
+  }
+  if (ir_loop_body_has_nested_while(function, branch_index + 1, jump_index)) {
     return 1;
   }
 
-  fused.op = IR_OP_SIMD_MATMUL_N32;
-  fused.location = function->instructions[0].location;
-  fused.dest = ir_operand_symbol(function->parameter_names[2]);
-  fused.lhs = ir_operand_symbol(function->parameter_names[0]);
-  fused.rhs = ir_operand_symbol(function->parameter_names[1]);
-  ret.op = IR_OP_RETURN;
-  ret.location = fused.location;
-
-  for (size_t j = 0; j < function->instruction_count; j++) {
-    ir_instruction_destroy_storage(&function->instructions[j]);
+  increment_index = jump_index;
+  while (increment_index > branch_index + 1) {
+    increment_index--;
+    if (function->instructions[increment_index].op != IR_OP_NOP) {
+      break;
+    }
   }
-  free(function->instructions);
+  if (!ir_try_parse_direct_unit_increment(
+          &function->instructions[increment_index], compare->lhs.name)) {
+    return 1;
+  }
 
-  function->instructions = calloc(2, sizeof(IRInstruction));
-  if (!function->instructions) {
+  if (!ir_operand_clone(&compare->rhs, bound_compare)) {
+    return 0;
+  }
+  *iv_out = compare->lhs.name;
+  *branch_out = branch_index;
+  *jump_out = jump_index;
+  *matched = 1;
+  return 1;
+}
+
+/* Reject body shapes that are not a pure read-only reduction (a store or call
+ * would make the fused kernel unsound). */
+static int ir_float_body_is_pure_reduction(IRFunction *function, size_t lo,
+                                           size_t hi) {
+  for (size_t i = lo; i < hi; i++) {
+    IROpcode op = function->instructions[i].op;
+    if (op == IR_OP_STORE || op == IR_OP_CALL || op == IR_OP_CALL_INDIRECT ||
+        op == IR_OP_BRANCH_ZERO || op == IR_OP_BRANCH_EQ || op == IR_OP_JUMP) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static void ir_install_fused_reduction(IRFunction *function,
+                                       size_t header_index, size_t jump_index,
+                                       IRInstruction *fused, int *changed) {
+  ir_instruction_destroy_storage(&function->instructions[header_index]);
+  function->instructions[header_index] = *fused;
+  for (size_t i = header_index + 1; i <= jump_index; i++) {
+    ir_instruction_make_nop(&function->instructions[i]);
+  }
+  if (changed) {
+    *changed = 1;
+  }
+}
+
+static int ir_try_vectorize_sum_float_at(IRFunction *function,
+                                         size_t header_index, int *changed) {
+  const char *iv_symbol = NULL;
+  const char *sum_symbol = NULL;
+  const char *base_symbol = NULL;
+  const char *sum_type = NULL;
+  size_t branch_index = 0;
+  size_t jump_index = 0;
+  IROperand bound = {0};
+  IRInstruction fused = {0};
+  int matched = 0;
+  int width_bits = 0;
+  int found = 0;
+
+  if (!ir_float_reduction_frame(function, header_index, &iv_symbol,
+                                &branch_index, &jump_index, &bound, &matched)) {
+    return 0;
+  }
+  if (!matched) {
+    return 1;
+  }
+  if (!ir_float_body_is_pure_reduction(function, branch_index + 1,
+                                       jump_index)) {
+    ir_operand_destroy(&bound);
+    return 1;
+  }
+
+  for (size_t i = branch_index + 1; i < jump_index; i++) {
+    const IRInstruction *ins = &function->instructions[i];
+    if (ins->op == IR_OP_BINARY && ins->is_float && ins->text &&
+        strcmp(ins->text, "+") == 0 && ins->dest.kind == IR_OPERAND_SYMBOL &&
+        ins->dest.name && ir_operand_is_symbol_named(&ins->lhs, ins->dest.name) &&
+        ins->rhs.kind == IR_OPERAND_TEMP && ins->rhs.name) {
+      int bits = 0;
+      const char *base = NULL;
+      if (!ir_decode_float_indexed_load(function, i, ins->rhs.name, iv_symbol,
+                                        &base, &bits)) {
+        continue;
+      }
+      sum_symbol = ins->dest.name;
+      base_symbol = base;
+      width_bits = bits;
+      found = 1;
+    }
+  }
+
+  if (!found || !sum_symbol || !base_symbol ||
+      strcmp(sum_symbol, iv_symbol) == 0) {
+    ir_operand_destroy(&bound);
+    return 1;
+  }
+  sum_type = ir_function_local_declared_type(function, sum_symbol);
+  if (!ir_float_sum_type_matches(sum_type, width_bits) ||
+      !ir_symbol_is_float_array_base(function, base_symbol) ||
+      ir_symbol_read_after(function, jump_index + 1, iv_symbol)) {
+    ir_operand_destroy(&bound);
+    return 1;
+  }
+
+  fused.op = (width_bits == 64) ? IR_OP_SIMD_SUM_F64 : IR_OP_SIMD_SUM_F32;
+  fused.location = function->instructions[header_index].location;
+  fused.is_float = 1;
+  fused.float_bits = width_bits;
+  fused.dest = ir_operand_symbol(sum_symbol);
+  fused.lhs = ir_operand_symbol(base_symbol);
+  fused.rhs = bound;
+  ir_install_fused_reduction(function, header_index, jump_index, &fused,
+                             changed);
+  return 1;
+}
+
+static int ir_simd_sum_float_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (function->instructions[i].op == IR_OP_LABEL &&
+        ir_label_is_while_header(function->instructions[i].text)) {
+      if (!ir_try_vectorize_sum_float_at(function, i, changed)) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+static int ir_try_vectorize_dot_float_at(IRFunction *function,
+                                         size_t header_index, int *changed) {
+  const char *iv_symbol = NULL;
+  const char *sum_symbol = NULL;
+  const char *a_symbol = NULL;
+  const char *b_symbol = NULL;
+  const char *sum_type = NULL;
+  size_t branch_index = 0;
+  size_t jump_index = 0;
+  IROperand bound = {0};
+  IRInstruction fused = {0};
+  int matched = 0;
+  int width_bits = 0;
+  int found = 0;
+
+  if (!ir_float_reduction_frame(function, header_index, &iv_symbol,
+                                &branch_index, &jump_index, &bound, &matched)) {
+    return 0;
+  }
+  if (!matched) {
+    return 1;
+  }
+  if (!ir_float_body_is_pure_reduction(function, branch_index + 1,
+                                       jump_index)) {
+    ir_operand_destroy(&bound);
+    return 1;
+  }
+
+  for (size_t i = branch_index + 1; i < jump_index; i++) {
+    const IRInstruction *ins = &function->instructions[i];
+    const IRInstruction *mul = NULL;
+    int bits_a = 0;
+    int bits_b = 0;
+    const char *base_a = NULL;
+    const char *base_b = NULL;
+    if (!(ins->op == IR_OP_BINARY && ins->is_float && ins->text &&
+          strcmp(ins->text, "+") == 0 && ins->dest.kind == IR_OPERAND_SYMBOL &&
+          ins->dest.name &&
+          ir_operand_is_symbol_named(&ins->lhs, ins->dest.name) &&
+          ins->rhs.kind == IR_OPERAND_TEMP && ins->rhs.name)) {
+      continue;
+    }
+    mul = ir_find_temp_producer_before(function, i, ins->rhs.name);
+    if (!mul || mul->op != IR_OP_BINARY || !mul->is_float || !mul->text ||
+        strcmp(mul->text, "*") != 0 || mul->lhs.kind != IR_OPERAND_TEMP ||
+        !mul->lhs.name || mul->rhs.kind != IR_OPERAND_TEMP || !mul->rhs.name) {
+      continue;
+    }
+    if (!ir_decode_float_indexed_load(function, i, mul->lhs.name, iv_symbol,
+                                      &base_a, &bits_a) ||
+        !ir_decode_float_indexed_load(function, i, mul->rhs.name, iv_symbol,
+                                      &base_b, &bits_b) ||
+        bits_a != bits_b) {
+      continue;
+    }
+    sum_symbol = ins->dest.name;
+    a_symbol = base_a;
+    b_symbol = base_b;
+    width_bits = bits_a;
+    found = 1;
+  }
+
+  if (!found || !sum_symbol || !a_symbol || !b_symbol ||
+      strcmp(sum_symbol, iv_symbol) == 0) {
+    ir_operand_destroy(&bound);
+    return 1;
+  }
+  sum_type = ir_function_local_declared_type(function, sum_symbol);
+  if (!ir_float_sum_type_matches(sum_type, width_bits) ||
+      !ir_symbol_is_float_array_base(function, a_symbol) ||
+      !ir_symbol_is_float_array_base(function, b_symbol) ||
+      ir_symbol_read_after(function, jump_index + 1, iv_symbol)) {
+    ir_operand_destroy(&bound);
+    return 1;
+  }
+
+  fused.op = (width_bits == 64) ? IR_OP_SIMD_DOT_F64 : IR_OP_SIMD_DOT_F32;
+  fused.location = function->instructions[header_index].location;
+  fused.is_float = 1;
+  fused.float_bits = width_bits;
+  fused.dest = ir_operand_symbol(sum_symbol);
+  fused.lhs = ir_operand_symbol(a_symbol);
+  fused.rhs = ir_operand_symbol(b_symbol);
+  fused.arguments = calloc(1, sizeof(IROperand));
+  if (!fused.arguments) {
+    ir_operand_destroy(&bound);
     ir_instruction_destroy_storage(&fused);
     return 0;
   }
-  function->instruction_count = 2;
-  function->instruction_capacity = 2;
-  function->instructions[0] = fused;
-  function->instructions[1] = ret;
+  fused.argument_count = 1;
+  fused.arguments[0] = bound;
+  ir_install_fused_reduction(function, header_index, jump_index, &fused,
+                             changed);
+  return 1;
+}
 
-  if (changed) {
-    *changed = 1;
+static int ir_simd_dot_float_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (function->instructions[i].op == IR_OP_LABEL &&
+        ir_label_is_while_header(function->instructions[i].text)) {
+      if (!ir_try_vectorize_dot_float_at(function, i, changed)) {
+        return 0;
+      }
+    }
   }
   return 1;
 }
@@ -12095,7 +12442,7 @@ static int ir_simd_dot_i32_pass(IRFunction *function, int *changed) {
   return 1;
 }
 
-#define IR_OPT_PASS_COUNT 29
+#define IR_OPT_PASS_COUNT 28
 
 static const char *g_ir_pass_names[IR_OPT_PASS_COUNT] = {
     "reduction_unroll", "copy_and_constant_propagation", "fuse_rotate_add",
@@ -12109,7 +12456,7 @@ static const char *g_ir_pass_names[IR_OPT_PASS_COUNT] = {
     "remove_redundant_jumps", "eliminate_unreachable_straightline",
     "eliminate_unreachable_blocks", "remove_unused_labels", "memcpy_inline",
     "eliminate_load_symbol_copy", "simd_sum_i32", "simd_dot_i32",
-    "simd_matmul", "simd_insertion_sort_i32", "sroa",
+    "simd_insertion_sort_i32", "sroa",
 };
 
 
@@ -12970,7 +13317,7 @@ static int ir_optimize_function(IRFunction *function) {
      * struct copies into clean symbol-to-symbol form, and before CSE/dead-temp,
      * so the resulting scalar assigns are then propagated and the backend can
      * register-promote the (now non-address-taken) field scalars. */
-    DRIVE_PASS(28, ir_sroa_pass);
+    DRIVE_PASS(27, ir_sroa_pass);
     DRIVE_PASS(10, ir_common_subexpression_elimination_pass);
     DRIVE_PASS(11, ir_constant_and_branch_simplify_pass);
     DRIVE_PASS_IF(12, features.has_label && features.has_jump &&
@@ -13006,10 +13353,9 @@ static int ir_optimize_function(IRFunction *function) {
     DRIVE_PASS_IF(25, features.has_label && features.has_jump &&
                           features.has_load,
                   ir_simd_dot_i32_pass);
-    DRIVE_PASS(26, ir_simd_matmul_pass);
-    DRIVE_PASS_IF(27, features.has_label && features.has_jump &&
-                          features.has_load,
-                  ir_simd_insertion_sort_i32_pass);
+    DRIVE_PASS_IF(26, features.has_label && features.has_jump &&
+                           features.has_load,
+                   ir_simd_insertion_sort_i32_pass);
 
     if (!changed) {
       break;
@@ -13032,6 +13378,14 @@ static int ir_optimize_function(IRFunction *function) {
     }
     mettle_compiler_ctx_set_pass_name("simd_minmax_i32");
     if (!ir_simd_minmax_i32_pass(function, &simd_changed)) {
+      mettle_compiler_ice("IR optimization pass failed");
+    }
+    mettle_compiler_ctx_set_pass_name("simd_dot_float");
+    if (!ir_simd_dot_float_pass(function, &simd_changed)) {
+      mettle_compiler_ice("IR optimization pass failed");
+    }
+    mettle_compiler_ctx_set_pass_name("simd_sum_float");
+    if (!ir_simd_sum_float_pass(function, &simd_changed)) {
       mettle_compiler_ice("IR optimization pass failed");
     }
   }
@@ -13104,12 +13458,6 @@ int ir_optimize_program(IRProgram *program,
     if (!ir_pointer_induction_pass(function, &pre_changed)) {
       mettle_compiler_ice("IR optimization pre-inline pass failed");
     }
-    pre_changed = 0;
-    mettle_compiler_ctx_set_pass_name("simd_matmul");
-    if (!ir_simd_matmul_pass(function, &pre_changed)) {
-      mettle_compiler_ice("IR optimization pre-inline pass failed");
-    }
-    pre_changed = 0;
     mettle_compiler_ctx_set_pass_name("simd_dot_i32");
     if (!ir_simd_dot_i32_pass(function, &pre_changed)) {
       mettle_compiler_ice("IR optimization pre-inline pass failed");
