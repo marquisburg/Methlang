@@ -432,6 +432,247 @@ int code_generator_binary_try_emit_reg_multiply_immediate(
   return 1;
 }
 
+/* Unsigned division-by-constant magic (Hacker's Delight Fig. 10-2, 64-bit).
+ * Produces (magic, shift, add) such that n/d == ((n*magic)>>64 corrected)>>shift,
+ * where `add` signals the overflow-correction path is needed. Returns 0 to
+ * decline (divisor out of range), 1 on success. */
+static int binary_unsigned_divisor_magic(unsigned long long divisor,
+                                          unsigned long long *magic_out,
+                                          unsigned char *shift_out,
+                                          int *add_out) {
+  typedef unsigned __int128 BinaryU128;
+
+  if (!magic_out || !shift_out || !add_out || divisor < 2) {
+    return 0;
+  }
+
+  BinaryU128 d = (BinaryU128)divisor;
+  BinaryU128 two64 = (BinaryU128)1 << 64;
+  BinaryU128 nc = two64 - 1 - (two64 - d) % d; /* largest n with n%d == d-1, mod 2^64 */
+  BinaryU128 q1 = (two64 >> 1) / nc;           /* 2^63 / nc */
+  BinaryU128 r1 = (two64 >> 1) - q1 * nc;
+  BinaryU128 q2 = ((two64 >> 1) - 1) / d;      /* (2^63 - 1) / d */
+  BinaryU128 r2 = ((two64 >> 1) - 1) - q2 * d;
+  unsigned int p = 63;
+  int add = 0;
+
+  for (;;) {
+    BinaryU128 delta;
+    p++;
+
+    if (r1 >= nc - r1) {
+      q1 = 2 * q1 + 1;
+      r1 = 2 * r1 - nc;
+    } else {
+      q1 = 2 * q1;
+      r1 = 2 * r1;
+    }
+
+    if (r2 + 1 >= d - r2) {
+      if (q2 >= ((two64 >> 1) - 1)) {
+        add = 1;
+      }
+      q2 = 2 * q2 + 1;
+      r2 = 2 * r2 + 1 - d;
+    } else {
+      if (q2 >= (two64 >> 1)) {
+        add = 1;
+      }
+      q2 = 2 * q2;
+      r2 = 2 * r2 + 1;
+    }
+
+    delta = d - 1 - r2;
+    if (p >= 128 || !(q1 < delta || (q1 == delta && r1 == 0))) {
+      break;
+    }
+  }
+
+  *magic_out = (unsigned long long)(q2 + 1);
+  *shift_out = (unsigned char)(p - 64);
+  *add_out = add;
+  return 1;
+}
+
+/* Emit unsigned n/d or n%d for a constant divisor d, with n already in RAX.
+ * Mirrors the signed variant but uses MUL (high half) and the add-correction
+ * sequence when the multiplier overflows 64 bits. Sets *handled_out=1 on
+ * success. RAX/RCX/RDX/R10/R11 are scratch; final result lands in RAX. */
+int code_generator_binary_try_emit_unsigned_const_divmod(
+    BinaryFunctionContext *context, const char *op, unsigned long long divisor,
+    int *handled_out) {
+  unsigned long long magic = 0;
+  unsigned char shift = 0;
+  int add = 0;
+
+  if (handled_out) {
+    *handled_out = 0;
+  }
+  if (!context || !op || !handled_out) {
+    return 0;
+  }
+  if ((strcmp(op, "/") != 0 && strcmp(op, "%") != 0) ||
+      !binary_unsigned_divisor_magic(divisor, &magic, &shift, &add)) {
+    return 1;
+  }
+
+  *handled_out = 1;
+  /* R11 = n (preserved for the remainder and add-correction). RAX*R10 -> RDX:RAX,
+   * the quotient estimate is in RDX. */
+  if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_R11, BINARY_GP_RAX) ||
+      !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_R10, magic) ||
+      !binary_emit_mul_reg(&context->code, BINARY_GP_R10)) {
+    return 0;
+  }
+
+  if (!add) {
+    /* q = high >> shift. */
+    if (shift != 0 &&
+        !binary_emit_shift_reg_imm8(&context->code, 5, BINARY_GP_RDX, shift)) {
+      return 0;
+    }
+    if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX,
+                                 BINARY_GP_RDX)) {
+      return 0;
+    }
+  } else {
+    /* t = high; q = ((n - t) >> 1 + t) >> (shift - 1).  (shift >= 1 here) */
+    if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX, BINARY_GP_R11) ||
+        !binary_emit_alu_reg_reg(&context->code, 0x29, BINARY_GP_RAX,
+                                 BINARY_GP_RDX) ||            /* RAX = n - t */
+        !binary_emit_shift_reg_imm8(&context->code, 5, BINARY_GP_RAX, 1) ||
+        !binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+                                 BINARY_GP_RDX)) {            /* RAX += t */
+      return 0;
+    }
+    if (shift > 1 &&
+        !binary_emit_shift_reg_imm8(&context->code, 5, BINARY_GP_RAX,
+                                    (unsigned char)(shift - 1))) {
+      return 0;
+    }
+  }
+
+  /* RAX now holds the quotient. For modulo, r = n - q*d. */
+  if (strcmp(op, "%") == 0) {
+    if (!binary_emit_mov_reg_imm64(&context->code, BINARY_GP_R10, divisor) ||
+        !binary_emit_imul_reg_reg(&context->code, BINARY_GP_RAX,
+                                  BINARY_GP_R10) ||           /* RAX = q*d (low 64) */
+        !binary_emit_mov_reg_reg(&context->code, BINARY_GP_R10, BINARY_GP_R11) ||
+        !binary_emit_alu_reg_reg(&context->code, 0x29, BINARY_GP_R10,
+                                 BINARY_GP_RAX) ||            /* R10 = n - q*d */
+        !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX,
+                                 BINARY_GP_R10)) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+static int binary_signed_divisor_magic(long long divisor, long long *magic_out,
+                                       unsigned char *shift_out) {
+  typedef unsigned __int128 BinaryU128;
+
+  if (!magic_out || !shift_out || divisor <= 1 || divisor > INT32_MAX) {
+    return 0;
+  }
+
+  BinaryU128 ad = (BinaryU128)(unsigned long long)divisor;
+  BinaryU128 two63 = (BinaryU128)1 << 63;
+  BinaryU128 anc = two63 - 1 - ((two63 - 1) % ad);
+  BinaryU128 q1 = two63 / anc;
+  BinaryU128 r1 = two63 - q1 * anc;
+  BinaryU128 q2 = two63 / ad;
+  BinaryU128 r2 = two63 - q2 * ad;
+  unsigned int p = 63;
+
+  for (;;) {
+    BinaryU128 delta;
+    p++;
+
+    q1 *= 2;
+    r1 *= 2;
+    if (r1 >= anc) {
+      q1++;
+      r1 -= anc;
+    }
+
+    q2 *= 2;
+    r2 *= 2;
+    if (r2 >= ad) {
+      q2++;
+      r2 -= ad;
+    }
+
+    delta = ad - r2;
+    if (q1 > delta || (q1 == delta && r1 != 0)) {
+      break;
+    }
+  }
+
+  *magic_out = (long long)(unsigned long long)(q2 + 1);
+  *shift_out = (unsigned char)(p - 64);
+  return 1;
+}
+
+int code_generator_binary_try_emit_signed_const_divmod(
+    BinaryFunctionContext *context, const char *op, long long divisor,
+    int *handled_out) {
+  long long magic = 0;
+  unsigned char shift = 0;
+
+  if (handled_out) {
+    *handled_out = 0;
+  }
+  if (!context || !op || !handled_out) {
+    return 0;
+  }
+  if ((strcmp(op, "/") != 0 && strcmp(op, "%") != 0) ||
+      !binary_signed_divisor_magic(divisor, &magic, &shift)) {
+    return 1;
+  }
+
+  *handled_out = 1;
+  if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_R11, BINARY_GP_RAX) ||
+      !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_R10,
+                                 (uint64_t)magic) ||
+      !binary_emit_imul_reg(&context->code, BINARY_GP_R10) ||
+      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX,
+                               BINARY_GP_RDX)) {
+    return 0;
+  }
+
+  if (magic < 0 &&
+      !binary_emit_alu_reg_reg(&context->code, 0x01, BINARY_GP_RAX,
+                               BINARY_GP_R11)) {
+    return 0;
+  }
+  if (shift != 0 &&
+      !binary_emit_shift_reg_imm8(&context->code, 7, BINARY_GP_RAX, shift)) {
+    return 0;
+  }
+  if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_RCX, BINARY_GP_R11) ||
+      !binary_emit_shift_reg_imm8(&context->code, 7, BINARY_GP_RCX, 63) ||
+      !binary_emit_alu_reg_reg(&context->code, 0x29, BINARY_GP_RAX,
+                               BINARY_GP_RCX)) {
+    return 0;
+  }
+
+  if (strcmp(op, "%") == 0) {
+    if (!binary_emit_imul_reg_reg_imm32(&context->code, BINARY_GP_RAX,
+                                        BINARY_GP_RAX,
+                                        (uint32_t)(int32_t)divisor) ||
+        !binary_emit_alu_reg_reg(&context->code, 0x29, BINARY_GP_R11,
+                                 BINARY_GP_RAX) ||
+        !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX,
+                                 BINARY_GP_R11)) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
 int code_generator_binary_emit_integer_binary_to_rax(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IRInstruction *instruction) {
@@ -508,6 +749,57 @@ int code_generator_binary_emit_integer_binary_to_rax(
             context->function_name);
         return 0;
       }
+      return 1;
+    }
+
+    /* Signedness of the division is the dividend's type. The signed magic and
+     * the unsigned magic are distinct algorithms; picking the wrong one
+     * silently miscompiles high-bit-set values, so only take the unsigned path
+     * when the dividend type is provably unsigned. A divisor that fits in a
+     * signed 64-bit value is required for the unsigned multiplier math here. */
+    Type *dividend_type = code_generator_binary_get_operand_type_in_context(
+        generator, context, &instruction->lhs);
+    int dividend_unsigned =
+        dividend_type &&
+        (dividend_type->kind == TYPE_UINT8 ||
+         dividend_type->kind == TYPE_UINT16 ||
+         dividend_type->kind == TYPE_UINT32 ||
+         dividend_type->kind == TYPE_UINT64);
+
+    int handled = 0;
+    if (!code_generator_binary_emit_operand_load(generator, context,
+                                                 &instruction->lhs,
+                                                 BINARY_GP_RAX)) {
+      code_generator_set_error(
+          generator,
+          "Out of memory while emitting integer expression chain in function "
+          "'%s'",
+          context->function_name);
+      return 0;
+    }
+    if (dividend_unsigned && instruction->rhs.int_value >= 2) {
+      if (!code_generator_binary_try_emit_unsigned_const_divmod(
+              context, op, (unsigned long long)instruction->rhs.int_value,
+              &handled)) {
+        code_generator_set_error(
+            generator,
+            "Out of memory while emitting integer expression chain in function "
+            "'%s'",
+            context->function_name);
+        return 0;
+      }
+    } else if (!dividend_unsigned) {
+      if (!code_generator_binary_try_emit_signed_const_divmod(
+              context, op, instruction->rhs.int_value, &handled)) {
+        code_generator_set_error(
+            generator,
+            "Out of memory while emitting integer expression chain in function "
+            "'%s'",
+            context->function_name);
+        return 0;
+      }
+    }
+    if (handled) {
       return 1;
     }
   }

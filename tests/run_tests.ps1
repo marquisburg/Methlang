@@ -1616,6 +1616,76 @@ foreach ($relFlag in @($true, $false)) {
   }
 }
 
+# Constant division/modulo magic-multiply strength reduction. The program is a
+# differential oracle: it compares each literal `x / C` / `x % C` (magic-
+# multiply) against the same division by a heap-loaded divisor (genuine idiv),
+# across signed/unsigned dividends incl. INT64_MIN and UINT64_MAX. Returns 1 on
+# full agreement. Built both with and without --release (the strength reduction
+# only runs in the binary backend, which both paths use).
+foreach ($relFlag in @($true, $false)) {
+  $total++
+  $variant = if ($relFlag) { "release" } else { "debug" }
+  try {
+    $exePath = Join-Path $tmpDir "test_const_divmod_$variant.exe"
+    $buildArgs = @("--build", "--emit-obj", "--linker", "internal")
+    if ($relFlag) { $buildArgs += "--release" }
+    $buildArgs += @("tests\test_const_divmod.mettle", "-o", $exePath)
+
+    $buildOut = & $CompilerPath @buildArgs 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "const-divmod build ($variant) failed: $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "const-divmod build ($variant) did not produce an executable"
+    }
+
+    & $exePath 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 1) {
+      throw "const-divmod ($variant) reported a mismatch (exit $LASTEXITCODE)"
+    }
+
+    Write-CaseResult -Name "const_divmod_$variant" -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "const_divmod_$variant" -Passed $false -Reason $_.Exception.Message
+  }
+}
+
+# Constant-multiply shift-add/sub strength reduction. Differential oracle: each
+# literal `x * C` (shift-add for nice constants, imul for dense ones) is checked
+# against `x * r` with r loaded from the heap (genuine imul), over signed and
+# unsigned operands incl. extremes. Returns 1 on full agreement.
+foreach ($relFlag in @($true, $false)) {
+  $total++
+  $variant = if ($relFlag) { "release" } else { "debug" }
+  try {
+    $exePath = Join-Path $tmpDir "test_const_mul_$variant.exe"
+    $buildArgs = @("--build", "--emit-obj", "--linker", "internal")
+    if ($relFlag) { $buildArgs += "--release" }
+    $buildArgs += @("tests\test_const_mul.mettle", "-o", $exePath)
+
+    $buildOut = & $CompilerPath @buildArgs 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+      throw "const-mul build ($variant) failed: $buildOut"
+    }
+    if (-not (Test-Path $exePath)) {
+      throw "const-mul build ($variant) did not produce an executable"
+    }
+
+    & $exePath 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 1) {
+      throw "const-mul ($variant) reported a mismatch (exit $LASTEXITCODE)"
+    }
+
+    Write-CaseResult -Name "const_mul_$variant" -Passed $true
+  }
+  catch {
+    $failed++
+    Write-CaseResult -Name "const_mul_$variant" -Passed $false -Reason $_.Exception.Message
+  }
+}
+
 # COFF reader test: parse Mettle and GCC-produced COFF objects
 $total++
 try {

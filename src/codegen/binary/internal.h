@@ -332,6 +332,9 @@ int binary_emit_divsd_xmm_xmm(BinaryCodeBuffer *buffer, BinaryXmmRegister destin
 int binary_emit_divss_xmm_xmm(BinaryCodeBuffer *buffer, BinaryXmmRegister destination, BinaryXmmRegister source);
 int binary_emit_frame_allocation(BinaryCodeBuffer *code, int frame_size);
 int binary_emit_idiv_reg(BinaryCodeBuffer *buffer, BinaryGpRegister divisor);
+int binary_emit_div_reg(BinaryCodeBuffer *buffer, BinaryGpRegister divisor);
+int binary_emit_mul_reg(BinaryCodeBuffer *buffer, BinaryGpRegister src);
+int binary_emit_imul_reg(BinaryCodeBuffer *buffer, BinaryGpRegister src);
 int binary_emit_imul_reg_reg(BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister source);
 int binary_emit_imul_reg_reg_imm32(BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister source, uint32_t immediate);
 int binary_emit_imul_reg_reg_small_imm(BinaryCodeBuffer *buffer, BinaryGpRegister destination, BinaryGpRegister source, int32_t immediate);
@@ -517,6 +520,10 @@ int code_generator_binary_emit_symbol_address( CodeGenerator *generator, BinaryF
 int code_generator_binary_emit_unary(CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_eval_numeric_global_initializer( ASTNode *expression, BinaryNumericConstant *out_value);
 int code_generator_binary_extract_positive_power_of_two( long long value, unsigned int *shift_out, unsigned long long *mask_out);
+/* Emits signed `rax / divisor` or `rax % divisor` via magic multiply when safe.
+ * On success with handled_out=1, RAX holds the quotient/remainder. */
+int code_generator_binary_try_emit_signed_const_divmod( BinaryFunctionContext *context, const char *op, long long divisor, int *handled_out);
+int code_generator_binary_try_emit_unsigned_const_divmod( BinaryFunctionContext *context, const char *op, unsigned long long divisor, int *handled_out);
 int code_generator_binary_function_can_promote_rsi_rdi( CodeGenerator *generator, IRFunction *function, Type *return_type);
 int code_generator_binary_function_has_calls(const IRFunction *function);
 size_t code_generator_binary_function_symbol_score( const BinaryFunctionContext *context, const IRFunction *function, const char *name, const size_t *loop_weights);

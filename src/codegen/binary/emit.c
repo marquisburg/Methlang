@@ -3648,6 +3648,19 @@ emit_failure:
   return 0;
 }
 
+/* True when `operand` is a SYMBOL currently held in a promoted GP register,
+ * writing that register to *reg_out. Used by the register-register ALU fast
+ * path to avoid the load-into-RAX round-trip for already-resident operands. */
+static int code_generator_binary_symbol_operand_register(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *operand, BinaryGpRegister *reg_out) {
+  if (!operand || operand->kind != IR_OPERAND_SYMBOL || !operand->name) {
+    return 0;
+  }
+  return code_generator_binary_symbol_assigned_register(
+      generator, context, operand->name, reg_out);
+}
+
 static int binary_emit_binary_integer(CodeGenerator *generator,
                                       BinaryFunctionContext *context,
                                       const IRInstruction *instruction) {
@@ -3659,9 +3672,42 @@ static int binary_emit_binary_integer(CodeGenerator *generator,
   if (!instruction->is_float &&
       (strcmp(op, "/") == 0 || strcmp(op, "%") == 0) &&
       instruction->rhs.kind == IR_OPERAND_INT) {
+    /* Signedness is the dividend's type: the power-of-two reduction below and
+     * the signed magic-multiply both assume signed arithmetic (sar, sign-bias).
+     * For an unsigned dividend those are wrong on high-bit-set values, so route
+     * unsigned constant division to its own magic path (logical shifts, MUL). */
+    Type *dividend_type = code_generator_binary_get_operand_type_in_context(
+        generator, context, &instruction->lhs);
+    int dividend_unsigned =
+        dividend_type &&
+        (dividend_type->kind == TYPE_UINT8 ||
+         dividend_type->kind == TYPE_UINT16 ||
+         dividend_type->kind == TYPE_UINT32 ||
+         dividend_type->kind == TYPE_UINT64);
+
+    if (dividend_unsigned && instruction->rhs.int_value >= 2) {
+      int u_handled = 0;
+      if (!code_generator_binary_emit_operand_load(generator, context,
+                                                   &instruction->lhs,
+                                                   BINARY_GP_RAX) ||
+          !code_generator_binary_try_emit_unsigned_const_divmod(
+              context, op, (unsigned long long)instruction->rhs.int_value,
+              &u_handled)) {
+        goto emit_failure;
+      }
+      if (u_handled) {
+        if (!code_generator_binary_emit_destination_store(
+                generator, context, &instruction->dest, BINARY_GP_RAX)) {
+          return 0;
+        }
+        return 1;
+      }
+    }
+
     unsigned int shift = 0;
     unsigned long long mask = 0;
-    if (code_generator_binary_extract_positive_power_of_two(
+    if (!dividend_unsigned &&
+        code_generator_binary_extract_positive_power_of_two(
             instruction->rhs.int_value, &shift, &mask)) {
       if (!code_generator_binary_emit_operand_load(generator, context,
                                                    &instruction->lhs,
@@ -3712,6 +3758,25 @@ static int binary_emit_binary_integer(CodeGenerator *generator,
         }
       }
 
+      if (!code_generator_binary_emit_destination_store(generator, context,
+                                                        &instruction->dest,
+                                                        BINARY_GP_RAX)) {
+        return 0;
+      }
+      return 1;
+    }
+
+    int handled = 0;
+    if (!dividend_unsigned) {
+      if (!code_generator_binary_emit_operand_load(generator, context,
+                                                   &instruction->lhs,
+                                                   BINARY_GP_RAX) ||
+          !code_generator_binary_try_emit_signed_const_divmod(
+              context, op, instruction->rhs.int_value, &handled)) {
+        goto emit_failure;
+      }
+    }
+    if (handled) {
       if (!code_generator_binary_emit_destination_store(generator, context,
                                                         &instruction->dest,
                                                         BINARY_GP_RAX)) {
@@ -3924,6 +3989,66 @@ static int binary_emit_binary_integer(CodeGenerator *generator,
     }
   }
 
+  /* Register-register in-place fast path: when the result symbol is promoted to
+   * a register DR and the op is a simple ALU op, compute directly in DR instead
+   * of the load-both-into-RAX/R10, operate, store-back sequence. This removes
+   * the ~4-instruction `mov r10,B; mov rax,A; <op> rax,r10; mov DR,rax` shape
+   * that dominates register-resident accumulator loops (a=a+i, c=c+a-b, ...).
+   * Restricted to the commutative/sub ALU ops with a known reg,reg encoding;
+   * everything else (compares, shifts-by-reg, mul, div) keeps the RAX path. */
+  {
+    BinaryGpRegister dest_reg = BINARY_GP_RAX;
+    unsigned char alu_opcode = 0;
+    int is_sub = (strcmp(op, "-") == 0);
+    int alu_ok = (strcmp(op, "+") == 0 && (alu_opcode = 0x01, 1)) ||
+                 (is_sub && (alu_opcode = 0x29, 1)) ||
+                 (strcmp(op, "&") == 0 && (alu_opcode = 0x21, 1)) ||
+                 (strcmp(op, "|") == 0 && (alu_opcode = 0x09, 1)) ||
+                 (strcmp(op, "^") == 0 && (alu_opcode = 0x31, 1));
+    if (alu_ok && instruction->dest.kind == IR_OPERAND_SYMBOL &&
+        instruction->dest.name &&
+        code_generator_binary_symbol_assigned_register(
+            generator, context, instruction->dest.name, &dest_reg)) {
+      BinaryGpRegister lhs_reg = BINARY_GP_RAX;
+      BinaryGpRegister rhs_reg = BINARY_GP_RAX;
+      int lhs_in_reg = code_generator_binary_symbol_operand_register(
+          generator, context, &instruction->lhs, &lhs_reg);
+      int rhs_in_reg = code_generator_binary_symbol_operand_register(
+          generator, context, &instruction->rhs, &rhs_reg);
+      int commutative_alu = !is_sub; /* +,&,|,^ are commutative; - is not */
+
+      /* Case A: dest already holds lhs (e.g. a = a + i). Just `op DR, rhs`,
+       * loading rhs into a scratch only if it isn't already in a register. */
+      if (lhs_in_reg && lhs_reg == dest_reg && rhs_in_reg &&
+          rhs_reg != dest_reg) {
+        if (!binary_emit_alu_reg_reg(&context->code, alu_opcode, dest_reg,
+                                     rhs_reg)) {
+          goto emit_failure;
+        }
+        return 1;
+      }
+      /* Case B (commutative): dest already holds rhs. `op DR, lhs`. */
+      if (commutative_alu && rhs_in_reg && rhs_reg == dest_reg && lhs_in_reg &&
+          lhs_reg != dest_reg) {
+        if (!binary_emit_alu_reg_reg(&context->code, alu_opcode, dest_reg,
+                                     lhs_reg)) {
+          goto emit_failure;
+        }
+        return 1;
+      }
+      /* Case C: both operands in registers, dest distinct. `mov DR,lhs; op DR,rhs`.
+       * Safe only when rhs_reg != dest_reg (the mov would clobber rhs first). */
+      if (lhs_in_reg && rhs_in_reg && rhs_reg != dest_reg) {
+        if (!binary_emit_mov_reg_reg(&context->code, dest_reg, lhs_reg) ||
+            !binary_emit_alu_reg_reg(&context->code, alu_opcode, dest_reg,
+                                     rhs_reg)) {
+          goto emit_failure;
+        }
+        return 1;
+      }
+    }
+  }
+
   if (!code_generator_binary_emit_operand_load(generator, context,
                                                &instruction->rhs,
                                                BINARY_GP_R10) ||
@@ -3951,8 +4076,24 @@ static int binary_emit_binary_integer(CodeGenerator *generator,
       goto emit_failure;
     }
   } else if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0) {
-    if (!binary_emit_cqo(&context->code) ||
-        !binary_emit_idiv_reg(&context->code, BINARY_GP_R10)) {
+    /* Unsigned dividend: zero-extend into RDX and use DIV, not CQO/IDIV.
+     * Applying signed division to a high-bit-set unsigned value gives the wrong
+     * quotient and remainder. Signedness is the dividend's declared type. */
+    Type *rt_dividend_type = code_generator_binary_get_operand_type_in_context(
+        generator, context, &instruction->lhs);
+    int rt_unsigned =
+        rt_dividend_type &&
+        (rt_dividend_type->kind == TYPE_UINT8 ||
+         rt_dividend_type->kind == TYPE_UINT16 ||
+         rt_dividend_type->kind == TYPE_UINT32 ||
+         rt_dividend_type->kind == TYPE_UINT64);
+    if (rt_unsigned) {
+      if (!binary_emit_xor_reg_reg32(&context->code, BINARY_GP_RDX) ||
+          !binary_emit_div_reg(&context->code, BINARY_GP_R10)) {
+        goto emit_failure;
+      }
+    } else if (!binary_emit_cqo(&context->code) ||
+               !binary_emit_idiv_reg(&context->code, BINARY_GP_R10)) {
       goto emit_failure;
     }
     if (strcmp(op, "%") == 0 &&
