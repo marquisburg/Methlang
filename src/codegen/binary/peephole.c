@@ -2278,3 +2278,212 @@ int code_generator_binary_try_emit_binary_expression_chain(
   *consumed_out = 2;
   return 1;
 }
+
+static int code_generator_binary_float_chain_operator_supported(
+    const char *op) {
+  return op && (strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
+                strcmp(op, "*") == 0 || strcmp(op, "/") == 0);
+}
+
+static int code_generator_binary_emit_xmm_float_op(BinaryCodeBuffer *code,
+                                                   const char *op, int fbits,
+                                                   BinaryXmmRegister dst,
+                                                   BinaryXmmRegister src) {
+  if (!code || !op) {
+    return 0;
+  }
+  if (strcmp(op, "+") == 0) {
+    return fbits == 32 ? binary_emit_addss_xmm_xmm(code, dst, src)
+                       : binary_emit_addsd_xmm_xmm(code, dst, src);
+  }
+  if (strcmp(op, "-") == 0) {
+    return fbits == 32 ? binary_emit_subss_xmm_xmm(code, dst, src)
+                       : binary_emit_subsd_xmm_xmm(code, dst, src);
+  }
+  if (strcmp(op, "*") == 0) {
+    return fbits == 32 ? binary_emit_mulss_xmm_xmm(code, dst, src)
+                       : binary_emit_mulsd_xmm_xmm(code, dst, src);
+  }
+  if (strcmp(op, "/") == 0) {
+    return fbits == 32 ? binary_emit_divss_xmm_xmm(code, dst, src)
+                       : binary_emit_divsd_xmm_xmm(code, dst, src);
+  }
+  return 0;
+}
+
+int code_generator_binary_try_emit_float_binary_expression_chain(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRFunction *function, size_t instruction_index,
+    size_t *consumed_out) {
+  const IRInstruction *producer = NULL;
+  const IRInstruction *consumer = NULL;
+  const IROperand *consumer_rhs = NULL;
+  int fbits = 64;
+
+  if (consumed_out) {
+    *consumed_out = 0;
+  }
+  if (!generator || !context || !function || !consumed_out ||
+      instruction_index + 1 >= function->instruction_count) {
+    return 0;
+  }
+
+  producer = &function->instructions[instruction_index];
+  consumer = &function->instructions[instruction_index + 1];
+  if (!producer || producer->op != IR_OP_BINARY || !producer->is_float ||
+      !code_generator_binary_float_chain_operator_supported(producer->text) ||
+      producer->dest.kind != IR_OPERAND_TEMP || !producer->dest.name ||
+      !consumer || consumer->op != IR_OP_BINARY || !consumer->is_float ||
+      !code_generator_binary_float_chain_operator_supported(consumer->text) ||
+      code_generator_binary_function_temp_use_count(function,
+                                                    producer->dest.name) != 1) {
+    return 0;
+  }
+
+  fbits = (producer->float_bits == 32) ? 32 : 64;
+  if (((consumer->float_bits == 32) ? 32 : 64) != fbits) {
+    return 0;
+  }
+
+  if (code_generator_binary_operand_uses_temp(&consumer->lhs,
+                                              producer->dest.name)) {
+    consumer_rhs = &consumer->rhs;
+  } else if ((strcmp(consumer->text, "+") == 0 ||
+              strcmp(consumer->text, "*") == 0) &&
+             code_generator_binary_operand_uses_temp(&consumer->rhs,
+                                                     producer->dest.name)) {
+    consumer_rhs = &consumer->lhs;
+  } else {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_float_operand_to_xmm_bits(
+          generator, context, &producer->rhs, BINARY_XMM1, fbits) ||
+      !code_generator_binary_emit_float_operand_to_xmm_bits(
+          generator, context, &producer->lhs, BINARY_XMM0, fbits) ||
+      !code_generator_binary_emit_xmm_float_op(&context->code, producer->text,
+                                               fbits, BINARY_XMM0,
+                                               BINARY_XMM1) ||
+      !code_generator_binary_emit_float_operand_to_xmm_bits(
+          generator, context, consumer_rhs, BINARY_XMM1, fbits) ||
+      !code_generator_binary_emit_xmm_float_op(&context->code, consumer->text,
+                                               fbits, BINARY_XMM0,
+                                               BINARY_XMM1)) {
+    if (!generator->has_error) {
+      code_generator_set_error(
+          generator,
+          "Failed to emit chained float expression in function '%s'",
+          context->function_name);
+    }
+    return 0;
+  }
+
+  if (!((fbits == 32)
+            ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                       BINARY_XMM0)
+            : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                       BINARY_XMM0)) ||
+      !code_generator_binary_emit_destination_store(generator, context,
+                                                    &consumer->dest,
+                                                    BINARY_GP_RAX)) {
+    return 0;
+  }
+
+  *consumed_out = 2;
+  return 1;
+}
+
+int code_generator_binary_try_emit_float_cast_binary_chain(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRFunction *function, size_t instruction_index,
+    size_t *consumed_out) {
+  const IRInstruction *cast = NULL;
+  const IRInstruction *consumer = NULL;
+  const IROperand *consumer_rhs = NULL;
+  int fbits = 64;
+
+  if (consumed_out) {
+    *consumed_out = 0;
+  }
+  if (!generator || !context || !function || !consumed_out ||
+      instruction_index + 1 >= function->instruction_count) {
+    return 0;
+  }
+
+  cast = &function->instructions[instruction_index];
+  consumer = &function->instructions[instruction_index + 1];
+  if (!cast || cast->op != IR_OP_CAST || cast->is_float || !cast->text ||
+      (strcmp(cast->text, "float32") != 0 &&
+       strcmp(cast->text, "float64") != 0) ||
+      cast->dest.kind != IR_OPERAND_TEMP || !cast->dest.name ||
+      !consumer || consumer->op != IR_OP_BINARY || !consumer->is_float ||
+      !code_generator_binary_float_chain_operator_supported(consumer->text) ||
+      code_generator_binary_function_temp_use_count(function,
+                                                    cast->dest.name) != 1) {
+    return 0;
+  }
+
+  fbits = strcmp(cast->text, "float32") == 0 ? 32 : 64;
+  if (((consumer->float_bits == 32) ? 32 : 64) != fbits) {
+    return 0;
+  }
+
+  if (consumer->dest.kind == IR_OPERAND_TEMP && consumer->dest.name &&
+      instruction_index + 2 < function->instruction_count) {
+    const IRInstruction *next = &function->instructions[instruction_index + 2];
+    if (next && next->op == IR_OP_BINARY && next->is_float &&
+        (code_generator_binary_operand_uses_temp(&next->lhs,
+                                                 consumer->dest.name) ||
+         code_generator_binary_operand_uses_temp(&next->rhs,
+                                                 consumer->dest.name))) {
+      return 0;
+    }
+  }
+
+  if (code_generator_binary_operand_uses_temp(&consumer->lhs,
+                                              cast->dest.name)) {
+    consumer_rhs = &consumer->rhs;
+  } else if ((strcmp(consumer->text, "+") == 0 ||
+              strcmp(consumer->text, "*") == 0) &&
+             code_generator_binary_operand_uses_temp(&consumer->rhs,
+                                                     cast->dest.name)) {
+    consumer_rhs = &consumer->lhs;
+  } else {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context, &cast->lhs,
+                                               BINARY_GP_RAX) ||
+      !((fbits == 32)
+            ? binary_emit_cvtsi2ss_xmm_reg(&context->code, BINARY_XMM0,
+                                           BINARY_GP_RAX)
+            : binary_emit_cvtsi2sd_xmm_reg(&context->code, BINARY_XMM0,
+                                           BINARY_GP_RAX)) ||
+      !code_generator_binary_emit_float_operand_to_xmm_bits(
+          generator, context, consumer_rhs, BINARY_XMM1, fbits) ||
+      !code_generator_binary_emit_xmm_float_op(&context->code, consumer->text,
+                                               fbits, BINARY_XMM0,
+                                               BINARY_XMM1)) {
+    if (!generator->has_error) {
+      code_generator_set_error(
+          generator,
+          "Failed to emit chained int-to-float expression in function '%s'",
+          context->function_name);
+    }
+    return 0;
+  }
+
+  if (!((fbits == 32)
+            ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
+                                       BINARY_XMM0)
+            : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
+                                       BINARY_XMM0)) ||
+      !code_generator_binary_emit_destination_store(generator, context,
+                                                    &consumer->dest,
+                                                    BINARY_GP_RAX)) {
+    return 0;
+  }
+
+  *consumed_out = 2;
+  return 1;
+}

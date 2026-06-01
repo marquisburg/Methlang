@@ -827,6 +827,83 @@ int code_generator_binary_emit_global_symbol_store(
   return 1;
 }
 
+static int code_generator_binary_promoted_symbol_is_global(
+    CodeGenerator *generator, const char *name, Symbol **symbol_out) {
+  Symbol *symbol = generator && generator->symbol_table && name
+                       ? symbol_table_lookup(generator->symbol_table, name)
+                       : NULL;
+  if (symbol_out) {
+    *symbol_out = symbol;
+  }
+  return symbol && symbol->scope && symbol->scope->type == SCOPE_GLOBAL;
+}
+
+int code_generator_binary_emit_promoted_global_loads(
+    CodeGenerator *generator, BinaryFunctionContext *context) {
+  if (!generator || !context) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < context->register_symbols.count; i++) {
+    const char *name = context->register_symbols.items[i].name;
+    BinaryGpRegister reg =
+        (BinaryGpRegister)context->register_symbols.items[i].offset;
+    Symbol *symbol = NULL;
+    if (!code_generator_binary_promoted_symbol_is_global(generator, name,
+                                                         &symbol)) {
+      continue;
+    }
+
+    const char *link_name = code_generator_get_link_symbol_name(generator, name);
+    if (!link_name || link_name[0] == '\0' ||
+        !code_generator_binary_emit_global_symbol_load(
+            generator, context, link_name, symbol->type, symbol->is_extern,
+            reg)) {
+      if (!generator->has_error) {
+        code_generator_set_error(
+            generator, "Out of memory while loading promoted global '%s'",
+            name ? name : "<unnamed>");
+      }
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+int code_generator_binary_emit_promoted_global_stores(
+    CodeGenerator *generator, BinaryFunctionContext *context) {
+  if (!generator || !context) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < context->register_symbols.count; i++) {
+    const char *name = context->register_symbols.items[i].name;
+    BinaryGpRegister reg =
+        (BinaryGpRegister)context->register_symbols.items[i].offset;
+    Symbol *symbol = NULL;
+    if (!code_generator_binary_promoted_symbol_is_global(generator, name,
+                                                         &symbol)) {
+      continue;
+    }
+
+    const char *link_name = code_generator_get_link_symbol_name(generator, name);
+    if (!link_name || link_name[0] == '\0' ||
+        !code_generator_binary_emit_global_symbol_store(
+            generator, context, link_name, symbol->type, symbol->is_extern,
+            reg)) {
+      if (!generator->has_error) {
+        code_generator_set_error(
+            generator, "Out of memory while storing promoted global '%s'",
+            name ? name : "<unnamed>");
+      }
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
 int code_generator_binary_operand_is_known_float64(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IROperand *operand) {
@@ -4917,6 +4994,10 @@ int code_generator_binary_emit_prologue(CodeGenerator *generator,
                                "Out of memory while saving callee registers");
       return 0;
     }
+  }
+
+  if (!code_generator_binary_emit_promoted_global_loads(generator, context)) {
+    return 0;
   }
 
   const BinaryAbi *abi = code_generator_binary_active_abi();

@@ -482,6 +482,10 @@ int code_generator_binary_emit_profile_op(CodeGenerator *generator,
                                           uint64_t amount);
 int code_generator_binary_emit_profile_exit(CodeGenerator *generator,
                                             BinaryFunctionContext *context);
+int code_generator_binary_emit_promoted_global_loads(CodeGenerator *generator,
+                                                     BinaryFunctionContext *context);
+int code_generator_binary_emit_promoted_global_stores(CodeGenerator *generator,
+                                                      BinaryFunctionContext *context);
 int code_generator_binary_emit_profile_tables(CodeGenerator *generator);
 int code_generator_binary_emit_dwarf_debug_sections(CodeGenerator *generator);
 int code_generator_binary_emit_runtime_debug_tables(CodeGenerator *generator);
@@ -591,6 +595,8 @@ int code_generator_binary_try_emit_address_add_store( CodeGenerator *generator, 
 int code_generator_binary_try_emit_binary_cast_chain( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_binary_compare_branch_chain( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_binary_expression_chain( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
+int code_generator_binary_try_emit_float_binary_expression_chain( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
+int code_generator_binary_try_emit_float_cast_binary_chain( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_compare_assign_diamond( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_compare_update_pair_diamond( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_try_emit_compare_branch_zero( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);

@@ -121,6 +121,18 @@ int code_generator_emit_binary_function(CodeGenerator *generator,
       continue;
     }
 
+    if (code_generator_binary_try_emit_float_cast_binary_chain(
+            generator, &context, ir_function, i, &consumed)) {
+      i += consumed;
+      continue;
+    }
+
+    if (code_generator_binary_try_emit_float_binary_expression_chain(
+            generator, &context, ir_function, i, &consumed)) {
+      i += consumed;
+      continue;
+    }
+
     if (code_generator_binary_try_emit_binary_expression_chain(
             generator, &context, ir_function, i, &consumed)) {
       i += consumed;
@@ -164,6 +176,11 @@ int code_generator_emit_binary_function(CodeGenerator *generator,
         generator,
         "Failed to define runtime function end label in function '%s'",
         context.function_name);
+    binary_function_context_destroy(&context);
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_promoted_global_stores(generator, &context)) {
     binary_function_context_destroy(&context);
     return 0;
   }
