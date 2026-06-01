@@ -5,6 +5,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Valid after `push rsi; push rdi`: recover the original string-copy
+ * register value when the source address was already in RSI or RDI. */
+static int binary_emit_mov_reg_from_saved_string_source(
+    BinaryCodeBuffer *code, BinaryGpRegister destination,
+    BinaryGpRegister source) {
+  if (source == BINARY_GP_RDI) {
+    return binary_emit_mov_reg_mem(code, destination, BINARY_GP_RSP, 0);
+  }
+  if (source == BINARY_GP_RSI) {
+    return binary_emit_mov_reg_mem(code, destination, BINARY_GP_RSP, 8);
+  }
+  return binary_emit_mov_reg_reg(code, destination, source);
+}
+
 int code_generator_binary_declare_external_symbol(
     CodeGenerator *generator, const char *symbol_name) {
   BinaryEmitter *emitter = NULL;
@@ -417,10 +431,10 @@ int code_generator_binary_emit_store_to_address(
     }
     return binary_emit_push_reg(&context->code, BINARY_GP_RSI) &&
            binary_emit_push_reg(&context->code, BINARY_GP_RDI) &&
-           binary_emit_mov_reg_reg(&context->code, BINARY_GP_RSI,
-                                    source_register) &&
-           binary_emit_mov_reg_reg(&context->code, BINARY_GP_RDI,
-                                    address_register) &&
+           binary_emit_mov_reg_from_saved_string_source(
+               &context->code, BINARY_GP_RSI, source_register) &&
+           binary_emit_mov_reg_from_saved_string_source(
+               &context->code, BINARY_GP_RDI, address_register) &&
            binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX, n) &&
            binary_code_buffer_append_u8(&context->code, 0xF3) &&
            binary_code_buffer_append_u8(&context->code, 0xA4) &&
@@ -627,24 +641,29 @@ int code_generator_binary_emit_indirect_source_address(
 }
 
 /* Emit `rep movsb` of `size` bytes from [src_addr_reg] to [dst_addr_reg].
- * Does NOT preserve rsi/rdi/rcx — callers that need them must save manually.
- * Used in call-arg memcpy and indirect-return paths where the surrounding
- * code knows rsi/rdi are dead. */
+ * Preserves RSI/RDI because the register promoter may keep live values there;
+ * RCX is consumed as the string count. */
 int code_generator_binary_emit_rep_movsb(
     CodeGenerator *generator, BinaryFunctionContext *context,
     BinaryGpRegister src_addr_reg, BinaryGpRegister dst_addr_reg, size_t size) {
   if (!generator || !context || size == 0) {
     return 0;
   }
-  if (!binary_emit_mov_reg_reg(&context->code, BINARY_GP_RSI, src_addr_reg) ||
-      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RDI, dst_addr_reg) ||
+  if (!binary_emit_push_reg(&context->code, BINARY_GP_RSI) ||
+      !binary_emit_push_reg(&context->code, BINARY_GP_RDI) ||
+      !binary_emit_mov_reg_from_saved_string_source(
+          &context->code, BINARY_GP_RSI, src_addr_reg) ||
+      !binary_emit_mov_reg_from_saved_string_source(
+          &context->code, BINARY_GP_RDI, dst_addr_reg) ||
       !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX,
                                  (uint64_t)size) ||
       /* cld (DF=0) — ensure forward direction. One byte 0xFC. */
       !binary_code_buffer_append_u8(&context->code, 0xFC) ||
       /* rep movsb: 0xF3 0xA4. */
       !binary_code_buffer_append_u8(&context->code, 0xF3) ||
-      !binary_code_buffer_append_u8(&context->code, 0xA4)) {
+      !binary_code_buffer_append_u8(&context->code, 0xA4) ||
+      !binary_emit_pop_reg(&context->code, BINARY_GP_RDI) ||
+      !binary_emit_pop_reg(&context->code, BINARY_GP_RSI)) {
     return 0;
   }
   return 1;
@@ -661,8 +680,10 @@ int code_generator_binary_emit_rep_movsq(
   }
   if (!binary_emit_push_reg(&context->code, BINARY_GP_RSI) ||
       !binary_emit_push_reg(&context->code, BINARY_GP_RDI) ||
-      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RSI, src_addr_reg) ||
-      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RDI, dst_addr_reg) ||
+      !binary_emit_mov_reg_from_saved_string_source(
+          &context->code, BINARY_GP_RSI, src_addr_reg) ||
+      !binary_emit_mov_reg_from_saved_string_source(
+          &context->code, BINARY_GP_RDI, dst_addr_reg) ||
       !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX,
                                  (uint64_t)qword_count) ||
       !binary_code_buffer_append_u8(&context->code, 0xFC) ||

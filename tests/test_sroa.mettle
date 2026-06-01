@@ -45,7 +45,16 @@ function main() -> int32 {
   if (s.c != rc) { fails = fails + 1; }
   if (s.d != rd) { fails = fails + 1; }
 
-  // 2. Per-field read/modify/write in a hot loop (basic scalarization +
+  // 2. Whole-struct copy after the by-value loop. This used to corrupt the
+  // offset-16 field under --release, making benchmark checksums untrustworthy.
+  var t: V4;
+  t = s;
+  if (t.a != ra) { fails = fails + 1; }
+  if (t.b != rb) { fails = fails + 1; }
+  if (t.c != rc) { fails = fails + 1; }
+  if (t.d != rd) { fails = fails + 1; }
+
+  // 3. Per-field read/modify/write in a hot loop (basic scalarization +
   // register promotion). p.x accumulates p.y; checked by closed form.
   var p: V4;
   p.a = 10; p.b = 7; p.c = 0; p.d = 0;
@@ -59,7 +68,7 @@ function main() -> int32 {
   if (p.c != 500) { fails = fails + 1; }
   if (p.b != 7) { fails = fails + 1; }
 
-  // 3. Float-field struct: the scalar must carry float width (movsd, not movq).
+  // 4. Float-field struct: the scalar must carry float width (movsd, not movq).
   var f: FP;
   f.x = 2.5;
   f.y = 4.0;
