@@ -19,6 +19,13 @@ static int binary_emit_mov_reg_from_saved_string_source(
   return binary_emit_mov_reg_reg(code, destination, source);
 }
 
+static int binary_emit_windows_heap_alloc(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    BinaryGpRegister size_register, uint32_t flags);
+static int binary_emit_windows_zeroed_heap_alloc(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    BinaryGpRegister size_register);
+
 int code_generator_binary_declare_external_symbol(
     CodeGenerator *generator, const char *symbol_name) {
   BinaryEmitter *emitter = NULL;
@@ -1504,6 +1511,384 @@ static int code_generator_binary_emit_memset_call_inline(
                                                       BINARY_GP_RAX);
 }
 
+static int code_generator_binary_emit_memcpy_call_inline(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  if (!generator || !context || !instruction ||
+      instruction->argument_count != 3 || !instruction->arguments) {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[0],
+                                               BINARY_GP_R10) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[1],
+                                               BINARY_GP_R11) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[2],
+                                               BINARY_GP_RCX) ||
+      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RAX, BINARY_GP_R10) ||
+      !binary_emit_push_reg(&context->code, BINARY_GP_RSI) ||
+      !binary_emit_push_reg(&context->code, BINARY_GP_RDI) ||
+      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RDI, BINARY_GP_R10) ||
+      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RSI, BINARY_GP_R11) ||
+      !binary_code_buffer_append_u8(&context->code, 0xFC) ||
+      !binary_code_buffer_append_u8(&context->code, 0xF3) ||
+      !binary_code_buffer_append_u8(&context->code, 0xA4) ||
+      !binary_emit_pop_reg(&context->code, BINARY_GP_RDI) ||
+      !binary_emit_pop_reg(&context->code, BINARY_GP_RSI)) {
+    return 0;
+  }
+
+  return code_generator_binary_emit_destination_store(generator, context,
+                                                      &instruction->dest,
+                                                      BINARY_GP_RAX);
+}
+
+static int code_generator_binary_emit_memmove_call_inline(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  BinaryCodeBuffer *b = NULL;
+  size_t j_done = 0;
+  size_t j_forward = 0;
+  size_t j_after_backward = 0;
+
+  if (!generator || !context || !instruction ||
+      instruction->argument_count != 3 || !instruction->arguments) {
+    return 0;
+  }
+
+  b = &context->code;
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[0],
+                                               BINARY_GP_R10) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[1],
+                                               BINARY_GP_R11) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[2],
+                                               BINARY_GP_RCX) ||
+      !binary_emit_mov_reg_reg(b, BINARY_GP_RAX, BINARY_GP_R10) ||
+      !binary_emit_cmp_reg_imm32(b, BINARY_GP_RCX, 0) ||
+      !wcs_jcc(b, 0x84 /* je */, &j_done) ||
+      !binary_emit_cmp_reg_reg(b, BINARY_GP_R10, BINARY_GP_R11) ||
+      !wcs_jcc(b, 0x84 /* je */, &j_done) ||
+      !wcs_jcc(b, 0x82 /* jb */, &j_forward) ||
+      !binary_emit_mov_reg_reg(b, BINARY_GP_R8, BINARY_GP_R11) ||
+      !wcs_add_reg_reg64(b, BINARY_GP_R8, BINARY_GP_RCX) ||
+      !binary_emit_cmp_reg_reg(b, BINARY_GP_R10, BINARY_GP_R8) ||
+      !wcs_jcc(b, 0x83 /* jae */, &j_forward) ||
+      !binary_emit_push_reg(b, BINARY_GP_RSI) ||
+      !binary_emit_push_reg(b, BINARY_GP_RDI) ||
+      !binary_emit_mov_reg_reg(b, BINARY_GP_RDI, BINARY_GP_R10) ||
+      !wcs_add_reg_reg64(b, BINARY_GP_RDI, BINARY_GP_RCX) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RDI, 1, 1) ||
+      !binary_emit_mov_reg_reg(b, BINARY_GP_RSI, BINARY_GP_R11) ||
+      !wcs_add_reg_reg64(b, BINARY_GP_RSI, BINARY_GP_RCX) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RSI, 1, 1) ||
+      !binary_code_buffer_append_u8(b, 0xFD) ||
+      !binary_code_buffer_append_u8(b, 0xF3) ||
+      !binary_code_buffer_append_u8(b, 0xA4) ||
+      !binary_code_buffer_append_u8(b, 0xFC) ||
+      !binary_emit_pop_reg(b, BINARY_GP_RDI) ||
+      !binary_emit_pop_reg(b, BINARY_GP_RSI) ||
+      !wcs_jcc(b, 0, &j_after_backward) ||
+      !wcs_patch_here(b, j_forward) ||
+      !binary_emit_push_reg(b, BINARY_GP_RSI) ||
+      !binary_emit_push_reg(b, BINARY_GP_RDI) ||
+      !binary_emit_mov_reg_reg(b, BINARY_GP_RDI, BINARY_GP_R10) ||
+      !binary_emit_mov_reg_reg(b, BINARY_GP_RSI, BINARY_GP_R11) ||
+      !binary_code_buffer_append_u8(b, 0xFC) ||
+      !binary_code_buffer_append_u8(b, 0xF3) ||
+      !binary_code_buffer_append_u8(b, 0xA4) ||
+      !binary_emit_pop_reg(b, BINARY_GP_RDI) ||
+      !binary_emit_pop_reg(b, BINARY_GP_RSI) ||
+      !wcs_patch_here(b, j_after_backward) ||
+      !wcs_patch_here(b, j_done)) {
+    return 0;
+  }
+
+  return code_generator_binary_emit_destination_store(generator, context,
+                                                      &instruction->dest,
+                                                      BINARY_GP_RAX);
+}
+
+static int code_generator_binary_emit_memcmp_call_inline(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  BinaryCodeBuffer *b = NULL;
+  size_t loop_top = 0;
+  size_t j_done = 0;
+  size_t j_diff = 0;
+  size_t j_back = 0;
+
+  if (!generator || !context || !instruction ||
+      instruction->argument_count != 3 || !instruction->arguments) {
+    return 0;
+  }
+
+  b = &context->code;
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[0],
+                                               BINARY_GP_R10) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[1],
+                                               BINARY_GP_R11) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[2],
+                                               BINARY_GP_RCX) ||
+      !binary_emit_xor_reg_reg32(b, BINARY_GP_RAX)) {
+    return 0;
+  }
+
+  loop_top = b->size;
+  if (!binary_emit_cmp_reg_imm32(b, BINARY_GP_RCX, 0) ||
+      !wcs_jcc(b, 0x84 /* je */, &j_done) ||
+      !binary_emit_movzx_reg_mem8(b, BINARY_GP_R8, BINARY_GP_R10, 0) ||
+      !binary_emit_movzx_reg_mem8(b, BINARY_GP_R9, BINARY_GP_R11, 0) ||
+      !binary_emit_cmp_reg_reg32(b, BINARY_GP_R8, BINARY_GP_R9) ||
+      !wcs_jcc(b, 0x85 /* jne */, &j_diff) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_R10, 0, 1) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_R11, 0, 1) ||
+      !wcs_addsub_reg_imm8(b, BINARY_GP_RCX, 1, 1) ||
+      !wcs_jcc(b, 0, &j_back) ||
+      !wcs_patch_to(b, j_back, loop_top) ||
+      !wcs_patch_here(b, j_diff) ||
+      !wcs_mov_reg_reg32(b, BINARY_GP_RAX, BINARY_GP_R8) ||
+      !wcs_sub_reg_reg32(b, BINARY_GP_RAX, BINARY_GP_R9) ||
+      !wcs_patch_here(b, j_done)) {
+    return 0;
+  }
+
+  return code_generator_binary_emit_destination_store(generator, context,
+                                                      &instruction->dest,
+                                                      BINARY_GP_RAX);
+}
+
+static int binary_emit_windows_heap_free_value(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    BinaryGpRegister ptr_register) {
+  size_t get_heap_displacement_offset = 0;
+  size_t heap_free_displacement_offset = 0;
+
+  if (!code_generator_binary_declare_external_symbol(generator,
+                                                     "GetProcessHeap") ||
+      !code_generator_binary_declare_external_symbol(generator, "HeapFree")) {
+    return 0;
+  }
+
+  return binary_emit_push_reg(&context->code, ptr_register) &&
+         binary_emit_sub_rsp_imm32(&context->code,
+                                   BINARY_WIN64_SHADOW_SPACE_SIZE) &&
+         binary_emit_call_placeholder(&context->code,
+                                      &get_heap_displacement_offset) &&
+         binary_call_relocation_table_add(&context->call_relocations,
+                                          "GetProcessHeap",
+                                          get_heap_displacement_offset) &&
+         binary_emit_add_rsp_imm32(&context->code,
+                                   BINARY_WIN64_SHADOW_SPACE_SIZE) &&
+         binary_emit_pop_reg(&context->code, BINARY_GP_R8) &&
+         binary_emit_mov_reg_reg(&context->code, BINARY_GP_RCX,
+                                 BINARY_GP_RAX) &&
+         binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RDX, 0) &&
+         binary_emit_sub_rsp_imm32(&context->code,
+                                   BINARY_WIN64_SHADOW_SPACE_SIZE + 8) &&
+         binary_emit_call_placeholder(&context->code,
+                                      &heap_free_displacement_offset) &&
+         binary_call_relocation_table_add(&context->call_relocations,
+                                          "HeapFree",
+                                          heap_free_displacement_offset) &&
+         binary_emit_add_rsp_imm32(&context->code,
+                                   BINARY_WIN64_SHADOW_SPACE_SIZE + 8);
+}
+
+static int code_generator_binary_emit_malloc_call_inline(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  if (!generator || !context || !instruction ||
+      instruction->argument_count != 1 || !instruction->arguments) {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[0],
+                                               BINARY_GP_R8) ||
+      !binary_emit_windows_heap_alloc(generator, context, BINARY_GP_R8, 0)) {
+    return 0;
+  }
+
+  return code_generator_binary_emit_destination_store(generator, context,
+                                                      &instruction->dest,
+                                                      BINARY_GP_RAX);
+}
+
+static int code_generator_binary_emit_calloc_call_inline(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  if (!generator || !context || !instruction ||
+      instruction->argument_count != 2 || !instruction->arguments) {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[0],
+                                               BINARY_GP_R8) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[1],
+                                               BINARY_GP_R10) ||
+      !binary_emit_imul_reg_reg(&context->code, BINARY_GP_R8, BINARY_GP_R10) ||
+      !binary_emit_windows_zeroed_heap_alloc(generator, context,
+                                             BINARY_GP_R8)) {
+    return 0;
+  }
+
+  return code_generator_binary_emit_destination_store(generator, context,
+                                                      &instruction->dest,
+                                                      BINARY_GP_RAX);
+}
+
+static int code_generator_binary_emit_free_call_inline(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  char *done_label = NULL;
+  size_t fixup = 0;
+
+  if (!generator || !context || !instruction ||
+      instruction->argument_count != 1 || !instruction->arguments) {
+    return 0;
+  }
+
+  done_label = code_generator_generate_label(generator, "free_done");
+  if (!done_label) {
+    code_generator_set_error(generator,
+                             "Out of memory while creating free label");
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[0],
+                                               BINARY_GP_R10) ||
+      !binary_emit_cmp_reg_imm32(&context->code, BINARY_GP_R10, 0) ||
+      !binary_emit_je_placeholder(&context->code, &fixup) ||
+      !binary_label_fixup_table_add(&context->label_fixups, done_label,
+                                    fixup) ||
+      !binary_emit_windows_heap_free_value(generator, context, BINARY_GP_R10) ||
+      !binary_label_table_define(&context->labels, done_label,
+                                 context->code.size)) {
+    free(done_label);
+    return 0;
+  }
+
+  free(done_label);
+  return 1;
+}
+
+static int code_generator_binary_emit_realloc_call_inline(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRInstruction *instruction) {
+  char *malloc_label = NULL;
+  char *free_label = NULL;
+  char *done_label = NULL;
+  size_t fixup = 0;
+  size_t get_heap_displacement_offset = 0;
+  size_t heap_realloc_displacement_offset = 0;
+
+  if (!generator || !context || !instruction ||
+      instruction->argument_count != 2 || !instruction->arguments) {
+    return 0;
+  }
+
+  malloc_label = code_generator_generate_label(generator, "realloc_malloc");
+  free_label = code_generator_generate_label(generator, "realloc_free");
+  done_label = code_generator_generate_label(generator, "realloc_done");
+  if (!malloc_label || !free_label || !done_label) {
+    free(malloc_label);
+    free(free_label);
+    free(done_label);
+    code_generator_set_error(generator,
+                             "Out of memory while creating realloc labels");
+    return 0;
+  }
+
+  if (!code_generator_binary_declare_external_symbol(generator,
+                                                     "GetProcessHeap") ||
+      !code_generator_binary_declare_external_symbol(generator,
+                                                     "HeapReAlloc")) {
+    free(malloc_label);
+    free(free_label);
+    free(done_label);
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[0],
+                                               BINARY_GP_R10) ||
+      !code_generator_binary_emit_operand_load(generator, context,
+                                               &instruction->arguments[1],
+                                               BINARY_GP_R11) ||
+      !binary_emit_cmp_reg_imm32(&context->code, BINARY_GP_R10, 0) ||
+      !binary_emit_je_placeholder(&context->code, &fixup) ||
+      !binary_label_fixup_table_add(&context->label_fixups, malloc_label,
+                                    fixup) ||
+      !binary_emit_cmp_reg_imm32(&context->code, BINARY_GP_R11, 0) ||
+      !binary_emit_je_placeholder(&context->code, &fixup) ||
+      !binary_label_fixup_table_add(&context->label_fixups, free_label,
+                                    fixup) ||
+      !binary_emit_push_reg(&context->code, BINARY_GP_R10) ||
+      !binary_emit_push_reg(&context->code, BINARY_GP_R11) ||
+      !binary_emit_sub_rsp_imm32(&context->code,
+                                 BINARY_WIN64_SHADOW_SPACE_SIZE + 8) ||
+      !binary_emit_call_placeholder(&context->code,
+                                    &get_heap_displacement_offset) ||
+      !binary_call_relocation_table_add(&context->call_relocations,
+                                        "GetProcessHeap",
+                                        get_heap_displacement_offset) ||
+      !binary_emit_add_rsp_imm32(&context->code,
+                                 BINARY_WIN64_SHADOW_SPACE_SIZE + 8) ||
+      !binary_emit_pop_reg(&context->code, BINARY_GP_R9) ||
+      !binary_emit_pop_reg(&context->code, BINARY_GP_R8) ||
+      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RCX, BINARY_GP_RAX) ||
+      !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RDX, 0) ||
+      !binary_emit_sub_rsp_imm32(&context->code,
+                                 BINARY_WIN64_SHADOW_SPACE_SIZE + 8) ||
+      !binary_emit_call_placeholder(&context->code,
+                                    &heap_realloc_displacement_offset) ||
+      !binary_call_relocation_table_add(&context->call_relocations,
+                                        "HeapReAlloc",
+                                        heap_realloc_displacement_offset) ||
+      !binary_emit_add_rsp_imm32(&context->code,
+                                 BINARY_WIN64_SHADOW_SPACE_SIZE + 8) ||
+      !binary_emit_jmp_placeholder(&context->code, &fixup) ||
+      !binary_label_fixup_table_add(&context->label_fixups, done_label,
+                                    fixup) ||
+      !binary_label_table_define(&context->labels, malloc_label,
+                                 context->code.size) ||
+      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_R8, BINARY_GP_R11) ||
+      !binary_emit_windows_heap_alloc(generator, context, BINARY_GP_R8, 0) ||
+      !binary_emit_jmp_placeholder(&context->code, &fixup) ||
+      !binary_label_fixup_table_add(&context->label_fixups, done_label,
+                                    fixup) ||
+      !binary_label_table_define(&context->labels, free_label,
+                                 context->code.size) ||
+      !binary_emit_windows_heap_free_value(generator, context, BINARY_GP_R10) ||
+      !binary_emit_xor_reg_reg32(&context->code, BINARY_GP_RAX) ||
+      !binary_label_table_define(&context->labels, done_label,
+                                 context->code.size)) {
+    free(malloc_label);
+    free(free_label);
+    free(done_label);
+    return 0;
+  }
+
+  free(malloc_label);
+  free(free_label);
+  free(done_label);
+  return code_generator_binary_emit_destination_store(generator, context,
+                                                      &instruction->dest,
+                                                      BINARY_GP_RAX);
+}
+
 int code_generator_binary_emit_call_argument_load(
     CodeGenerator *generator, BinaryFunctionContext *context,
     const IROperand *operand, Type *parameter_type,
@@ -2376,24 +2761,70 @@ int code_generator_binary_emit_store(CodeGenerator *generator,
   return 1;
 }
 
+static int binary_emit_windows_heap_alloc(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    BinaryGpRegister size_register, uint32_t flags) {
+  size_t get_heap_displacement_offset = 0;
+  size_t heap_alloc_displacement_offset = 0;
+
+  if (!code_generator_binary_declare_external_symbol(generator,
+                                                     "GetProcessHeap") ||
+      !code_generator_binary_declare_external_symbol(generator, "HeapAlloc")) {
+    return 0;
+  }
+
+  if (!binary_emit_push_reg(&context->code, size_register) ||
+      !binary_emit_sub_rsp_imm32(&context->code,
+                                 BINARY_WIN64_SHADOW_SPACE_SIZE) ||
+      !binary_emit_call_placeholder(&context->code,
+                                    &get_heap_displacement_offset) ||
+      !binary_call_relocation_table_add(&context->call_relocations,
+                                        "GetProcessHeap",
+                                        get_heap_displacement_offset) ||
+      !binary_emit_add_rsp_imm32(&context->code,
+                                 BINARY_WIN64_SHADOW_SPACE_SIZE) ||
+      !binary_emit_pop_reg(&context->code, BINARY_GP_R8) ||
+      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RCX, BINARY_GP_RAX) ||
+      !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RDX, flags) ||
+      !binary_emit_sub_rsp_imm32(&context->code,
+                                 BINARY_WIN64_SHADOW_SPACE_SIZE + 8) ||
+      !binary_emit_call_placeholder(&context->code,
+                                    &heap_alloc_displacement_offset) ||
+      !binary_call_relocation_table_add(&context->call_relocations,
+                                        "HeapAlloc",
+                                        heap_alloc_displacement_offset) ||
+      !binary_emit_add_rsp_imm32(&context->code,
+                                 BINARY_WIN64_SHADOW_SPACE_SIZE + 8)) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int binary_emit_windows_zeroed_heap_alloc(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    BinaryGpRegister size_register) {
+  return binary_emit_windows_heap_alloc(generator, context, size_register, 8);
+}
+
 int code_generator_binary_emit_new(CodeGenerator *generator,
-                                          BinaryFunctionContext *context,
-                                          const IRInstruction *instruction) {
+                                           BinaryFunctionContext *context,
+                                           const IRInstruction *instruction) {
   size_t displacement_offset = 0;
   const char *allocator_name = "calloc";
-  /* calloc(count, size): count is arg 0, size is arg 1. Use the active ABI's
-   * integer parameter registers (MS-x64 RCX/RDX + 32B shadow; SysV RDI/RSI +
-   * no shadow) so the call is correct on both platforms' C runtimes. */
   const BinaryAbi *abi = code_generator_binary_active_abi();
   BinaryGpRegister count_register = abi->int_param_registers[0];
-  BinaryGpRegister size_register = abi->int_param_registers[1];
+  BinaryGpRegister size_register = abi->shadow_space_size > 0
+                                       ? BINARY_GP_R8
+                                       : abi->int_param_registers[1];
   int shadow = abi->shadow_space_size;
 
   if (!generator || !context || !instruction) {
     return 0;
   }
 
-  if (!code_generator_binary_declare_external_symbol(generator, allocator_name)) {
+  if (abi->shadow_space_size == 0 &&
+      !code_generator_binary_declare_external_symbol(generator, allocator_name)) {
     return 0;
   }
 
@@ -2417,13 +2848,35 @@ int code_generator_binary_emit_new(CodeGenerator *generator,
     return 0;
   }
 
-  if (!binary_emit_mov_reg_imm64(&context->code, count_register, 1) ||
-      !binary_emit_sub_rsp_imm32(&context->code, shadow) ||
-      !binary_emit_call_placeholder(&context->code, &displacement_offset) ||
-      !binary_call_relocation_table_add(&context->call_relocations,
-                                        allocator_name, displacement_offset) ||
-      !binary_emit_add_rsp_imm32(&context->code, shadow) ||
-      !code_generator_binary_emit_destination_store(generator, context,
+  if (abi->shadow_space_size > 0) {
+    if (!binary_emit_windows_zeroed_heap_alloc(generator, context,
+                                              size_register)) {
+      if (!generator->has_error) {
+        code_generator_set_error(generator,
+                                 "Out of memory while emitting Win32 heap "
+                                 "allocation in function '%s'",
+                                 context->function_name);
+      }
+      return 0;
+    }
+  } else if (!binary_emit_mov_reg_imm64(&context->code, count_register, 1) ||
+             !binary_emit_sub_rsp_imm32(&context->code, shadow) ||
+             !binary_emit_call_placeholder(&context->code,
+                                           &displacement_offset) ||
+             !binary_call_relocation_table_add(&context->call_relocations,
+                                               allocator_name,
+                                               displacement_offset) ||
+             !binary_emit_add_rsp_imm32(&context->code, shadow)) {
+    if (!generator->has_error) {
+      code_generator_set_error(generator,
+                               "Out of memory while emitting IR new in "
+                               "function '%s'",
+                               context->function_name);
+    }
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_destination_store(generator, context,
                                                     &instruction->dest,
                                                     BINARY_GP_RAX)) {
     if (!generator->has_error) {
@@ -2680,9 +3133,53 @@ int code_generator_binary_emit_call(CodeGenerator *generator,
                                                  amount);
   }
 
+  if (code_generator_binary_active_abi()->shadow_space_size > 0) {
+    if (strcmp(instruction->text, "malloc") == 0 &&
+        instruction->argument_count == 1) {
+      return code_generator_binary_emit_malloc_call_inline(generator, context,
+                                                          instruction);
+    }
+
+    if (strcmp(instruction->text, "calloc") == 0 &&
+        instruction->argument_count == 2) {
+      return code_generator_binary_emit_calloc_call_inline(generator, context,
+                                                          instruction);
+    }
+
+    if (strcmp(instruction->text, "realloc") == 0 &&
+        instruction->argument_count == 2) {
+      return code_generator_binary_emit_realloc_call_inline(generator, context,
+                                                           instruction);
+    }
+
+    if (strcmp(instruction->text, "free") == 0 &&
+        instruction->argument_count == 1) {
+      return code_generator_binary_emit_free_call_inline(generator, context,
+                                                        instruction);
+    }
+  }
+
   if (strcmp(instruction->text, "memset") == 0 &&
       instruction->argument_count == 3) {
     return code_generator_binary_emit_memset_call_inline(generator, context,
+                                                        instruction);
+  }
+
+  if (strcmp(instruction->text, "memcpy") == 0 &&
+      instruction->argument_count == 3) {
+    return code_generator_binary_emit_memcpy_call_inline(generator, context,
+                                                        instruction);
+  }
+
+  if (strcmp(instruction->text, "memmove") == 0 &&
+      instruction->argument_count == 3) {
+    return code_generator_binary_emit_memmove_call_inline(generator, context,
+                                                         instruction);
+  }
+
+  if (strcmp(instruction->text, "memcmp") == 0 &&
+      instruction->argument_count == 3) {
+    return code_generator_binary_emit_memcmp_call_inline(generator, context,
                                                         instruction);
   }
 
@@ -3439,18 +3936,11 @@ int code_generator_binary_emit_rotate_add(
 static int binary_emit_string_concat(CodeGenerator *generator,
                                      BinaryFunctionContext *context,
                                      const IRInstruction *instruction) {
-  const char *allocator_name = "calloc";
-  size_t displacement_offset = 0;
   size_t loop_fixup = 0;
   char *left_done_label = NULL;
   char *left_loop_label = NULL;
   char *right_done_label = NULL;
   char *right_loop_label = NULL;
-
-  if (!code_generator_binary_declare_external_symbol(generator,
-                                                     allocator_name)) {
-    return 0;
-  }
 
   left_done_label = code_generator_generate_label(generator, "concat_left_done");
   left_loop_label = code_generator_generate_label(generator, "concat_left_loop");
@@ -3493,16 +3983,8 @@ static int binary_emit_string_concat(CodeGenerator *generator,
       !binary_emit_mov_mem_reg(&context->code, BINARY_GP_RSP, 16,
                                BINARY_GP_RCX) ||
       !binary_emit_add_reg_imm32(&context->code, BINARY_GP_RCX, 17) ||
-      !binary_emit_mov_reg_reg(&context->code, BINARY_GP_RDX,
-                               BINARY_GP_RCX) ||
-      !binary_emit_mov_reg_imm64(&context->code, BINARY_GP_RCX, 1) ||
-      !binary_emit_sub_rsp_imm32(
-          &context->code, BINARY_WIN64_SHADOW_SPACE_SIZE + 8) ||
-      !binary_emit_call_placeholder(&context->code, &displacement_offset) ||
-      !binary_call_relocation_table_add(&context->call_relocations,
-                                        allocator_name, displacement_offset) ||
-      !binary_emit_add_rsp_imm32(
-          &context->code, BINARY_WIN64_SHADOW_SPACE_SIZE + 8) ||
+      !binary_emit_windows_zeroed_heap_alloc(generator, context,
+                                             BINARY_GP_RCX) ||
       !binary_emit_mov_reg_mem(&context->code, BINARY_GP_RCX, BINARY_GP_RSP,
                                16) ||
       !binary_emit_mov_reg_mem(&context->code, BINARY_GP_RDX, BINARY_GP_RSP,
@@ -4920,6 +5402,12 @@ int code_generator_binary_emit_instruction(
   case IR_OP_SIMD_DOT_F32:
     return code_generator_binary_emit_simd_dot_f32(generator, context,
                                                    instruction);
+  case IR_OP_SIMD_AFFINE_MAP_F64:
+    return code_generator_binary_emit_simd_affine_map_f64(generator, context,
+                                                          instruction);
+  case IR_OP_SIMD_AFFINE_MAP_F32:
+    return code_generator_binary_emit_simd_affine_map_f32(generator, context,
+                                                          instruction);
 
   default:
     code_generator_set_error(
