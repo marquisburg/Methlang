@@ -721,6 +721,8 @@ static const char *ir_opcode_name(IROpcode op) {
   case IR_OP_SIMD_SUM_F32: return "simd_sum_f32";
   case IR_OP_SIMD_DOT_F64: return "simd_dot_f64";
   case IR_OP_SIMD_DOT_F32: return "simd_dot_f32";
+  case IR_OP_SIMD_AFFINE_MAP_F64: return "simd_affine_map_f64";
+  case IR_OP_SIMD_AFFINE_MAP_F32: return "simd_affine_map_f32";
   default:
     return "unknown";
   }
@@ -983,6 +985,30 @@ static int ir_format_instruction_line(const IRInstruction *instruction,
                       len, sizeof(len));
     written = snprintf(buffer, buffer_size, "%s += %s(a=%s, b=%s, len=%s)", dest,
                        ir_opcode_name(instruction->op), lhs, rhs, len);
+    break;
+  }
+  case IR_OP_SIMD_AFFINE_MAP_F64:
+  case IR_OP_SIMD_AFFINE_MAP_F32: {
+    char len[128];
+    char src_scale[128];
+    char dst_scale[128];
+    char bias[128];
+    ir_format_operand(instruction->argument_count > 0 ? &instruction->arguments[0]
+                                                      : NULL,
+                      len, sizeof(len));
+    ir_format_operand(instruction->argument_count > 1 ? &instruction->arguments[1]
+                                                      : NULL,
+                      src_scale, sizeof(src_scale));
+    ir_format_operand(instruction->argument_count > 2 ? &instruction->arguments[2]
+                                                      : NULL,
+                      dst_scale, sizeof(dst_scale));
+    ir_format_operand(instruction->argument_count > 3 ? &instruction->arguments[3]
+                                                      : NULL,
+                      bias, sizeof(bias));
+    written = snprintf(buffer, buffer_size,
+                       "%s = %s(src=%s, dst=%s, len=%s, a=%s, b=%s, c=%s)",
+                       dest, ir_opcode_name(instruction->op), lhs, rhs, len,
+                       src_scale, dst_scale, bias);
     break;
   }
   case IR_OP_NOP:

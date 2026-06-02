@@ -91,6 +91,18 @@ int code_generator_emit_binary_function(CodeGenerator *generator,
       continue;
     }
 
+    if (code_generator_binary_try_emit_offset_scaled_address_load(
+            generator, &context, ir_function, i, &consumed)) {
+      i += consumed;
+      continue;
+    }
+
+    if (code_generator_binary_try_emit_offset_scaled_address_store(
+            generator, &context, ir_function, i, &consumed)) {
+      i += consumed;
+      continue;
+    }
+
     if (code_generator_binary_try_emit_address_add_load(
             generator, &context, ir_function, i, &consumed)) {
       i += consumed;

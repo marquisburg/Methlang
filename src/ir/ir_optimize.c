@@ -41,6 +41,8 @@ typedef struct {
 } IRLabelValueMap;
 
 static int ir_operand_equals(const IROperand *lhs, const IROperand *rhs);
+static int ir_symbol_address_taken(const IRFunction *function,
+                                   const char *symbol_name);
 
 typedef struct {
   char *name;
@@ -325,6 +327,8 @@ static int ir_instruction_writes_symbol(const IRInstruction *instruction) {
   case IR_OP_SIMD_SUM_F32:
   case IR_OP_SIMD_DOT_F64:
   case IR_OP_SIMD_DOT_F32:
+  case IR_OP_SIMD_AFFINE_MAP_F64:
+  case IR_OP_SIMD_AFFINE_MAP_F32:
     return 1;
   default:
     return 0;
@@ -363,6 +367,8 @@ static int ir_instruction_writes_destination(const IRInstruction *instruction) {
   case IR_OP_SIMD_SUM_F32:
   case IR_OP_SIMD_DOT_F64:
   case IR_OP_SIMD_DOT_F32:
+  case IR_OP_SIMD_AFFINE_MAP_F64:
+  case IR_OP_SIMD_AFFINE_MAP_F32:
     return 1;
   default:
     return 0;
@@ -1430,6 +1436,8 @@ static int ir_collect_instruction_temp_uses(IRTempUseMap *uses,
   case IR_OP_SIMD_SUM_F32:
   case IR_OP_SIMD_DOT_F64:
   case IR_OP_SIMD_DOT_F32:
+  case IR_OP_SIMD_AFFINE_MAP_F64:
+  case IR_OP_SIMD_AFFINE_MAP_F32:
     if (!ir_collect_operand_temp_use(uses, &instruction->dest) ||
         !ir_collect_operand_temp_use(uses, &instruction->lhs) ||
         !ir_collect_operand_temp_use(uses, &instruction->rhs)) {
@@ -4201,6 +4209,8 @@ static int ir_instruction_has_side_effect(const IRInstruction *instruction) {
   case IR_OP_SIMD_SUM_F32:
   case IR_OP_SIMD_DOT_F64:
   case IR_OP_SIMD_DOT_F32:
+  case IR_OP_SIMD_AFFINE_MAP_F64:
+  case IR_OP_SIMD_AFFINE_MAP_F32:
   case IR_OP_RETURN:
   case IR_OP_INLINE_ASM:
     return 1;
@@ -4254,6 +4264,149 @@ static int ir_symbol_read_after(const IRFunction *function, size_t start_index,
     }
   }
   return 0;
+}
+
+static int ir_symbol_read_count_after_until_write_or_control(
+    const IRFunction *function, size_t start_index, const char *symbol_name,
+    size_t *only_read_index_out) {
+  int count = 0;
+
+  if (only_read_index_out) {
+    *only_read_index_out = (size_t)-1;
+  }
+  if (!function || !symbol_name) {
+    return 0;
+  }
+
+  for (size_t i = start_index; i < function->instruction_count; i++) {
+    const IRInstruction *instruction = &function->instructions[i];
+    if (instruction->op == IR_OP_JUMP || instruction->op == IR_OP_RETURN) {
+      return count;
+    }
+    if (instruction->op == IR_OP_LABEL || instruction->op == IR_OP_BRANCH_ZERO ||
+        instruction->op == IR_OP_BRANCH_EQ ||
+        instruction->op == IR_OP_CALL || instruction->op == IR_OP_CALL_INDIRECT ||
+        instruction->op == IR_OP_STORE || instruction->op == IR_OP_INLINE_ASM) {
+      return -1;
+    }
+    if (ir_instruction_writes_symbol(instruction) &&
+        ir_operand_is_symbol_named(&instruction->dest, symbol_name)) {
+      break;
+    }
+    if (ir_instruction_reads_symbol_operand(instruction, symbol_name)) {
+      count++;
+      if (only_read_index_out) {
+        *only_read_index_out = i;
+      }
+      if (count > 1) {
+        return count;
+      }
+    }
+  }
+
+  return count;
+}
+
+static int ir_instruction_replace_symbol_reads(IRInstruction *instruction,
+                                               const char *symbol_name,
+                                               const IROperand *replacement,
+                                               int *changed) {
+  IROperand *operands[2];
+  if (!instruction || !symbol_name || !replacement) {
+    return 0;
+  }
+
+  operands[0] = &instruction->lhs;
+  operands[1] = &instruction->rhs;
+  for (size_t i = 0; i < sizeof(operands) / sizeof(operands[0]); i++) {
+    if (ir_operand_is_symbol_named(operands[i], symbol_name)) {
+      IROperand cloned = ir_operand_none();
+      if (!ir_operand_clone(replacement, &cloned)) {
+        return 0;
+      }
+      ir_operand_destroy(operands[i]);
+      *operands[i] = cloned;
+      if (changed) {
+        *changed = 1;
+      }
+    }
+  }
+
+  for (size_t i = 0; i < instruction->argument_count; i++) {
+    if (ir_operand_is_symbol_named(&instruction->arguments[i], symbol_name)) {
+      IROperand cloned = ir_operand_none();
+      if (!ir_operand_clone(replacement, &cloned)) {
+        return 0;
+      }
+      ir_operand_destroy(&instruction->arguments[i]);
+      instruction->arguments[i] = cloned;
+      if (changed) {
+        *changed = 1;
+      }
+    }
+  }
+
+  return 1;
+}
+
+static char *ir_make_float_symbol_copy_temp_name(size_t instruction_index) {
+  char buffer[64];
+  snprintf(buffer, sizeof(buffer), "__float_local_%zu", instruction_index);
+  return mettle_strdup(buffer);
+}
+
+static int ir_eliminate_single_use_float_symbol_copies_pass(IRFunction *function,
+                                                            int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    IRInstruction *instruction = &function->instructions[i];
+    if (!instruction->is_float ||
+        instruction->dest.kind != IR_OPERAND_SYMBOL || !instruction->dest.name ||
+        !ir_instruction_is_trivially_dead_if_dest_unused(instruction)) {
+      continue;
+    }
+
+    if (instruction->float_bits == 32) {
+      continue;
+    }
+
+    if (ir_instruction_reads_symbol_operand(instruction, instruction->dest.name) ||
+        ir_symbol_address_taken(function, instruction->dest.name)) {
+      continue;
+    }
+
+    size_t only_read_index = (size_t)-1;
+    if (ir_symbol_read_count_after_until_write_or_control(
+            function, i + 1, instruction->dest.name, &only_read_index) != 1 ||
+        only_read_index == (size_t)-1) {
+      continue;
+    }
+
+    char *temp_name = ir_make_float_symbol_copy_temp_name(i);
+    if (!temp_name) {
+      return 0;
+    }
+    IROperand replacement = ir_operand_temp(temp_name);
+    if (!ir_instruction_replace_symbol_reads(
+            &function->instructions[only_read_index], instruction->dest.name,
+            &replacement, changed)) {
+      ir_operand_destroy(&replacement);
+      free(temp_name);
+      return 0;
+    }
+    ir_operand_destroy(&instruction->dest);
+    instruction->dest = ir_operand_temp(temp_name);
+    ir_operand_destroy(&replacement);
+    free(temp_name);
+    if (changed) {
+      *changed = 1;
+    }
+  }
+
+  return 1;
 }
 
 static int ir_symbol_zero_initialized_before(const IRFunction *function,
@@ -6980,6 +7133,45 @@ static int ir_decode_float_indexed_load(IRFunction *function, size_t before,
   return 1;
 }
 
+static int ir_decode_float_indexed_address(IRFunction *function, size_t before,
+                                           const char *addr_temp,
+                                           const char *iv,
+                                           const char **base_out,
+                                           int *bits_out) {
+  const IRInstruction *addr = NULL;
+  const IRInstruction *shl = NULL;
+  long long shift = 0;
+
+  if (!addr_temp || !iv || !base_out || !bits_out) {
+    return 0;
+  }
+  addr = ir_find_temp_producer_before(function, before, addr_temp);
+  if (!addr || addr->op != IR_OP_BINARY || addr->is_float || !addr->text ||
+      strcmp(addr->text, "+") != 0 || addr->lhs.kind != IR_OPERAND_SYMBOL ||
+      !addr->lhs.name || addr->rhs.kind != IR_OPERAND_TEMP ||
+      !addr->rhs.name) {
+    return 0;
+  }
+  shl = ir_find_temp_producer_before(function, before, addr->rhs.name);
+  if (!shl || shl->op != IR_OP_BINARY || shl->is_float || !shl->text ||
+      strcmp(shl->text, "<<") != 0 ||
+      !ir_operand_is_symbol_named(&shl->lhs, iv) ||
+      shl->rhs.kind != IR_OPERAND_INT) {
+    return 0;
+  }
+
+  shift = shl->rhs.int_value;
+  if (shift == 3) {
+    *bits_out = 64;
+  } else if (shift == 2) {
+    *bits_out = 32;
+  } else {
+    return 0;
+  }
+  *base_out = addr->lhs.name;
+  return 1;
+}
+
 /* A symbol is an acceptable float-array base if it is a function parameter or a
  * declared local (covers inlined-callee parameter copies). The strict
  * load-shape decode above already pins element width and float-ness, so this
@@ -6998,6 +7190,56 @@ static int ir_float_sum_type_matches(const char *sum_type, int width_bits) {
     return strcmp(sum_type, "float64") == 0;
   }
   return strcmp(sum_type, "float32") == 0;
+}
+
+static int ir_float_scalar_operand_matches(IRFunction *function,
+                                           const IROperand *operand,
+                                           int width_bits) {
+  if (!operand) {
+    return 0;
+  }
+  if (operand->kind == IR_OPERAND_FLOAT) {
+    return operand->float_bits == width_bits;
+  }
+  if (operand->kind == IR_OPERAND_SYMBOL && operand->name) {
+    return ir_float_sum_type_matches(
+        ir_function_local_declared_type(function, operand->name), width_bits);
+  }
+  return 0;
+}
+
+static int ir_try_clone_float_scalar_operand(IRFunction *function,
+                                             size_t before_index,
+                                             const IROperand *operand,
+                                             int width_bits,
+                                             IROperand *out) {
+  const IRInstruction *producer = NULL;
+
+  if (!out) {
+    return 0;
+  }
+  *out = ir_operand_none();
+  if (ir_float_scalar_operand_matches(function, operand, width_bits)) {
+    return ir_operand_clone(operand, out);
+  }
+  if (!operand || operand->kind != IR_OPERAND_TEMP || !operand->name) {
+    return 0;
+  }
+
+  producer = ir_find_temp_producer_before(function, before_index, operand->name);
+  if (!producer || producer->op != IR_OP_CAST || !producer->text ||
+      !ir_float_sum_type_matches(producer->text, width_bits)) {
+    return 0;
+  }
+  if (producer->lhs.kind == IR_OPERAND_FLOAT) {
+    *out = ir_operand_float_sized(producer->lhs.float_value, width_bits);
+    return 1;
+  }
+  if (producer->lhs.kind == IR_OPERAND_INT) {
+    *out = ir_operand_float_sized((double)producer->lhs.int_value, width_bits);
+    return 1;
+  }
+  return 0;
 }
 
 /* Shared loop-frame matcher for the float reductions. Confirms `header_index`
@@ -7035,13 +7277,16 @@ static int ir_float_reduction_frame(IRFunction *function, size_t header_index,
       strcmp(compare->text, "<") != 0 ||
       compare->dest.kind != IR_OPERAND_TEMP || !compare->dest.name ||
       compare->lhs.kind != IR_OPERAND_SYMBOL || !compare->lhs.name ||
-      compare->rhs.kind != IR_OPERAND_SYMBOL || !compare->rhs.name ||
+      (compare->rhs.kind != IR_OPERAND_SYMBOL &&
+       compare->rhs.kind != IR_OPERAND_INT) ||
+      (compare->rhs.kind == IR_OPERAND_SYMBOL && !compare->rhs.name) ||
       branch->op != IR_OP_BRANCH_ZERO ||
       !ir_operand_is_temp_named(&branch->lhs, compare->dest.name) ||
       !branch->text) {
     return 1;
   }
-  if (!ir_symbol_is_sum_loop_bound(function, compare->rhs.name)) {
+  if (compare->rhs.kind == IR_OPERAND_SYMBOL &&
+      !ir_symbol_is_sum_loop_bound(function, compare->rhs.name)) {
     return 1;
   }
   exit_label = branch->text;
@@ -7305,6 +7550,322 @@ static int ir_simd_dot_float_pass(IRFunction *function, int *changed) {
     if (function->instructions[i].op == IR_OP_LABEL &&
         ir_label_is_while_header(function->instructions[i].text)) {
       if (!ir_try_vectorize_dot_float_at(function, i, changed)) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+typedef struct {
+  const char *src_base;
+  const char *dst_base;
+  IROperand src_scale;
+  IROperand dst_scale;
+  IROperand bias;
+  int has_src_scale;
+  int has_dst_scale;
+  int has_bias;
+  int width_bits;
+} IRAffineMapTerms;
+
+static IROperand ir_float_const_operand(double value, int width_bits) {
+  return ir_operand_float_sized(value, width_bits == 32 ? 32 : 64);
+}
+
+static void ir_affine_map_terms_destroy(IRAffineMapTerms *terms) {
+  if (!terms) {
+    return;
+  }
+  if (terms->has_src_scale) {
+    ir_operand_destroy(&terms->src_scale);
+  }
+  if (terms->has_dst_scale) {
+    ir_operand_destroy(&terms->dst_scale);
+  }
+  if (terms->has_bias) {
+    ir_operand_destroy(&terms->bias);
+  }
+  memset(terms, 0, sizeof(*terms));
+}
+
+static int ir_float_map_body_is_safe(IRFunction *function, size_t lo,
+                                     size_t hi, const char *iv_symbol,
+                                     size_t *store_index_out) {
+  size_t store_count = 0;
+
+  if (!function || !store_index_out) {
+    return 0;
+  }
+  for (size_t i = lo; i < hi; i++) {
+    const IRInstruction *ins = &function->instructions[i];
+    if (ins->op == IR_OP_STORE) {
+      store_count++;
+      *store_index_out = i;
+      continue;
+    }
+    if (ir_instruction_writes_symbol(ins) &&
+        !ir_operand_is_symbol_named(&ins->dest, iv_symbol)) {
+      return 0;
+    }
+    if (ins->op == IR_OP_CALL || ins->op == IR_OP_CALL_INDIRECT ||
+        ins->op == IR_OP_BRANCH_ZERO || ins->op == IR_OP_BRANCH_EQ ||
+        ins->op == IR_OP_JUMP || ins->op == IR_OP_INLINE_ASM ||
+        ins->op == IR_OP_MEMCPY_INLINE || ins->op == IR_OP_COUNT_WORD_STARTS) {
+      return 0;
+    }
+  }
+
+  return store_count == 1;
+}
+
+static int ir_affine_map_add_bias(IRAffineMapTerms *terms,
+                                  const IROperand *bias) {
+  if (!terms || !bias || terms->has_bias) {
+    return 0;
+  }
+  if (!ir_operand_clone(bias, &terms->bias)) {
+    return 0;
+  }
+  terms->has_bias = 1;
+  return 1;
+}
+
+static int ir_affine_map_add_indexed_term(IRAffineMapTerms *terms,
+                                          const char *base,
+                                          const IROperand *scale) {
+  if (!terms || !base || !scale) {
+    return 0;
+  }
+  if (strcmp(base, terms->dst_base) == 0) {
+    if (terms->has_dst_scale) {
+      return 0;
+    }
+    if (!ir_operand_clone(scale, &terms->dst_scale)) {
+      return 0;
+    }
+    terms->has_dst_scale = 1;
+    return 1;
+  }
+
+  if (terms->src_base && strcmp(base, terms->src_base) != 0) {
+    return 0;
+  }
+  terms->src_base = base;
+  if (terms->has_src_scale) {
+    return 0;
+  }
+  if (!ir_operand_clone(scale, &terms->src_scale)) {
+    return 0;
+  }
+  terms->has_src_scale = 1;
+  return 1;
+}
+
+static int ir_try_parse_affine_map_term(IRFunction *function, size_t before,
+                                        const IROperand *operand,
+                                        const char *iv_symbol,
+                                        IRAffineMapTerms *terms) {
+  const IRInstruction *producer = NULL;
+  const char *base = NULL;
+  IROperand scalar = {0};
+  int bits = 0;
+
+  if (!function || !operand || !iv_symbol || !terms) {
+    return 0;
+  }
+
+  if (operand->kind == IR_OPERAND_TEMP && operand->name &&
+      ir_decode_float_indexed_load(function, before, operand->name, iv_symbol,
+                                   &base, &bits) &&
+      bits == terms->width_bits) {
+    IROperand one = ir_float_const_operand(1.0, terms->width_bits);
+    int ok = ir_affine_map_add_indexed_term(terms, base, &one);
+    ir_operand_destroy(&one);
+    return ok;
+  }
+
+  if (ir_try_clone_float_scalar_operand(function, before, operand,
+                                        terms->width_bits, &scalar)) {
+    int ok = ir_affine_map_add_bias(terms, &scalar);
+    ir_operand_destroy(&scalar);
+    return ok;
+  }
+
+  if (operand->kind != IR_OPERAND_TEMP || !operand->name) {
+    return 0;
+  }
+
+  producer = ir_find_temp_producer_before(function, before, operand->name);
+  if (!producer || producer->op != IR_OP_BINARY || !producer->is_float ||
+      !producer->text || strcmp(producer->text, "*") != 0) {
+    return 0;
+  }
+
+  if (producer->lhs.kind == IR_OPERAND_TEMP && producer->lhs.name &&
+      ir_decode_float_indexed_load(function, before, producer->lhs.name,
+                                   iv_symbol, &base, &bits) &&
+      bits == terms->width_bits &&
+      ir_try_clone_float_scalar_operand(function, before, &producer->rhs,
+                                        terms->width_bits, &scalar)) {
+    int ok = ir_affine_map_add_indexed_term(terms, base, &scalar);
+    ir_operand_destroy(&scalar);
+    return ok;
+  }
+  if (producer->rhs.kind == IR_OPERAND_TEMP && producer->rhs.name &&
+      ir_decode_float_indexed_load(function, before, producer->rhs.name,
+                                   iv_symbol, &base, &bits) &&
+      bits == terms->width_bits &&
+      ir_try_clone_float_scalar_operand(function, before, &producer->lhs,
+                                        terms->width_bits, &scalar)) {
+    int ok = ir_affine_map_add_indexed_term(terms, base, &scalar);
+    ir_operand_destroy(&scalar);
+    return ok;
+  }
+
+  return 0;
+}
+
+static int ir_try_parse_affine_map_expr(IRFunction *function, size_t before,
+                                        const IROperand *operand,
+                                        const char *iv_symbol,
+                                        IRAffineMapTerms *terms) {
+  const IRInstruction *producer = NULL;
+
+  if (!operand) {
+    return 0;
+  }
+  if (operand->kind == IR_OPERAND_TEMP && operand->name) {
+    producer = ir_find_temp_producer_before(function, before, operand->name);
+    if (producer && producer->op == IR_OP_BINARY && producer->is_float &&
+        producer->text && strcmp(producer->text, "+") == 0) {
+      return ir_try_parse_affine_map_expr(function, before, &producer->lhs,
+                                          iv_symbol, terms) &&
+             ir_try_parse_affine_map_expr(function, before, &producer->rhs,
+                                          iv_symbol, terms);
+    }
+  }
+
+  return ir_try_parse_affine_map_term(function, before, operand, iv_symbol,
+                                      terms);
+}
+
+static int ir_affine_map_terms_finalize(IRAffineMapTerms *terms) {
+  if (!terms || !terms->dst_base) {
+    return 0;
+  }
+
+  if (!terms->src_base) {
+    terms->src_base = terms->dst_base;
+    terms->src_scale = ir_float_const_operand(0.0, terms->width_bits);
+    terms->has_src_scale = 1;
+  }
+  if (!terms->has_dst_scale) {
+    terms->dst_scale = ir_float_const_operand(0.0, terms->width_bits);
+    terms->has_dst_scale = 1;
+  }
+  if (!terms->has_bias) {
+    terms->bias = ir_float_const_operand(0.0, terms->width_bits);
+    terms->has_bias = 1;
+  }
+  return terms->has_src_scale && terms->has_dst_scale && terms->has_bias;
+}
+
+static int ir_try_vectorize_affine_map_float_at(IRFunction *function,
+                                                size_t header_index,
+                                                int *changed) {
+  const char *iv_symbol = NULL;
+  const char *dst_base = NULL;
+  size_t branch_index = 0;
+  size_t jump_index = 0;
+  size_t store_index = 0;
+  IROperand bound = {0};
+  IRAffineMapTerms terms = {0};
+  IRInstruction fused = {0};
+  int matched = 0;
+  int store_bits = 0;
+  const IRInstruction *store = NULL;
+
+  if (!ir_float_reduction_frame(function, header_index, &iv_symbol,
+                                &branch_index, &jump_index, &bound, &matched)) {
+    return 0;
+  }
+  if (!matched) {
+    return 1;
+  }
+  if (!ir_float_map_body_is_safe(function, branch_index + 1, jump_index,
+                                 iv_symbol, &store_index)) {
+    ir_operand_destroy(&bound);
+    return 1;
+  }
+
+  store = &function->instructions[store_index];
+  if (store->dest.kind != IR_OPERAND_TEMP || !store->dest.name ||
+      store->lhs.kind != IR_OPERAND_TEMP || !store->lhs.name ||
+      store->rhs.kind != IR_OPERAND_INT ||
+      (store->rhs.int_value != 4 && store->rhs.int_value != 8) ||
+      !ir_decode_float_indexed_address(function, store_index, store->dest.name,
+                                       iv_symbol, &dst_base, &store_bits) ||
+      store_bits != store->rhs.int_value * 8) {
+    ir_operand_destroy(&bound);
+    return 1;
+  }
+
+  terms.dst_base = dst_base;
+  terms.width_bits = store_bits;
+  if (!ir_try_parse_affine_map_expr(function, store_index, &store->lhs,
+                                    iv_symbol, &terms) ||
+      !ir_affine_map_terms_finalize(&terms)) {
+    ir_operand_destroy(&bound);
+    ir_affine_map_terms_destroy(&terms);
+    return 1;
+  }
+
+  if (!ir_symbol_is_float_array_base(function, terms.src_base) ||
+      !ir_symbol_is_float_array_base(function, dst_base) ||
+      ir_symbol_read_after(function, jump_index + 1, iv_symbol)) {
+    ir_operand_destroy(&bound);
+    ir_affine_map_terms_destroy(&terms);
+    return 1;
+  }
+
+  fused.op = (store_bits == 64) ? IR_OP_SIMD_AFFINE_MAP_F64
+                                : IR_OP_SIMD_AFFINE_MAP_F32;
+  fused.location = function->instructions[header_index].location;
+  fused.is_float = 1;
+  fused.float_bits = store_bits;
+  fused.dest = ir_operand_symbol(dst_base);
+  fused.lhs = ir_operand_symbol(terms.src_base);
+  fused.rhs = ir_operand_symbol(dst_base);
+  fused.arguments = calloc(4, sizeof(IROperand));
+  if (!fused.arguments) {
+    ir_operand_destroy(&bound);
+    ir_affine_map_terms_destroy(&terms);
+    ir_instruction_destroy_storage(&fused);
+    return 0;
+  }
+  fused.argument_count = 4;
+  fused.arguments[0] = bound;
+  fused.arguments[1] = terms.src_scale;
+  fused.arguments[2] = terms.dst_scale;
+  fused.arguments[3] = terms.bias;
+  terms.has_src_scale = 0;
+  terms.has_dst_scale = 0;
+  terms.has_bias = 0;
+  ir_install_fused_reduction(function, header_index, jump_index, &fused,
+                             changed);
+  ir_affine_map_terms_destroy(&terms);
+  return 1;
+}
+
+static int ir_simd_affine_map_float_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    if (function->instructions[i].op == IR_OP_LABEL &&
+        ir_label_is_while_header(function->instructions[i].text)) {
+      if (!ir_try_vectorize_affine_map_float_at(function, i, changed)) {
         return 0;
       }
     }
@@ -12442,21 +13003,22 @@ static int ir_simd_dot_i32_pass(IRFunction *function, int *changed) {
   return 1;
 }
 
-#define IR_OPT_PASS_COUNT 28
+#define IR_OPT_PASS_COUNT 29
 
 static const char *g_ir_pass_names[IR_OPT_PASS_COUNT] = {
     "reduction_unroll", "copy_and_constant_propagation", "fuse_rotate_add",
     "strength_reduce_rotate_loops", "unroll_small_const_bound_loops",
     "positive_loop_div2_to_shift", "fold_popcount_byte_loop",
     "fuse_popcount_buffer_loop", "collatz_odd_step_fold",
-    "coalesce_single_use_temp_assign", "common_subexpression_elimination",
-    "constant_and_branch_simplify", "count_word_starts",
-    "eliminate_dead_temp_writes", "thread_jump_targets", "null_check_licm",
-    "remove_empty_conditional_diamonds", "remove_redundant_fallthrough_branches",
-    "remove_redundant_jumps", "eliminate_unreachable_straightline",
-    "eliminate_unreachable_blocks", "remove_unused_labels", "memcpy_inline",
-    "eliminate_load_symbol_copy", "simd_sum_i32", "simd_dot_i32",
-    "simd_insertion_sort_i32", "sroa",
+    "coalesce_single_use_temp_assign",
+    "eliminate_single_use_float_symbol_copies",
+    "common_subexpression_elimination", "constant_and_branch_simplify",
+    "count_word_starts", "eliminate_dead_temp_writes", "thread_jump_targets",
+    "null_check_licm", "remove_empty_conditional_diamonds",
+    "remove_redundant_fallthrough_branches", "remove_redundant_jumps",
+    "eliminate_unreachable_straightline", "eliminate_unreachable_blocks",
+    "remove_unused_labels", "memcpy_inline", "eliminate_load_symbol_copy",
+    "simd_sum_i32", "simd_dot_i32", "simd_insertion_sort_i32", "sroa",
 };
 
 
@@ -13267,6 +13829,393 @@ static int ir_sroa_pass(IRFunction *function, int *changed) {
   return 1;
 }
 
+/* ---- congruent induction-variable elimination ----------------------------
+ *
+ * Several hand-unrolled kernels carry a fan of induction variables that are all
+ * constant offsets of one another and step in lockstep, e.g. matmul's inner
+ * loop:
+ *
+ *     b1_idx = b0_idx + 1; b2_idx = b0_idx + 2; b3_idx = b0_idx + 3;  // pre-loop
+ *     while (k < N) { ... use b{0..3}_idx ...; b0_idx += N; b1_idx += N; ... }
+ *
+ * Throughout the loop b1_idx == b0_idx + 1 etc., so the b1..b3 variables are
+ * redundant: each costs a load/add/store every iteration plus a live stack slot
+ * (which, under the 7-register promotion budget, is what forces the hot
+ * accumulators to spill). This pass replaces every in-loop read of a derived IV
+ * with a fresh `base + C` recompute and deletes the derived IV's init and
+ * increment. The recompute lands as `(base + C) << k; ptr + ...; load/store`,
+ * which the backend's offset-scaled-address fold collapses into a single
+ * displacement memory op — so the net effect is: 3 induction variables and
+ * their per-iteration maintenance vanish, addresses gain a constant disp, and
+ * register pressure drops by the eliminated IVs.
+ *
+ * Only runs under -O/--release (the whole optimizer is gated there), so the
+ * differential fuzzer's unoptimized debug build is an independent oracle. */
+
+#define IR_CIV_MAX_GROUP 32
+
+static int ir_civ_operand_is_sym(const IROperand *op, const char *name) {
+  return op && op->kind == IR_OPERAND_SYMBOL && op->name && name &&
+         strcmp(op->name, name) == 0;
+}
+
+static int ir_civ_instruction_mentions_sym(const IRInstruction *in,
+                                            const char *name) {
+  if (!in) {
+    return 0;
+  }
+  if (ir_civ_operand_is_sym(&in->dest, name) ||
+      ir_civ_operand_is_sym(&in->lhs, name) ||
+      ir_civ_operand_is_sym(&in->rhs, name)) {
+    return 1;
+  }
+  for (size_t a = 0; a < in->argument_count; a++) {
+    if (ir_civ_operand_is_sym(&in->arguments[a], name)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int ir_civ_steps_match(const IROperand *a, const IROperand *b) {
+  if (!a || !b || a->kind != b->kind) {
+    return 0;
+  }
+  if (a->kind == IR_OPERAND_INT) {
+    return a->int_value == b->int_value;
+  }
+  if (a->kind == IR_OPERAND_SYMBOL || a->kind == IR_OPERAND_TEMP) {
+    return a->name && b->name && strcmp(a->name, b->name) == 0;
+  }
+  return 0;
+}
+
+/* Recognize `v = v + S` (or `v = S + v`): the canonical induction step. Returns
+ * the stepped symbol name and a pointer to the step operand S. */
+static int ir_civ_is_self_add(const IRInstruction *in, const char **name_out,
+                              const IROperand **step_out) {
+  if (!in || in->op != IR_OP_BINARY || in->is_float || !in->text ||
+      strcmp(in->text, "+") != 0 || in->dest.kind != IR_OPERAND_SYMBOL ||
+      !in->dest.name) {
+    return 0;
+  }
+  if (ir_civ_operand_is_sym(&in->lhs, in->dest.name) &&
+      in->rhs.kind != IR_OPERAND_NONE) {
+    *name_out = in->dest.name;
+    *step_out = &in->rhs;
+    return 1;
+  }
+  if (ir_civ_operand_is_sym(&in->rhs, in->dest.name) &&
+      in->lhs.kind != IR_OPERAND_NONE) {
+    *name_out = in->dest.name;
+    *step_out = &in->lhs;
+    return 1;
+  }
+  return 0;
+}
+
+/* Find a pre-loop init `v = base + C` (base a symbol, C an int constant) in
+ * [0, label_idx). Fills base/offset and the init's index. */
+static int ir_civ_find_offset_init(const IRFunction *function, size_t label_idx,
+                                   const char *v, const char **base_out,
+                                   long long *offset_out, size_t *init_idx_out) {
+  for (size_t i = 0; i < label_idx; i++) {
+    const IRInstruction *in = &function->instructions[i];
+    if (in->op != IR_OP_BINARY || in->is_float || !in->text ||
+        strcmp(in->text, "+") != 0 ||
+        !ir_civ_operand_is_sym(&in->dest, v)) {
+      continue;
+    }
+    if (in->lhs.kind == IR_OPERAND_SYMBOL && in->lhs.name &&
+        in->rhs.kind == IR_OPERAND_INT) {
+      *base_out = in->lhs.name;
+      *offset_out = in->rhs.int_value;
+      *init_idx_out = i;
+      return 1;
+    }
+    if (in->rhs.kind == IR_OPERAND_SYMBOL && in->rhs.name &&
+        in->lhs.kind == IR_OPERAND_INT) {
+      *base_out = in->rhs.name;
+      *offset_out = in->lhs.int_value;
+      *init_idx_out = i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/* Count writes (BINARY/ASSIGN with dest == name) to a symbol across the whole
+ * function; used to confirm a derived IV is written only by its init+step. */
+static size_t ir_civ_symbol_write_count(const IRFunction *function,
+                                        const char *name) {
+  size_t count = 0;
+  for (size_t i = 0; i < function->instruction_count; i++) {
+    const IRInstruction *in = &function->instructions[i];
+    if (in->op == IR_OP_DECLARE_LOCAL) {
+      continue;
+    }
+    if (ir_civ_operand_is_sym(&in->dest, name)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+static int ir_eliminate_congruent_ivs_pass(IRFunction *function, int *changed) {
+  if (!function) {
+    return 0;
+  }
+
+  char derived_names[IR_CIV_MAX_GROUP][256];
+  char derived_base[IR_CIV_MAX_GROUP][256];
+  long long derived_off[IR_CIV_MAX_GROUP];
+  size_t derived_count = 0;
+
+  for (size_t jump_idx = 0; jump_idx < function->instruction_count; jump_idx++) {
+    const IRInstruction *jump = &function->instructions[jump_idx];
+    if (!jump || jump->op != IR_OP_JUMP || !jump->text) {
+      continue;
+    }
+
+    /* Locate the loop header label preceding this back-edge. */
+    size_t label_idx = jump_idx;
+    int have_label = 0;
+    for (size_t li = 0; li < jump_idx; li++) {
+      const IRInstruction *lab = &function->instructions[li];
+      if (lab->op == IR_OP_LABEL && lab->text &&
+          strcmp(lab->text, jump->text) == 0) {
+        label_idx = li;
+        have_label = 1;
+        break;
+      }
+    }
+    if (!have_label) {
+      continue;
+    }
+
+    /* Collect induction steps (v = v + S) in the loop body. */
+    const char *iv_name[IR_CIV_MAX_GROUP];
+    const IROperand *iv_step[IR_CIV_MAX_GROUP];
+    size_t iv_count = 0;
+    for (size_t i = label_idx + 1; i < jump_idx; i++) {
+      const char *nm = NULL;
+      const IROperand *step = NULL;
+      if (ir_civ_is_self_add(&function->instructions[i], &nm, &step)) {
+        if (iv_count < IR_CIV_MAX_GROUP) {
+          iv_name[iv_count] = nm;
+          iv_step[iv_count] = step;
+          iv_count++;
+        }
+      }
+    }
+    if (iv_count < 2) {
+      continue;
+    }
+
+    /* For each IV, classify as derived (pre-loop init `v = base + C`, base a
+     * same-step IV, written only by init+step, dead outside the loop, used
+     * inside only as a plain lhs/rhs operand). */
+    for (size_t d = 0; d < iv_count; d++) {
+      const char *v = iv_name[d];
+      const char *base = NULL;
+      long long offset = 0;
+      size_t init_idx = 0;
+
+      if (derived_count >= IR_CIV_MAX_GROUP) {
+        break;
+      }
+      if (!ir_civ_find_offset_init(function, label_idx, v, &base, &offset,
+                                   &init_idx)) {
+        continue;
+      }
+      /* base must be a DIFFERENT, same-step IV in this loop and itself NOT
+       * derived from another (avoid chained rewrites referencing a base we are
+       * about to delete). */
+      int base_is_group_member = 0;
+      int base_is_derived = 0;
+      for (size_t g = 0; g < iv_count; g++) {
+        if (strcmp(iv_name[g], base) == 0) {
+          base_is_group_member =
+              ir_civ_steps_match(iv_step[g], iv_step[d]);
+        }
+      }
+      if (!base_is_group_member || strcmp(base, v) == 0) {
+        continue;
+      }
+      /* base must not itself have a `base = other + C` pre-loop init. */
+      {
+        const char *bb = NULL;
+        long long bo = 0;
+        size_t bi = 0;
+        if (ir_civ_find_offset_init(function, label_idx, base, &bb, &bo, &bi)) {
+          base_is_derived = 1;
+        }
+      }
+      if (base_is_derived) {
+        continue;
+      }
+      /* v written only by its init + its loop step. */
+      if (ir_civ_symbol_write_count(function, v) != 2) {
+        continue;
+      }
+      /* No mention of v outside [label_idx, jump_idx] except its DECLARE_LOCAL
+       * and the init we will delete. */
+      int ok = 1;
+      for (size_t i = 0; i < function->instruction_count && ok; i++) {
+        if (i >= label_idx && i <= jump_idx) {
+          continue;
+        }
+        if (i == init_idx) {
+          continue;
+        }
+        const IRInstruction *in = &function->instructions[i];
+        if (in->op == IR_OP_DECLARE_LOCAL) {
+          continue;
+        }
+        if (ir_civ_instruction_mentions_sym(in, v)) {
+          ok = 0;
+        }
+      }
+      if (!ok) {
+        continue;
+      }
+      /* Inside the loop, every mention of v outside its own step must be a
+       * plain lhs/rhs read (no dest write, no argument use). */
+      for (size_t i = label_idx + 1; i < jump_idx && ok; i++) {
+        const IRInstruction *in = &function->instructions[i];
+        const char *snm = NULL;
+        const IROperand *sstep = NULL;
+        if (ir_civ_is_self_add(in, &snm, &sstep) && strcmp(snm, v) == 0) {
+          continue; /* the step itself */
+        }
+        if (ir_civ_operand_is_sym(&in->dest, v)) {
+          ok = 0;
+          break;
+        }
+        for (size_t a = 0; a < in->argument_count; a++) {
+          if (ir_civ_operand_is_sym(&in->arguments[a], v)) {
+            ok = 0;
+            break;
+          }
+        }
+      }
+      if (!ok) {
+        continue;
+      }
+
+      /* Accept this derived IV. */
+      if (strlen(v) >= sizeof(derived_names[0]) ||
+          strlen(base) >= sizeof(derived_base[0])) {
+        continue;
+      }
+      strcpy(derived_names[derived_count], v);
+      strcpy(derived_base[derived_count], base);
+      derived_off[derived_count] = offset;
+      derived_count++;
+    }
+  }
+
+  if (derived_count == 0) {
+    return 1;
+  }
+
+  /* Mutation pass: NOP every write to a derived IV (init + step), and replace
+   * each read with a freshly recomputed `base + C` temp. Names are matched
+   * (not indices), so the in-place insertions below can shift the array
+   * without invalidating the plan. */
+  static unsigned long long civ_tmp_serial = 0;
+  size_t i = 0;
+  while (i < function->instruction_count) {
+    IRInstruction *insn = &function->instructions[i];
+
+    /* Delete writes to derived IVs (their init and increment). */
+    if ((insn->op == IR_OP_BINARY) && insn->dest.kind == IR_OPERAND_SYMBOL &&
+        insn->dest.name) {
+      int is_derived_dest = 0;
+      for (size_t d = 0; d < derived_count; d++) {
+        if (strcmp(insn->dest.name, derived_names[d]) == 0) {
+          is_derived_dest = 1;
+          break;
+        }
+      }
+      if (is_derived_dest) {
+        ir_instruction_make_nop(insn);
+        if (changed) {
+          *changed = 1;
+        }
+        i++;
+        continue;
+      }
+    }
+
+    /* Replace a read of a derived IV (lhs/rhs) with a recomputed base+C. */
+    int hit = -1;
+    if (insn->lhs.kind == IR_OPERAND_SYMBOL && insn->lhs.name) {
+      for (size_t d = 0; d < derived_count; d++) {
+        if (strcmp(insn->lhs.name, derived_names[d]) == 0) {
+          hit = (int)d;
+          break;
+        }
+      }
+    }
+    int hit_rhs = -1;
+    if (hit < 0 && insn->rhs.kind == IR_OPERAND_SYMBOL && insn->rhs.name) {
+      for (size_t d = 0; d < derived_count; d++) {
+        if (strcmp(insn->rhs.name, derived_names[d]) == 0) {
+          hit_rhs = (int)d;
+          break;
+        }
+      }
+    }
+
+    if (hit >= 0 || hit_rhs >= 0) {
+      int d = hit >= 0 ? hit : hit_rhs;
+      char tmpname[64];
+      snprintf(tmpname, sizeof(tmpname), "__civ%llu", civ_tmp_serial++);
+
+      IRInstruction recompute;
+      memset(&recompute, 0, sizeof(recompute));
+      recompute.op = IR_OP_BINARY;
+      recompute.location = insn->location;
+      recompute.text = (char *)"+";
+      recompute.dest.kind = IR_OPERAND_TEMP;
+      recompute.dest.name = tmpname;
+      recompute.lhs.kind = IR_OPERAND_SYMBOL;
+      recompute.lhs.name = derived_base[d];
+      recompute.rhs.kind = IR_OPERAND_INT;
+      recompute.rhs.int_value = derived_off[d];
+
+      if (!ir_function_insert_instruction(function, i, &recompute)) {
+        return 0;
+      }
+      /* insn shifted to i+1; repoint the operand(s) that named the derived IV
+       * to the new temp. */
+      IRInstruction *moved = &function->instructions[i + 1];
+      if (ir_civ_operand_is_sym(&moved->lhs, derived_names[d])) {
+        ir_operand_destroy(&moved->lhs);
+        moved->lhs.kind = IR_OPERAND_TEMP;
+        moved->lhs.name = mettle_strdup(tmpname);
+      }
+      if (ir_civ_operand_is_sym(&moved->rhs, derived_names[d])) {
+        ir_operand_destroy(&moved->rhs);
+        moved->rhs.kind = IR_OPERAND_TEMP;
+        moved->rhs.name = mettle_strdup(tmpname);
+      }
+      if (changed) {
+        *changed = 1;
+      }
+      /* Re-examine the moved instruction (it may still read another derived
+       * IV); the inserted recompute reads only `base`, never a derived IV. */
+      i++;
+      continue;
+    }
+
+    i++;
+  }
+
+  return 1;
+}
+
 static int ir_optimize_function(IRFunction *function) {
   if (!function) {
     return 0;
@@ -13313,47 +14262,49 @@ static int ir_optimize_function(IRFunction *function) {
                          features.has_branch_zero && features.has_binary,
                   ir_collatz_odd_step_fold_pass);
     DRIVE_PASS_IF(9, features.has_assign, ir_coalesce_single_use_temp_assign_pass);
+    DRIVE_PASS_IF(10, features.has_assign,
+                  ir_eliminate_single_use_float_symbol_copies_pass);
     /* SROA runs after copy/coalesce have folded the inliner's temp-mediated
      * struct copies into clean symbol-to-symbol form, and before CSE/dead-temp,
      * so the resulting scalar assigns are then propagated and the backend can
      * register-promote the (now non-address-taken) field scalars. */
-    DRIVE_PASS(27, ir_sroa_pass);
-    DRIVE_PASS(10, ir_common_subexpression_elimination_pass);
-    DRIVE_PASS(11, ir_constant_and_branch_simplify_pass);
-    DRIVE_PASS_IF(12, features.has_label && features.has_jump &&
+    DRIVE_PASS(28, ir_sroa_pass);
+    DRIVE_PASS(11, ir_common_subexpression_elimination_pass);
+    DRIVE_PASS(12, ir_constant_and_branch_simplify_pass);
+    DRIVE_PASS_IF(13, features.has_label && features.has_jump &&
                           features.has_branch_zero && features.has_load,
                   ir_count_word_starts_pass);
-    DRIVE_PASS_IF(13, features.has_temp_write, ir_eliminate_dead_temp_writes_pass);
-    DRIVE_PASS_IF(14, features.has_label &&
+    DRIVE_PASS_IF(14, features.has_temp_write, ir_eliminate_dead_temp_writes_pass);
+    DRIVE_PASS_IF(15, features.has_label &&
                           (features.has_jump || features.has_branch_zero ||
                            features.has_branch_eq),
                   ir_thread_jump_targets_pass);
-    DRIVE_PASS_IF(15, features.has_while_label && features.has_branch_zero &&
+    DRIVE_PASS_IF(16, features.has_while_label && features.has_branch_zero &&
                           features.has_call,
                   ir_null_check_licm_pass);
-    DRIVE_PASS_IF(16, features.has_label && features.has_jump &&
+    DRIVE_PASS_IF(17, features.has_label && features.has_jump &&
                           (features.has_branch_zero || features.has_branch_eq),
                   ir_remove_empty_conditional_diamonds_pass);
-    DRIVE_PASS_IF(17, features.has_label &&
+    DRIVE_PASS_IF(18, features.has_label &&
                           (features.has_branch_zero || features.has_branch_eq),
                   ir_remove_redundant_fallthrough_branches_pass);
-    DRIVE_PASS_IF(18, features.has_label && features.has_jump,
+    DRIVE_PASS_IF(19, features.has_label && features.has_jump,
                   ir_remove_redundant_jumps_pass);
-    DRIVE_PASS(19, ir_eliminate_unreachable_straightline_pass);
-    DRIVE_PASS_IF(20, features.has_label &&
+    DRIVE_PASS(20, ir_eliminate_unreachable_straightline_pass);
+    DRIVE_PASS_IF(21, features.has_label &&
                           (features.has_jump || features.has_branch_zero ||
                            features.has_branch_eq),
                   ir_eliminate_unreachable_blocks_pass);
-    DRIVE_PASS_IF(21, features.has_label, ir_remove_unused_labels_pass);
-    DRIVE_PASS(22, ir_memcpy_inline_pass);
-    DRIVE_PASS(23, ir_eliminate_load_symbol_copy_pass);
-    DRIVE_PASS_IF(24, features.has_label && features.has_jump &&
-                          features.has_load,
-                  ir_simd_sum_i32_pass);
+    DRIVE_PASS_IF(22, features.has_label, ir_remove_unused_labels_pass);
+    DRIVE_PASS(23, ir_memcpy_inline_pass);
+    DRIVE_PASS(24, ir_eliminate_load_symbol_copy_pass);
     DRIVE_PASS_IF(25, features.has_label && features.has_jump &&
                           features.has_load,
-                  ir_simd_dot_i32_pass);
+                  ir_simd_sum_i32_pass);
     DRIVE_PASS_IF(26, features.has_label && features.has_jump &&
+                          features.has_load,
+                  ir_simd_dot_i32_pass);
+    DRIVE_PASS_IF(27, features.has_label && features.has_jump &&
                            features.has_load,
                    ir_simd_insertion_sort_i32_pass);
 
@@ -13378,6 +14329,10 @@ static int ir_optimize_function(IRFunction *function) {
     }
     mettle_compiler_ctx_set_pass_name("simd_minmax_i32");
     if (!ir_simd_minmax_i32_pass(function, &simd_changed)) {
+      mettle_compiler_ice("IR optimization pass failed");
+    }
+    mettle_compiler_ctx_set_pass_name("simd_affine_map_float");
+    if (!ir_simd_affine_map_float_pass(function, &simd_changed)) {
       mettle_compiler_ice("IR optimization pass failed");
     }
     mettle_compiler_ctx_set_pass_name("simd_dot_float");
@@ -13418,6 +14373,14 @@ static int ir_optimize_function(IRFunction *function) {
     int memcmp_changed = 0;
     mettle_compiler_ctx_set_pass_name("memcmp_byte_loop");
     if (!ir_memcmp_byte_loop_pass(function, &memcmp_changed)) {
+      mettle_compiler_ice("IR optimization pass failed");
+    }
+  }
+
+  {
+    int civ_changed = 0;
+    mettle_compiler_ctx_set_pass_name("eliminate_congruent_ivs");
+    if (!ir_eliminate_congruent_ivs_pass(function, &civ_changed)) {
       mettle_compiler_ice("IR optimization pass failed");
     }
   }

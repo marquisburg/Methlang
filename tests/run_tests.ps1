@@ -1188,7 +1188,7 @@ $simdRuntimeCases = @(
     Name            = "simd_correctness_float"
     Path            = "tests\simd_correctness\simd_float_check.mettle"
     OutputMustMatch = "FLOAT SIMD: ALL OK"
-    IrMustMatch     = @("simd_sum_f64", "simd_sum_f32", "simd_dot_f64", "simd_dot_f32")
+    IrMustMatch     = @("simd_sum_f64", "simd_sum_f32", "simd_dot_f64", "simd_dot_f32", "simd_affine_map_f64", "simd_affine_map_f32")
   }
 )
 

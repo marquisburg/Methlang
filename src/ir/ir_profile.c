@@ -323,6 +323,12 @@ static int ir_profile_instruction_op_class(const IRInstruction *instruction,
   case IR_OP_LOWER_BOUND_I32:
   case IR_OP_PREFIX_SUM_I32:
   case IR_OP_SIMD_MINMAX_I32:
+  case IR_OP_SIMD_SUM_F64:
+  case IR_OP_SIMD_SUM_F32:
+  case IR_OP_SIMD_DOT_F64:
+  case IR_OP_SIMD_DOT_F32:
+  case IR_OP_SIMD_AFFINE_MAP_F64:
+  case IR_OP_SIMD_AFFINE_MAP_F32:
     *op_class_out = METTLE_PROFILE_OP_SIMD;
     return 1;
   case IR_OP_BINARY:

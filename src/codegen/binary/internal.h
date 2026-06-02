@@ -505,6 +505,10 @@ int code_generator_binary_emit_rep_movsq( CodeGenerator *generator, BinaryFuncti
 int code_generator_binary_emit_rotate_add( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_runtime_trap_call( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_scaled_address_to_rax( CodeGenerator *generator, BinaryFunctionContext *context, const IROperand *base, const IROperand *index, int scale);
+int code_generator_binary_emit_scaled_address_to_rax_disp( CodeGenerator *generator, BinaryFunctionContext *context, const IROperand *base, const IROperand *index, int scale, int displacement);
+int code_generator_binary_try_match_offset_scaled_address( const IRFunction *function, size_t instruction_index, const IRInstruction **mem_out, const IROperand **base_out, const IROperand **index_out, int *scale_out, int *displacement_out);
+int code_generator_binary_try_emit_offset_scaled_address_load( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
+int code_generator_binary_try_emit_offset_scaled_address_store( CodeGenerator *generator, BinaryFunctionContext *context, const IRFunction *function, size_t instruction_index, size_t *consumed_out);
 int code_generator_binary_emit_simd_clamp_i32( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_simd_dot_i32( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_simd_insertion_sort_i32( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
@@ -519,6 +523,8 @@ int code_generator_binary_emit_simd_sum_f64( CodeGenerator *generator, BinaryFun
 int code_generator_binary_emit_simd_sum_f32( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_simd_dot_f64( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_simd_dot_f32( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
+int code_generator_binary_emit_simd_affine_map_f64( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
+int code_generator_binary_emit_simd_affine_map_f32( CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_store(CodeGenerator *generator, BinaryFunctionContext *context, const IRInstruction *instruction);
 int code_generator_binary_emit_store_to_address( CodeGenerator *generator, BinaryFunctionContext *context, BinaryGpRegister address_register, int size, BinaryGpRegister source_register);
 int code_generator_binary_emit_string_literal_value_address( CodeGenerator *generator, BinaryFunctionContext *context, const char *value, BinaryGpRegister target_register);

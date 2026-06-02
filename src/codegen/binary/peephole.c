@@ -1895,20 +1895,280 @@ int code_generator_binary_try_skip_scaled_address_shift(
   return 1;
 }
 
-int code_generator_binary_emit_scaled_address_to_rax(
+int code_generator_binary_emit_scaled_address_to_rax_disp(
     CodeGenerator *generator, BinaryFunctionContext *context,
-    const IROperand *base, const IROperand *index, int scale) {
+    const IROperand *base, const IROperand *index, int scale, int displacement) {
+  BinaryGpRegister base_reg = BINARY_GP_RAX;
+  BinaryGpRegister index_reg = BINARY_GP_R10;
+  BinaryGpRegister promoted = BINARY_GP_RAX;
+  int base_in_register = 0;
+  int index_in_register = 0;
+
   if (!generator || !context || !base || !index) {
     return 0;
   }
 
-  return code_generator_binary_emit_operand_load(generator, context, index,
-                                                 BINARY_GP_R10) &&
-         code_generator_binary_emit_operand_load(generator, context, base,
-                                                 BINARY_GP_RAX) &&
-         binary_emit_lea_reg_base_index_scale_disp(
-             &context->code, BINARY_GP_RAX, BINARY_GP_RAX, BINARY_GP_R10,
-             scale, 0);
+  /* When base/index are symbols already living in a promoted register, feed
+   * that register straight into the lea instead of copying it through RAX/R10.
+   * symbol_assigned_register only ever reports Win64 non-volatile registers
+   * (the R12-R15/RBX/RSI/RDI promotion pool), none of which alias the RAX
+   * destination or the R10 index scratch, so the survivors can't be clobbered.
+   * This drops a redundant `mov` per fused array access — the dominant overhead
+   * in tight indexing loops like matmul's inner kernel where the base pointer
+   * and induction index are both promoted. */
+  if (base->kind == IR_OPERAND_SYMBOL && base->name &&
+      code_generator_binary_symbol_assigned_register(generator, context,
+                                                     base->name, &promoted)) {
+    base_reg = promoted;
+    base_in_register = 1;
+  }
+  if (index->kind == IR_OPERAND_SYMBOL && index->name &&
+      code_generator_binary_symbol_assigned_register(generator, context,
+                                                     index->name, &promoted)) {
+    index_reg = promoted;
+    index_in_register = 1;
+  }
+
+  /* Materialize only the operands that are not already in a register. Load the
+   * index into R10 first, then the base into RAX, mirroring the original order
+   * so a non-promoted base load cannot disturb an already-loaded index. */
+  if (!index_in_register &&
+      !code_generator_binary_emit_operand_load(generator, context, index,
+                                               BINARY_GP_R10)) {
+    return 0;
+  }
+  if (!base_in_register &&
+      !code_generator_binary_emit_operand_load(generator, context, base,
+                                               BINARY_GP_RAX)) {
+    return 0;
+  }
+
+  return binary_emit_lea_reg_base_index_scale_disp(
+      &context->code, BINARY_GP_RAX, base_reg, index_reg, scale, displacement);
+}
+
+int code_generator_binary_emit_scaled_address_to_rax(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IROperand *base, const IROperand *index, int scale) {
+  return code_generator_binary_emit_scaled_address_to_rax_disp(
+      generator, context, base, index, scale, 0);
+}
+
+/* Match `Td = sym +/- C ; Ts = Td << k ; Ta = base + Ts ; <mem via Ta>` —
+ * an array access at a constant element offset from a symbol index, e.g.
+ * `arr[i + 3]` or matmul's `c[c_idx + 1]` (and the b0_idx+{1,2,3} accesses
+ * once the congruent-IV pass rewrites them). The constant element offset folds
+ * into the x86 address displacement (C * scale), so the whole thing collapses
+ * to a single `lea/mov [base + sym*scale + disp]` with no separate add.
+ *
+ * Returns 1 and fills base/index(sym)/scale/displacement when the four
+ * instructions at `instruction_index` form this shape. Safety mirrors the
+ * other scaled folds: the index is re-read from `sym`'s home, so `sym` must be
+ * a SYMBOL (always materialized), and each intermediate temp must be single-use
+ * so consuming the quartet drops no other consumer. */
+int code_generator_binary_try_match_offset_scaled_address(
+    const IRFunction *function, size_t instruction_index,
+    const IRInstruction **mem_out, const IROperand **base_out,
+    const IROperand **index_out, int *scale_out, int *displacement_out) {
+  const IRInstruction *offset_add = NULL;
+  const IRInstruction *shift = NULL;
+  const IRInstruction *address = NULL;
+  const IROperand *sym = NULL;
+  long long offset_const = 0;
+  int scale = 0;
+
+  if (!function || !mem_out || !base_out || !index_out || !scale_out ||
+      !displacement_out || instruction_index + 3 >= function->instruction_count) {
+    return 0;
+  }
+
+  offset_add = &function->instructions[instruction_index];
+  shift = &function->instructions[instruction_index + 1];
+  address = &function->instructions[instruction_index + 2];
+
+  /* offset_add: Td = sym + C  (or C + sym); Td a single-use temp. */
+  if (!offset_add || offset_add->op != IR_OP_BINARY || offset_add->is_float ||
+      !offset_add->text || strcmp(offset_add->text, "+") != 0 ||
+      offset_add->dest.kind != IR_OPERAND_TEMP || !offset_add->dest.name) {
+    return 0;
+  }
+  if (offset_add->lhs.kind == IR_OPERAND_SYMBOL && offset_add->lhs.name &&
+      offset_add->rhs.kind == IR_OPERAND_INT) {
+    sym = &offset_add->lhs;
+    offset_const = offset_add->rhs.int_value;
+  } else if (offset_add->rhs.kind == IR_OPERAND_SYMBOL && offset_add->rhs.name &&
+             offset_add->lhs.kind == IR_OPERAND_INT) {
+    sym = &offset_add->rhs;
+    offset_const = offset_add->lhs.int_value;
+  } else {
+    return 0;
+  }
+  if (code_generator_binary_function_temp_use_count(
+          function, offset_add->dest.name) != 1) {
+    return 0;
+  }
+
+  /* shift: Ts = Td << k  (scale = 1<<k); single-use, fed by offset_add. */
+  if (!shift || shift->dest.kind != IR_OPERAND_TEMP || !shift->dest.name ||
+      !code_generator_binary_operand_uses_temp(&shift->lhs,
+                                               offset_add->dest.name) ||
+      !code_generator_binary_shift_scale(shift, &scale) ||
+      code_generator_binary_function_temp_use_count(function,
+                                                    shift->dest.name) != 1) {
+    return 0;
+  }
+
+  /* address: Ta = base + Ts (or Ts + base); single-use, base not an immediate. */
+  if (!address || address->op != IR_OP_BINARY || address->is_float ||
+      !address->text || strcmp(address->text, "+") != 0 ||
+      address->dest.kind != IR_OPERAND_TEMP || !address->dest.name ||
+      code_generator_binary_function_temp_use_count(
+          function, address->dest.name) != 1) {
+    return 0;
+  }
+  if (code_generator_binary_operand_uses_temp(&address->lhs,
+                                              shift->dest.name) &&
+      address->rhs.kind != IR_OPERAND_INT) {
+    *base_out = &address->rhs;
+  } else if (code_generator_binary_operand_uses_temp(&address->rhs,
+                                                     shift->dest.name) &&
+             address->lhs.kind != IR_OPERAND_INT) {
+    *base_out = &address->lhs;
+  } else {
+    return 0;
+  }
+
+  /* Displacement = C * scale, must fit a signed 32-bit lea displacement. */
+  {
+    long long disp = offset_const * (long long)scale;
+    if (disp < INT32_MIN || disp > INT32_MAX) {
+      return 0;
+    }
+    *displacement_out = (int)disp;
+  }
+
+  *mem_out = address;
+  *index_out = sym;
+  *scale_out = scale;
+  return 1;
+}
+
+int code_generator_binary_try_emit_offset_scaled_address_load(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRFunction *function, size_t instruction_index,
+    size_t *consumed_out) {
+  const IRInstruction *address = NULL;
+  const IRInstruction *load = NULL;
+  const IROperand *base = NULL;
+  const IROperand *index = NULL;
+  int scale = 0;
+  int displacement = 0;
+  int size = 0;
+
+  if (consumed_out) {
+    *consumed_out = 0;
+  }
+  if (!generator || !context || !function || !consumed_out ||
+      instruction_index + 3 >= function->instruction_count ||
+      !code_generator_binary_try_match_offset_scaled_address(
+          function, instruction_index, &address, &base, &index, &scale,
+          &displacement)) {
+    return 0;
+  }
+
+  load = &function->instructions[instruction_index + 3];
+  if (!load || load->op != IR_OP_LOAD ||
+      !code_generator_binary_operand_uses_temp(&load->lhs, address->dest.name)) {
+    return 0;
+  }
+
+  size = code_generator_binary_get_access_size(generator, context, &load->rhs);
+  if (size <= 0) {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_scaled_address_to_rax_disp(
+          generator, context, base, index, scale, displacement) ||
+      !code_generator_binary_emit_load_from_address(generator, context,
+                                                    BINARY_GP_RAX, size,
+                                                    BINARY_GP_RAX)) {
+    return 0;
+  }
+  if (size == 4 && !load->is_float &&
+      code_generator_binary_load_needs_sign_extend(generator, context,
+                                                   &load->dest, size) &&
+      !binary_emit_movsxd_rax_eax(&context->code)) {
+    return 0;
+  }
+  if (!code_generator_binary_emit_destination_store(generator, context,
+                                                    &load->dest,
+                                                    BINARY_GP_RAX)) {
+    return 0;
+  }
+
+  *consumed_out = 4;
+  return 1;
+}
+
+int code_generator_binary_try_emit_offset_scaled_address_store(
+    CodeGenerator *generator, BinaryFunctionContext *context,
+    const IRFunction *function, size_t instruction_index,
+    size_t *consumed_out) {
+  const IRInstruction *address = NULL;
+  const IRInstruction *store = NULL;
+  const IROperand *base = NULL;
+  const IROperand *index = NULL;
+  int scale = 0;
+  int displacement = 0;
+  int size = 0;
+
+  if (consumed_out) {
+    *consumed_out = 0;
+  }
+  if (!generator || !context || !function || !consumed_out ||
+      instruction_index + 3 >= function->instruction_count ||
+      !code_generator_binary_try_match_offset_scaled_address(
+          function, instruction_index, &address, &base, &index, &scale,
+          &displacement)) {
+    return 0;
+  }
+
+  store = &function->instructions[instruction_index + 3];
+  if (!store || store->op != IR_OP_STORE ||
+      !code_generator_binary_operand_uses_temp(&store->dest,
+                                               address->dest.name)) {
+    return 0;
+  }
+
+  size = code_generator_binary_get_access_size(generator, context, &store->rhs);
+  if (size <= 0) {
+    return 0;
+  }
+
+  if (!code_generator_binary_emit_operand_load(generator, context, &store->lhs,
+                                               BINARY_GP_STORE_VALUE)) {
+    return 0;
+  }
+  if (store->is_float && store->float_bits) {
+    int value_bits = code_generator_binary_operand_float_bits(
+        generator, context, &store->lhs);
+    if (value_bits &&
+        !code_generator_binary_emit_float_reg_convert(
+            context, BINARY_GP_STORE_VALUE, value_bits, store->float_bits)) {
+      return 0;
+    }
+  }
+
+  if (!code_generator_binary_emit_scaled_address_to_rax_disp(
+          generator, context, base, index, scale, displacement) ||
+      !code_generator_binary_emit_store_to_address(generator, context,
+                                                   BINARY_GP_RAX, size,
+                                                   BINARY_GP_STORE_VALUE)) {
+    return 0;
+  }
+
+  *consumed_out = 4;
+  return 1;
 }
 
 int code_generator_binary_try_emit_scaled_address_load(
@@ -2285,6 +2545,24 @@ static int code_generator_binary_float_chain_operator_supported(
                 strcmp(op, "*") == 0 || strcmp(op, "/") == 0);
 }
 
+static size_t code_generator_binary_next_float_chain_index(
+    const IRFunction *function, size_t index) {
+  if (!function || index >= function->instruction_count) {
+    return function ? function->instruction_count : 0;
+  }
+
+  index++;
+  while (index < function->instruction_count) {
+    const IRInstruction *instruction = &function->instructions[index];
+    if (instruction->op != IR_OP_NOP &&
+        instruction->op != IR_OP_DECLARE_LOCAL) {
+      break;
+    }
+    index++;
+  }
+  return index;
+}
+
 static int code_generator_binary_emit_xmm_float_op(BinaryCodeBuffer *code,
                                                    const char *op, int fbits,
                                                    BinaryXmmRegister dst,
@@ -2399,8 +2677,17 @@ int code_generator_binary_try_emit_float_cast_binary_chain(
     size_t *consumed_out) {
   const IRInstruction *cast = NULL;
   const IRInstruction *consumer = NULL;
+  const IRInstruction *next = NULL;
   const IROperand *consumer_rhs = NULL;
+  const IROperand *next_rhs = NULL;
+  const IROperand *final_dest = NULL;
+  size_t consumer_index = 0;
+  size_t final_index = 0;
+  size_t next_index = 0;
   int fbits = 64;
+  int has_next = 0;
+  int next_temp_is_rhs = 0;
+  BinaryXmmRegister result_register = BINARY_XMM0;
 
   if (consumed_out) {
     *consumed_out = 0;
@@ -2411,7 +2698,12 @@ int code_generator_binary_try_emit_float_cast_binary_chain(
   }
 
   cast = &function->instructions[instruction_index];
-  consumer = &function->instructions[instruction_index + 1];
+  consumer_index =
+      code_generator_binary_next_float_chain_index(function, instruction_index);
+  if (consumer_index >= function->instruction_count) {
+    return 0;
+  }
+  consumer = &function->instructions[consumer_index];
   if (!cast || cast->op != IR_OP_CAST || cast->is_float || !cast->text ||
       (strcmp(cast->text, "float32") != 0 &&
        strcmp(cast->text, "float64") != 0) ||
@@ -2428,18 +2720,6 @@ int code_generator_binary_try_emit_float_cast_binary_chain(
     return 0;
   }
 
-  if (consumer->dest.kind == IR_OPERAND_TEMP && consumer->dest.name &&
-      instruction_index + 2 < function->instruction_count) {
-    const IRInstruction *next = &function->instructions[instruction_index + 2];
-    if (next && next->op == IR_OP_BINARY && next->is_float &&
-        (code_generator_binary_operand_uses_temp(&next->lhs,
-                                                 consumer->dest.name) ||
-         code_generator_binary_operand_uses_temp(&next->rhs,
-                                                 consumer->dest.name))) {
-      return 0;
-    }
-  }
-
   if (code_generator_binary_operand_uses_temp(&consumer->lhs,
                                               cast->dest.name)) {
     consumer_rhs = &consumer->rhs;
@@ -2450,6 +2730,45 @@ int code_generator_binary_try_emit_float_cast_binary_chain(
     consumer_rhs = &consumer->lhs;
   } else {
     return 0;
+  }
+
+  final_dest = &consumer->dest;
+  final_index = consumer_index;
+  if (consumer->dest.kind == IR_OPERAND_TEMP && consumer->dest.name &&
+      code_generator_binary_function_temp_use_count(function,
+                                                    consumer->dest.name) == 1 &&
+      consumer_index + 1 < function->instruction_count) {
+    next_index =
+        code_generator_binary_next_float_chain_index(function, consumer_index);
+    if (next_index >= function->instruction_count) {
+      next = NULL;
+    } else {
+      next = &function->instructions[next_index];
+    }
+    if (next && next->op == IR_OP_BINARY && next->is_float &&
+        code_generator_binary_float_chain_operator_supported(next->text) &&
+        ((next->float_bits == 32) ? 32 : 64) == fbits) {
+      if (code_generator_binary_operand_uses_temp(&next->lhs,
+                                                  consumer->dest.name)) {
+        next_rhs = &next->rhs;
+      } else if ((strcmp(next->text, "+") == 0 ||
+                  strcmp(next->text, "*") == 0) &&
+                 code_generator_binary_operand_uses_temp(&next->rhs,
+                                                         consumer->dest.name)) {
+        next_rhs = &next->lhs;
+      } else if ((strcmp(next->text, "-") == 0 ||
+                  strcmp(next->text, "/") == 0) &&
+                 code_generator_binary_operand_uses_temp(&next->rhs,
+                                                         consumer->dest.name)) {
+        next_rhs = &next->lhs;
+        next_temp_is_rhs = 1;
+      }
+      if (next_rhs) {
+        has_next = 1;
+        final_dest = &next->dest;
+        final_index = next_index;
+      }
+    }
   }
 
   if (!code_generator_binary_emit_operand_load(generator, context, &cast->lhs,
@@ -2473,17 +2792,49 @@ int code_generator_binary_try_emit_float_cast_binary_chain(
     return 0;
   }
 
+  if (has_next) {
+    if (!code_generator_binary_emit_float_operand_to_xmm_bits(
+            generator, context, next_rhs, BINARY_XMM1, fbits)) {
+      if (!generator->has_error) {
+        code_generator_set_error(
+            generator,
+            "Failed to emit extended chained int-to-float expression in "
+            "function '%s'",
+            context->function_name);
+      }
+      return 0;
+    }
+    if (next_temp_is_rhs) {
+      if (!code_generator_binary_emit_xmm_float_op(&context->code, next->text,
+                                                   fbits, BINARY_XMM1,
+                                                   BINARY_XMM0)) {
+        return 0;
+      }
+      result_register = BINARY_XMM1;
+    } else if (!code_generator_binary_emit_xmm_float_op(
+                   &context->code, next->text, fbits, BINARY_XMM0,
+                   BINARY_XMM1)) {
+      if (!generator->has_error) {
+        code_generator_set_error(
+            generator,
+            "Failed to emit extended chained int-to-float expression in "
+            "function '%s'",
+            context->function_name);
+      }
+      return 0;
+    }
+  }
+
   if (!((fbits == 32)
             ? binary_emit_movd_reg_xmm(&context->code, BINARY_GP_RAX,
-                                       BINARY_XMM0)
+                                       result_register)
             : binary_emit_movq_reg_xmm(&context->code, BINARY_GP_RAX,
-                                       BINARY_XMM0)) ||
+                                       result_register)) ||
       !code_generator_binary_emit_destination_store(generator, context,
-                                                    &consumer->dest,
-                                                    BINARY_GP_RAX)) {
+                                                    final_dest, BINARY_GP_RAX)) {
     return 0;
   }
 
-  *consumed_out = 2;
+  *consumed_out = final_index - instruction_index + 1;
   return 1;
 }

@@ -103,7 +103,12 @@ typedef enum {
   /* Float64/float32 dot product into the dest float accumulator (added to
    * dest's prior value). lhs = a, rhs = b, arguments[0] = element count. */
   IR_OP_SIMD_DOT_F64,
-  IR_OP_SIMD_DOT_F32
+  IR_OP_SIMD_DOT_F32,
+  /* Float affine memory map:
+   * rhs[i] = arguments[1] * lhs[i] + arguments[2] * rhs[i] + arguments[3].
+   * lhs = src, rhs = dst, arguments[0] = element count. */
+  IR_OP_SIMD_AFFINE_MAP_F64,
+  IR_OP_SIMD_AFFINE_MAP_F32
 } IROpcode;
 
 typedef struct {
